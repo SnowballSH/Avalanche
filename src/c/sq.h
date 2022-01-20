@@ -1,3 +1,5 @@
+#define BB unsigned long long
+
 enum Squares
 {
   A1,
@@ -67,28 +69,35 @@ enum Squares
   N_SQUARES = 64
 };
 
-enum Ranks
-{
-  RANK_1,
-  RANK_2,
-  RANK_3,
-  RANK_4,
-  RANK_5,
-  RANK_6,
-  RANK_7,
-  RANK_8,
-  N_RANKS = 8
-};
+const BB RANK_1 = 0x00000000000000FFull,
+         RANK_2 = 0x000000000000FF00ull,
+         RANK_3 = 0x0000000000FF0000ull,
+         RANK_4 = 0x00000000FF000000ull,
+         RANK_5 = 0x000000FF00000000ull,
+         RANK_6 = 0x0000FF0000000000ull,
+         RANK_7 = 0x00FF000000000000ull,
+         RANK_8 = 0xFF00000000000000ull,
 
-enum Files
-{
-  FILE_A,
-  FILE_B,
-  FILE_C,
-  FILE_D,
-  FILE_E,
-  FILE_F,
-  FILE_G,
-  FILE_H,
-  N_FILES = 8
-};
+         FILE_A = 0x0101010101010101ull,
+         FILE_B = 0x0202020202020202ull,
+         FILE_C = 0x0404040404040404ull,
+         FILE_D = 0x0808080808080808ull,
+         FILE_E = 0x1010101010101010ull,
+         FILE_F = 0x2020202020202020ull,
+         FILE_G = 0x4040404040404040ull,
+         FILE_H = 0x8080808080808080ull,
+
+         WHITE_SQUARES = 0x55AA55AA55AA55AAull,
+         BLACK_SQUARES = 0xAA55AA55AA55AA55ull,
+
+         LONG_DIAGONALS = 0x8142241818244281ull,
+         CENTER_SQUARES = 0x0000001818000000ull,
+         CENTER_BIG = 0x00003C3C3C3C0000ull,
+
+         LEFT_FLANK = FILE_A | FILE_B | FILE_C | FILE_D,
+         RIGHT_FLANK = FILE_E | FILE_F | FILE_G | FILE_H,
+
+         PROMOTION_RANKS = RANK_1 | RANK_8;
+
+const BB RANKS[8] = {RANK_1, RANK_2, RANK_3, RANK_4, RANK_5, RANK_6, RANK_7, RANK_8};
+const BB FILES[8] = {FILE_A, FILE_B, FILE_C, FILE_D, FILE_E, FILE_F, FILE_G, FILE_H};

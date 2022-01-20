@@ -57,6 +57,14 @@ pub inline fn get_at(bb: u64, index: u6) u1 {
     return @intCast(u1, 1 & (bb >> index));
 }
 
+pub inline fn rank_of(sq: usize) u3 {
+    return @intCast(u3, sq / 8);
+}
+
+pub inline fn file_of(sq: usize) u3 {
+    return @intCast(u3, sq & 7);
+}
+
 // Direction manipulation
 
 pub inline fn east_one(bb: u64) u64 {
