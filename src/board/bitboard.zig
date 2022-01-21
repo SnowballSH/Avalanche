@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const piece = @import("./piece.zig");
+const Patterns = @import("./patterns.zig");
 
 // Definition
 
@@ -21,21 +22,30 @@ pub const Bitboards = struct {
     WhiteAll: u64 = 0,
     BlackAll: u64 = 0,
 
-    pub fn get_bb_for(self: *Bitboards, pc: piece.Piece) u64 {
+    pub fn get_bb_for(self: *Bitboards, pc: piece.Piece) *u64 {
         return switch (pc) {
-            piece.Piece.WhitePawn => self.WhitePawns,
-            piece.Piece.WhiteKnight => self.WhiteKnights,
-            piece.Piece.WhiteBishop => self.WhiteBishops,
-            piece.Piece.WhiteRook => self.WhiteRooks,
-            piece.Piece.WhiteQueen => self.WhiteQueens,
-            piece.Piece.WhiteKing => self.WhiteKing,
-            piece.Piece.BlackPawn => self.BlackPawns,
-            piece.Piece.BlackKnight => self.BlackKnights,
-            piece.Piece.BlackBishop => self.BlackBishops,
-            piece.Piece.BlackRook => self.BlackRooks,
-            piece.Piece.BlackQueen => self.BlackQueens,
-            piece.Piece.BlackKing => self.BlackKing,
+            piece.Piece.WhitePawn => &self.WhitePawns,
+            piece.Piece.WhiteKnight => &self.WhiteKnights,
+            piece.Piece.WhiteBishop => &self.WhiteBishops,
+            piece.Piece.WhiteRook => &self.WhiteRooks,
+            piece.Piece.WhiteQueen => &self.WhiteQueens,
+            piece.Piece.WhiteKing => &self.WhiteKing,
+            piece.Piece.BlackPawn => &self.BlackPawns,
+            piece.Piece.BlackKnight => &self.BlackKnights,
+            piece.Piece.BlackBishop => &self.BlackBishops,
+            piece.Piece.BlackRook => &self.BlackRooks,
+            piece.Piece.BlackQueen => &self.BlackQueens,
+            piece.Piece.BlackKing => &self.BlackKing,
         };
+    }
+
+    pub fn toggle_piece(self: *Bitboards, pc: piece.Piece, sq: u6) void {
+        self.get_bb_for(pc).* ^= Patterns.index_to_bb(sq);
+        if (@enumToInt(pc) >= @enumToInt(piece.Piece.BlackPawn)) {
+            self.BlackAll ^= Patterns.index_to_bb(sq);
+        } else {
+            self.WhiteAll ^= Patterns.index_to_bb(sq);
+        }
     }
 };
 

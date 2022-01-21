@@ -1,4 +1,4 @@
-pub const Piece = enum {
+pub const Piece = enum(u4) {
     WhitePawn,
     WhiteKnight,
     WhiteBishop,
@@ -13,7 +13,7 @@ pub const Piece = enum {
     BlackKing,
 };
 
-pub const PieceType = enum {
+pub const PieceType = enum(u4) {
     Pawn,
     Knight,
     Bishop,
@@ -22,7 +22,7 @@ pub const PieceType = enum {
     King,
 };
 
-pub const Color = enum {
+pub const Color = enum(u1) {
     White,
     Black,
 
