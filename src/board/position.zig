@@ -26,7 +26,7 @@ pub const Position = struct {
     }
 };
 
-inline fn fen_sq_to_sq(fsq: u8) u6 {
+pub inline fn fen_sq_to_sq(fsq: u8) u6 {
     return @intCast(u6, (fsq % 8) + (7 - fsq / 8) * 8);
 }
 

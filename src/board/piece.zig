@@ -11,6 +11,10 @@ pub const Piece = enum(u4) {
     BlackRook,
     BlackQueen,
     BlackKing,
+
+    pub inline fn color(self: Piece) Color {
+        return if (@enumToInt(self) <= @enumToInt(Piece.WhiteKing)) Color.White else Color.Black;
+    }
 };
 
 pub const PieceType = enum(u4) {
