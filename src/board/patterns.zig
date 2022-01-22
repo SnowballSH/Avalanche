@@ -119,6 +119,8 @@ pub fn slider_attacks(sq: u6, occupied: u64, comptime delta: [4][2]i8) u64 {
 
         var rank = @intCast(i8, BB.rank_of(sq));
         var file = @intCast(i8, BB.file_of(sq));
+        rank += dr;
+        file += df;
         while (is_valid(rank, file)) {
             const k = rank_file_to_bb(rank, file);
             result |= k;

@@ -196,7 +196,107 @@ pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u
                 }
             },
 
-            else => {},
+            Piece.Piece.WhiteBishop => {
+                if (piece.color() != board.turn) {
+                    continue;
+                }
+                const my_bb = board.bitboards.WhiteAll;
+                const opp_bb = board.bitboards.BlackAll;
+
+                var attacks = Patterns.get_bishop_attacks(sq, bb_all) & (~my_bb);
+                while (attacks != 0) {
+                    const to = @intCast(u6, @ctz(u64, attacks));
+                    const to_bb = @as(u64, 1) << to;
+                    const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
+                    list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
+                    attacks ^= to_bb;
+                }
+            },
+
+            Piece.Piece.BlackBishop => {
+                if (piece.color() != board.turn) {
+                    continue;
+                }
+                const my_bb = board.bitboards.BlackAll;
+                const opp_bb = board.bitboards.WhiteAll;
+
+                var attacks = Patterns.get_bishop_attacks(sq, bb_all) & (~my_bb);
+                while (attacks != 0) {
+                    const to = @intCast(u6, @ctz(u64, attacks));
+                    const to_bb = @as(u64, 1) << to;
+                    const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
+                    list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
+                    attacks ^= to_bb;
+                }
+            },
+
+            Piece.Piece.WhiteRook => {
+                if (piece.color() != board.turn) {
+                    continue;
+                }
+                const my_bb = board.bitboards.WhiteAll;
+                const opp_bb = board.bitboards.BlackAll;
+
+                var attacks = Patterns.get_rook_attacks(sq, bb_all) & (~my_bb);
+                while (attacks != 0) {
+                    const to = @intCast(u6, @ctz(u64, attacks));
+                    const to_bb = @as(u64, 1) << to;
+                    const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
+                    list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
+                    attacks ^= to_bb;
+                }
+            },
+
+            Piece.Piece.BlackRook => {
+                if (piece.color() != board.turn) {
+                    continue;
+                }
+                const my_bb = board.bitboards.BlackAll;
+                const opp_bb = board.bitboards.WhiteAll;
+
+                var attacks = Patterns.get_rook_attacks(sq, bb_all) & (~my_bb);
+                while (attacks != 0) {
+                    const to = @intCast(u6, @ctz(u64, attacks));
+                    const to_bb = @as(u64, 1) << to;
+                    const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
+                    list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
+                    attacks ^= to_bb;
+                }
+            },
+
+            Piece.Piece.WhiteQueen => {
+                if (piece.color() != board.turn) {
+                    continue;
+                }
+                const my_bb = board.bitboards.WhiteAll;
+                const opp_bb = board.bitboards.BlackAll;
+
+                var attacks = Patterns.get_queen_attacks(sq, bb_all) & (~my_bb);
+                while (attacks != 0) {
+                    const to = @intCast(u6, @ctz(u64, attacks));
+                    const to_bb = @as(u64, 1) << to;
+                    const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
+                    list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
+                    attacks ^= to_bb;
+                }
+            },
+
+            Piece.Piece.BlackQueen => {
+                if (piece.color() != board.turn) {
+                    continue;
+                }
+                const my_bb = board.bitboards.BlackAll;
+                const opp_bb = board.bitboards.WhiteAll;
+
+                var attacks = Patterns.get_queen_attacks(sq, bb_all) & (~my_bb);
+                while (attacks != 0) {
+                    const to = @intCast(u6, @ctz(u64, attacks));
+                    const to_bb = @as(u64, 1) << to;
+                    const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
+                    list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
+                    attacks ^= to_bb;
+                }
+            },
         }
     }
 
