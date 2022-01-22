@@ -6,7 +6,7 @@ const BB = @import("../board/bitboard.zig");
 const Encode = @import("./encode.zig");
 const C = @import("../c.zig");
 
-pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u24) {
+pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(u24) {
     var list = std.ArrayList(u24).init(std.heap.page_allocator);
 
     const bb_all = board.bitboards.WhiteAll | board.bitboards.BlackAll;
@@ -29,8 +29,9 @@ pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u
                 const my_last_rank = C.SQ_C.RANK_8;
                 const opp_bb = board.bitboards.BlackAll;
                 const sq_bb = @as(u64, 1) << sq;
+                const ep_bb = if (board.ep == null) 0 else @as(u64, 1) << board.ep.?;
 
-                var attacks = Patterns.PawnCapturePatterns[0][sq] & opp_bb;
+                var attacks = Patterns.PawnCapturePatterns[0][sq] & (opp_bb | ep_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = @as(u64, 1) << to;
@@ -42,7 +43,8 @@ pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u
                             pp -= 1;
                         }
                     } else {
-                        list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, 1, 0, 0, 0)) catch {};
+                        var ep_ = @boolToInt(sq == board.ep);
+                        list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, 1, 0, ep_, 0)) catch {};
                     }
                     attacks ^= to_bb;
                 }
@@ -68,6 +70,7 @@ pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u
 
                         if (sq_bb & my_second_rank != 0 and double_target_bb & bb_all == 0) {
                             list.append(Encode.move(@intCast(u6, sq), @intCast(u6, double_target), @enumToInt(piece), 0, 0, 1, 0, 0)) catch {};
+                            board.*.ep = double_target;
                         }
                     }
                 }
@@ -84,8 +87,9 @@ pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u
                 const my_last_rank = C.SQ_C.RANK_1;
                 const opp_bb = board.bitboards.WhiteAll;
                 const sq_bb = @as(u64, 1) << sq;
+                const ep_bb = if (board.ep == null) 0 else @as(u64, 1) << board.ep.?;
 
-                var attacks = Patterns.PawnCapturePatterns[1][sq] & opp_bb;
+                var attacks = Patterns.PawnCapturePatterns[1][sq] & (opp_bb | ep_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = @as(u64, 1) << to;
@@ -97,7 +101,9 @@ pub fn generate_all_pseudo_legal_moves(board: Position.Position) std.ArrayList(u
                             pp -= 1;
                         }
                     } else {
-                        list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, 1, 0, 0, 0)) catch {};
+                        var ep_ = @boolToInt(sq == board.ep);
+
+                        list.append(Encode.move(@intCast(u6, sq), @intCast(u6, to), @enumToInt(piece), 0, 1, 0, ep_, 0)) catch {};
                     }
                     attacks ^= to_bb;
                 }

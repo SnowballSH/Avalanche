@@ -8,6 +8,8 @@ pub const Position = struct {
     bitboards: BB.Bitboards,
     mailbox: [64]?Piece.Piece,
     turn: Piece.Color,
+    ep: ?u6,
+    castling: Piece.Castling,
 
     pub fn display(self: *Position) void {
         for (self.mailbox) |x, i| {

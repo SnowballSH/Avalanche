@@ -14,7 +14,7 @@ pub fn main() void {
     var pos = Position.new_position_by_fen(s);
     pos.display();
 
-    var moves = MoveGen.generate_all_pseudo_legal_moves(pos);
+    var moves = MoveGen.generate_all_pseudo_legal_moves(&pos);
     defer moves.deinit();
 
     for (moves.items) |x| {

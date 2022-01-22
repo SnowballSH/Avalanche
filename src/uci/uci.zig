@@ -36,9 +36,16 @@ pub inline fn move_to_detailed(move: u24) []u8 {
             break :init @as(u8, '^');
         }
     };
+    const ep = init: {
+        if (Encode.enpassant(move) == 0) {
+            break :init @as(u8, ' ');
+        } else {
+            break :init @as(u8, 'E');
+        }
+    };
     if (promop != 0) {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{c} {c}{c}{c}{c}{c}={c} {c}", .{ pieces[Encode.pt(move)], alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], cpc, alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], pieces_lower[promop], dbl }) catch unreachable;
+        return std.fmt.allocPrint(std.heap.page_allocator, "{c} {c}{c}{c}{c}{c}={c} {c}{c}", .{ pieces[Encode.pt(move)], alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], cpc, alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], pieces_lower[promop], dbl, ep }) catch unreachable;
     } else {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{c} {c}{c}{c}{c}{c} {c}", .{ pieces[Encode.pt(move)], alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], cpc, alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], dbl }) catch unreachable;
+        return std.fmt.allocPrint(std.heap.page_allocator, "{c} {c}{c}{c}{c}{c} {c}{c}", .{ pieces[Encode.pt(move)], alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], cpc, alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], dbl, ep }) catch unreachable;
     }
 }
