@@ -12,9 +12,28 @@ pub inline fn move_to_uci(move: u24) []u8 {
     const target = Encode.target(move);
     const promop = Encode.promote(move);
     if (promop != 0) {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{c}{c}{c}{c}{c}", .{ alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], pieces_lower[promop] }) catch unreachable;
+        return std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{c}{c}{c}{c}{c}",
+            .{
+                alphabets[Bitboard.file_of(source)],
+                numbers[Bitboard.rank_of(source)],
+                alphabets[Bitboard.file_of(target)],
+                numbers[Bitboard.rank_of(target)],
+                pieces_lower[promop],
+            },
+        ) catch unreachable;
     } else {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{c}{c}{c}{c}", .{ alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)] }) catch unreachable;
+        return std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{c}{c}{c}{c}",
+            .{
+                alphabets[Bitboard.file_of(source)],
+                numbers[Bitboard.rank_of(source)],
+                alphabets[Bitboard.file_of(target)],
+                numbers[Bitboard.rank_of(target)],
+            },
+        ) catch unreachable;
     }
 }
 
@@ -44,8 +63,35 @@ pub inline fn move_to_detailed(move: u24) []u8 {
         }
     };
     if (promop != 0) {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{c} {c}{c}{c}{c}{c}={c} {c}{c}", .{ pieces[Encode.pt(move)], alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], cpc, alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], pieces_lower[promop], dbl, ep }) catch unreachable;
+        return std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{c} {c}{c}{c}{c}{c}={c} {c}{c}",
+            .{
+                pieces[Encode.pt(move)],
+                alphabets[Bitboard.file_of(source)],
+                numbers[Bitboard.rank_of(source)],
+                cpc,
+                alphabets[Bitboard.file_of(target)],
+                numbers[Bitboard.rank_of(target)],
+                pieces_lower[promop],
+                dbl,
+                ep,
+            },
+        ) catch unreachable;
     } else {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{c} {c}{c}{c}{c}{c} {c}{c}", .{ pieces[Encode.pt(move)], alphabets[Bitboard.file_of(source)], numbers[Bitboard.rank_of(source)], cpc, alphabets[Bitboard.file_of(target)], numbers[Bitboard.rank_of(target)], dbl, ep }) catch unreachable;
+        return std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "{c} {c}{c}{c}{c}{c} {c}{c}",
+            .{
+                pieces[Encode.pt(move)],
+                alphabets[Bitboard.file_of(source)],
+                numbers[Bitboard.rank_of(source)],
+                cpc,
+                alphabets[Bitboard.file_of(target)],
+                numbers[Bitboard.rank_of(target)],
+                dbl,
+                ep,
+            },
+        ) catch unreachable;
     }
 }

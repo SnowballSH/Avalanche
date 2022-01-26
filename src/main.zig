@@ -11,7 +11,9 @@ const C = @import("./c.zig");
 pub fn main() void {
     // https://www.chessprogramming.org/Perft_Results
     const s = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ";
+    // const s = Position.STARTPOS;
     var pos = Position.new_position_by_fen(s);
+    defer pos.deinit();
     pos.display();
 
     var moves = MoveGen.generate_all_pseudo_legal_moves(&pos);
@@ -19,6 +21,11 @@ pub fn main() void {
 
     for (moves.items) |x| {
         std.debug.print("{s}\n", .{Uci.move_to_detailed(x)});
+
+        var npos = Position.new_position_by_fen(s);
+        npos.make_move(x);
+        npos.display();
+        npos.deinit();
     }
     std.debug.print("{d}", .{moves.items.len});
 }

@@ -4,6 +4,10 @@ const BB = @import("./bitboard.zig");
 const Piece = @import("./piece.zig");
 const Uci = @import("../uci/uci.zig");
 const Patterns = @import("./patterns.zig");
+const Encode = @import("../move/encode.zig");
+const C = @import("../c.zig");
+
+pub const STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 pub const Position = struct {
     bitboards: BB.Bitboards,
@@ -11,6 +15,11 @@ pub const Position = struct {
     turn: Piece.Color,
     ep: ?u6,
     castling: u4,
+    capture_stack: std.ArrayList(Piece.Piece),
+
+    pub fn deinit(self: *Position) void {
+        self.capture_stack.deinit();
+    }
 
     pub fn display(self: *Position) void {
         for (self.mailbox) |x, i| {
@@ -26,6 +35,29 @@ pub const Position = struct {
         } else {
             std.debug.print("Black to move\n", .{});
         }
+
+        std.debug.print("Castling: ", .{});
+        if (self.castling & Piece.WhiteKingCastle != 0) {
+            std.debug.print("K", .{});
+        }
+        if (self.castling & Piece.WhiteQueenCastle != 0) {
+            std.debug.print("Q", .{});
+        }
+        if (self.castling & Piece.BlackKingCastle != 0) {
+            std.debug.print("k", .{});
+        }
+        if (self.castling & Piece.BlackQueenCastle != 0) {
+            std.debug.print("q", .{});
+        }
+        std.debug.print("\n", .{});
+
+        if (self.ep != null) {
+            std.debug.print("En Passant: {c}{c}\n", .{ Uci.alphabets[BB.file_of(self.ep.?)], Uci.numbers[BB.rank_of(self.ep.?)] });
+        } else {
+            std.debug.print("En Passant: no\n", .{});
+        }
+
+        std.debug.print("\n", .{});
     }
 
     pub fn is_square_attacked_by(self: *Position, square: u6, color: Piece.Color) bool {
@@ -64,6 +96,112 @@ pub const Position = struct {
         }
         return false;
     }
+
+    pub fn add_piece(self: *Position, target: u6, piece: Piece.Piece) void {
+        const st: u64 = @as(u64, 1) << target;
+        self.bitboards.get_bb_for(piece).* |= st;
+        self.bitboards.get_occupancy_for(piece.color()).* |= st;
+
+        self.mailbox[fen_sq_to_sq(target)] = piece;
+    }
+
+    pub fn remove_piece(self: *Position, target: u6, piece: Piece.Piece) void {
+        const st: u64 = @as(u64, 1) << target;
+        self.bitboards.get_bb_for(piece).* &= ~st;
+        self.bitboards.get_occupancy_for(piece.color()).* &= ~st;
+
+        self.mailbox[fen_sq_to_sq(target)] = null;
+    }
+
+    pub fn move_piece(self: *Position, source: u6, target: u6, piece: Piece.Piece) void {
+        const st: u64 = (@as(u64, 1) << source) | (@as(u64, 1) << target);
+        self.bitboards.get_bb_for(piece).* ^= st;
+        self.bitboards.get_occupancy_for(piece.color()).* ^= st;
+
+        self.mailbox[fen_sq_to_sq(target)] = piece;
+        self.mailbox[fen_sq_to_sq(source)] = null;
+    }
+
+    pub fn make_move(self: *Position, move: u24) void {
+        var source = Encode.source(move);
+        var target = Encode.target(move);
+        var piece = @intToEnum(Piece.Piece, Encode.pt(move));
+
+        self.ep = null;
+
+        if (piece == Piece.Piece.WhiteRook) {
+            if (source == C.SQ_C.A1) {
+                self.castling &= ~Piece.WhiteQueenCastle;
+            } else if (source == C.SQ_C.H1) {
+                self.castling &= ~Piece.WhiteKingCastle;
+            }
+        } else if (piece == Piece.Piece.BlackRook) {
+            if (source == C.SQ_C.A8) {
+                self.castling &= ~Piece.BlackQueenCastle;
+            } else if (source == C.SQ_C.H8) {
+                self.castling &= ~Piece.BlackKingCastle;
+            }
+        }
+
+        if (piece == Piece.Piece.WhiteKing) {
+            self.castling &= ~(Piece.WhiteKingCastle | Piece.WhiteQueenCastle);
+        } else if (piece == Piece.Piece.BlackKing) {
+            self.castling &= ~(Piece.BlackKingCastle | Piece.BlackQueenCastle);
+        }
+
+        if (Encode.capture(move) != 0) {
+            var captured = self.mailbox[fen_sq_to_sq(target)].?;
+            self.capture_stack.append(captured) catch {};
+
+            if (Encode.enpassant(move)) {
+                if (self.turn == Piece.Color.White) {
+                    self.remove_piece(target + 8, captured);
+                } else {
+                    self.remove_piece(target - 8, captured);
+                }
+            } else {
+                self.remove_piece(target, captured);
+            }
+            self.move_piece(source, target, piece);
+        } else if (Encode.double(move) != 0) {
+            self.move_piece(source, target, piece);
+            if (self.turn == Piece.Color.White) {
+                self.ep = target - 8;
+            } else {
+                self.ep = target + 8;
+            }
+        } else if (Encode.castling(move) != 0) {
+            switch (target) {
+                C.SQ_C.G1 => {
+                    self.move_piece(C.SQ_C.H1, C.SQ_C.F1, Piece.Piece.WhiteRook);
+                    self.move_piece(source, target, piece);
+                },
+                C.SQ_C.C1 => {
+                    self.move_piece(C.SQ_C.A1, C.SQ_C.D1, Piece.Piece.WhiteRook);
+                    self.move_piece(source, target, piece);
+                },
+                C.SQ_C.G8 => {
+                    self.move_piece(C.SQ_C.H8, C.SQ_C.F8, Piece.Piece.BlackRook);
+                    self.move_piece(source, target, piece);
+                },
+                C.SQ_C.C8 => {
+                    self.move_piece(C.SQ_C.A8, C.SQ_C.D8, Piece.Piece.BlackRook);
+                    self.move_piece(source, target, piece);
+                },
+                else => unreachable,
+            }
+        } else {
+            self.move_piece(source, target, piece);
+        }
+
+        var promo = Encode.promote(move);
+        if (promo != 0) {
+            self.remove_piece(target, piece);
+            self.add_piece(target, @intToEnum(Piece.Piece, promo));
+        }
+
+        self.turn = self.turn.invert();
+    }
 };
 
 pub inline fn fen_sq_to_sq(fsq: u8) u6 {
@@ -71,9 +209,14 @@ pub inline fn fen_sq_to_sq(fsq: u8) u6 {
 }
 
 pub fn new_position_by_fen(fen: anytype) Position {
-    var position = std.mem.zeroes(Position);
-
-    position.castling = 0b1111;
+    var position = Position{
+        .bitboards = std.mem.zeroes(BB.Bitboards),
+        .mailbox = std.mem.zeroes([64]?Piece.Piece),
+        .turn = Piece.Color.White,
+        .ep = null,
+        .castling = 0b1111,
+        .capture_stack = std.ArrayList(Piece.Piece).init(std.heap.page_allocator),
+    };
 
     var index: usize = 0;
     var sq: u8 = 0;
@@ -158,6 +301,49 @@ pub fn new_position_by_fen(fen: anytype) Position {
         } else if (fen[index] == 'b') {
             position.turn = Piece.Color.Black;
         }
+        index += 1;
+    } else {
+        return position;
+    }
+
+    index += 1;
+    if (index < fen.len) {
+        if (fen[index] == '-') {
+            position.castling = 0;
+            index += 1;
+        } else {
+            position.castling = 0;
+            while (index < fen.len and fen[index] != ' ') {
+                switch (fen[index]) {
+                    'K' => {
+                        position.castling |= Piece.WhiteKingCastle;
+                    },
+                    'Q' => {
+                        position.castling |= Piece.WhiteQueenCastle;
+                    },
+                    'k' => {
+                        position.castling |= Piece.BlackKingCastle;
+                    },
+                    'q' => {
+                        position.castling |= Piece.BlackQueenCastle;
+                    },
+                    else => {},
+                }
+                index += 1;
+            }
+        }
+    } else {
+        return position;
+    }
+
+    index += 1;
+    if (index < fen.len) {
+        if (fen[index] == '-') {
+            position.ep = null;
+        }
+        // TODO: parse ep
+    } else {
+        return position;
     }
 
     return position;

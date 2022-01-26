@@ -39,6 +39,13 @@ pub const Bitboards = struct {
         };
     }
 
+    pub fn get_occupancy_for(self: *Bitboards, pc: piece.Color) *u64 {
+        return switch (pc) {
+            piece.Color.White => &self.WhiteAll,
+            piece.Color.Black => &self.BlackAll,
+        };
+    }
+
     pub fn toggle_piece(self: *Bitboards, pc: piece.Piece, sq: u6) void {
         self.get_bb_for(pc).* ^= Patterns.index_to_bb(sq);
         if (@enumToInt(pc) >= @enumToInt(piece.Piece.BlackPawn)) {
