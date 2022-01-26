@@ -16,9 +16,13 @@ pub const Position = struct {
     ep: ?u6,
     castling: u4,
     capture_stack: std.ArrayList(Piece.Piece),
+    castle_stack: std.ArrayList(u4),
+    ep_stack: std.ArrayList(?u6),
 
     pub fn deinit(self: *Position) void {
         self.capture_stack.deinit();
+        self.ep_stack.deinit();
+        self.castle_stack.deinit();
     }
 
     pub fn display(self: *Position) void {
@@ -127,6 +131,9 @@ pub const Position = struct {
         var target = Encode.target(move);
         var piece = @intToEnum(Piece.Piece, Encode.pt(move));
 
+        self.ep_stack.append(self.ep) catch {};
+        self.castle_stack.append(self.castling) catch {};
+
         self.ep = null;
 
         if (piece == Piece.Piece.WhiteRook) {
@@ -150,16 +157,19 @@ pub const Position = struct {
         }
 
         if (Encode.capture(move) != 0) {
-            var captured = self.mailbox[fen_sq_to_sq(target)].?;
-            self.capture_stack.append(captured) catch {};
-
-            if (Encode.enpassant(move)) {
+            if (Encode.enpassant(move) != 0) {
                 if (self.turn == Piece.Color.White) {
+                    var captured = self.mailbox[fen_sq_to_sq(target + 8)].?;
+                    self.capture_stack.append(captured) catch {};
                     self.remove_piece(target + 8, captured);
                 } else {
+                    var captured = self.mailbox[fen_sq_to_sq(target - 8)].?;
+                    self.capture_stack.append(captured) catch {};
                     self.remove_piece(target - 8, captured);
                 }
             } else {
+                var captured = self.mailbox[fen_sq_to_sq(target)].?;
+                self.capture_stack.append(captured) catch {};
                 self.remove_piece(target, captured);
             }
             self.move_piece(source, target, piece);
@@ -202,6 +212,70 @@ pub const Position = struct {
 
         self.turn = self.turn.invert();
     }
+
+    pub fn undo_move(self: *Position, move: u24) void {
+        const my_color = self.turn.invert();
+        const opp_color = self.turn;
+
+        var source = Encode.source(move);
+        var target = Encode.target(move);
+        var piece = @intToEnum(Piece.Piece, Encode.pt(move));
+
+        self.ep = self.ep_stack.pop();
+        // TODO figure out why this happens
+        if (self.ep != null and self.ep.? == 0x1e) {
+            self.ep = null;
+        }
+        self.castling = self.castle_stack.pop();
+
+        var promo = Encode.promote(move);
+        if (promo != 0) {
+            self.remove_piece(target, @intToEnum(Piece.Piece, promo));
+            self.add_piece(target, piece);
+        }
+
+        if (Encode.capture(move) != 0) {
+            var captured = self.capture_stack.pop();
+
+            self.move_piece(target, source, piece);
+
+            if (Encode.enpassant(move) != 0) {
+                if (opp_color == Piece.Color.White) {
+                    self.add_piece(target + 8, captured);
+                } else {
+                    self.add_piece(target - 8, captured);
+                }
+            } else {
+                self.add_piece(target, captured);
+            }
+        } else if (Encode.double(move) != 0) {
+            self.move_piece(target, source, piece);
+        } else if (Encode.castling(move) != 0) {
+            switch (target) {
+                C.SQ_C.G1 => {
+                    self.move_piece(C.SQ_C.F1, C.SQ_C.H1, Piece.Piece.WhiteRook);
+                    self.move_piece(target, source, piece);
+                },
+                C.SQ_C.C1 => {
+                    self.move_piece(C.SQ_C.D1, C.SQ_C.A1, Piece.Piece.WhiteRook);
+                    self.move_piece(target, source, piece);
+                },
+                C.SQ_C.G8 => {
+                    self.move_piece(C.SQ_C.F8, C.SQ_C.H8, Piece.Piece.BlackRook);
+                    self.move_piece(target, source, piece);
+                },
+                C.SQ_C.C8 => {
+                    self.move_piece(C.SQ_C.D8, C.SQ_C.A8, Piece.Piece.BlackRook);
+                    self.move_piece(target, source, piece);
+                },
+                else => unreachable,
+            }
+        } else {
+            self.move_piece(target, source, piece);
+        }
+
+        self.turn = my_color;
+    }
 };
 
 pub inline fn fen_sq_to_sq(fsq: u8) u6 {
@@ -216,6 +290,8 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .ep = null,
         .castling = 0b1111,
         .capture_stack = std.ArrayList(Piece.Piece).init(std.heap.page_allocator),
+        .castle_stack = std.ArrayList(u4).init(std.heap.page_allocator),
+        .ep_stack = std.ArrayList(?u6).init(std.heap.page_allocator),
     };
 
     var index: usize = 0;

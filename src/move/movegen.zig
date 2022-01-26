@@ -220,14 +220,14 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
 
                 if (board.castling & Piece.BlackKingCastle != 0) {
                     if (BB.get_at(bb_all, C.SQ_C.F8) == 0 and BB.get_at(bb_all, C.SQ_C.G8) == 0) {
-                        if (!board.is_square_attacked_by(C.SQ_C.E8, Piece.Color.Black) and !board.is_square_attacked_by(C.SQ_C.F8, Piece.Color.Black)) {
+                        if (!board.is_square_attacked_by(C.SQ_C.E8, Piece.Color.White) and !board.is_square_attacked_by(C.SQ_C.F8, Piece.Color.White)) {
                             list.append(Encode.move(sq, C.SQ_C.G8, @enumToInt(piece), 0, 0, 0, 0, 1)) catch {};
                         }
                     }
                 }
                 if (board.castling & Piece.BlackQueenCastle != 0) {
                     if (BB.get_at(bb_all, C.SQ_C.D8) == 0 and BB.get_at(bb_all, C.SQ_C.C8) == 0 and BB.get_at(bb_all, C.SQ_C.B8) == 0) {
-                        if (!board.is_square_attacked_by(C.SQ_C.E8, Piece.Color.Black) and !board.is_square_attacked_by(C.SQ_C.D8, Piece.Color.Black)) {
+                        if (!board.is_square_attacked_by(C.SQ_C.E8, Piece.Color.White) and !board.is_square_attacked_by(C.SQ_C.D8, Piece.Color.White)) {
                             list.append(Encode.move(sq, C.SQ_C.C8, @enumToInt(piece), 0, 0, 0, 0, 1)) catch {};
                         }
                     }
