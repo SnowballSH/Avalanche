@@ -42,10 +42,7 @@ test "color operations" {
     std.debug.assert(Color.invert(Color.Black) == Color.White);
 }
 
-pub const Castling = enum(u4) {
-    NoCastling = 0,
-    WhiteKingSide = 1,
-    WhiteQueenSide = 2,
-    BlackKingSide = 4,
-    BlackQueenSide = 8,
-};
+pub const WhiteKingCastle: u4 = 1;
+pub const WhiteQueenCastle: u4 = 2;
+pub const BlackKingCastle: u4 = 4;
+pub const BlackQueenCastle: u4 = 8;

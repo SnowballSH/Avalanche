@@ -3,13 +3,14 @@ const std = @import("std");
 const BB = @import("./bitboard.zig");
 const Piece = @import("./piece.zig");
 const Uci = @import("../uci/uci.zig");
+const Patterns = @import("./patterns.zig");
 
 pub const Position = struct {
     bitboards: BB.Bitboards,
     mailbox: [64]?Piece.Piece,
     turn: Piece.Color,
     ep: ?u6,
-    castling: Piece.Castling,
+    castling: u4,
 
     pub fn display(self: *Position) void {
         for (self.mailbox) |x, i| {
@@ -26,6 +27,43 @@ pub const Position = struct {
             std.debug.print("Black to move\n", .{});
         }
     }
+
+    pub fn is_square_attacked_by(self: *Position, square: u6, color: Piece.Color) bool {
+        if (color == Piece.Color.White) {
+            if (Patterns.PawnCapturePatterns[1][square] & self.bitboards.WhitePawns != 0) {
+                return true;
+            }
+            if (Patterns.KnightPatterns[square] & self.bitboards.WhiteKnights != 0) {
+                return true;
+            }
+            if (Patterns.KingPatterns[square] & self.bitboards.WhiteKing != 0) {
+                return true;
+            }
+            if (Patterns.get_bishop_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens) != 0) {
+                return true;
+            }
+            if (Patterns.get_rook_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens) != 0) {
+                return true;
+            }
+        } else {
+            if (Patterns.PawnCapturePatterns[0][square] & self.bitboards.BlackPawns != 0) {
+                return true;
+            }
+            if (Patterns.KnightPatterns[square] & self.bitboards.BlackKnights != 0) {
+                return true;
+            }
+            if (Patterns.KingPatterns[square] & self.bitboards.BlackKing != 0) {
+                return true;
+            }
+            if (Patterns.get_bishop_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0) {
+                return true;
+            }
+            if (Patterns.get_rook_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0) {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 pub inline fn fen_sq_to_sq(fsq: u8) u6 {
@@ -34,6 +72,8 @@ pub inline fn fen_sq_to_sq(fsq: u8) u6 {
 
 pub fn new_position_by_fen(fen: anytype) Position {
     var position = std.mem.zeroes(Position);
+
+    position.castling = 0b1111;
 
     var index: usize = 0;
     var sq: u8 = 0;
