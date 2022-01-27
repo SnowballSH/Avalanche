@@ -159,13 +159,13 @@ pub const Position = struct {
         if (Encode.capture(move) != 0) {
             if (Encode.enpassant(move) != 0) {
                 if (self.turn == Piece.Color.White) {
-                    var captured = self.mailbox[fen_sq_to_sq(target + 8)].?;
-                    self.capture_stack.append(captured) catch {};
-                    self.remove_piece(target + 8, captured);
-                } else {
                     var captured = self.mailbox[fen_sq_to_sq(target - 8)].?;
                     self.capture_stack.append(captured) catch {};
                     self.remove_piece(target - 8, captured);
+                } else {
+                    var captured = self.mailbox[fen_sq_to_sq(target + 8)].?;
+                    self.capture_stack.append(captured) catch {};
+                    self.remove_piece(target + 8, captured);
                 }
             } else {
                 var captured = self.mailbox[fen_sq_to_sq(target)].?;
@@ -275,6 +275,20 @@ pub const Position = struct {
         }
 
         self.turn = my_color;
+    }
+
+    pub fn is_king_checked_for(self: *Position, color: Piece.Color) bool {
+        if (color == Piece.Color.White) {
+            if (self.bitboards.WhiteKing == 0) {
+                return false;
+            }
+            return self.is_square_attacked_by(@intCast(u6, @ctz(u64, self.bitboards.WhiteKing)), Piece.Color.Black);
+        } else {
+            if (self.bitboards.BlackKing == 0) {
+                return false;
+            }
+            return self.is_square_attacked_by(@intCast(u6, @ctz(u64, self.bitboards.BlackKing)), Piece.Color.White);
+        }
     }
 };
 

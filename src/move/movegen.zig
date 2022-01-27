@@ -31,7 +31,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 const sq_bb = @as(u64, 1) << sq;
                 const ep_bb = if (board.ep == null) 0 else @as(u64, 1) << board.ep.?;
 
-                var attacks = Patterns.PawnCapturePatterns[0][sq] & (opp_bb | ep_bb);
+                var attacks = Patterns.PawnCapturePatterns[0][sq] & opp_bb;
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = @as(u64, 1) << to;
@@ -43,10 +43,13 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                             pp -= 1;
                         }
                     } else {
-                        var ep_ = @boolToInt(sq == board.ep);
-                        list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, 1, 0, ep_, 0)) catch {};
+                        list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, 1, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
+                }
+
+                if ((Patterns.PawnCapturePatterns[0][sq] & ep_bb) != 0) {
+                    list.append(Encode.move(sq, @intCast(u6, board.ep.?), @enumToInt(piece), 0, 1, 0, 1, 0)) catch {};
                 }
 
                 // Normal moves
@@ -89,7 +92,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 const sq_bb = @as(u64, 1) << sq;
                 const ep_bb = if (board.ep == null) 0 else @as(u64, 1) << board.ep.?;
 
-                var attacks = Patterns.PawnCapturePatterns[1][sq] & (opp_bb | ep_bb);
+                var attacks = Patterns.PawnCapturePatterns[1][sq] & opp_bb;
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = @as(u64, 1) << to;
@@ -101,11 +104,13 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                             pp -= 1;
                         }
                     } else {
-                        var ep_ = @boolToInt(sq == board.ep);
-
-                        list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, 1, 0, ep_, 0)) catch {};
+                        list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, 1, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
+                }
+
+                if ((Patterns.PawnCapturePatterns[1][sq] & ep_bb) != 0) {
+                    list.append(Encode.move(sq, @intCast(u6, board.ep.?), @enumToInt(piece), 0, 1, 0, 1, 0)) catch {};
                 }
 
                 // Normal moves

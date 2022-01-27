@@ -1,6 +1,6 @@
 const Piece = @import("../board/piece.zig");
 
-pub inline fn move(arg_source: u6, arg_target: u6, arg_pt: u4, arg_promote: u4, arg_capture: u1, comptime arg_double: u1, arg_enpassant: u1, comptime arg_castling: u1) u24 {
+pub inline fn move(arg_source: u6, arg_target: u6, arg_pt: u4, arg_promote: u4, arg_capture: u1, comptime arg_double: u1, comptime arg_enpassant: u1, comptime arg_castling: u1) u24 {
     return @intCast(u24, arg_source) | (@intCast(u24, arg_target) << 6) | (@intCast(u24, arg_pt) << 12) | (@intCast(u24, arg_promote) << 16) | (@intCast(u24, arg_capture) << 20) | (@intCast(u24, comptime arg_double) << 21) | (@intCast(u24, comptime arg_enpassant) << 22) | (@intCast(u24, comptime arg_castling) << 23);
 }
 
