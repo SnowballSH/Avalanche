@@ -1,3 +1,3 @@
 # Avalanche
 
-[WIP] Highly Customizable Bitboard Chess Engine written in Zig and C
+[WIP] Bitboard Chess Engine written in Zig
