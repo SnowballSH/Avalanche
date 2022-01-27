@@ -16,7 +16,12 @@ pub fn main() !void {
     // const s = "r3k2K/6P1/6N1/8/8/8/4p3/8 b q - 0 1";
     var pos = Position.new_position_by_fen(s);
     defer pos.deinit();
-    pos.display();
+    //pos.display();
+
+    // v1: 22.67s
+    // Cosette: 8s
+    // FSF: 6.27s
+    // SF: 0.84s
 
     _ = try Perft.perft_root(&pos, 6);
 }

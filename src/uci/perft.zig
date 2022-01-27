@@ -29,7 +29,7 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
 
     const stdout = std.io.getStdOut().writer();
 
-    try stdout.print("nodes: {}", .{nodes});
+    try stdout.print("nodes: {}\n", .{nodes});
 
     return nodes;
 }

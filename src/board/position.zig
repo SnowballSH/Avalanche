@@ -65,6 +65,7 @@ pub const Position = struct {
     }
 
     pub fn is_square_attacked_by(self: *Position, square: u6, color: Piece.Color) bool {
+        const bb_all = self.bitboards.WhiteAll | self.bitboards.BlackAll;
         if (color == Piece.Color.White) {
             if (Patterns.PawnCapturePatterns[1][square] & self.bitboards.WhitePawns != 0) {
                 return true;
@@ -75,10 +76,10 @@ pub const Position = struct {
             if (Patterns.KingPatterns[square] & self.bitboards.WhiteKing != 0) {
                 return true;
             }
-            if (Patterns.get_bishop_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens) != 0) {
+            if (Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens) != 0) {
                 return true;
             }
-            if (Patterns.get_rook_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens) != 0) {
+            if (Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens) != 0) {
                 return true;
             }
         } else {
@@ -91,10 +92,10 @@ pub const Position = struct {
             if (Patterns.KingPatterns[square] & self.bitboards.BlackKing != 0) {
                 return true;
             }
-            if (Patterns.get_bishop_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0) {
+            if (Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0) {
                 return true;
             }
-            if (Patterns.get_rook_attacks(square, self.bitboards.WhiteAll | self.bitboards.BlackAll) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0) {
+            if (Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0) {
                 return true;
             }
         }
@@ -293,7 +294,7 @@ pub const Position = struct {
 };
 
 pub inline fn fen_sq_to_sq(fsq: u8) u6 {
-    return @intCast(u6, (fsq % 8) + (7 - fsq / 8) * 8);
+    return @intCast(u6, fsq ^ 56);
 }
 
 pub fn new_position_by_fen(fen: anytype) Position {
@@ -307,6 +308,10 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .castle_stack = std.ArrayList(u4).init(std.heap.page_allocator),
         .ep_stack = std.ArrayList(?u6).init(std.heap.page_allocator),
     };
+
+    position.capture_stack.ensureTotalCapacity(16) catch {};
+    position.castle_stack.ensureTotalCapacity(16) catch {};
+    position.ep_stack.ensureTotalCapacity(16) catch {};
 
     var index: usize = 0;
     var sq: u8 = 0;

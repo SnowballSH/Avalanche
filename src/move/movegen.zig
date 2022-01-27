@@ -9,6 +9,8 @@ const C = @import("../c.zig");
 pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(u24) {
     var list = std.ArrayList(u24).init(std.heap.page_allocator);
 
+    list.ensureTotalCapacity(32) catch {};
+
     const bb_all = board.bitboards.WhiteAll | board.bitboards.BlackAll;
 
     for (board.mailbox) |pt, sq_| {
