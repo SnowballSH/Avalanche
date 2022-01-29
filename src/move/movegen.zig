@@ -29,13 +29,13 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 const my_second_rank = C.SQ_C.RANK_2;
                 const my_last_rank = C.SQ_C.RANK_8;
                 const opp_bb = board.bitboards.BlackAll;
-                const sq_bb = @as(u64, 1) << sq;
-                const ep_bb = if (board.ep == null) 0 else @as(u64, 1) << board.ep.?;
+                const sq_bb = BB.ShiftLocations[sq];
+                const ep_bb = if (board.ep == null) 0 else BB.ShiftLocations[board.ep.?];
 
                 var attacks = Patterns.PawnCapturePatterns[0][sq] & opp_bb;
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     if (to_bb & my_last_rank != 0) {
                         // Promotion
                         var pp: u4 = promo_start;
@@ -56,7 +56,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
 
                 // Normal moves
                 const single_target = @intCast(u6, @as(i12, sq) + pawn_delta);
-                const single_target_bb = @as(u64, 1) << single_target;
+                const single_target_bb = BB.ShiftLocations[single_target];
                 // only continue if that square is free
                 if (single_target_bb & bb_all == 0) {
                     if (single_target_bb & my_last_rank != 0) {
@@ -71,7 +71,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
 
                         // double pushes
                         const double_target = @intCast(u6, @as(i12, single_target) + pawn_delta);
-                        const double_target_bb = @as(u64, 1) << double_target;
+                        const double_target_bb = BB.ShiftLocations[double_target];
 
                         if (sq_bb & my_second_rank != 0 and double_target_bb & bb_all == 0) {
                             list.append(Encode.move(sq, @intCast(u6, double_target), @enumToInt(piece), 0, 0, 1, 0, 0)) catch {};
@@ -91,13 +91,13 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 const my_second_rank = C.SQ_C.RANK_7;
                 const my_last_rank = C.SQ_C.RANK_1;
                 const opp_bb = board.bitboards.WhiteAll;
-                const sq_bb = @as(u64, 1) << sq;
-                const ep_bb = if (board.ep == null) 0 else @as(u64, 1) << board.ep.?;
+                const sq_bb = BB.ShiftLocations[sq];
+                const ep_bb = if (board.ep == null) 0 else BB.ShiftLocations[board.ep.?];
 
                 var attacks = Patterns.PawnCapturePatterns[1][sq] & opp_bb;
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     if (to_bb & my_last_rank != 0) {
                         // Promotion
                         var pp: u4 = promo_start;
@@ -117,7 +117,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
 
                 // Normal moves
                 const single_target = @intCast(u6, @as(i12, sq) + pawn_delta);
-                const single_target_bb = @as(u64, 1) << single_target;
+                const single_target_bb = BB.ShiftLocations[single_target];
                 // only continue if that square is free
                 if (single_target_bb & bb_all == 0) {
                     if (single_target_bb & my_last_rank != 0) {
@@ -132,7 +132,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
 
                         // double pushes
                         const double_target = @intCast(u6, @as(i12, single_target) + pawn_delta);
-                        const double_target_bb = @as(u64, 1) << double_target;
+                        const double_target_bb = BB.ShiftLocations[double_target];
 
                         if (sq_bb & my_second_rank != 0 and double_target_bb & bb_all == 0) {
                             list.append(Encode.move(sq, @intCast(u6, double_target), @enumToInt(piece), 0, 0, 1, 0, 0)) catch {};
@@ -151,7 +151,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.KnightPatterns[sq] & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -168,7 +168,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.KnightPatterns[sq] & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -185,7 +185,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.KingPatterns[sq] & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -219,7 +219,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.KingPatterns[sq] & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -251,7 +251,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Magic.get_bishop_moves(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -268,7 +268,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Magic.get_bishop_moves(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -285,7 +285,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.get_rook_attacks(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -302,7 +302,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.get_rook_attacks(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -319,7 +319,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.get_queen_attacks(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;
@@ -336,7 +336,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 var attacks = Patterns.get_queen_attacks(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
-                    const to_bb = @as(u64, 1) << to;
+                    const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
                     list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     attacks ^= to_bb;

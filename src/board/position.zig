@@ -89,7 +89,7 @@ pub const Position = struct {
     }
 
     pub fn add_piece(self: *Position, target: u6, piece: Piece.Piece) void {
-        const st: u64 = @as(u64, 1) << target;
+        const st: u64 = BB.ShiftLocations[target];
         self.bitboards.get_bb_for(piece).* |= st;
         self.bitboards.get_occupancy_for(piece.color()).* |= st;
 
@@ -97,7 +97,7 @@ pub const Position = struct {
     }
 
     pub fn remove_piece(self: *Position, target: u6, piece: Piece.Piece) void {
-        const st: u64 = @as(u64, 1) << target;
+        const st: u64 = BB.ShiftLocations[target];
         self.bitboards.get_bb_for(piece).* &= ~st;
         self.bitboards.get_occupancy_for(piece.color()).* &= ~st;
 
@@ -105,7 +105,7 @@ pub const Position = struct {
     }
 
     pub fn move_piece(self: *Position, source: u6, target: u6, piece: Piece.Piece) void {
-        const st: u64 = (@as(u64, 1) << source) | (@as(u64, 1) << target);
+        const st: u64 = BB.ShiftLocations[source] | BB.ShiftLocations[target];
         self.bitboards.get_bb_for(piece).* ^= st;
         self.bitboards.get_occupancy_for(piece.color()).* ^= st;
 

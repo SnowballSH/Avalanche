@@ -13,7 +13,7 @@ pub const Piece = enum(u4) {
     BlackKing,
 
     pub inline fn color(self: Piece) Color {
-        return if (@enumToInt(self) <= @enumToInt(Piece.WhiteKing)) Color.White else Color.Black;
+        return @intToEnum(Color, @boolToInt(@enumToInt(self) > @enumToInt(Piece.WhiteKing)));
     }
 };
 
@@ -30,8 +30,8 @@ pub const Color = enum(u1) {
     White,
     Black,
 
-    pub inline fn invert(self: Color) Color {
-        return if (self == Color.White) Color.Black else Color.White;
+    pub inline fn invert(self: *Color) Color {
+        return @intToEnum(Color, @enumToInt(self.*) ^ 1);
     }
 };
 
