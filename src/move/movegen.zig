@@ -4,12 +4,11 @@ const Patterns = @import("../board/patterns.zig");
 const Piece = @import("../board/piece.zig");
 const BB = @import("../board/bitboard.zig");
 const Encode = @import("./encode.zig");
+const Magic = @import("../board/magic.zig");
 const C = @import("../c.zig");
 
 pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(u24) {
-    var list = std.ArrayList(u24).init(std.heap.page_allocator);
-
-    list.ensureTotalCapacity(32) catch {};
+    var list = std.ArrayList(u24).initCapacity(std.heap.page_allocator, 48) catch unreachable;
 
     const bb_all = board.bitboards.WhiteAll | board.bitboards.BlackAll;
 
@@ -248,7 +247,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 const my_bb = board.bitboards.WhiteAll;
                 const opp_bb = board.bitboards.BlackAll;
 
-                var attacks = Patterns.get_bishop_attacks(sq, bb_all) & (~my_bb);
+                var attacks = Magic.get_bishop_moves(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = @as(u64, 1) << to;
@@ -265,7 +264,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                 const my_bb = board.bitboards.BlackAll;
                 const opp_bb = board.bitboards.WhiteAll;
 
-                var attacks = Patterns.get_bishop_attacks(sq, bb_all) & (~my_bb);
+                var attacks = Magic.get_bishop_moves(sq, bb_all) & (~my_bb);
                 while (attacks != 0) {
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = @as(u64, 1) << to;

@@ -62,9 +62,18 @@ pub const PawnDelta: [2][2][2]i8 = .{ .{
     .{ -1, 1 },
 } };
 
-pub const KingPatterns: [C.SQ_C.N_SQUARES]u64 align(64) = init: {
-    @setEvalBranchQuota(C.SQ_C.N_SQUARES * 8 * 3);
-    var patterns: [C.SQ_C.N_SQUARES]u64 align(64) = undefined;
+pub const DiagPatterns: [64]u64 align(64) = init: {
+    @setEvalBranchQuota(64 * 64 * 8 * 3);
+    var patterns: [64]u64 align(64) = undefined;
+    for (patterns) |*pt, idx| {
+        pt.* = get_bishop_attacks(@intCast(u6, idx), 0);
+    }
+    break :init patterns;
+};
+
+pub const KingPatterns: [64]u64 align(64) = init: {
+    @setEvalBranchQuota(64 * 8 * 3);
+    var patterns: [64]u64 align(64) = undefined;
     for (patterns) |*pt, idx| {
         const r: i8 = BB.rank_of(idx);
         const f: i8 = BB.file_of(idx);
@@ -77,9 +86,9 @@ pub const KingPatterns: [C.SQ_C.N_SQUARES]u64 align(64) = init: {
     break :init patterns;
 };
 
-pub const KnightPatterns: [C.SQ_C.N_SQUARES]u64 align(64) = init: {
-    @setEvalBranchQuota(C.SQ_C.N_SQUARES * 8 * 3);
-    var patterns: [C.SQ_C.N_SQUARES]u64 align(64) = undefined;
+pub const KnightPatterns: [64]u64 align(64) = init: {
+    @setEvalBranchQuota(64 * 8 * 3);
+    var patterns: [64]u64 align(64) = undefined;
     for (patterns) |*pt, idx| {
         const r: i8 = BB.rank_of(idx);
         const f: i8 = BB.file_of(idx);
@@ -92,9 +101,9 @@ pub const KnightPatterns: [C.SQ_C.N_SQUARES]u64 align(64) = init: {
     break :init patterns;
 };
 
-pub const PawnCapturePatterns: [2][C.SQ_C.N_SQUARES]u64 align(64) = init: {
-    @setEvalBranchQuota(C.SQ_C.N_SQUARES * 8 * 3);
-    var patterns: [2][C.SQ_C.N_SQUARES]u64 align(64) = undefined;
+pub const PawnCapturePatterns: [2][64]u64 align(64) = init: {
+    @setEvalBranchQuota(64 * 8 * 3);
+    var patterns: [2][64]u64 align(64) = undefined;
     for (patterns) |*ptc, c| {
         for (ptc.*) |*pt, idx| {
             const r: i8 = BB.rank_of(idx);

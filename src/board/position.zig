@@ -66,39 +66,25 @@ pub const Position = struct {
 
     pub fn is_square_attacked_by(self: *Position, square: u6, color: Piece.Color) bool {
         const bb_all = self.bitboards.WhiteAll | self.bitboards.BlackAll;
+        // zig fmt: off
         if (color == Piece.Color.White) {
-            if (Patterns.PawnCapturePatterns[1][square] & self.bitboards.WhitePawns != 0) {
-                return true;
-            }
-            if (Patterns.KnightPatterns[square] & self.bitboards.WhiteKnights != 0) {
-                return true;
-            }
-            if (Patterns.KingPatterns[square] & self.bitboards.WhiteKing != 0) {
-                return true;
-            }
-            if (Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens) != 0) {
-                return true;
-            }
-            if (Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens) != 0) {
-                return true;
-            }
+            return (
+            Patterns.PawnCapturePatterns[1][square] & self.bitboards.WhitePawns != 0
+                or Patterns.KnightPatterns[square] & self.bitboards.WhiteKnights != 0
+                or Patterns.KingPatterns[square] & self.bitboards.WhiteKing != 0
+                or Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens) != 0
+                or Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens) != 0
+            );
         } else {
-            if (Patterns.PawnCapturePatterns[0][square] & self.bitboards.BlackPawns != 0) {
-                return true;
-            }
-            if (Patterns.KnightPatterns[square] & self.bitboards.BlackKnights != 0) {
-                return true;
-            }
-            if (Patterns.KingPatterns[square] & self.bitboards.BlackKing != 0) {
-                return true;
-            }
-            if (Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0) {
-                return true;
-            }
-            if (Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0) {
-                return true;
-            }
+            return (
+            Patterns.PawnCapturePatterns[0][square] & self.bitboards.BlackPawns != 0
+                or Patterns.KnightPatterns[square] & self.bitboards.BlackKnights != 0
+                or Patterns.KingPatterns[square] & self.bitboards.BlackKing != 0
+                or Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0
+                or Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0
+            );
         }
+        // zig fmt: on
         return false;
     }
 
@@ -304,14 +290,10 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .turn = Piece.Color.White,
         .ep = null,
         .castling = 0b1111,
-        .capture_stack = std.ArrayList(Piece.Piece).init(std.heap.page_allocator),
-        .castle_stack = std.ArrayList(u4).init(std.heap.page_allocator),
-        .ep_stack = std.ArrayList(?u6).init(std.heap.page_allocator),
+        .capture_stack = std.ArrayList(Piece.Piece).initCapacity(std.heap.page_allocator, 16) catch unreachable,
+        .castle_stack = std.ArrayList(u4).initCapacity(std.heap.page_allocator, 16) catch unreachable,
+        .ep_stack = std.ArrayList(?u6).initCapacity(std.heap.page_allocator, 16) catch unreachable,
     };
-
-    position.capture_stack.ensureTotalCapacity(16) catch {};
-    position.castle_stack.ensureTotalCapacity(16) catch {};
-    position.ep_stack.ensureTotalCapacity(16) catch {};
 
     var index: usize = 0;
     var sq: u8 = 0;
