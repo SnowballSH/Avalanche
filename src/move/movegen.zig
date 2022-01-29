@@ -49,6 +49,7 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
                     attacks ^= to_bb;
                 }
 
+                // en passant
                 if ((Patterns.PawnCapturePatterns[0][sq] & ep_bb) != 0) {
                     list.append(Encode.move(sq, @intCast(u6, board.ep.?), @enumToInt(piece), 0, 1, 0, 1, 0)) catch {};
                 }

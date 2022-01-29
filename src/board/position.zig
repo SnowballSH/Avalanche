@@ -158,6 +158,19 @@ pub const Position = struct {
                 var captured = self.mailbox[fen_sq_to_sq(target)].?;
                 self.capture_stack.append(captured) catch {};
                 self.remove_piece(target, captured);
+                if (captured == Piece.Piece.WhiteRook) {
+                    if (target == C.SQ_C.A1) {
+                        self.castling &= ~Piece.WhiteQueenCastle;
+                    } else if (target == C.SQ_C.H1) {
+                        self.castling &= ~Piece.WhiteKingCastle;
+                    }
+                } else if (captured == Piece.Piece.BlackRook) {
+                    if (target == C.SQ_C.A8) {
+                        self.castling &= ~Piece.BlackQueenCastle;
+                    } else if (target == C.SQ_C.H8) {
+                        self.castling &= ~Piece.BlackKingCastle;
+                    }
+                }
             }
             self.move_piece(source, target, piece);
         } else if (Encode.double(move) != 0) {
