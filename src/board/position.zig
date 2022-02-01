@@ -6,6 +6,7 @@ const Uci = @import("../uci/uci.zig");
 const Patterns = @import("./patterns.zig");
 const Encode = @import("../move/encode.zig");
 const C = @import("../c.zig");
+const Zobrist = @import("./zobrist.zig");
 
 pub const STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -18,11 +19,14 @@ pub const Position = struct {
     capture_stack: std.ArrayList(Piece.Piece),
     castle_stack: std.ArrayList(u4),
     ep_stack: std.ArrayList(?u6),
+    hash_stack: std.ArrayList(u64),
+    hash: u64,
 
     pub fn deinit(self: *Position) void {
         self.capture_stack.deinit();
         self.ep_stack.deinit();
         self.castle_stack.deinit();
+        self.hash_stack.deinit();
     }
 
     pub fn display(self: *Position) void {
@@ -88,26 +92,39 @@ pub const Position = struct {
         return false;
     }
 
-    pub fn add_piece(self: *Position, target: u6, piece: Piece.Piece) void {
+    pub fn add_piece(self: *Position, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
         const st: u64 = BB.ShiftLocations[target];
         self.bitboards.get_bb_for(piece).* |= st;
         self.bitboards.get_occupancy_for(piece.color()).* |= st;
 
+        if (modhash) {
+            self.hash ^= Zobrist.ZobristKeys[@enumToInt(piece)][target];
+        }
+
         self.mailbox[fen_sq_to_sq(target)] = piece;
     }
 
-    pub fn remove_piece(self: *Position, target: u6, piece: Piece.Piece) void {
+    pub fn remove_piece(self: *Position, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
         const st: u64 = BB.ShiftLocations[target];
         self.bitboards.get_bb_for(piece).* &= ~st;
         self.bitboards.get_occupancy_for(piece.color()).* &= ~st;
 
+        if (modhash) {
+            self.hash ^= Zobrist.ZobristKeys[@enumToInt(piece)][target];
+        }
+
         self.mailbox[fen_sq_to_sq(target)] = null;
     }
 
-    pub fn move_piece(self: *Position, source: u6, target: u6, piece: Piece.Piece) void {
+    pub fn move_piece(self: *Position, source: u6, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
         const st: u64 = BB.ShiftLocations[source] | BB.ShiftLocations[target];
         self.bitboards.get_bb_for(piece).* ^= st;
         self.bitboards.get_occupancy_for(piece.color()).* ^= st;
+
+        if (modhash) {
+            self.hash ^= Zobrist.ZobristKeys[@enumToInt(piece)][source];
+            self.hash ^= Zobrist.ZobristKeys[@enumToInt(piece)][target];
+        }
 
         self.mailbox[fen_sq_to_sq(target)] = piece;
         self.mailbox[fen_sq_to_sq(source)] = null;
@@ -118,29 +135,49 @@ pub const Position = struct {
         var target = Encode.target(move);
         var piece = @intToEnum(Piece.Piece, Encode.pt(move));
 
+        if (self.ep != null) {
+            std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
+        }
+
         self.ep_stack.append(self.ep) catch {};
         self.castle_stack.append(self.castling) catch {};
+        self.hash_stack.append(self.hash) catch {};
 
-        self.ep = null;
+        if (self.ep != null) {
+            self.hash ^= Zobrist.ZobristEpKeys[BB.file_of(self.ep.?)];
+            self.ep = null;
+        }
 
         if (piece == Piece.Piece.WhiteRook) {
             if (source == C.SQ_C.A1) {
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                 self.castling &= ~Piece.WhiteQueenCastle;
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
             } else if (source == C.SQ_C.H1) {
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                 self.castling &= ~Piece.WhiteKingCastle;
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
             }
         } else if (piece == Piece.Piece.BlackRook) {
             if (source == C.SQ_C.A8) {
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                 self.castling &= ~Piece.BlackQueenCastle;
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
             } else if (source == C.SQ_C.H8) {
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                 self.castling &= ~Piece.BlackKingCastle;
+                self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
             }
         }
 
         if (piece == Piece.Piece.WhiteKing) {
+            self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
             self.castling &= ~(Piece.WhiteKingCastle | Piece.WhiteQueenCastle);
+            self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
         } else if (piece == Piece.Piece.BlackKing) {
+            self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
             self.castling &= ~(Piece.BlackKingCastle | Piece.BlackQueenCastle);
+            self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
         }
 
         if (Encode.capture(move) != 0) {
@@ -148,68 +185,81 @@ pub const Position = struct {
                 if (self.turn == Piece.Color.White) {
                     var captured = self.mailbox[fen_sq_to_sq(target - 8)].?;
                     self.capture_stack.append(captured) catch {};
-                    self.remove_piece(target - 8, captured);
+                    self.remove_piece(target - 8, captured, true);
                 } else {
                     var captured = self.mailbox[fen_sq_to_sq(target + 8)].?;
                     self.capture_stack.append(captured) catch {};
-                    self.remove_piece(target + 8, captured);
+                    self.remove_piece(target + 8, captured, true);
                 }
             } else {
                 var captured = self.mailbox[fen_sq_to_sq(target)].?;
                 self.capture_stack.append(captured) catch {};
-                self.remove_piece(target, captured);
+                self.remove_piece(target, captured, true);
                 if (captured == Piece.Piece.WhiteRook) {
                     if (target == C.SQ_C.A1) {
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                         self.castling &= ~Piece.WhiteQueenCastle;
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                     } else if (target == C.SQ_C.H1) {
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                         self.castling &= ~Piece.WhiteKingCastle;
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                     }
                 } else if (captured == Piece.Piece.BlackRook) {
                     if (target == C.SQ_C.A8) {
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                         self.castling &= ~Piece.BlackQueenCastle;
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                     } else if (target == C.SQ_C.H8) {
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                         self.castling &= ~Piece.BlackKingCastle;
+                        self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
                     }
                 }
             }
-            self.move_piece(source, target, piece);
+            self.move_piece(source, target, piece, true);
         } else if (Encode.double(move) != 0) {
-            self.move_piece(source, target, piece);
+            self.move_piece(source, target, piece, true);
             if (self.turn == Piece.Color.White) {
                 self.ep = target - 8;
+                std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
+                self.hash ^= Zobrist.ZobristEpKeys[BB.file_of(self.ep.?)];
             } else {
                 self.ep = target + 8;
+                std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
+                self.hash ^= Zobrist.ZobristEpKeys[BB.file_of(self.ep.?)];
             }
         } else if (Encode.castling(move) != 0) {
             switch (target) {
                 C.SQ_C.G1 => {
-                    self.move_piece(C.SQ_C.H1, C.SQ_C.F1, Piece.Piece.WhiteRook);
-                    self.move_piece(source, target, piece);
+                    self.move_piece(C.SQ_C.H1, C.SQ_C.F1, Piece.Piece.WhiteRook, true);
+                    self.move_piece(source, target, piece, true);
                 },
                 C.SQ_C.C1 => {
-                    self.move_piece(C.SQ_C.A1, C.SQ_C.D1, Piece.Piece.WhiteRook);
-                    self.move_piece(source, target, piece);
+                    self.move_piece(C.SQ_C.A1, C.SQ_C.D1, Piece.Piece.WhiteRook, true);
+                    self.move_piece(source, target, piece, true);
                 },
                 C.SQ_C.G8 => {
-                    self.move_piece(C.SQ_C.H8, C.SQ_C.F8, Piece.Piece.BlackRook);
-                    self.move_piece(source, target, piece);
+                    self.move_piece(C.SQ_C.H8, C.SQ_C.F8, Piece.Piece.BlackRook, true);
+                    self.move_piece(source, target, piece, true);
                 },
                 C.SQ_C.C8 => {
-                    self.move_piece(C.SQ_C.A8, C.SQ_C.D8, Piece.Piece.BlackRook);
-                    self.move_piece(source, target, piece);
+                    self.move_piece(C.SQ_C.A8, C.SQ_C.D8, Piece.Piece.BlackRook, true);
+                    self.move_piece(source, target, piece, true);
                 },
                 else => unreachable,
             }
         } else {
-            self.move_piece(source, target, piece);
+            self.move_piece(source, target, piece, true);
         }
 
         var promo = Encode.promote(move);
         if (promo != 0) {
-            self.remove_piece(target, piece);
-            self.add_piece(target, @intToEnum(Piece.Piece, promo));
+            self.remove_piece(target, piece, true);
+            self.add_piece(target, @intToEnum(Piece.Piece, promo), true);
         }
 
+        self.hash ^= Zobrist.ZobristTurn;
         self.turn = self.turn.invert();
     }
 
@@ -221,57 +271,60 @@ pub const Position = struct {
         var target = Encode.target(move);
         var piece = @intToEnum(Piece.Piece, Encode.pt(move));
 
+        self.hash = self.hash_stack.pop();
+
         self.ep = self.ep_stack.pop();
-        // TODO figure out why this happens
-        if (self.ep != null and self.ep.? == 0x1e) {
-            self.ep = null;
+
+        if (self.ep != null) {
+            std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
         }
+
         self.castling = self.castle_stack.pop();
 
         var promo = Encode.promote(move);
         if (promo != 0) {
-            self.remove_piece(target, @intToEnum(Piece.Piece, promo));
-            self.add_piece(target, piece);
+            self.remove_piece(target, @intToEnum(Piece.Piece, promo), false);
+            self.add_piece(target, piece, false);
         }
 
         if (Encode.capture(move) != 0) {
             var captured = self.capture_stack.pop();
 
-            self.move_piece(target, source, piece);
+            self.move_piece(target, source, piece, false);
 
             if (Encode.enpassant(move) != 0) {
                 if (opp_color == Piece.Color.White) {
-                    self.add_piece(target + 8, captured);
+                    self.add_piece(target + 8, captured, false);
                 } else {
-                    self.add_piece(target - 8, captured);
+                    self.add_piece(target - 8, captured, false);
                 }
             } else {
-                self.add_piece(target, captured);
+                self.add_piece(target, captured, false);
             }
         } else if (Encode.double(move) != 0) {
-            self.move_piece(target, source, piece);
+            self.move_piece(target, source, piece, false);
         } else if (Encode.castling(move) != 0) {
             switch (target) {
                 C.SQ_C.G1 => {
-                    self.move_piece(C.SQ_C.F1, C.SQ_C.H1, Piece.Piece.WhiteRook);
-                    self.move_piece(target, source, piece);
+                    self.move_piece(C.SQ_C.F1, C.SQ_C.H1, Piece.Piece.WhiteRook, false);
+                    self.move_piece(target, source, piece, false);
                 },
                 C.SQ_C.C1 => {
-                    self.move_piece(C.SQ_C.D1, C.SQ_C.A1, Piece.Piece.WhiteRook);
-                    self.move_piece(target, source, piece);
+                    self.move_piece(C.SQ_C.D1, C.SQ_C.A1, Piece.Piece.WhiteRook, false);
+                    self.move_piece(target, source, piece, false);
                 },
                 C.SQ_C.G8 => {
-                    self.move_piece(C.SQ_C.F8, C.SQ_C.H8, Piece.Piece.BlackRook);
-                    self.move_piece(target, source, piece);
+                    self.move_piece(C.SQ_C.F8, C.SQ_C.H8, Piece.Piece.BlackRook, false);
+                    self.move_piece(target, source, piece, false);
                 },
                 C.SQ_C.C8 => {
-                    self.move_piece(C.SQ_C.D8, C.SQ_C.A8, Piece.Piece.BlackRook);
-                    self.move_piece(target, source, piece);
+                    self.move_piece(C.SQ_C.D8, C.SQ_C.A8, Piece.Piece.BlackRook, false);
+                    self.move_piece(target, source, piece, false);
                 },
                 else => unreachable,
             }
         } else {
-            self.move_piece(target, source, piece);
+            self.move_piece(target, source, piece, false);
         }
 
         self.turn = my_color;
@@ -290,6 +343,28 @@ pub const Position = struct {
             return self.is_square_attacked_by(@intCast(u6, @ctz(u64, self.bitboards.BlackKing)), Piece.Color.White);
         }
     }
+
+    pub fn calculate_hash(self: *Position) u64 {
+        var hash: u64 = 0;
+
+        for (self.mailbox) |piece, square| {
+            if (piece != null) {
+                hash ^= Zobrist.ZobristKeys[@enumToInt(piece.?)][fen_sq_to_sq(@intCast(u8, square))];
+            }
+        }
+
+        if (self.ep != null) {
+            hash ^= Zobrist.ZobristEpKeys[BB.file_of(self.ep.?)];
+        }
+
+        if (self.turn == Piece.Color.Black) {
+            hash ^= Zobrist.ZobristTurn;
+        }
+
+        hash ^= Zobrist.ZobristCastleKeys[self.castling];
+
+        return hash;
+    }
 };
 
 pub inline fn fen_sq_to_sq(fsq: u8) u6 {
@@ -306,6 +381,8 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .capture_stack = std.ArrayList(Piece.Piece).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .castle_stack = std.ArrayList(u4).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .ep_stack = std.ArrayList(?u6).initCapacity(std.heap.page_allocator, 16) catch unreachable,
+        .hash_stack = std.ArrayList(u64).initCapacity(std.heap.page_allocator, 16) catch unreachable,
+        .hash = 0,
     };
 
     var index: usize = 0;
@@ -393,6 +470,7 @@ pub fn new_position_by_fen(fen: anytype) Position {
         }
         index += 1;
     } else {
+        position.hash = position.calculate_hash();
         return position;
     }
 
@@ -423,6 +501,7 @@ pub fn new_position_by_fen(fen: anytype) Position {
             }
         }
     } else {
+        position.hash = position.calculate_hash();
         return position;
     }
 
@@ -433,8 +512,10 @@ pub fn new_position_by_fen(fen: anytype) Position {
         }
         // TODO: parse ep
     } else {
+        position.hash = position.calculate_hash();
         return position;
     }
 
+    position.hash = position.calculate_hash();
     return position;
 }

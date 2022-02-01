@@ -149,7 +149,7 @@ pub fn init_magic() void {
     }
 }
 
-pub inline fn get_bishop_moves(sq: u6, occupancy: u64) u64 {
+pub fn get_bishop_moves(sq: u6, occupancy: u64) u64 {
     var hash = occupancy & MAGIC_BISHOP_FIELDS[sq].mask;
     hash *%= MAGIC_BISHOP_FIELDS[sq].magic;
     hash >>= @intCast(u6, 64 - MAGIC_BISHOP_FIELDS[sq].shift);
@@ -157,7 +157,7 @@ pub inline fn get_bishop_moves(sq: u6, occupancy: u64) u64 {
     return MAGIC_BISHOP_FIELDS[sq].attacks.items[hash];
 }
 
-pub inline fn get_rook_moves(sq: u6, occupancy: u64) u64 {
+pub fn get_rook_moves(sq: u6, occupancy: u64) u64 {
     var hash = occupancy & MAGIC_ROOK_FIELDS[sq].mask;
     hash *%= MAGIC_ROOK_FIELDS[sq].magic;
     hash >>= @intCast(u6, 64 - MAGIC_ROOK_FIELDS[sq].shift);

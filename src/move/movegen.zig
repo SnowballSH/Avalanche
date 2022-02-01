@@ -75,7 +75,6 @@ pub fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(
 
                         if (sq_bb & my_second_rank != 0 and double_target_bb & bb_all == 0) {
                             list.append(Encode.move(sq, @intCast(u6, double_target), @enumToInt(piece), 0, 0, 1, 0, 0)) catch {};
-                            board.*.ep = double_target;
                         }
                     }
                 }

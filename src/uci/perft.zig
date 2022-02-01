@@ -1,6 +1,7 @@
 const Position = @import("../board/position.zig");
 const MoveGen = @import("../move/movegen.zig");
 const Uci = @import("./uci.zig");
+const TT = @import("../cache/tt.zig");
 const std = @import("std");
 
 pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
@@ -50,7 +51,8 @@ pub fn perft(pos: *Position.Position, depth: usize) usize {
             pos.*.undo_move(x);
             continue;
         }
-        nodes += perft(pos, depth - 1);
+        var res = perft(pos, depth - 1);
+        nodes += res;
         pos.*.undo_move(x);
     }
 
