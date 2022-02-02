@@ -21,8 +21,8 @@ pub fn main() !void {
     std.debug.print("Avalanche 0.0 by SnowballSH\n", .{});
 
     // https://www.chessprogramming.org/Perft_Results
-    // const s = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ";
-    const s = Position.STARTPOS;
+    const s = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ";
+    // const s = Position.STARTPOS;
     // const s = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
     var pos = Position.new_position_by_fen(s);
     defer pos.deinit();

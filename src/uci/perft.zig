@@ -4,10 +4,37 @@ const Uci = @import("./uci.zig");
 const TT = @import("../cache/tt.zig");
 const std = @import("std");
 
+const Value = struct {
+    hash: u64,
+    depth: u8,
+    nodes: u64,
+};
+
+var tt_size: usize = 1 << 15;
+
 pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
     if (depth == 0) {
         return 1;
     }
+
+    tt_size = (1 << 15) * depth;
+
+    var map = std.ArrayList(Value).initCapacity(
+        TT.TTArena.allocator(),
+        tt_size,
+    ) catch unreachable;
+    map.expandToCapacity();
+    for (map.items) |*ptr| {
+        ptr.* = Value{
+            .depth = 0,
+            .nodes = 0,
+            .hash = 0,
+        };
+    }
+
+    std.debug.print("Perft TT allocated: {}KB\n", .{tt_size * @sizeOf(Value) / TT.KB});
+
+    defer map.deinit();
 
     var nodes: usize = 0;
 
@@ -20,7 +47,7 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
             pos.*.undo_move(x);
             continue;
         }
-        var k = perft(pos, depth - 1);
+        var k = perft(pos, depth - 1, &map);
         nodes += k;
         var s: []u8 = Uci.move_to_uci(x);
         std.debug.print("{s}: {}\n", .{ s, k });
@@ -35,7 +62,7 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
     return nodes;
 }
 
-pub fn perft(pos: *Position.Position, depth: usize) usize {
+pub fn perft(pos: *Position.Position, depth: usize, map: *std.ArrayList(Value)) usize {
     if (depth == 0) {
         return 1;
     }
@@ -51,8 +78,27 @@ pub fn perft(pos: *Position.Position, depth: usize) usize {
             pos.*.undo_move(x);
             continue;
         }
-        var res = perft(pos, depth - 1);
+
+        if (depth <= 127 and depth > 1) {
+            var ttentry: Value = map.*.items[pos.*.hash % tt_size];
+            if (ttentry.depth == depth and ttentry.hash == pos.*.hash) {
+                nodes += ttentry.nodes;
+                pos.*.undo_move(x);
+                continue;
+            }
+        }
+
+        var res = perft(pos, depth - 1, map);
         nodes += res;
+
+        if (depth <= 127 and depth > 1) {
+            map.*.items[pos.*.hash % tt_size] = Value{
+                .nodes = @intCast(u64, res),
+                .depth = @intCast(u8, depth),
+                .hash = pos.*.hash,
+            };
+        }
+
         pos.*.undo_move(x);
     }
 
