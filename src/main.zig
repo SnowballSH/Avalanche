@@ -18,7 +18,7 @@ pub fn main() !void {
 
     // https://www.chessprogramming.org/Perft_Results
     // const s = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - ";
-    const s = "3k4/8/2K5/8/8/8/8/5R2 w - - 0 1";
+    const s = "4nrk1/1pq2p1p/r3p1p1/7Q/3B1P2/3R4/1PP3PP/2K4R w - - 0 1";
     // const s = Position.STARTPOS;
     var pos = Position.new_position_by_fen(s);
     defer pos.deinit();
@@ -33,7 +33,32 @@ pub fn main() !void {
 
     var dp: u8 = 1;
     while (dp <= depth) {
-        std.debug.print("info depth {} score {} pv", .{ dp, searcher.negamax(&pos, -Search.INF, Search.INF, dp) });
+        var score = searcher.negamax(&pos, -Search.INF, Search.INF, dp);
+        if (score > 0 and Search.INF - score < 50) {
+            std.debug.print(
+                "info depth {} score mate {} pv",
+                .{
+                    dp,
+                    Search.INF - score,
+                },
+            );
+        } else if (score < 0 and Search.INF + score < 50) {
+            std.debug.print(
+                "info depth {} score mate -{} pv",
+                .{
+                    dp,
+                    Search.INF + score,
+                },
+            );
+        } else {
+            std.debug.print(
+                "info depth {} score cp {} pv",
+                .{
+                    dp,
+                    score,
+                },
+            );
+        }
 
         var i: usize = 0;
         while (i < dp) {
