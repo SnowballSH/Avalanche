@@ -11,7 +11,11 @@ pub inline fn generate_all_pseudo_legal_moves(board: *Position.Position) std.Arr
     return generate_all_pseudo_legal_moves_core(board, true);
 }
 
-pub fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all: bool) std.ArrayList(u24) {
+pub inline fn generate_all_pseudo_legal_capture_moves(board: *Position.Position) std.ArrayList(u24) {
+    return generate_all_pseudo_legal_moves_core(board, false);
+}
+
+fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all: bool) std.ArrayList(u24) {
     var list = std.ArrayList(u24).initCapacity(std.heap.page_allocator, if (all) 48 else 12) catch unreachable;
 
     const bb_all = board.bitboards.WhiteAll | board.bitboards.BlackAll;
