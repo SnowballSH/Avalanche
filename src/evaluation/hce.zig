@@ -5,17 +5,17 @@ const Piece = @import("../board/piece.zig");
 
 pub const PieceValues: [12]i16 = .{
     85, // P
-    320, // N
-    340, // B
-    530, // R
-    950, // Q
-    000, // K
+    370, // N
+    390, // B
+    590, // R
+    1100, // Q
+    0, // K
     -85, // p
-    -320, // n
-    -340, // b
-    -530, // r
-    -950, // q
-    -000, // k
+    -370, // n
+    -390, // b
+    -590, // r
+    -1100, // q
+    -0, // k
 };
 
 // ^ 56 for black
@@ -93,7 +93,7 @@ pub const PSQT: [6][64]i16 = .{
 
 pub fn evaluate(position: *Position.Position) i16 {
     var score: i16 = 0;
-    for (position.*.mailbox) |p, i| {
+    for (position.mailbox) |p, i| {
         if (p == null) {
             continue;
         }
