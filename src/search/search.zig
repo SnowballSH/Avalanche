@@ -21,6 +21,7 @@ pub const Searcher = struct {
     pv_index: u16,
     timer: std.time.Timer,
     max_nano: ?u64,
+    seldepth: u8,
 
     pub fn new_searcher() Searcher {
         return Searcher{
@@ -30,6 +31,7 @@ pub const Searcher = struct {
             .pv_index = 0,
             .timer = undefined,
             .max_nano = null,
+            .seldepth = 0,
         };
     }
 
@@ -53,7 +55,6 @@ pub const Searcher = struct {
     pub fn iterative_deepening(self: *Searcher, position: *Position.Position, movetime_nano: usize) void {
         const stdout = std.io.getStdOut().writer();
         self.timer = std.time.Timer.start() catch undefined;
-        self.nodes = 0;
 
         self.max_nano = movetime_nano;
         if (self.max_nano.? < 30) {
@@ -65,7 +66,7 @@ pub const Searcher = struct {
 
         var dp: u8 = 1;
         while (dp <= 127) {
-            self.nodes = 0;
+            self.seldepth = 0;
 
             var score = self.negamax(position, -INF, INF, dp);
             if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
@@ -73,9 +74,10 @@ pub const Searcher = struct {
             }
             if (score > 0 and INF - score < 50) {
                 stdout.print(
-                    "info depth {} nodes {} time {} score mate {} pv",
+                    "info depth {} seldepth {} nodes {} time {} score mate {} pv",
                     .{
                         dp,
+                        self.seldepth,
                         self.nodes,
                         self.timer.read() / std.time.ns_per_ms,
                         INF - score,
@@ -83,9 +85,10 @@ pub const Searcher = struct {
                 ) catch {};
             } else if (score < 0 and INF + score < 50) {
                 stdout.print(
-                    "info depth {} nodes {} time {} score mate -{} pv",
+                    "info depth {} seldepth {} nodes {} time {} score mate -{} pv",
                     .{
                         dp,
+                        self.seldepth,
                         self.nodes,
                         self.timer.read() / std.time.ns_per_ms,
                         INF + score,
@@ -93,9 +96,10 @@ pub const Searcher = struct {
                 ) catch {};
             } else {
                 stdout.print(
-                    "info depth {} nodes {} time {} score cp {} pv",
+                    "info depth {} seldepth {} nodes {} time {} score cp {} pv",
                     .{
                         dp,
+                        self.seldepth,
                         self.nodes,
                         self.timer.read() / std.time.ns_per_ms,
                         score,
@@ -125,6 +129,9 @@ pub const Searcher = struct {
     pub fn negamax(self: *Searcher, position: *Position.Position, alpha_: i16, beta_: i16, depth: u8) i16 {
         var alpha = alpha_;
         var beta = beta_;
+
+        self.nodes += 1;
+
         if (depth == 0) {
             // At horizon, go to quiescence search
             return self.quiescence_search(position, alpha, beta);
@@ -134,7 +141,9 @@ pub const Searcher = struct {
             return TIME_UP;
         }
 
-        self.nodes += 1;
+        if (self.ply > self.seldepth) {
+            self.seldepth = self.ply;
+        }
 
         // set up PV
         self.pv_array[self.pv_index] = 0;
@@ -206,6 +215,10 @@ pub const Searcher = struct {
 
         if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
             return TIME_UP;
+        }
+
+        if (self.ply > self.seldepth) {
+            self.seldepth = self.ply;
         }
 
         // Static eval
