@@ -1,6 +1,7 @@
 const std = @import("std");
 const Position = @import("../board/position.zig");
 const Search = @import("../search/search.zig");
+const Uci = @import("../uci/uci.zig");
 
 pub const UciInterface = struct {
     position: Position.Position,
@@ -22,10 +23,11 @@ pub const UciInterface = struct {
         _ = try stdout.writeAll("Avalanche 0.0 by SnowballSH\n");
 
         self.position = Position.new_position_by_fen(Position.STARTPOS);
+        defer self.position.deinit();
 
         out: while (true) {
-            // The command will probably be less than 512 characters
-            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 512);
+            // The command will probably be less than 1024 characters
+            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 1024);
             if (line == null) {
                 break;
             }
@@ -45,8 +47,54 @@ pub const UciInterface = struct {
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "isready")) {
                 _ = try stdout.writeAll("readyok\n");
+            } else if (std.mem.eql(u8, token.?, "d")) {
+                self.position.display();
             } else if (std.mem.eql(u8, token.?, "go")) {
-                searcher.iterative_deepening(&self.position, std.time.ns_per_ms * 3000);
+                var movetime: ?u64 = 10 * std.time.ns_per_s;
+                while (true) {
+                    token = tokens.next();
+                    if (token == null) {
+                        break;
+                    }
+                    if (std.mem.eql(u8, token.?, "movetime")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
+                        movetime.? *= std.time.ns_per_ms;
+                    }
+                }
+                searcher.iterative_deepening(&self.position, movetime.?);
+            } else if (std.mem.eql(u8, token.?, "position")) {
+                token = tokens.next();
+                if (token != null) {
+                    if (std.mem.eql(u8, token.?, "startpos")) {
+                        self.position.deinit();
+                        self.position = Position.new_position_by_fen(Position.STARTPOS);
+                        token = tokens.next();
+                        if (token != null) {
+                            if (std.mem.eql(u8, token.?, "moves")) {
+                                while (true) {
+                                    token = tokens.next();
+                                    if (token == null) {
+                                        break;
+                                    }
+
+                                    var move = Uci.uci_to_move(token.?, &self.position);
+
+                                    if (move == null) {
+                                        std.debug.print("Invalid move!\n", .{});
+                                        break;
+                                    }
+
+                                    self.position.make_move(move.?);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
