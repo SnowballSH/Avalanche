@@ -2,3 +2,4 @@
 **/zig-out
 **/*.exe
 **/old_binaries
+.DS_Store

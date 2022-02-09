@@ -4,6 +4,7 @@ const HCE = @import("../evaluation/hce.zig");
 const Movegen = @import("../move/movegen.zig");
 const Uci = @import("../uci/uci.zig");
 const Ordering = @import("./ordering.zig");
+const Encode = @import("../move/encode.zig");
 
 const std = @import("std");
 
@@ -56,6 +57,7 @@ pub const Searcher = struct {
     pub fn iterative_deepening(self: *Searcher, position: *Position.Position, movetime_nano: usize) void {
         const stdout = std.io.getStdOut().writer();
         self.timer = std.time.Timer.start() catch undefined;
+        self.nodes = 0;
 
         self.max_nano = movetime_nano;
         if (self.max_nano.? < 30) {
@@ -127,9 +129,10 @@ pub const Searcher = struct {
     }
 
     // Negamax alpha-beta tree search with prunings
-    pub fn negamax(self: *Searcher, position: *Position.Position, alpha_: i16, beta_: i16, depth: u8) i16 {
+    pub fn negamax(self: *Searcher, position: *Position.Position, alpha_: i16, beta_: i16, depth_: u8) i16 {
         var alpha = alpha_;
         var beta = beta_;
+        var depth = depth_;
 
         if (depth == 0) {
             // At horizon, go to quiescence search
@@ -152,6 +155,13 @@ pub const Searcher = struct {
         defer self.pv_index = old_pv_index;
         self.pv_index += MAX_PLY - self.ply;
 
+        var in_check = position.is_king_checked_for(position.turn);
+
+        if (in_check) {
+            // Check extension
+            depth += 1;
+        }
+
         // generate moves
         var moves = Movegen.generate_all_pseudo_legal_moves(position);
         defer moves.deinit();
@@ -159,7 +169,9 @@ pub const Searcher = struct {
         std.sort.sort(
             u24,
             moves.items,
-            position,
+            Ordering.OrderInfo{
+                .pos = position,
+            },
             Ordering.order,
         );
 
@@ -178,7 +190,22 @@ pub const Searcher = struct {
             self.ply += 1;
 
             // recursive call to negamax
-            var score = -self.negamax(position, -beta, -alpha, depth - 1);
+
+            // LMR
+            var lmr_depth = depth - 1;
+
+            if (!in_check and depth >= 3 and legals >= 3 and m != self.pv_array[self.ply - 1] and Encode.capture(m) == 0) {
+                if (legals <= 6) {
+                    lmr_depth -= 1;
+                } else if (legals <= 9) {
+                    lmr_depth /= 2;
+                } else {
+                    lmr_depth /= 3;
+                }
+            }
+
+            var score = -self.negamax(position, -beta, -alpha, lmr_depth);
+
             position.undo_move(m);
             self.ply -= 1;
 
@@ -225,9 +252,9 @@ pub const Searcher = struct {
             return TIME_UP;
         }
 
-        if (self.ply > self.seldepth) {
-            self.seldepth = self.ply;
-        }
+        // if (self.ply > self.seldepth) {
+        //     self.seldepth = self.ply;
+        // }
 
         // Static eval
         var stand_pat = HCE.evaluate(position);
@@ -239,6 +266,7 @@ pub const Searcher = struct {
         if (stand_pat >= beta) {
             return beta;
         }
+
         if (alpha < stand_pat) {
             alpha = stand_pat;
         }
@@ -251,6 +279,15 @@ pub const Searcher = struct {
         // generate capture moves
         var moves = Movegen.generate_all_pseudo_legal_capture_moves(position);
         defer moves.deinit();
+
+        std.sort.sort(
+            u24,
+            moves.items,
+            Ordering.OrderInfo{
+                .pos = position,
+            },
+            Ordering.order,
+        );
 
         for (moves.items) |m| {
             position.make_move(m);

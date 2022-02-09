@@ -91,11 +91,11 @@ pub const UciInterface = struct {
 
                                     self.position.make_move(move.?);
                                 }
-                            } else if (std.mem.eql(u8, token.?, "fen")) {
-                                self.position.deinit();
-                                self.position = Position.new_position_by_fen(tokens.rest());
                             }
                         }
+                    } else if (std.mem.eql(u8, token.?, "fen")) {
+                        self.position.deinit();
+                        self.position = Position.new_position_by_fen(tokens.rest());
                     }
                 }
             }
