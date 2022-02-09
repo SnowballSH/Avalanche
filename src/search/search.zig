@@ -3,6 +3,7 @@ const Piece = @import("../board/piece.zig");
 const HCE = @import("../evaluation/hce.zig");
 const Movegen = @import("../move/movegen.zig");
 const Uci = @import("../uci/uci.zig");
+const Ordering = @import("./ordering.zig");
 
 const std = @import("std");
 
@@ -130,8 +131,6 @@ pub const Searcher = struct {
         var alpha = alpha_;
         var beta = beta_;
 
-        self.nodes += 1;
-
         if (depth == 0) {
             // At horizon, go to quiescence search
             return self.quiescence_search(position, alpha, beta);
@@ -140,6 +139,8 @@ pub const Searcher = struct {
         if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
             return TIME_UP;
         }
+
+        self.nodes += 1;
 
         if (self.ply > self.seldepth) {
             self.seldepth = self.ply;
@@ -154,6 +155,13 @@ pub const Searcher = struct {
         // generate moves
         var moves = Movegen.generate_all_pseudo_legal_moves(position);
         defer moves.deinit();
+
+        std.sort.sort(
+            u24,
+            moves.items,
+            position,
+            Ordering.order,
+        );
 
         var legals: u16 = 0;
 
