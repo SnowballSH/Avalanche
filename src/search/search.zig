@@ -195,12 +195,10 @@ pub const Searcher = struct {
             var lmr_depth = depth - 1;
 
             if (!in_check and depth >= 3 and legals >= 3 and m != self.pv_array[self.ply - 1] and Encode.capture(m) == 0) {
-                if (legals <= 6) {
+                if (legals <= 7) {
                     lmr_depth -= 1;
-                } else if (legals <= 9) {
-                    lmr_depth /= 2;
                 } else {
-                    lmr_depth /= 3;
+                    lmr_depth /= 2;
                 }
             }
 

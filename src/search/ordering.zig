@@ -40,5 +40,11 @@ pub fn score_move(move: u24, pos: *Position.Position) i16 {
         score += 500 + HCE.PieceValues[Encode.promote(move) % 6];
     }
 
+    if (pos.turn == Piece.Color.White) {
+        score += HCE.PSQT[pt % 6][ts];
+    } else {
+        score += HCE.PSQT[pt % 6][ts ^ 56];
+    }
+
     return score;
 }

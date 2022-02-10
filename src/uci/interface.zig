@@ -73,6 +73,7 @@ pub const UciInterface = struct {
                     if (std.mem.eql(u8, token.?, "startpos")) {
                         self.position.deinit();
                         self.position = Position.new_position_by_fen(Position.STARTPOS);
+
                         token = tokens.next();
                         if (token != null) {
                             if (std.mem.eql(u8, token.?, "moves")) {
@@ -95,7 +96,31 @@ pub const UciInterface = struct {
                         }
                     } else if (std.mem.eql(u8, token.?, "fen")) {
                         self.position.deinit();
-                        self.position = Position.new_position_by_fen(tokens.rest());
+                        tokens = std.mem.split(u8, tokens.rest(), " moves ");
+                        var fen = tokens.next();
+                        if (fen != null) {
+                            self.position = Position.new_position_by_fen(fen.?);
+
+                            var afterfen = tokens.next();
+                            if (afterfen != null) {
+                                tokens = std.mem.split(u8, afterfen.?, " ");
+                                while (true) {
+                                    token = tokens.next();
+                                    if (token == null) {
+                                        break;
+                                    }
+
+                                    var move = Uci.uci_to_move(token.?, &self.position);
+
+                                    if (move == null) {
+                                        std.debug.print("Invalid move!\n", .{});
+                                        break;
+                                    }
+
+                                    self.position.make_move(move.?);
+                                }
+                            }
+                        }
                     }
                 }
             }
