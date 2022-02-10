@@ -24,6 +24,7 @@ const MVV_LVA: [6][6]i16 = .{
 pub fn score_move(move: u24, pos: *Position.Position) i16 {
     var score: i16 = 0;
     var ts = Position.fen_sq_to_sq(Encode.target(move));
+    var sq = Position.fen_sq_to_sq(Encode.source(move));
     var pt = Encode.pt(move);
     if (Encode.capture(move) != 0) {
         score += 3000;
@@ -41,9 +42,9 @@ pub fn score_move(move: u24, pos: *Position.Position) i16 {
     }
 
     if (pos.turn == Piece.Color.White) {
-        score += HCE.PSQT[pt % 6][ts];
+        score += HCE.PSQT[pt % 6][ts] - HCE.PSQT[pt % 6][sq];
     } else {
-        score += HCE.PSQT[pt % 6][ts ^ 56];
+        score += HCE.PSQT[pt % 6][ts ^ 56] - HCE.PSQT[pt % 6][sq ^ 56];
     }
 
     return score;

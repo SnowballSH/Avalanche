@@ -7,6 +7,7 @@ const Patterns = @import("./patterns.zig");
 const Encode = @import("../move/encode.zig");
 const C = @import("../c.zig");
 const Zobrist = @import("./zobrist.zig");
+const HCE = @import("../evaluation/hce.zig");
 
 pub const STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -21,6 +22,7 @@ pub const Position = struct {
     ep_stack: std.ArrayList(?u6),
     hash_stack: std.ArrayList(u64),
     hash: u64,
+    phase: i16,
 
     pub fn deinit(self: *Position) void {
         self.capture_stack.deinit();
@@ -102,6 +104,7 @@ pub const Position = struct {
         }
 
         self.mailbox[fen_sq_to_sq(target)] = piece;
+        self.phase -= HCE.PhaseValues[@enumToInt(piece) % 6];
     }
 
     pub fn remove_piece(self: *Position, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
@@ -114,6 +117,7 @@ pub const Position = struct {
         }
 
         self.mailbox[fen_sq_to_sq(target)] = null;
+        self.phase += HCE.PhaseValues[@enumToInt(piece) % 6];
     }
 
     pub fn move_piece(self: *Position, source: u6, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
@@ -383,6 +387,7 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .ep_stack = std.ArrayList(?u6).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .hash_stack = std.ArrayList(u64).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .hash = 0,
+        .phase = 24,
     };
 
     var index: usize = 0;
@@ -393,61 +398,73 @@ pub fn new_position_by_fen(fen: anytype) Position {
             'P' => {
                 position.mailbox[sq] = Piece.Piece.WhitePawn;
                 position.bitboards.toggle_piece(Piece.Piece.WhitePawn, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[0];
                 sq += 1;
             },
             'N' => {
                 position.mailbox[sq] = Piece.Piece.WhiteKnight;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteKnight, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[1];
                 sq += 1;
             },
             'B' => {
                 position.mailbox[sq] = Piece.Piece.WhiteBishop;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteBishop, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[2];
                 sq += 1;
             },
             'R' => {
                 position.mailbox[sq] = Piece.Piece.WhiteRook;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteRook, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[3];
                 sq += 1;
             },
             'Q' => {
                 position.mailbox[sq] = Piece.Piece.WhiteQueen;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteQueen, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[4];
                 sq += 1;
             },
             'K' => {
                 position.mailbox[sq] = Piece.Piece.WhiteKing;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteKing, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[5];
                 sq += 1;
             },
             'p' => {
                 position.mailbox[sq] = Piece.Piece.BlackPawn;
                 position.bitboards.toggle_piece(Piece.Piece.BlackPawn, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[0];
                 sq += 1;
             },
             'n' => {
                 position.mailbox[sq] = Piece.Piece.BlackKnight;
                 position.bitboards.toggle_piece(Piece.Piece.BlackKnight, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[1];
                 sq += 1;
             },
             'b' => {
                 position.mailbox[sq] = Piece.Piece.BlackBishop;
                 position.bitboards.toggle_piece(Piece.Piece.BlackBishop, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[2];
                 sq += 1;
             },
             'r' => {
                 position.mailbox[sq] = Piece.Piece.BlackRook;
                 position.bitboards.toggle_piece(Piece.Piece.BlackRook, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[3];
                 sq += 1;
             },
             'q' => {
                 position.mailbox[sq] = Piece.Piece.BlackQueen;
                 position.bitboards.toggle_piece(Piece.Piece.BlackQueen, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[4];
                 sq += 1;
             },
             'k' => {
                 position.mailbox[sq] = Piece.Piece.BlackKing;
                 position.bitboards.toggle_piece(Piece.Piece.BlackKing, fen_sq_to_sq(sq));
+                position.phase -= HCE.PhaseValues[5];
                 sq += 1;
             },
             '0'...'8' => {
