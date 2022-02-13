@@ -24,13 +24,6 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
         tt_size,
     ) catch unreachable;
     map.expandToCapacity();
-    for (map.items) |*ptr| {
-        ptr.* = Value{
-            .depth = 0,
-            .nodes = 0,
-            .hash = 0,
-        };
-    }
 
     std.debug.print("Perft TT allocated: {}KB\n", .{tt_size * @sizeOf(Value) / TT.KB});
 

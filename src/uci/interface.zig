@@ -1,7 +1,9 @@
 const std = @import("std");
 const Position = @import("../board/position.zig");
 const Search = @import("../search/search.zig");
-const Uci = @import("../uci/uci.zig");
+const Uci = @import("./uci.zig");
+const Perft = @import("./perft.zig");
+const Encode = @import("../move/encode.zig");
 
 pub const UciInterface = struct {
     position: Position.Position,
@@ -49,6 +51,16 @@ pub const UciInterface = struct {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.display();
+            } else if (std.mem.eql(u8, token.?, "perft")) {
+                var depth: usize = 1;
+                token = tokens.next();
+                if (token != null) {
+                    depth = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
+                }
+
+                depth = std.math.max(depth, 1);
+
+                _ = Perft.perft_root(&self.position, depth) catch unreachable;
             } else if (std.mem.eql(u8, token.?, "go")) {
                 var movetime: ?u64 = 10 * std.time.ns_per_s;
                 while (true) {
@@ -91,6 +103,13 @@ pub const UciInterface = struct {
                                     }
 
                                     self.position.make_move(move.?);
+                                    if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
+                                        searcher.halfmoves = 0;
+                                    } else {
+                                        searcher.halfmoves += 1;
+                                    }
+
+                                    searcher.hash_history.append(self.position.hash) catch {};
                                 }
                             }
                         }
@@ -118,6 +137,13 @@ pub const UciInterface = struct {
                                     }
 
                                     self.position.make_move(move.?);
+                                    if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
+                                        searcher.halfmoves = 0;
+                                    } else {
+                                        searcher.halfmoves += 1;
+                                    }
+
+                                    searcher.hash_history.append(self.position.hash) catch {};
                                 }
                             }
                         }

@@ -5,16 +5,26 @@ const Movegen = @import("../move/movegen.zig");
 const Uci = @import("../uci/uci.zig");
 const Ordering = @import("./ordering.zig");
 const Encode = @import("../move/encode.zig");
+const TT = @import("../cache/tt.zig");
 
 const std = @import("std");
 
 pub const INF: i16 = 32767;
+
+pub const DRAW: i16 = 0;
 
 pub const TIME_UP: i16 = INF - 500;
 
 pub const MAX_PLY = 127;
 
 const PVARRAY = [(MAX_PLY * MAX_PLY + MAX_PLY) / 2]u24;
+
+pub var GlobalTT: TT.TT = undefined;
+
+pub fn init_tt() void {
+    GlobalTT = TT.TT.new(16);
+    GlobalTT.reset();
+}
 
 pub const Searcher = struct {
     ply: u8,
@@ -24,6 +34,9 @@ pub const Searcher = struct {
     timer: std.time.Timer,
     max_nano: ?u64,
     seldepth: u8,
+    hash_history: std.ArrayList(u64),
+    halfmoves: u8,
+    hm_stack: std.ArrayList(u8),
 
     pub fn new_searcher() Searcher {
         return Searcher{
@@ -34,6 +47,9 @@ pub const Searcher = struct {
             .timer = undefined,
             .max_nano = null,
             .seldepth = 0,
+            .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
+            .halfmoves = 0,
+            .hm_stack = std.ArrayList(u8).init(std.heap.page_allocator),
         };
     }
 
@@ -126,6 +142,8 @@ pub const Searcher = struct {
         }
 
         stdout.print("bestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
+
+        GlobalTT.reset();
     }
 
     // Negamax alpha-beta tree search with prunings
@@ -133,11 +151,6 @@ pub const Searcher = struct {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
-
-        if (depth == 0) {
-            // At horizon, go to quiescence search
-            return self.quiescence_search(position, alpha, beta);
-        }
 
         if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
             return TIME_UP;
@@ -147,6 +160,50 @@ pub const Searcher = struct {
 
         if (self.ply > self.seldepth) {
             self.seldepth = self.ply;
+        }
+
+        if (self.halfmoves >= 100) {
+            return DRAW;
+        }
+
+        if (std.mem.len(self.hash_history.items) > 1) {
+            var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
+            var limit: i16 = index - self.halfmoves - 1;
+            var count: u8 = 0;
+            while (index >= limit and index >= 0) {
+                if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
+                    count += 1;
+                }
+                if (count >= 2) {
+                    return DRAW;
+                }
+                index -= 2;
+            }
+        }
+
+        if (depth <= 127) {
+            var entry = GlobalTT.probe(position.hash);
+
+            if (entry != null) {
+                if (entry.?.depth >= depth) {
+                    if (entry.?.flag == TT.TTFlag.Exact) {
+                        return entry.?.score;
+                    } else if (entry.?.flag == TT.TTFlag.Lower) {
+                        alpha = std.math.max(alpha, entry.?.score);
+                    } else {
+                        beta = std.math.max(beta, entry.?.score);
+                    }
+
+                    if (alpha >= beta) {
+                        return entry.?.score;
+                    }
+                }
+            }
+        }
+
+        if (depth == 0) {
+            // At horizon, go to quiescence search
+            return self.quiescence_search(position, alpha, beta);
         }
 
         // set up PV
@@ -186,6 +243,14 @@ pub const Searcher = struct {
                 continue;
             }
 
+            self.hm_stack.append(self.halfmoves) catch {};
+            if (Encode.capture(m) != 0 or Encode.pt(m) % 6 == 0) {
+                self.halfmoves = 0;
+            } else {
+                self.halfmoves += 1;
+            }
+            self.hash_history.append(position.hash) catch {};
+
             legals += 1;
             self.ply += 1;
 
@@ -205,6 +270,8 @@ pub const Searcher = struct {
             var score = -self.negamax(position, -beta, -alpha, lmr_depth);
 
             position.undo_move(m);
+            self.halfmoves = self.hm_stack.pop();
+            _ = self.hash_history.pop();
             self.ply -= 1;
 
             if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
@@ -225,6 +292,10 @@ pub const Searcher = struct {
                 self.pv_array[old_pv_index] = m;
                 self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
             }
+
+            if (alpha >= beta) {
+                break;
+            }
         }
 
         // checkmate or stalemate
@@ -236,6 +307,17 @@ pub const Searcher = struct {
             } else {
                 return 0;
             }
+        }
+
+        if (depth <= 127) {
+            var flag = if (alpha <= alpha_)
+                TT.TTFlag.Upper
+            else if (alpha >= beta)
+                TT.TTFlag.Lower
+            else
+                TT.TTFlag.Exact;
+
+            GlobalTT.insert(position.hash, @intCast(u8, depth), alpha, flag);
         }
 
         return alpha;
