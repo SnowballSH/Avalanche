@@ -17,6 +17,7 @@ pub const TTData = struct {
     depth: u8,
     score: i16,
     flag: TTFlag,
+    bm: u24,
 };
 
 pub const TT = struct {
@@ -50,19 +51,20 @@ pub const TT = struct {
     pub fn probe(self: *TT, hash: u64) ?*TTData {
         var entry = &self.data.items[hash % self.size];
 
-        if (entry.hash == hash and entry.flag != TTFlag.Invalid and entry.depth != 0) {
+        if (entry.hash == hash and entry.flag != TTFlag.Invalid and entry.depth != 0 and entry.bm != 0) {
             return entry;
         }
 
         return null;
     }
 
-    pub fn insert(self: *TT, hash: u64, depth: u8, score: i16, flag: TTFlag) void {
+    pub fn insert(self: *TT, hash: u64, depth: u8, score: i16, flag: TTFlag, bm: u24) void {
         self.data.items[hash % self.size] = TTData{
             .hash = hash,
             .depth = depth,
             .score = score,
             .flag = flag,
+            .bm = bm,
         };
     }
 };

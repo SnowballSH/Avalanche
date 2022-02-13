@@ -86,6 +86,9 @@ pub const Searcher = struct {
         var dp: u8 = 1;
         while (dp <= 127) {
             self.seldepth = 0;
+            for (self.pv_array) |*ptr| {
+                ptr.* = 0;
+            }
 
             var score = self.negamax(position, -INF, INF, dp);
             if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
@@ -233,6 +236,7 @@ pub const Searcher = struct {
         );
 
         var legals: u16 = 0;
+        var bm: u24 = 0;
 
         for (moves.items) |m| {
             position.make_move(m);
@@ -287,6 +291,7 @@ pub const Searcher = struct {
             // better move
             if (score > alpha) {
                 alpha = score;
+                bm = m;
 
                 // store in PV
                 self.pv_array[old_pv_index] = m;
@@ -317,7 +322,7 @@ pub const Searcher = struct {
             else
                 TT.TTFlag.Exact;
 
-            GlobalTT.insert(position.hash, @intCast(u8, depth), alpha, flag);
+            GlobalTT.insert(position.hash, @intCast(u8, depth), alpha, flag, bm);
         }
 
         return alpha;
