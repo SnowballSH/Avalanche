@@ -185,26 +185,22 @@ pub const PSQT_EG: [6][64]i16 = .{
 
 // zig fmt: on
 
-pub const OPEN_FILE_BONUS: i16 = 55;
+pub const OPEN_FILE_BONUS: i16 = 35;
 pub const PASSED_PAWN_BONUS: i16 = 125;
-pub const DOUBLED_PAWN_REDUCTION: i16 = 30;
+pub const DOUBLED_PAWN_REDUCTION: i16 = 20;
 
 pub fn evaluate(position: *Position.Position) i16 {
     var score: i16 = 0;
-    var eg_score: i16 = 0;
 
     for (position.mailbox) |p, i| {
         if (p == null) {
             continue;
         }
         score += PieceValues[@enumToInt(p.?)];
-        eg_score += PieceValuesEg[@enumToInt(p.?)];
         if (p.?.color() == Piece.Color.White) {
             score += PSQT[@enumToInt(p.?) % 6][i];
-            eg_score += PSQT_EG[@enumToInt(p.?) % 6][i];
         } else {
             score -= PSQT[@enumToInt(p.?) % 6][i ^ 56];
-            eg_score -= PSQT_EG[@enumToInt(p.?) % 6][i ^ 56];
         }
     }
 
@@ -234,13 +230,5 @@ pub fn evaluate(position: *Position.Position) i16 {
         file += 1;
     }
 
-    if (position.phase <= 14) {
-        return score;
-    }
-
-    if (position.phase <= 16) {
-        return @divFloor(score * 3 + eg_score, 4);
-    }
-
-    return @divFloor(score * 2 + eg_score, 3);
+    return score;
 }

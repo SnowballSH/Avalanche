@@ -3,3 +3,9 @@
 **/*.exe
 **/old_binaries
 .DS_Store
+**/*.bin
+**/*.pgn
+**/*.bson
+
+# Private for now
+nnue/**/*

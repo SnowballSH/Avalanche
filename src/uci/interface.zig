@@ -4,6 +4,7 @@ const Search = @import("../search/search.zig");
 const Uci = @import("./uci.zig");
 const Perft = @import("./perft.zig");
 const Encode = @import("../move/encode.zig");
+const HCE = @import("../evaluation/hce.zig");
 
 pub const UciInterface = struct {
     position: Position.Position,
@@ -51,6 +52,28 @@ pub const UciInterface = struct {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.display();
+            } else if (std.mem.eql(u8, token.?, "eval")) {
+                token = tokens.next();
+                if (token != null) {
+                    var depth = std.fmt.parseUnsigned(u8, token.?, 10) catch 1;
+                    depth = std.math.max(depth, 1);
+                    searcher.max_nano = null;
+                    searcher.nodes = 0;
+                    var score = searcher.negamax(&self.position, -Search.INF, Search.INF, depth);
+                    var ev = HCE.evaluate(&self.position);
+                    if (@intCast(i16, @enumToInt(self.position.turn)) == 1) {
+                        score = -score;
+                        ev = -ev;
+                    }
+
+                    if (score >= Search.INF - 200 or std.math.absInt(ev - score) catch 0 > 400) {
+                        try stdout.print("{}\n", .{ev});
+                    } else {
+                        try stdout.print("{}\n", .{score});
+                    }
+                } else {
+                    try stdout.print("{}\n", .{HCE.evaluate(&self.position)});
+                }
             } else if (std.mem.eql(u8, token.?, "perft")) {
                 var depth: usize = 1;
                 token = tokens.next();
