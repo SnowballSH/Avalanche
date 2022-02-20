@@ -9,3 +9,4 @@
 
 # Private for now
 nnue/**/*
+**/weights.zig  # built with build.zig automatically

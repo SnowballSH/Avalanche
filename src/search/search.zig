@@ -1,6 +1,7 @@
 const Position = @import("../board/position.zig");
 const Piece = @import("../board/piece.zig");
 const HCE = @import("../evaluation/hce.zig");
+const NNUE = @import("../evaluation/nnue.zig");
 const Movegen = @import("../move/movegen.zig");
 const Uci = @import("../uci/uci.zig");
 const Ordering = @import("./ordering.zig");
@@ -37,6 +38,7 @@ pub const Searcher = struct {
     hash_history: std.ArrayList(u64),
     halfmoves: u8,
     hm_stack: std.ArrayList(u8),
+    nnue: NNUE.NNUE,
 
     pub fn new_searcher() Searcher {
         return Searcher{
@@ -50,6 +52,7 @@ pub const Searcher = struct {
             .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
             .halfmoves = 0,
             .hm_stack = std.ArrayList(u8).init(std.heap.page_allocator),
+            .nnue = NNUE.NNUE.new(),
         };
     }
 
@@ -83,6 +86,9 @@ pub const Searcher = struct {
 
         var bestmove: u24 = 0;
 
+        var alpha = -INF;
+        var beta = INF;
+
         var dp: u8 = 1;
         while (dp <= 127) {
             self.seldepth = 0;
@@ -90,10 +96,11 @@ pub const Searcher = struct {
                 ptr.* = 0;
             }
 
-            var score = self.negamax(position, -INF, INF, dp);
+            var score: i16 = self.negamax(position, alpha, beta, dp);
             if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
                 break;
             }
+
             if (score > 0 and INF - score < 50) {
                 stdout.print(
                     "info depth {} seldepth {} nodes {} time {} score mate {} pv",
@@ -169,36 +176,40 @@ pub const Searcher = struct {
             return DRAW;
         }
 
-        if (std.mem.len(self.hash_history.items) > 1) {
-            var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
-            var limit: i16 = index - self.halfmoves - 1;
-            var count: u8 = 0;
-            while (index >= limit and index >= 0) {
-                if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
-                    count += 1;
-                }
-                if (count >= 2) {
-                    return DRAW;
-                }
-                index -= 2;
-            }
-        }
+        var in_check = position.is_king_checked_for(position.turn);
 
-        if (depth <= 127) {
-            var entry = GlobalTT.probe(position.hash);
-
-            if (entry != null) {
-                if (entry.?.depth >= depth) {
-                    if (entry.?.flag == TT.TTFlag.Exact) {
-                        return entry.?.score;
-                    } else if (entry.?.flag == TT.TTFlag.Lower) {
-                        alpha = std.math.max(alpha, entry.?.score);
-                    } else {
-                        beta = std.math.max(beta, entry.?.score);
+        if (!in_check) {
+            if (std.mem.len(self.hash_history.items) > 1) {
+                var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
+                var limit: i16 = index - self.halfmoves - 1;
+                var count: u8 = 0;
+                while (index >= limit and index >= 0) {
+                    if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
+                        count += 1;
                     }
+                    if (count >= 2) {
+                        return DRAW;
+                    }
+                    index -= 2;
+                }
+            }
 
-                    if (alpha >= beta) {
-                        return entry.?.score;
+            if (depth <= 127) {
+                var entry = GlobalTT.probe(position.hash);
+
+                if (entry != null) {
+                    if (entry.?.depth >= depth) {
+                        if (entry.?.flag == TT.TTFlag.Exact) {
+                            return entry.?.score;
+                        } else if (entry.?.flag == TT.TTFlag.Lower) {
+                            alpha = std.math.max(alpha, entry.?.score);
+                        } else {
+                            beta = std.math.max(beta, entry.?.score);
+                        }
+
+                        if (alpha >= beta) {
+                            return entry.?.score;
+                        }
                     }
                 }
             }
@@ -215,11 +226,13 @@ pub const Searcher = struct {
         defer self.pv_index = old_pv_index;
         self.pv_index += MAX_PLY - self.ply;
 
-        var in_check = position.is_king_checked_for(position.turn);
-
         if (in_check) {
             // Check extension
             depth += 1;
+        }
+
+        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+            return TIME_UP;
         }
 
         // generate moves
@@ -343,6 +356,10 @@ pub const Searcher = struct {
 
         // Static eval
         var stand_pat = HCE.evaluate(position);
+        if (std.math.absInt(stand_pat) catch 0 < 350) {
+            self.nnue.re_evaluate(position);
+            stand_pat = @divFloor(self.nnue.result[0] + stand_pat * 2, 3);
+        }
         if (position.turn == Piece.Color.Black) {
             stand_pat *= -1;
         }
@@ -359,6 +376,10 @@ pub const Searcher = struct {
         // we don't want to overflow plies...
         if (self.ply >= MAX_PLY) {
             return stand_pat;
+        }
+
+        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+            return TIME_UP;
         }
 
         // generate capture moves

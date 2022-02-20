@@ -85,7 +85,7 @@ fn do_nnue() void {
 
     comptime var bias1 = next_bias(&index, hidden_size);
 
-    writer.writeAll("pub const BIAS_1: [HIDDEN_SIZE]i8 = .{") catch {};
+    writer.writeAll("pub const BIAS_1: [HIDDEN_SIZE]i16 = .{") catch {};
 
     for (bias1) |k| {
         writer.print("{},", .{k}) catch {};
@@ -98,16 +98,18 @@ fn do_nnue() void {
     writer.writeAll("pub const LAYER_2: [HIDDEN_SIZE][OUTPUT_SIZE]i8 = .{") catch {};
 
     for (layer2) |k| {
+        writer.writeAll(".{") catch {};
         for (k) |v| {
             writer.print("{},", .{v}) catch {};
         }
+        writer.writeAll("},") catch {};
     }
 
     writer.writeAll("};\n") catch {};
 
     comptime var bias2 = next_bias(&index, output_size);
 
-    writer.writeAll("pub const BIAS_2: [OUTPUT_SIZE]i8 = .{") catch {};
+    writer.writeAll("pub const BIAS_2: [OUTPUT_SIZE]i16 = .{") catch {};
 
     for (bias2) |k| {
         writer.print("{},", .{k}) catch {};

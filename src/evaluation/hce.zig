@@ -187,7 +187,9 @@ pub const PSQT_EG: [6][64]i16 = .{
 
 pub const OPEN_FILE_BONUS: i16 = 35;
 pub const PASSED_PAWN_BONUS: i16 = 125;
-pub const DOUBLED_PAWN_REDUCTION: i16 = 20;
+pub const DOUBLED_PAWN_REDUCTION: i16 = 23;
+pub const BISHOP_PAIR: i16 = 40;
+pub const KNIGHT_PAIR: i16 = 12;
 
 pub fn evaluate(position: *Position.Position) i16 {
     var score: i16 = 0;
@@ -204,6 +206,7 @@ pub fn evaluate(position: *Position.Position) i16 {
         }
     }
 
+    // Pawns
     var file: u8 = 0;
     while (file < 8) {
         var wbb = position.bitboards.WhitePawns & C.SQ_C.FILES[file];
@@ -228,6 +231,22 @@ pub fn evaluate(position: *Position.Position) i16 {
             }
         }
         file += 1;
+    }
+
+    // Bishop pair
+    if (@popCount(u64, position.bitboards.WhiteBishops) >= 2) {
+        score += BISHOP_PAIR;
+    }
+    if (@popCount(u64, position.bitboards.BlackBishops) >= 2) {
+        score -= BISHOP_PAIR;
+    }
+
+    // Knight pair
+    if (@popCount(u64, position.bitboards.WhiteKnights) >= 2) {
+        score += KNIGHT_PAIR;
+    }
+    if (@popCount(u64, position.bitboards.BlackKnights) >= 2) {
+        score -= KNIGHT_PAIR;
     }
 
     return score;
