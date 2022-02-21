@@ -99,6 +99,7 @@ pub const UciInterface = struct {
                         }
 
                         movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
+                        movetime.? = std.math.max(movetime.? - 50, 10);
                         movetime.? *= std.time.ns_per_ms;
                     }
                 }

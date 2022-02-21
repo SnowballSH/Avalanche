@@ -356,12 +356,12 @@ pub const Searcher = struct {
 
         // Static eval
         var stand_pat = HCE.evaluate(position);
-        if (std.math.absInt(stand_pat) catch 0 < 350) {
-            self.nnue.re_evaluate(position);
-            stand_pat = @divFloor(self.nnue.result[0] + stand_pat * 2, 3);
-        }
         if (position.turn == Piece.Color.Black) {
             stand_pat *= -1;
+        }
+        if (std.math.absInt(stand_pat) catch 0 <= 500) {
+            self.nnue.re_evaluate(position);
+            stand_pat = @divFloor(self.nnue.result[0] + stand_pat * 3, 4);
         }
 
         // *** Static evaluation pruning ***
