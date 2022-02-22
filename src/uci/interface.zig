@@ -1,5 +1,6 @@
 const std = @import("std");
 const Position = @import("../board/position.zig");
+const Piece = @import("../board/piece.zig");
 const Search = @import("../search/search.zig");
 const Uci = @import("./uci.zig");
 const Perft = @import("./perft.zig");
@@ -56,9 +57,22 @@ pub const UciInterface = struct {
             } else if (std.mem.eql(u8, token.?, "nnue")) {
                 var arch = NNUE.NNUE.new();
                 arch.re_evaluate(&self.position);
-                _ = try stdout.print("{}\n", .{
-                    arch.result[0] * (@intCast(i16, @enumToInt(self.position.turn)) * -2 + 1),
-                });
+                var bucket = @minimum(@divFloor(self.position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
+                _ = try stdout.writeAll("Bucket | PSQT  | Layer | Final\n");
+                for (arch.result) |val, idx| {
+                    var score = val;
+                    if (self.position.turn == Piece.Color.Black) {
+                        score = -score;
+                    }
+
+                    var psqt = @divFloor(arch.residual[@enumToInt(self.position.turn)][idx], 64);
+
+                    if (idx == bucket) {
+                        _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}  <-- this bucket is used\n", .{ idx, psqt, score - psqt, score });
+                    } else {
+                        _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}\n", .{ idx, psqt, score - psqt, score });
+                    }
+                }
             } else if (std.mem.eql(u8, token.?, "eval")) {
                 token = tokens.next();
                 if (token != null) {
@@ -67,7 +81,7 @@ pub const UciInterface = struct {
                     searcher.max_nano = null;
                     searcher.nodes = 0;
                     var score = -searcher.negamax(&self.position, -Search.INF, Search.INF, depth);
-                    if (@enumToInt(self.position.turn) == 1) {
+                    if (self.position.turn == Piece.Color.Black) {
                         score = -score;
                     }
 

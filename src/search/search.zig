@@ -366,7 +366,9 @@ pub const Searcher = struct {
         }
         if (std.math.absInt(stand_pat) catch 0 <= 500) {
             self.nnue.evaluate(position.turn);
-            stand_pat = @divFloor(self.nnue.result[0], 2) + stand_pat;
+            var bucket = @minimum(@divFloor(position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
+            var nn = @truncate(i16, @minimum(self.nnue.result[bucket], (1 << 15) - 1));
+            stand_pat = @divFloor(nn + stand_pat, 2);
         }
 
         // *** Static evaluation pruning ***

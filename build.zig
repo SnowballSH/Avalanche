@@ -15,6 +15,16 @@ fn le_to_i8(comptime idx: usize) i8 {
     return k;
 }
 
+fn le_to_i32(comptime idx: usize) i32 {
+    var num = le_to_u32(idx);
+    comptime var k = @intCast(i32, num & 0b0111_1111_1111_1111_1111_1111_1111_1111);
+    if (num & 0b1000_0000_0000_0000_0000_0000_0000_0000 != 0) {
+        k = ~(2147483647 - k);
+    }
+
+    return k;
+}
+
 fn next_u32(comptime idx: *usize) u32 {
     var v = le_to_u32(idx.*);
     idx.* += 4;
@@ -29,6 +39,21 @@ fn next_dense(comptime idx: *usize, comptime input: u32, comptime output: u32) [
         while (j < output) {
             arr[i][j] = le_to_i8(idx.*);
             idx.* += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    return arr;
+}
+
+fn next_dense_32(comptime idx: *usize, comptime input: u32, comptime output: u32) [input][output]i32 {
+    comptime var arr: [input][output]i32 = undefined;
+    comptime var i = 0;
+    while (i < input) {
+        comptime var j = 0;
+        while (j < output) {
+            arr[i][j] = le_to_i32(idx.*);
+            idx.* += 4;
             j += 1;
         }
         i += 1;
@@ -116,6 +141,22 @@ fn do_nnue() void {
     }
 
     writer.writeAll("};\n") catch {};
+
+    comptime var residual = next_dense_32(&index, input_size, output_size);
+
+    writer.writeAll("pub const PSQT: [INPUT_SIZE][OUTPUT_SIZE]i32 = .{") catch {};
+
+    for (residual) |k| {
+        writer.writeAll(".{") catch {};
+        for (k) |v| {
+            writer.print("{},", .{v}) catch {};
+        }
+        writer.writeAll("},") catch {};
+    }
+
+    writer.writeAll("};\n") catch {};
+
+    std.debug.assert(index == std.mem.len(NNUE_SOURCE));
 }
 
 pub fn build(b: *std.build.Builder) void {
