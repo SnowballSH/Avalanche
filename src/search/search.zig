@@ -89,6 +89,8 @@ pub const Searcher = struct {
         var alpha = -INF;
         var beta = INF;
 
+        self.nnue.refresh_accumulator(position);
+
         var dp: u8 = 1;
         while (dp <= 127) {
             self.seldepth = 0;
@@ -176,6 +178,12 @@ pub const Searcher = struct {
             return DRAW;
         }
 
+        // set up PV
+        self.pv_array[self.pv_index] = 0;
+        const old_pv_index = self.pv_index;
+        defer self.pv_index = old_pv_index;
+        self.pv_index += MAX_PLY - self.ply;
+
         var in_check = position.is_king_checked_for(position.turn);
 
         if (!in_check) {
@@ -199,6 +207,9 @@ pub const Searcher = struct {
 
                 if (entry != null) {
                     if (entry.?.depth >= depth) {
+                        self.pv_array[old_pv_index] = entry.?.bm;
+                        self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
+
                         if (entry.?.flag == TT.TTFlag.Exact) {
                             return entry.?.score;
                         } else if (entry.?.flag == TT.TTFlag.Lower) {
@@ -219,12 +230,6 @@ pub const Searcher = struct {
             // At horizon, go to quiescence search
             return self.quiescence_search(position, alpha, beta);
         }
-
-        // set up PV
-        self.pv_array[self.pv_index] = 0;
-        const old_pv_index = self.pv_index;
-        defer self.pv_index = old_pv_index;
-        self.pv_index += MAX_PLY - self.ply;
 
         if (in_check) {
             // Check extension
@@ -252,11 +257,11 @@ pub const Searcher = struct {
         var bm: u24 = 0;
 
         for (moves.items) |m| {
-            position.make_move(m);
+            position.make_move(m, &self.nnue);
 
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
-                position.undo_move(m);
+                position.undo_move(m, &self.nnue);
                 continue;
             }
 
@@ -286,7 +291,7 @@ pub const Searcher = struct {
 
             var score = -self.negamax(position, -beta, -alpha, lmr_depth);
 
-            position.undo_move(m);
+            position.undo_move(m, &self.nnue);
             self.halfmoves = self.hm_stack.pop();
             _ = self.hash_history.pop();
             self.ply -= 1;
@@ -360,8 +365,8 @@ pub const Searcher = struct {
             stand_pat *= -1;
         }
         if (std.math.absInt(stand_pat) catch 0 <= 500) {
-            self.nnue.re_evaluate(position);
-            stand_pat = @divFloor(self.nnue.result[0] + stand_pat * 3, 4);
+            self.nnue.evaluate(position.turn);
+            stand_pat = @divFloor(self.nnue.result[0], 2) + stand_pat;
         }
 
         // *** Static evaluation pruning ***
@@ -396,17 +401,17 @@ pub const Searcher = struct {
         );
 
         for (moves.items) |m| {
-            position.make_move(m);
+            position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
-                position.undo_move(m);
+                position.undo_move(m, &self.nnue);
                 continue;
             }
 
             self.ply += 1;
 
             var score = -self.quiescence_search(position, -beta, -alpha);
-            position.undo_move(m);
+            position.undo_move(m, &self.nnue);
             self.ply -= 1;
 
             if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {

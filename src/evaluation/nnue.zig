@@ -14,29 +14,32 @@ pub fn clipped_relu_one(input: i16) i16 {
 }
 
 pub const NNUE = struct {
-    activations: [Weights.INPUT_SIZE]bool,
-    layer1_out: [Weights.HIDDEN_SIZE]i16,
+    activations: [2][Weights.INPUT_SIZE]bool,
+    accumulator: [2][Weights.HIDDEN_SIZE]i16,
     result: [Weights.OUTPUT_SIZE]i16,
 
     pub fn new() NNUE {
         return NNUE{
             .activations = undefined,
-            .layer1_out = undefined,
+            .accumulator = undefined,
             .result = undefined,
         };
     }
 
-    pub fn re_evaluate(self: *NNUE, pos: *Position.Position) void {
+    pub fn refresh_accumulator(self: *NNUE, pos: *Position.Position) void {
         // Reset activations
-        for (self.activations) |*ptr| {
+        for (self.activations[0]) |*ptr| {
+            ptr.* = false;
+        }
+        for (self.activations[1]) |*ptr| {
             ptr.* = false;
         }
         // Reset bias
-        for (self.layer1_out) |*ptr, index| {
+        for (self.accumulator[0]) |*ptr, index| {
             ptr.* = Weights.BIAS_1[index];
         }
-        for (self.result) |*ptr, index| {
-            ptr.* = Weights.BIAS_2[index];
+        for (self.accumulator[1]) |*ptr, index| {
+            ptr.* = Weights.BIAS_1[index];
         }
 
         for (pos.mailbox) |pc, index| {
@@ -44,23 +47,65 @@ pub const NNUE = struct {
                 continue;
             }
 
-            var p = if (pos.turn == Piece.Color.Black)
-                (@intCast(usize, @enumToInt(pc.?)) + 6) % 12
-            else
-                @intCast(usize, @enumToInt(pc.?));
+            self.activations[0][@intCast(usize, @enumToInt(pc.?)) * 64 + index] = true;
+            self.activations[1][((@intCast(usize, @enumToInt(pc.?)) + 6) % 12) * 64 + (index ^ 56)] = true;
 
-            var sq = if (pos.turn == Piece.Color.Black)
-                index ^ 56
-            else
-                index;
+            for (self.accumulator[0]) |*ptr, l_index| {
+                ptr.* += Weights.LAYER_1[@intCast(usize, @enumToInt(pc.?)) * 64 + index][l_index];
+            }
+            for (self.accumulator[1]) |*ptr, l_index| {
+                ptr.* += Weights.LAYER_1[((@intCast(usize, @enumToInt(pc.?)) + 6) % 12) * 64 + (index ^ 56)][l_index];
+            }
+        }
+    }
 
-            self.activations[p * 64 + sq] = true;
-            for (self.layer1_out) |*ptr, l_index| {
-                ptr.* += Weights.LAYER_1[p * 64 + sq][l_index];
+    pub fn deactivate(self: *NNUE, pc: Piece.Piece, index: usize) void {
+        self.activations[0][@intCast(usize, @enumToInt(pc)) * 64 + index] = false;
+        self.activations[1][((@intCast(usize, @enumToInt(pc)) + 6) % 12) * 64 + (index ^ 56)] = false;
+
+        for (self.accumulator[0]) |*ptr, l_index| {
+            ptr.* -= Weights.LAYER_1[@intCast(usize, @enumToInt(pc)) * 64 + index][l_index];
+        }
+        for (self.accumulator[1]) |*ptr, l_index| {
+            ptr.* -= Weights.LAYER_1[((@intCast(usize, @enumToInt(pc)) + 6) % 12) * 64 + (index ^ 56)][l_index];
+        }
+    }
+
+    pub fn activate(self: *NNUE, pc: Piece.Piece, index: usize) void {
+        self.activations[0][@intCast(usize, @enumToInt(pc)) * 64 + index] = true;
+        self.activations[1][((@intCast(usize, @enumToInt(pc)) + 6) % 12) * 64 + (index ^ 56)] = true;
+
+        for (self.accumulator[0]) |*ptr, l_index| {
+            ptr.* += Weights.LAYER_1[@intCast(usize, @enumToInt(pc)) * 64 + index][l_index];
+        }
+        for (self.accumulator[1]) |*ptr, l_index| {
+            ptr.* += Weights.LAYER_1[((@intCast(usize, @enumToInt(pc)) + 6) % 12) * 64 + (index ^ 56)][l_index];
+        }
+    }
+
+    pub fn re_evaluate(self: *NNUE, pos: *Position.Position) void {
+        self.refresh_accumulator(pos);
+        for (self.result) |*ptr| {
+            ptr.* = 0;
+        }
+
+        for (self.accumulator[@enumToInt(pos.turn)]) |val, l_index| {
+            for (self.result) |*ptr, r_index| {
+                ptr.* += Weights.LAYER_2[l_index][r_index] * clipped_relu_one(val);
             }
         }
 
-        for (self.layer1_out) |val, l_index| {
+        for (self.result) |*ptr| {
+            ptr.* = @divFloor(ptr.*, 64);
+        }
+    }
+
+    pub fn evaluate(self: *NNUE, turn: Piece.Color) void {
+        for (self.result) |*ptr| {
+            ptr.* = 0;
+        }
+
+        for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
             for (self.result) |*ptr, r_index| {
                 ptr.* += Weights.LAYER_2[l_index][r_index] * clipped_relu_one(val);
             }

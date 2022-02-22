@@ -8,6 +8,7 @@ const Encode = @import("../move/encode.zig");
 const C = @import("../c.zig");
 const Zobrist = @import("./zobrist.zig");
 const HCE = @import("../evaluation/hce.zig");
+const NNUE = @import("../evaluation/nnue.zig");
 
 pub const STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -134,7 +135,7 @@ pub const Position = struct {
         self.mailbox[fen_sq_to_sq(source)] = null;
     }
 
-    pub fn make_move(self: *Position, move: u24) void {
+    pub fn make_move(self: *Position, move: u24, nnue: ?*NNUE.NNUE) void {
         var source = Encode.source(move);
         var target = Encode.target(move);
         var piece = @intToEnum(Piece.Piece, Encode.pt(move));
@@ -190,15 +191,24 @@ pub const Position = struct {
                     var captured = self.mailbox[fen_sq_to_sq(target - 8)].?;
                     self.capture_stack.append(captured) catch {};
                     self.remove_piece(target - 8, captured, true);
+                    if (nnue != null) {
+                        nnue.?.deactivate(captured, fen_sq_to_sq(target - 8));
+                    }
                 } else {
                     var captured = self.mailbox[fen_sq_to_sq(target + 8)].?;
                     self.capture_stack.append(captured) catch {};
                     self.remove_piece(target + 8, captured, true);
+                    if (nnue != null) {
+                        nnue.?.deactivate(captured, fen_sq_to_sq(target + 8));
+                    }
                 }
             } else {
                 var captured = self.mailbox[fen_sq_to_sq(target)].?;
                 self.capture_stack.append(captured) catch {};
                 self.remove_piece(target, captured, true);
+                if (nnue != null) {
+                    nnue.?.deactivate(captured, fen_sq_to_sq(target));
+                }
                 if (captured == Piece.Piece.WhiteRook) {
                     if (target == C.SQ_C.A1) {
                         self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
@@ -222,8 +232,16 @@ pub const Position = struct {
                 }
             }
             self.move_piece(source, target, piece, true);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(target));
+                nnue.?.deactivate(piece, fen_sq_to_sq(source));
+            }
         } else if (Encode.double(move) != 0) {
             self.move_piece(source, target, piece, true);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(target));
+                nnue.?.deactivate(piece, fen_sq_to_sq(source));
+            }
             if (self.turn == Piece.Color.White) {
                 self.ep = target - 8;
                 std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
@@ -237,37 +255,79 @@ pub const Position = struct {
             switch (target) {
                 C.SQ_C.G1 => {
                     self.move_piece(C.SQ_C.H1, C.SQ_C.F1, Piece.Piece.WhiteRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.F1));
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.H1));
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(target));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(source));
+                    }
                 },
                 C.SQ_C.C1 => {
                     self.move_piece(C.SQ_C.A1, C.SQ_C.D1, Piece.Piece.WhiteRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.D1));
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.A1));
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(target));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(source));
+                    }
                 },
                 C.SQ_C.G8 => {
                     self.move_piece(C.SQ_C.H8, C.SQ_C.F8, Piece.Piece.BlackRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.F8));
+                        nnue.?.deactivate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.H8));
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(target));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(source));
+                    }
                 },
                 C.SQ_C.C8 => {
                     self.move_piece(C.SQ_C.A8, C.SQ_C.D8, Piece.Piece.BlackRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.D8));
+                        nnue.?.deactivate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.A8));
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(target));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(source));
+                    }
                 },
                 else => unreachable,
             }
         } else {
             self.move_piece(source, target, piece, true);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(target));
+                nnue.?.deactivate(piece, fen_sq_to_sq(source));
+            }
         }
 
         var promo = Encode.promote(move);
         if (promo != 0) {
             self.remove_piece(target, piece, true);
+            if (nnue != null) {
+                nnue.?.deactivate(piece, fen_sq_to_sq(target));
+            }
             self.add_piece(target, @intToEnum(Piece.Piece, promo), true);
+            if (nnue != null) {
+                nnue.?.activate(@intToEnum(Piece.Piece, promo), fen_sq_to_sq(target));
+            }
         }
 
         self.hash ^= Zobrist.ZobristTurn;
         self.turn = self.turn.invert();
     }
 
-    pub fn undo_move(self: *Position, move: u24) void {
+    pub fn undo_move(self: *Position, move: u24, nnue: ?*NNUE.NNUE) void {
         const my_color = self.turn.invert();
         const opp_color = self.turn;
 
@@ -288,47 +348,106 @@ pub const Position = struct {
         var promo = Encode.promote(move);
         if (promo != 0) {
             self.remove_piece(target, @intToEnum(Piece.Piece, promo), false);
+            if (nnue != null) {
+                nnue.?.deactivate(@intToEnum(Piece.Piece, promo), fen_sq_to_sq(target));
+            }
             self.add_piece(target, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(target));
+            }
         }
 
         if (Encode.capture(move) != 0) {
             var captured = self.capture_stack.pop();
 
             self.move_piece(target, source, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(source));
+                nnue.?.deactivate(piece, fen_sq_to_sq(target));
+            }
 
             if (Encode.enpassant(move) != 0) {
                 if (opp_color == Piece.Color.White) {
                     self.add_piece(target + 8, captured, false);
+                    if (nnue != null) {
+                        nnue.?.activate(captured, fen_sq_to_sq(target + 8));
+                    }
                 } else {
                     self.add_piece(target - 8, captured, false);
+                    if (nnue != null) {
+                        nnue.?.activate(captured, fen_sq_to_sq(target - 8));
+                    }
                 }
             } else {
                 self.add_piece(target, captured, false);
+                if (nnue != null) {
+                    nnue.?.activate(captured, fen_sq_to_sq(target));
+                }
             }
         } else if (Encode.double(move) != 0) {
             self.move_piece(target, source, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(source));
+                nnue.?.deactivate(piece, fen_sq_to_sq(target));
+            }
         } else if (Encode.castling(move) != 0) {
             switch (target) {
                 C.SQ_C.G1 => {
                     self.move_piece(C.SQ_C.F1, C.SQ_C.H1, Piece.Piece.WhiteRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.H1));
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.F1));
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(source));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(target));
+                    }
                 },
                 C.SQ_C.C1 => {
                     self.move_piece(C.SQ_C.D1, C.SQ_C.A1, Piece.Piece.WhiteRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.A1));
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, fen_sq_to_sq(C.SQ_C.D1));
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(source));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(target));
+                    }
                 },
                 C.SQ_C.G8 => {
                     self.move_piece(C.SQ_C.F8, C.SQ_C.H8, Piece.Piece.BlackRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.H8));
+                        nnue.?.deactivate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.F8));
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(source));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(target));
+                    }
                 },
                 C.SQ_C.C8 => {
                     self.move_piece(C.SQ_C.D8, C.SQ_C.A8, Piece.Piece.BlackRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.A8));
+                        nnue.?.deactivate(Piece.Piece.BlackRook, fen_sq_to_sq(C.SQ_C.D8));
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, fen_sq_to_sq(source));
+                        nnue.?.deactivate(piece, fen_sq_to_sq(target));
+                    }
                 },
                 else => unreachable,
             }
         } else {
             self.move_piece(target, source, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, fen_sq_to_sq(source));
+                nnue.?.deactivate(piece, fen_sq_to_sq(target));
+            }
         }
 
         self.turn = my_color;

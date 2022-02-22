@@ -110,6 +110,7 @@ pub const UciInterface = struct {
                     if (std.mem.eql(u8, token.?, "startpos")) {
                         self.position.deinit();
                         self.position = Position.new_position_by_fen(Position.STARTPOS);
+                        searcher.nnue.refresh_accumulator(&self.position);
 
                         token = tokens.next();
                         if (token != null) {
@@ -127,7 +128,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    self.position.make_move(move.?);
+                                    self.position.make_move(move.?, &searcher.nnue);
                                     if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
                                         searcher.halfmoves = 0;
                                     } else {
@@ -144,6 +145,7 @@ pub const UciInterface = struct {
                         var fen = tokens.next();
                         if (fen != null) {
                             self.position = Position.new_position_by_fen(fen.?);
+                            searcher.nnue.refresh_accumulator(&self.position);
 
                             var afterfen = tokens.next();
                             if (afterfen != null) {
@@ -161,7 +163,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    self.position.make_move(move.?);
+                                    self.position.make_move(move.?, &searcher.nnue);
                                     if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
                                         searcher.halfmoves = 0;
                                     } else {
