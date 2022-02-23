@@ -8,6 +8,7 @@ const Encode = @import("../move/encode.zig");
 const C = @import("../c.zig");
 const Zobrist = @import("./zobrist.zig");
 const HCE = @import("../evaluation/hce.zig");
+const NNUE = @import("../evaluation/nnue.zig");
 
 pub const STARTPOS = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
@@ -22,7 +23,6 @@ pub const Position = struct {
     ep_stack: std.ArrayList(?u6),
     hash_stack: std.ArrayList(u64),
     hash: u64,
-    phase: i16,
 
     pub fn deinit(self: *Position) void {
         self.capture_stack.deinit();
@@ -104,7 +104,6 @@ pub const Position = struct {
         }
 
         self.mailbox[fen_sq_to_sq(target)] = piece;
-        self.phase -= HCE.PhaseValues[@enumToInt(piece) % 6];
     }
 
     pub fn remove_piece(self: *Position, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
@@ -117,7 +116,6 @@ pub const Position = struct {
         }
 
         self.mailbox[fen_sq_to_sq(target)] = null;
-        self.phase += HCE.PhaseValues[@enumToInt(piece) % 6];
     }
 
     pub fn move_piece(self: *Position, source: u6, target: u6, piece: Piece.Piece, comptime modhash: bool) void {
@@ -134,7 +132,7 @@ pub const Position = struct {
         self.mailbox[fen_sq_to_sq(source)] = null;
     }
 
-    pub fn make_move(self: *Position, move: u24) void {
+    pub fn make_move(self: *Position, move: u24, nnue: ?*NNUE.NNUE) void {
         var source = Encode.source(move);
         var target = Encode.target(move);
         var piece = @intToEnum(Piece.Piece, Encode.pt(move));
@@ -190,15 +188,24 @@ pub const Position = struct {
                     var captured = self.mailbox[fen_sq_to_sq(target - 8)].?;
                     self.capture_stack.append(captured) catch {};
                     self.remove_piece(target - 8, captured, true);
+                    if (nnue != null) {
+                        nnue.?.deactivate(captured, target - 8);
+                    }
                 } else {
                     var captured = self.mailbox[fen_sq_to_sq(target + 8)].?;
                     self.capture_stack.append(captured) catch {};
                     self.remove_piece(target + 8, captured, true);
+                    if (nnue != null) {
+                        nnue.?.deactivate(captured, target + 8);
+                    }
                 }
             } else {
                 var captured = self.mailbox[fen_sq_to_sq(target)].?;
                 self.capture_stack.append(captured) catch {};
                 self.remove_piece(target, captured, true);
+                if (nnue != null) {
+                    nnue.?.deactivate(captured, target);
+                }
                 if (captured == Piece.Piece.WhiteRook) {
                     if (target == C.SQ_C.A1) {
                         self.hash ^= Zobrist.ZobristCastleKeys[self.castling];
@@ -222,8 +229,16 @@ pub const Position = struct {
                 }
             }
             self.move_piece(source, target, piece, true);
+            if (nnue != null) {
+                nnue.?.activate(piece, target);
+                nnue.?.deactivate(piece, source);
+            }
         } else if (Encode.double(move) != 0) {
             self.move_piece(source, target, piece, true);
+            if (nnue != null) {
+                nnue.?.activate(piece, target);
+                nnue.?.deactivate(piece, source);
+            }
             if (self.turn == Piece.Color.White) {
                 self.ep = target - 8;
                 std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
@@ -237,37 +252,79 @@ pub const Position = struct {
             switch (target) {
                 C.SQ_C.G1 => {
                     self.move_piece(C.SQ_C.H1, C.SQ_C.F1, Piece.Piece.WhiteRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, C.SQ_C.F1);
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, C.SQ_C.H1);
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, target);
+                        nnue.?.deactivate(piece, source);
+                    }
                 },
                 C.SQ_C.C1 => {
                     self.move_piece(C.SQ_C.A1, C.SQ_C.D1, Piece.Piece.WhiteRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, C.SQ_C.D1);
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, C.SQ_C.A1);
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, target);
+                        nnue.?.deactivate(piece, source);
+                    }
                 },
                 C.SQ_C.G8 => {
                     self.move_piece(C.SQ_C.H8, C.SQ_C.F8, Piece.Piece.BlackRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, C.SQ_C.F8);
+                        nnue.?.deactivate(Piece.Piece.BlackRook, C.SQ_C.H8);
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, target);
+                        nnue.?.deactivate(piece, source);
+                    }
                 },
                 C.SQ_C.C8 => {
                     self.move_piece(C.SQ_C.A8, C.SQ_C.D8, Piece.Piece.BlackRook, true);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, C.SQ_C.D8);
+                        nnue.?.deactivate(Piece.Piece.BlackRook, C.SQ_C.A8);
+                    }
                     self.move_piece(source, target, piece, true);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, target);
+                        nnue.?.deactivate(piece, source);
+                    }
                 },
                 else => unreachable,
             }
         } else {
             self.move_piece(source, target, piece, true);
+            if (nnue != null) {
+                nnue.?.activate(piece, target);
+                nnue.?.deactivate(piece, source);
+            }
         }
 
         var promo = Encode.promote(move);
         if (promo != 0) {
             self.remove_piece(target, piece, true);
+            if (nnue != null) {
+                nnue.?.deactivate(piece, target);
+            }
             self.add_piece(target, @intToEnum(Piece.Piece, promo), true);
+            if (nnue != null) {
+                nnue.?.activate(@intToEnum(Piece.Piece, promo), target);
+            }
         }
 
         self.hash ^= Zobrist.ZobristTurn;
         self.turn = self.turn.invert();
     }
 
-    pub fn undo_move(self: *Position, move: u24) void {
+    pub fn undo_move(self: *Position, move: u24, nnue: ?*NNUE.NNUE) void {
         const my_color = self.turn.invert();
         const opp_color = self.turn;
 
@@ -288,47 +345,106 @@ pub const Position = struct {
         var promo = Encode.promote(move);
         if (promo != 0) {
             self.remove_piece(target, @intToEnum(Piece.Piece, promo), false);
+            if (nnue != null) {
+                nnue.?.deactivate(@intToEnum(Piece.Piece, promo), target);
+            }
             self.add_piece(target, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, target);
+            }
         }
 
         if (Encode.capture(move) != 0) {
             var captured = self.capture_stack.pop();
 
             self.move_piece(target, source, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, source);
+                nnue.?.deactivate(piece, target);
+            }
 
             if (Encode.enpassant(move) != 0) {
                 if (opp_color == Piece.Color.White) {
                     self.add_piece(target + 8, captured, false);
+                    if (nnue != null) {
+                        nnue.?.activate(captured, target + 8);
+                    }
                 } else {
                     self.add_piece(target - 8, captured, false);
+                    if (nnue != null) {
+                        nnue.?.activate(captured, target - 8);
+                    }
                 }
             } else {
                 self.add_piece(target, captured, false);
+                if (nnue != null) {
+                    nnue.?.activate(captured, target);
+                }
             }
         } else if (Encode.double(move) != 0) {
             self.move_piece(target, source, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, source);
+                nnue.?.deactivate(piece, target);
+            }
         } else if (Encode.castling(move) != 0) {
             switch (target) {
                 C.SQ_C.G1 => {
                     self.move_piece(C.SQ_C.F1, C.SQ_C.H1, Piece.Piece.WhiteRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, C.SQ_C.H1);
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, C.SQ_C.F1);
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, source);
+                        nnue.?.deactivate(piece, target);
+                    }
                 },
                 C.SQ_C.C1 => {
                     self.move_piece(C.SQ_C.D1, C.SQ_C.A1, Piece.Piece.WhiteRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.WhiteRook, C.SQ_C.A1);
+                        nnue.?.deactivate(Piece.Piece.WhiteRook, C.SQ_C.D1);
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, source);
+                        nnue.?.deactivate(piece, target);
+                    }
                 },
                 C.SQ_C.G8 => {
                     self.move_piece(C.SQ_C.F8, C.SQ_C.H8, Piece.Piece.BlackRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, C.SQ_C.H8);
+                        nnue.?.deactivate(Piece.Piece.BlackRook, C.SQ_C.F8);
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, source);
+                        nnue.?.deactivate(piece, target);
+                    }
                 },
                 C.SQ_C.C8 => {
                     self.move_piece(C.SQ_C.D8, C.SQ_C.A8, Piece.Piece.BlackRook, false);
+                    if (nnue != null) {
+                        nnue.?.activate(Piece.Piece.BlackRook, C.SQ_C.A8);
+                        nnue.?.deactivate(Piece.Piece.BlackRook, C.SQ_C.D8);
+                    }
                     self.move_piece(target, source, piece, false);
+                    if (nnue != null) {
+                        nnue.?.activate(piece, source);
+                        nnue.?.deactivate(piece, target);
+                    }
                 },
                 else => unreachable,
             }
         } else {
             self.move_piece(target, source, piece, false);
+            if (nnue != null) {
+                nnue.?.activate(piece, source);
+                nnue.?.deactivate(piece, target);
+            }
         }
 
         self.turn = my_color;
@@ -369,6 +485,15 @@ pub const Position = struct {
 
         return hash;
     }
+
+    pub fn phase(self: *Position) usize {
+        var phase_: usize = 0;
+        phase_ += @popCount(u64, self.bitboards.WhiteKnights | self.bitboards.WhiteBishops);
+        phase_ += @popCount(u64, self.bitboards.BlackKnights | self.bitboards.BlackBishops);
+        phase_ += @popCount(u64, self.bitboards.WhiteRooks | self.bitboards.BlackRooks) * 2;
+        phase_ += @popCount(u64, self.bitboards.WhiteQueens | self.bitboards.BlackQueens) * 4;
+        return phase_;
+    }
 };
 
 pub inline fn fen_sq_to_sq(fsq: u8) u6 {
@@ -387,7 +512,6 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .ep_stack = std.ArrayList(?u6).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .hash_stack = std.ArrayList(u64).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .hash = 0,
-        .phase = 24,
     };
 
     var index: usize = 0;
@@ -398,73 +522,61 @@ pub fn new_position_by_fen(fen: anytype) Position {
             'P' => {
                 position.mailbox[sq] = Piece.Piece.WhitePawn;
                 position.bitboards.toggle_piece(Piece.Piece.WhitePawn, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[0];
                 sq += 1;
             },
             'N' => {
                 position.mailbox[sq] = Piece.Piece.WhiteKnight;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteKnight, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[1];
                 sq += 1;
             },
             'B' => {
                 position.mailbox[sq] = Piece.Piece.WhiteBishop;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteBishop, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[2];
                 sq += 1;
             },
             'R' => {
                 position.mailbox[sq] = Piece.Piece.WhiteRook;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteRook, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[3];
                 sq += 1;
             },
             'Q' => {
                 position.mailbox[sq] = Piece.Piece.WhiteQueen;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteQueen, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[4];
                 sq += 1;
             },
             'K' => {
                 position.mailbox[sq] = Piece.Piece.WhiteKing;
                 position.bitboards.toggle_piece(Piece.Piece.WhiteKing, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[5];
                 sq += 1;
             },
             'p' => {
                 position.mailbox[sq] = Piece.Piece.BlackPawn;
                 position.bitboards.toggle_piece(Piece.Piece.BlackPawn, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[0];
                 sq += 1;
             },
             'n' => {
                 position.mailbox[sq] = Piece.Piece.BlackKnight;
                 position.bitboards.toggle_piece(Piece.Piece.BlackKnight, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[1];
                 sq += 1;
             },
             'b' => {
                 position.mailbox[sq] = Piece.Piece.BlackBishop;
                 position.bitboards.toggle_piece(Piece.Piece.BlackBishop, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[2];
                 sq += 1;
             },
             'r' => {
                 position.mailbox[sq] = Piece.Piece.BlackRook;
                 position.bitboards.toggle_piece(Piece.Piece.BlackRook, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[3];
                 sq += 1;
             },
             'q' => {
                 position.mailbox[sq] = Piece.Piece.BlackQueen;
                 position.bitboards.toggle_piece(Piece.Piece.BlackQueen, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[4];
                 sq += 1;
             },
             'k' => {
                 position.mailbox[sq] = Piece.Piece.BlackKing;
                 position.bitboards.toggle_piece(Piece.Piece.BlackKing, fen_sq_to_sq(sq));
-                position.phase -= HCE.PhaseValues[5];
                 sq += 1;
             },
             '0'...'8' => {

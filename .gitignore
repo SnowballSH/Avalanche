@@ -3,3 +3,12 @@
 **/*.exe
 **/old_binaries
 .DS_Store
+**/*.bin
+**/*.pgn
+**/*.bson
+*.epd
+
+# Private for now
+nnue/**/*
+# Built with zig build -- nnue
+src/weights.zig

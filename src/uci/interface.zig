@@ -1,9 +1,12 @@
 const std = @import("std");
 const Position = @import("../board/position.zig");
+const Piece = @import("../board/piece.zig");
 const Search = @import("../search/search.zig");
 const Uci = @import("./uci.zig");
 const Perft = @import("./perft.zig");
 const Encode = @import("../move/encode.zig");
+const HCE = @import("../evaluation/hce.zig");
+const NNUE = @import("../evaluation/nnue.zig");
 
 pub const UciInterface = struct {
     position: Position.Position,
@@ -44,13 +47,48 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 0.0\n");
+                _ = try stdout.write("id name Avalanche 0.1\n");
                 _ = try stdout.write("id author SnowballSH\n");
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "isready")) {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.display();
+            } else if (std.mem.eql(u8, token.?, "nnue")) {
+                var arch = NNUE.NNUE.new();
+                arch.re_evaluate(&self.position);
+                var bucket = @minimum(@divFloor(self.position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
+                _ = try stdout.writeAll("Bucket | PSQT  | Layer | Final\n");
+                for (arch.result) |val, idx| {
+                    var score = val;
+                    if (self.position.turn == Piece.Color.Black) {
+                        score = -score;
+                    }
+
+                    var psqt = @divFloor(arch.residual[@enumToInt(self.position.turn)][idx], 64);
+
+                    if (idx == bucket) {
+                        _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}  <-- this bucket is used\n", .{ idx, psqt, score - psqt, score });
+                    } else {
+                        _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}\n", .{ idx, psqt, score - psqt, score });
+                    }
+                }
+            } else if (std.mem.eql(u8, token.?, "eval")) {
+                token = tokens.next();
+                if (token != null) {
+                    var depth = std.fmt.parseUnsigned(u8, token.?, 10) catch 1;
+                    depth = std.math.max(depth, 1);
+                    searcher.max_nano = null;
+                    searcher.nodes = 0;
+                    var score = -searcher.negamax(&self.position, -Search.INF, Search.INF, depth);
+                    if (self.position.turn == Piece.Color.Black) {
+                        score = -score;
+                    }
+
+                    try stdout.print("{}\n", .{score});
+                } else {
+                    try stdout.print("{}\n", .{HCE.evaluate(&self.position)});
+                }
             } else if (std.mem.eql(u8, token.?, "perft")) {
                 var depth: usize = 1;
                 token = tokens.next();
@@ -75,6 +113,7 @@ pub const UciInterface = struct {
                         }
 
                         movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
+                        movetime.? = std.math.max(movetime.? - 50, 10);
                         movetime.? *= std.time.ns_per_ms;
                     }
                 }
@@ -85,6 +124,7 @@ pub const UciInterface = struct {
                     if (std.mem.eql(u8, token.?, "startpos")) {
                         self.position.deinit();
                         self.position = Position.new_position_by_fen(Position.STARTPOS);
+                        searcher.nnue.refresh_accumulator(&self.position);
 
                         token = tokens.next();
                         if (token != null) {
@@ -102,7 +142,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    self.position.make_move(move.?);
+                                    self.position.make_move(move.?, &searcher.nnue);
                                     if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
                                         searcher.halfmoves = 0;
                                     } else {
@@ -119,6 +159,7 @@ pub const UciInterface = struct {
                         var fen = tokens.next();
                         if (fen != null) {
                             self.position = Position.new_position_by_fen(fen.?);
+                            searcher.nnue.refresh_accumulator(&self.position);
 
                             var afterfen = tokens.next();
                             if (afterfen != null) {
@@ -136,7 +177,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    self.position.make_move(move.?);
+                                    self.position.make_move(move.?, &searcher.nnue);
                                     if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
                                         searcher.halfmoves = 0;
                                     } else {
