@@ -6,6 +6,7 @@
 **/*.bin
 **/*.pgn
 **/*.bson
+*.epd
 
 # Private for now
 nnue/**/*

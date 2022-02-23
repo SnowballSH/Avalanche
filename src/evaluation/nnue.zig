@@ -58,10 +58,12 @@ pub const NNUE = struct {
             ptr.* = Weights.BIAS_1[index];
         }
 
-        for (pos.mailbox) |pc, index| {
+        for (pos.mailbox) |pc, index_| {
             if (pc == null) {
                 continue;
             }
+
+            var index = Position.fen_sq_to_sq(@intCast(u8, index_));
 
             var wi = @intCast(usize, @enumToInt(pc.?)) * 64 + index;
             var bi = ((@intCast(usize, @enumToInt(pc.?)) + 6) % 12) * 64 + (index ^ 56);
@@ -146,19 +148,13 @@ pub const NNUE = struct {
         }
     }
 
-    pub fn evaluate(self: *NNUE, turn: Piece.Color) void {
-        for (self.result) |*ptr| {
-            ptr.* = 0;
-        }
+    pub fn evaluate(self: *NNUE, turn: Piece.Color, bucket: usize) void {
+        self.result[bucket] = 0;
 
         for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
-            for (self.result) |*ptr, r_index| {
-                ptr.* += Weights.LAYER_2[l_index][r_index] * clipped_relu_one(val);
-            }
+            self.result[bucket] += Weights.LAYER_2[l_index][bucket] * clipped_relu_one(val);
         }
 
-        for (self.result) |*ptr, idx| {
-            ptr.* = normalize(ptr.*) + @divFloor(self.residual[@enumToInt(turn)][idx], 64);
-        }
+        self.result[bucket] = normalize(self.result[bucket]) + @divFloor(self.residual[@enumToInt(turn)][bucket], 64);
     }
 };

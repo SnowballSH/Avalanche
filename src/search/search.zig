@@ -364,9 +364,10 @@ pub const Searcher = struct {
         if (position.turn == Piece.Color.Black) {
             stand_pat *= -1;
         }
-        if (std.math.absInt(stand_pat) catch 0 <= 500) {
-            self.nnue.evaluate(position.turn);
+        if (std.math.absInt(stand_pat) catch 0 <= 550) {
             var bucket = @minimum(@divFloor(position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
+            self.nnue.evaluate(position.turn, bucket);
+
             var nn = @truncate(i16, @minimum(self.nnue.result[bucket], (1 << 15) - 1));
             stand_pat = @divFloor(nn + stand_pat, 2);
         }
