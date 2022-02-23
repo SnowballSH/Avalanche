@@ -35,9 +35,9 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
     defer moves.deinit();
 
     for (moves.items) |x| {
-        pos.*.make_move(x);
+        pos.*.make_move(x, null);
         if (pos.*.is_king_checked_for(pos.*.turn.invert())) {
-            pos.*.undo_move(x);
+            pos.*.undo_move(x, null);
             continue;
         }
         var k = perft(pos, depth - 1, &map);
@@ -45,7 +45,7 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
         var s: []u8 = Uci.move_to_uci(x);
         std.debug.print("{s}: {}\n", .{ s, k });
         std.heap.page_allocator.free(s);
-        pos.*.undo_move(x);
+        pos.*.undo_move(x, null);
     }
 
     const stdout = std.io.getStdOut().writer();
@@ -66,9 +66,9 @@ pub fn perft(pos: *Position.Position, depth: usize, map: *std.ArrayList(Value)) 
     defer moves.deinit();
 
     for (moves.items) |x| {
-        pos.*.make_move(x);
+        pos.*.make_move(x, null);
         if (pos.*.is_king_checked_for(pos.*.turn.invert())) {
-            pos.*.undo_move(x);
+            pos.*.undo_move(x, null);
             continue;
         }
 
@@ -76,7 +76,7 @@ pub fn perft(pos: *Position.Position, depth: usize, map: *std.ArrayList(Value)) 
             var ttentry: Value = map.*.items[pos.*.hash % tt_size];
             if (ttentry.depth == depth and ttentry.hash == pos.*.hash) {
                 nodes += ttentry.nodes;
-                pos.*.undo_move(x);
+                pos.*.undo_move(x, null);
                 continue;
             }
         }
@@ -92,7 +92,7 @@ pub fn perft(pos: *Position.Position, depth: usize, map: *std.ArrayList(Value)) 
             };
         }
 
-        pos.*.undo_move(x);
+        pos.*.undo_move(x, null);
     }
 
     return nodes;

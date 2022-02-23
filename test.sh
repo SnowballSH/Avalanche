@@ -1,5 +1,4 @@
 cutechess-cli -tournament gauntlet -concurrency 4 \
-  -pgnout games.pgn "fi" \
   -engine name="Old" dir=. cmd="./old_binaries/Avalanche" st=0.5 timemargin=100 proto="uci" \
   -engine name="New" dir=. cmd="./zig-out/bin/Avalanche" st=0.5 timemargin=100 proto="uci" \
   -recover \

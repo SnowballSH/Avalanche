@@ -185,29 +185,28 @@ pub const PSQT_EG: [6][64]i16 = .{
 
 // zig fmt: on
 
-pub const OPEN_FILE_BONUS: i16 = 55;
+pub const OPEN_FILE_BONUS: i16 = 35;
 pub const PASSED_PAWN_BONUS: i16 = 125;
-pub const DOUBLED_PAWN_REDUCTION: i16 = 30;
+pub const DOUBLED_PAWN_REDUCTION: i16 = 23;
+pub const BISHOP_PAIR: i16 = 40;
+pub const KNIGHT_PAIR: i16 = 12;
 
 pub fn evaluate(position: *Position.Position) i16 {
     var score: i16 = 0;
-    var eg_score: i16 = 0;
 
     for (position.mailbox) |p, i| {
         if (p == null) {
             continue;
         }
         score += PieceValues[@enumToInt(p.?)];
-        eg_score += PieceValuesEg[@enumToInt(p.?)];
         if (p.?.color() == Piece.Color.White) {
             score += PSQT[@enumToInt(p.?) % 6][i];
-            eg_score += PSQT_EG[@enumToInt(p.?) % 6][i];
         } else {
             score -= PSQT[@enumToInt(p.?) % 6][i ^ 56];
-            eg_score -= PSQT_EG[@enumToInt(p.?) % 6][i ^ 56];
         }
     }
 
+    // Pawns
     var file: u8 = 0;
     while (file < 8) {
         var wbb = position.bitboards.WhitePawns & C.SQ_C.FILES[file];
@@ -234,13 +233,21 @@ pub fn evaluate(position: *Position.Position) i16 {
         file += 1;
     }
 
-    if (position.phase <= 14) {
-        return score;
+    // Bishop pair
+    if (@popCount(u64, position.bitboards.WhiteBishops) >= 2) {
+        score += BISHOP_PAIR;
+    }
+    if (@popCount(u64, position.bitboards.BlackBishops) >= 2) {
+        score -= BISHOP_PAIR;
     }
 
-    if (position.phase <= 16) {
-        return @divFloor(score * 3 + eg_score, 4);
+    // Knight pair
+    if (@popCount(u64, position.bitboards.WhiteKnights) >= 2) {
+        score += KNIGHT_PAIR;
+    }
+    if (@popCount(u64, position.bitboards.BlackKnights) >= 2) {
+        score -= KNIGHT_PAIR;
     }
 
-    return @divFloor(score * 2 + eg_score, 3);
+    return score;
 }
