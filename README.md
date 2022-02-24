@@ -6,7 +6,7 @@ Currently plays at around 1900 ELO -- mainly due to tactical reasons.
 
 ## Changelog
 
-- ### v0.2: [DEV] Searh  (+150 ELO)
+- ### v0.2: [DEV] Search  (+150 ELO)
     - History heuristics, killer heuristics
     - Stronger NNUE networks
 
