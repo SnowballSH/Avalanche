@@ -6,10 +6,13 @@ Currently plays at around 1900 ELO -- mainly due to tactical reasons.
 
 ## Changelog
 
+- ### v0.2: [DEV] Searh  (+150 ELO)
+    - History heuristics, killer heuristics
+    - Stronger NNUE networks
+
 - ### v0.1: NNUE  (+275-375 ELO)
     - Efficiently Updatable Neural Network trained on top-level engine tournaments
         - Current model: 728 -> dense -> 128 -> clipped_relu -> 128 -> dense -> 5 + PSQT
-        - Next model: 728 -> dense -> 256 -> clipped_relu -> 256 -> dense -> 3 + PSQT
     - Forward Pass
     - Tuned LMR
     - Bishop pair, doubled pawns, etc.

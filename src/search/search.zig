@@ -19,6 +19,8 @@ pub const TIME_UP: i16 = INF - 500;
 pub const MAX_PLY = 127;
 
 const PVARRAY = [(MAX_PLY * MAX_PLY + MAX_PLY) / 2]u24;
+const KILLER = [2][MAX_PLY]u24;
+const HISTORY = [12][64]i16;
 
 pub var GlobalTT: TT.TT = undefined;
 
@@ -28,30 +30,45 @@ pub fn init_tt() void {
 }
 
 pub const Searcher = struct {
+    // info
     ply: u8,
     nodes: u64,
-    pv_array: PVARRAY,
-    pv_index: u16,
     timer: std.time.Timer,
     max_nano: ?u64,
     seldepth: u8,
+
+    // game
     hash_history: std.ArrayList(u64),
     halfmoves: u8,
     hm_stack: std.ArrayList(u8),
+
+    // Search
+    pv_array: PVARRAY,
+    pv_index: u16,
+
+    killers: KILLER,
+    history: HISTORY,
+
+    // NNUE
     nnue: NNUE.NNUE,
 
     pub fn new_searcher() Searcher {
         return Searcher{
             .ply = 0,
             .nodes = 0,
-            .pv_array = std.mem.zeroes(PVARRAY),
-            .pv_index = 0,
             .timer = undefined,
             .max_nano = null,
             .seldepth = 0,
+
             .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
             .halfmoves = 0,
             .hm_stack = std.ArrayList(u8).init(std.heap.page_allocator),
+
+            .pv_array = std.mem.zeroes(PVARRAY),
+            .pv_index = 0,
+            .killers = std.mem.zeroes(KILLER),
+            .history = std.mem.zeroes(HISTORY),
+
             .nnue = NNUE.NNUE.new(),
         };
     }
@@ -83,6 +100,24 @@ pub const Searcher = struct {
             self.max_nano = 30;
         }
         self.max_nano.? -= 20;
+
+        for (self.killers) |*k| {
+            for (k) |*p| {
+                p.* = 0;
+            }
+        }
+
+        for (self.history) |*h| {
+            for (h) |*p| {
+                p.* = 0;
+            }
+        }
+
+        for (self.pv_array) |*p| {
+            p.* = 0;
+        }
+
+        self.pv_index = 0;
 
         var bestmove: u24 = 0;
 
@@ -208,7 +243,6 @@ pub const Searcher = struct {
                 if (entry != null) {
                     if (entry.?.depth >= depth) {
                         self.pv_array[old_pv_index] = entry.?.bm;
-                        self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
 
                         if (entry.?.flag == TT.TTFlag.Exact) {
                             return entry.?.score;
@@ -249,6 +283,7 @@ pub const Searcher = struct {
             moves.items,
             Ordering.OrderInfo{
                 .pos = position,
+                .searcher = self,
             },
             Ordering.order,
         );
@@ -304,12 +339,24 @@ pub const Searcher = struct {
 
             // fail hard
             if (score >= beta) {
+                // Killer
+                if (Encode.capture(m) == 0) {
+                    self.killers[1][self.ply] = self.killers[0][self.ply];
+                    self.killers[0][self.ply] = m;
+                }
+
                 return beta;
             }
+
             // better move
             if (score > alpha) {
                 alpha = score;
                 bm = m;
+
+                // Killer
+                if (Encode.capture(m) == 0) {
+                    self.history[Encode.pt(m)][Encode.target(m)] += depth;
+                }
 
                 // store in PV
                 self.pv_array[old_pv_index] = m;
@@ -364,12 +411,12 @@ pub const Searcher = struct {
         if (position.turn == Piece.Color.Black) {
             stand_pat *= -1;
         }
-        if (std.math.absInt(stand_pat) catch 0 <= 550) {
+        if (std.math.absInt(stand_pat) catch 0 <= 800) {
             var bucket = @minimum(@divFloor(position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
             self.nnue.evaluate(position.turn, bucket);
 
             var nn = @truncate(i16, @minimum(self.nnue.result[bucket], (1 << 15) - 1));
-            stand_pat = @divFloor(nn + stand_pat, 2);
+            stand_pat = @divFloor(nn * 3 + stand_pat, 4);
         }
 
         // *** Static evaluation pruning ***
@@ -399,6 +446,7 @@ pub const Searcher = struct {
             moves.items,
             Ordering.OrderInfo{
                 .pos = position,
+                .searcher = self,
             },
             Ordering.order,
         );

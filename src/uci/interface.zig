@@ -25,7 +25,7 @@ pub const UciInterface = struct {
 
         var searcher = Search.Searcher.new_searcher();
 
-        _ = try stdout.writeAll("Avalanche 0.0 by SnowballSH\n");
+        _ = try stdout.writeAll("Avalanche 0.2 by SnowballSH\n");
 
         self.position = Position.new_position_by_fen(Position.STARTPOS);
         defer self.position.deinit();
@@ -47,7 +47,7 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 0.1\n");
+                _ = try stdout.write("id name Avalanche 0.2\n");
                 _ = try stdout.write("id author SnowballSH\n");
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "isready")) {
@@ -121,6 +121,8 @@ pub const UciInterface = struct {
             } else if (std.mem.eql(u8, token.?, "position")) {
                 token = tokens.next();
                 if (token != null) {
+                    searcher.halfmoves = 0;
+
                     if (std.mem.eql(u8, token.?, "startpos")) {
                         self.position.deinit();
                         self.position = Position.new_position_by_fen(Position.STARTPOS);
