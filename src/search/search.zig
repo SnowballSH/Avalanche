@@ -290,8 +290,13 @@ pub const Searcher = struct {
 
         var legals: u16 = 0;
         var bm: u24 = 0;
+        var count: usize = 0;
+        var length = std.mem.len(moves.items);
 
-        for (moves.items) |m| {
+        while (count < length) {
+            var m = moves.items[count];
+            count += 1;
+
             position.make_move(m, &self.nnue);
 
             // illegal?
@@ -402,10 +407,6 @@ pub const Searcher = struct {
             return TIME_UP;
         }
 
-        // if (self.ply > self.seldepth) {
-        //     self.seldepth = self.ply;
-        // }
-
         // Static eval
         var stand_pat = HCE.evaluate(position);
         if (position.turn == Piece.Color.Black) {
@@ -441,17 +442,47 @@ pub const Searcher = struct {
         var moves = Movegen.generate_all_pseudo_legal_capture_moves(position);
         defer moves.deinit();
 
-        std.sort.sort(
-            u24,
-            moves.items,
-            Ordering.OrderInfo{
-                .pos = position,
-                .searcher = self,
-            },
-            Ordering.order,
-        );
+        var count: usize = 0;
+        var length = std.mem.len(moves.items);
 
-        for (moves.items) |m| {
+        var oi = Ordering.OrderInfo{
+            .pos = position,
+            .searcher = self,
+        };
+
+        var pre_sort = length <= 8;
+
+        if (pre_sort) {
+            std.sort.sort(
+                u24,
+                moves.items,
+                Ordering.OrderInfo{
+                    .pos = position,
+                    .searcher = self,
+                },
+                Ordering.order,
+            );
+        }
+
+        while (count < length) {
+            // dynamic bubble sort
+            if (!pre_sort) {
+                var index = count + 1;
+                var best: i16 = Ordering.score_move(moves.items[count], oi);
+                while (index < length) {
+                    var s = Ordering.score_move(moves.items[index], oi);
+                    if (best < s) {
+                        best = s;
+                        std.mem.swap(u24, &moves.items[count], &moves.items[index]);
+                    }
+                    index += 1;
+                }
+            }
+
+            var m = moves.items[count];
+
+            count += 1;
+
             position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {

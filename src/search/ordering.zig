@@ -4,6 +4,8 @@ const Encode = @import("../move/encode.zig");
 const HCE = @import("../evaluation/hce.zig");
 const Search = @import("./search.zig");
 
+const std = @import("std");
+
 pub const OrderInfo = struct {
     pos: *Position.Position,
     searcher: *Search.Searcher,
@@ -32,6 +34,7 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
     var pt = Encode.pt(move);
 
     if (Encode.capture(move) != 0) {
+        // Captures first!
         score += 5000;
 
         var captured = @enumToInt(pos.mailbox[ts].?);
@@ -50,14 +53,14 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
         } else {
             score += HCE.PSQT[pt % 6][ts ^ 56] - HCE.PSQT[pt % 6][sq ^ 56];
         }
-    }
 
-    if (Encode.castling(move) != 0) {
-        score += 500;
+        if (Encode.castling(move) != 0) {
+            score += 500;
+        }
     }
 
     if (Encode.promote(move) != 0) {
-        score += 1000 + HCE.PieceValues[Encode.promote(move) % 6];
+        score += 7500 + HCE.PieceValues[Encode.promote(move) % 6];
     }
 
     return score;

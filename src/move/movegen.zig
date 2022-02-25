@@ -15,8 +15,8 @@ pub inline fn generate_all_pseudo_legal_capture_moves(board: *Position.Position)
     return generate_all_pseudo_legal_moves_core(board, false);
 }
 
-fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all: bool) std.ArrayList(u24) {
-    var list = std.ArrayList(u24).initCapacity(std.heap.page_allocator, if (all) 48 else 12) catch unreachable;
+fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime gen_quiet: bool) std.ArrayList(u24) {
+    var list = std.ArrayList(u24).initCapacity(std.heap.page_allocator, if (gen_quiet) 48 else 12) catch unreachable;
 
     const bb_all = board.bitboards.WhiteAll | board.bitboards.BlackAll;
 
@@ -62,7 +62,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     list.append(Encode.move(sq, @intCast(u6, board.ep.?), @enumToInt(piece), 0, 1, 0, 1, 0)) catch {};
                 }
 
-                if (all) {
+                if (gen_quiet) {
                     // Normal moves
                     const single_target = @intCast(u6, @as(i12, sq) + pawn_delta);
                     const single_target_bb = BB.ShiftLocations[single_target];
@@ -124,7 +124,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     list.append(Encode.move(sq, @intCast(u6, board.ep.?), @enumToInt(piece), 0, 1, 0, 1, 0)) catch {};
                 }
 
-                if (all) {
+                if (gen_quiet) {
                     // Normal moves
                     const single_target = @intCast(u6, @as(i12, sq) + pawn_delta);
                     const single_target_bb = BB.ShiftLocations[single_target];
@@ -164,7 +164,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -183,7 +183,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -202,13 +202,13 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
                 }
 
-                if (all) {
+                if (gen_quiet) {
                     if (board.castling & Piece.WhiteKingCastle != 0) {
                         if (BB.get_at(bb_all, C.SQ_C.F1) == 0 and BB.get_at(bb_all, C.SQ_C.G1) == 0) {
                             if (!board.is_square_attacked_by(C.SQ_C.E1, Piece.Color.Black) and !board.is_square_attacked_by(C.SQ_C.F1, Piece.Color.Black)) {
@@ -238,13 +238,13 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
                 }
 
-                if (all) {
+                if (gen_quiet) {
                     if (board.castling & Piece.BlackKingCastle != 0) {
                         if (BB.get_at(bb_all, C.SQ_C.F8) == 0 and BB.get_at(bb_all, C.SQ_C.G8) == 0) {
                             if (!board.is_square_attacked_by(C.SQ_C.E8, Piece.Color.White) and !board.is_square_attacked_by(C.SQ_C.F8, Piece.Color.White)) {
@@ -274,7 +274,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -293,7 +293,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -312,7 +312,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -331,7 +331,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -350,7 +350,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;
@@ -369,7 +369,7 @@ fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime all:
                     const to = @intCast(u6, @ctz(u64, attacks));
                     const to_bb = BB.ShiftLocations[to];
                     const capture: u1 = @bitCast(u1, to_bb & opp_bb != 0);
-                    if (all or capture != 0) {
+                    if (gen_quiet or capture != 0) {
                         list.append(Encode.move(sq, @intCast(u6, to), @enumToInt(piece), 0, capture, 0, 0, 0)) catch {};
                     }
                     attacks ^= to_bb;

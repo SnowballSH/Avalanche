@@ -2,13 +2,20 @@
 
 [WIP] Bitboard Chess Engine written in Zig
 
-Currently plays at around 1900 ELO -- mainly due to tactical reasons.
+Currently plays at around 2000 ELO.
+
+## Compile
+
+`zig build -Drelease-fast=true -- nnue` to make weights.zig as well (add NNUE)
+If the weights.zig for current net already exists (rebuild), `zig build -Drelease-fast=true`
 
 ## Changelog
 
 - ### v0.2: [DEV] Search  (+150 ELO)
     - History heuristics, killer heuristics
-    - Stronger NNUE networks
+    - Stronger NNUE network
+        - Trained on human games on https://database.lichess.org/ and engine games.
+        - 728 -> dense -> 256 -> clipped_relu -> 128 -> dense -> 4 + PSQT
 
 - ### v0.1: NNUE  (+275-375 ELO)
     - Efficiently Updatable Neural Network trained on top-level engine tournaments
