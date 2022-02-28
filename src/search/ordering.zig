@@ -30,12 +30,11 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
 
     var score: i16 = 0;
     var ts = Position.fen_sq_to_sq(Encode.target(move));
-    var sq = Position.fen_sq_to_sq(Encode.source(move));
     var pt = Encode.pt(move);
 
     if (Encode.capture(move) != 0) {
         // Captures first!
-        score += 5000;
+        score += 6000;
 
         var captured = @enumToInt(pos.mailbox[ts].?);
         score += MVV_LVA[pt % 6][captured % 6];
@@ -43,15 +42,9 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
         if (info.searcher.killers[0][info.searcher.ply] == move) {
             score += 2500;
         } else if (info.searcher.killers[1][info.searcher.ply] == move) {
-            score += 1020;
+            score += 2000;
         } else {
-            score += info.searcher.history[pt][Encode.target(move)] * 2;
-        }
-
-        if (pos.turn == Piece.Color.White) {
-            score += HCE.PSQT[pt % 6][ts] - HCE.PSQT[pt % 6][sq];
-        } else {
-            score += HCE.PSQT[pt % 6][ts ^ 56] - HCE.PSQT[pt % 6][sq ^ 56];
+            score += @intCast(i16, info.searcher.history[Encode.source(move)][Encode.target(move)]);
         }
 
         if (Encode.castling(move) != 0) {
@@ -60,7 +53,7 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
     }
 
     if (Encode.promote(move) != 0) {
-        score += 7500 + HCE.PieceValues[Encode.promote(move) % 6];
+        score += 9500 + HCE.PieceValues[Encode.promote(move) % 6];
     }
 
     return score;

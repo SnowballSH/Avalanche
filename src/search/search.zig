@@ -20,7 +20,7 @@ pub const MAX_PLY = 127;
 
 const PVARRAY = [(MAX_PLY * MAX_PLY + MAX_PLY) / 2]u24;
 const KILLER = [2][MAX_PLY]u24;
-const HISTORY = [12][64]i16;
+const HISTORY = [64][64]u32;
 
 pub var GlobalTT: TT.TT = undefined;
 
@@ -358,9 +358,9 @@ pub const Searcher = struct {
                 alpha = score;
                 bm = m;
 
-                // Killer
+                // History
                 if (Encode.capture(m) == 0) {
-                    self.history[Encode.pt(m)][Encode.target(m)] += depth;
+                    self.history[Encode.source(m)][Encode.target(m)] += depth;
                 }
 
                 // store in PV
@@ -416,8 +416,8 @@ pub const Searcher = struct {
             var bucket = @minimum(@divFloor(position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
             self.nnue.evaluate(position.turn, bucket);
 
-            var nn = @truncate(i16, @minimum(self.nnue.result[bucket], (1 << 15) - 1));
-            stand_pat = @divFloor(nn * 3 + stand_pat, 4);
+            var nn = @truncate(i16, self.nnue.result[bucket]);
+            stand_pat = nn;
         }
 
         // *** Static evaluation pruning ***
