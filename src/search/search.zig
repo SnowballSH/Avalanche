@@ -7,6 +7,7 @@ const Uci = @import("../uci/uci.zig");
 const Ordering = @import("./ordering.zig");
 const Encode = @import("../move/encode.zig");
 const TT = @import("../cache/tt.zig");
+const LMR = @import("./lmr.zig");
 
 const std = @import("std");
 
@@ -48,6 +49,7 @@ pub const Searcher = struct {
 
     killers: KILLER,
     history: HISTORY,
+    in_null: bool,
 
     // NNUE
     nnue: NNUE.NNUE,
@@ -68,6 +70,7 @@ pub const Searcher = struct {
             .pv_index = 0,
             .killers = std.mem.zeroes(KILLER),
             .history = std.mem.zeroes(HISTORY),
+            .in_null = false,
 
             .nnue = NNUE.NNUE.new(),
         };
@@ -290,6 +293,53 @@ pub const Searcher = struct {
             return TIME_UP;
         }
 
+        var eval = Eval.evaluate(position, &self.nnue);
+
+        // Pruning
+        var is_pruning_allowed = !in_check;
+
+        if (is_pruning_allowed) {
+            // Razoring
+            const RazoringMargin: i16 = 375;
+            if (depth < 2 and eval + RazoringMargin < beta) {
+                return self.quiescence_search(position, alpha, beta);
+            }
+
+            // Reversed futility pruning
+            const RFPMargin: i16 = 50;
+            var reversed_futility_pruning_margin = RFPMargin * depth;
+            if (depth < 7 and eval - reversed_futility_pruning_margin >= beta) {
+                return eval - reversed_futility_pruning_margin;
+            }
+
+            // Null move pruning
+            var is_null_move_allowed = position.phase() >= 6 and !self.in_null;
+            if (is_null_move_allowed and depth >= 2 and eval > beta) {
+                var r = 4 + @minimum(depth / 4, 3);
+                if (eval > beta + 95) {
+                    r += 1;
+                }
+                r = @minimum(depth, r);
+                position.make_null_move();
+                self.ply += 1;
+                self.in_null = true;
+
+                var score = -self.negamax(position, -beta, -beta + 1, depth - r);
+
+                self.in_null = false;
+                self.ply -= 1;
+                position.undo_null_move();
+
+                if (score >= beta) {
+                    return score;
+                }
+            }
+        }
+
+        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+            return TIME_UP;
+        }
+
         // generate moves
         var moves = Movegen.generate_all_pseudo_legal_moves(position);
         defer moves.deinit();
@@ -306,6 +356,7 @@ pub const Searcher = struct {
 
         var legals: u16 = 0;
         var bm: u24 = 0;
+        var bs: i16 = -INF;
         var count: usize = 0;
         var length = std.mem.len(moves.items);
 
@@ -332,20 +383,30 @@ pub const Searcher = struct {
             legals += 1;
             self.ply += 1;
 
-            // recursive call to negamax
+            // DONE MAKING MOVES
+
+            var is_quiet = Encode.capture(m) == 0;
+            var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
             // LMR
-            var lmr_depth = depth - 1;
+            var lmr_depth: i16 = 0;
 
-            if (!in_check and depth >= 3 and legals >= 3 and m != self.pv_array[self.ply - 1] and Encode.capture(m) == 0) {
-                if (legals <= 7) {
+            if (depth >= 2 and legals >= 3 and m != self.pv_array[self.ply - 1] and is_quiet) {
+                // TODO include captures after implementing SEE
+
+                lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
+                if (in_check) {
                     lmr_depth -= 1;
-                } else {
-                    lmr_depth /= 2;
                 }
+                if (is_killer) {
+                    lmr_depth -= 1;
+                }
+
+                lmr_depth = @minimum(depth - 2, @maximum(1, lmr_depth));
             }
 
-            var score = -self.negamax(position, -beta, -alpha, lmr_depth);
+            // recursive call to negamax
+            var score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
 
             position.undo_move(m, &self.nnue);
             self.halfmoves = self.hm_stack.pop();
@@ -361,7 +422,7 @@ pub const Searcher = struct {
             // fail hard
             if (score >= beta) {
                 // Killer
-                if (Encode.capture(m) == 0) {
+                if (is_quiet) {
                     self.killers[1][self.ply] = self.killers[0][self.ply];
                     self.killers[0][self.ply] = m;
                 }
@@ -369,13 +430,18 @@ pub const Searcher = struct {
                 return beta;
             }
 
+            if (score > bs) {
+                bs = score;
+            }
+
             // better move
             if (score > alpha) {
                 alpha = score;
+                bs = score;
                 bm = m;
 
                 // History
-                if (Encode.capture(m) == 0) {
+                if (is_quiet) {
                     self.history[Encode.source(m)][Encode.target(m)] += depth;
                 }
 

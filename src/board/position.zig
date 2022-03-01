@@ -333,13 +333,7 @@ pub const Position = struct {
         var piece = @intToEnum(Piece.Piece, Encode.pt(move));
 
         self.hash = self.hash_stack.pop();
-
         self.ep = self.ep_stack.pop();
-
-        if (self.ep != null) {
-            std.debug.assert(BB.rank_of(self.ep.?) == 2 or BB.rank_of(self.ep.?) == 5);
-        }
-
         self.castling = self.castle_stack.pop();
 
         var promo = Encode.promote(move);
@@ -448,6 +442,28 @@ pub const Position = struct {
         }
 
         self.turn = my_color;
+    }
+
+    pub fn make_null_move(self: *Position) void {
+        self.ep_stack.append(self.ep) catch {};
+        self.castle_stack.append(self.castling) catch {};
+        self.hash_stack.append(self.hash) catch {};
+
+        if (self.ep != null) {
+            self.hash ^= Zobrist.ZobristEpKeys[BB.file_of(self.ep.?)];
+            self.ep = null;
+        }
+
+        self.turn = self.turn.invert();
+        self.hash ^= Zobrist.ZobristTurn;
+    }
+
+    pub fn undo_null_move(self: *Position) void {
+        self.hash = self.hash_stack.pop();
+        self.ep = self.ep_stack.pop();
+        self.castling = self.castle_stack.pop();
+
+        self.turn = self.turn.invert();
     }
 
     pub fn is_king_checked_for(self: *Position, color: Piece.Color) bool {
