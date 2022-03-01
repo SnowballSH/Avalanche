@@ -1,7 +1,7 @@
 const Position = @import("../board/position.zig");
 const Piece = @import("../board/piece.zig");
-const HCE = @import("../evaluation/hce.zig");
 const NNUE = @import("../evaluation/nnue.zig");
+const Eval = @import("../evaluation/final.zig");
 const Movegen = @import("../move/movegen.zig");
 const Uci = @import("../uci/uci.zig");
 const Ordering = @import("./ordering.zig");
@@ -124,10 +124,16 @@ pub const Searcher = struct {
         var alpha = -INF;
         var beta = INF;
 
+        var max_depth: u8 = MAX_PLY;
+
+        if (Eval.is_material_drawn(position)) {
+            max_depth = 2;
+        }
+
         self.nnue.refresh_accumulator(position);
 
         var dp: u8 = 1;
-        while (dp <= 127) {
+        while (dp <= max_depth) {
             self.seldepth = 0;
             for (self.pv_array) |*ptr| {
                 ptr.* = 0;
@@ -149,6 +155,9 @@ pub const Searcher = struct {
                         INF - score,
                     },
                 ) catch {};
+                if (dp < max_depth - 3) {
+                    max_depth = dp + 3;
+                }
             } else if (score < 0 and INF + score < 50) {
                 stdout.print(
                     "info depth {} seldepth {} nodes {} time {} score mate -{} pv",
@@ -160,6 +169,9 @@ pub const Searcher = struct {
                         INF + score,
                     },
                 ) catch {};
+                if (dp < max_depth - 8) {
+                    max_depth = dp + 8;
+                }
             } else {
                 stdout.print(
                     "info depth {} seldepth {} nodes {} time {} score cp {} pv",
@@ -210,6 +222,10 @@ pub const Searcher = struct {
         }
 
         if (self.halfmoves >= 100) {
+            return DRAW;
+        }
+
+        if (Eval.is_material_drawn(position)) {
             return DRAW;
         }
 
@@ -407,18 +423,12 @@ pub const Searcher = struct {
             return TIME_UP;
         }
 
-        // Static eval
-        var stand_pat = HCE.evaluate(position);
-        if (position.turn == Piece.Color.Black) {
-            stand_pat *= -1;
+        if (Eval.is_material_drawn(position)) {
+            return DRAW;
         }
-        if (std.math.absInt(stand_pat) catch 0 <= 800) {
-            var bucket = @minimum(@divFloor(position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
-            self.nnue.evaluate(position.turn, bucket);
 
-            var nn = @truncate(i16, self.nnue.result[bucket]);
-            stand_pat = nn;
-        }
+        // Static eval
+        var stand_pat = Eval.evaluate(position, &self.nnue);
 
         // *** Static evaluation pruning ***
         if (stand_pat >= beta) {
