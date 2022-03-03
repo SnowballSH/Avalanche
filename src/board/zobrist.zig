@@ -1,11 +1,20 @@
 const Piece = @import("./piece.zig");
 
-fn rand_u64(seed: *u64) u64 {
-    seed.* ^= seed.* >> 12;
-    seed.* ^= seed.* << 25;
-    seed.* ^= seed.* >> 27;
+fn rand_u32(seed: *u32) u32 {
+    seed.* ^= seed.* << 13;
+    seed.* ^= seed.* >> 17;
+    seed.* ^= seed.* << 5;
 
-    return seed.* *% 2685821657736338717;
+    return seed.*;
+}
+
+fn rand_u64(seed: *u32) u64 {
+    var n1 = @as(u64, rand_u32(seed) & 0xFFFF);
+    var n2 = @as(u64, rand_u32(seed) & 0xFFFF);
+    var n3 = @as(u64, rand_u32(seed) & 0xFFFF);
+    var n4 = @as(u64, rand_u32(seed) & 0xFFFF);
+
+    return n1 | (n2 << 16) | (n3 << 32) | (n4 << 48);
 }
 
 pub var ZobristKeys: [12][64]u64 = undefined;
@@ -14,7 +23,7 @@ pub var ZobristEpKeys: [8]u64 = undefined;
 pub var ZobristTurn: u64 = 0;
 
 pub fn init_zobrist() void {
-    var seed: u64 = 1070372;
+    var seed: u32 = 1804289383;
 
     var piece = @enumToInt(Piece.Piece.WhitePawn);
     while (piece <= @enumToInt(Piece.Piece.BlackKing)) {

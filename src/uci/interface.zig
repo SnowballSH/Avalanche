@@ -10,10 +10,14 @@ const NNUE = @import("../evaluation/nnue.zig");
 
 pub const UciInterface = struct {
     position: Position.Position,
+    search_thread: ?std.Thread,
+    searcher: Search.Searcher,
 
     pub fn new() UciInterface {
         return UciInterface{
             .position = Position.new_position_by_fen(Position.STARTPOS),
+            .search_thread = null,
+            .searcher = Search.Searcher.new_searcher(),
         };
     }
 
@@ -23,7 +27,7 @@ pub const UciInterface = struct {
         var command_arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer command_arena.deinit();
 
-        var searcher = Search.Searcher.new_searcher();
+        self.searcher = Search.Searcher.new_searcher();
 
         _ = try stdout.writeAll("Avalanche 0.2 by SnowballSH\n");
 
@@ -36,12 +40,20 @@ pub const UciInterface = struct {
             if (line == null) {
                 break;
             }
-            defer command_arena.allocator().free(line.?);
 
             var tokens = std.mem.split(u8, line.?, " ");
             var token = tokens.next();
             if (token == null) {
                 break;
+            }
+
+            if (std.mem.eql(u8, token.?, "stop")) {
+                self.searcher.stop = true;
+                self.searcher.is_searching = false;
+            }
+
+            if (self.searcher.is_searching) {
+                continue;
             }
 
             if (std.mem.eql(u8, token.?, "quit")) {
@@ -78,9 +90,9 @@ pub const UciInterface = struct {
                 if (token != null) {
                     var depth = std.fmt.parseUnsigned(u8, token.?, 10) catch 1;
                     depth = std.math.max(depth, 1);
-                    searcher.max_nano = null;
-                    searcher.nodes = 0;
-                    var score = -searcher.negamax(&self.position, -Search.INF, Search.INF, depth);
+                    self.searcher.max_nano = null;
+                    self.searcher.nodes = 0;
+                    var score = -self.searcher.negamax(&self.position, -Search.INF, Search.INF, depth);
                     if (self.position.turn == Piece.Color.Black) {
                         score = -score;
                     }
@@ -117,16 +129,28 @@ pub const UciInterface = struct {
                         movetime.? *= std.time.ns_per_ms;
                     }
                 }
-                searcher.iterative_deepening(&self.position, movetime.?);
+
+                self.searcher.stop = false;
+
+                self.search_thread = std.Thread.spawn(
+                    .{},
+                    start_search,
+                    .{ &self.searcher, &self.position, movetime.? },
+                ) catch |e| {
+                    std.debug.panic("Oh no, error!\n{}", .{e});
+                    unreachable;
+                };
+
+                self.search_thread.?.detach();
             } else if (std.mem.eql(u8, token.?, "position")) {
                 token = tokens.next();
                 if (token != null) {
-                    searcher.halfmoves = 0;
+                    self.searcher.halfmoves = 0;
 
                     if (std.mem.eql(u8, token.?, "startpos")) {
                         self.position.deinit();
                         self.position = Position.new_position_by_fen(Position.STARTPOS);
-                        searcher.nnue.refresh_accumulator(&self.position);
+                        self.searcher.nnue.refresh_accumulator(&self.position);
 
                         token = tokens.next();
                         if (token != null) {
@@ -144,14 +168,14 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    self.position.make_move(move.?, &searcher.nnue);
+                                    self.position.make_move(move.?, &self.searcher.nnue);
                                     if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
-                                        searcher.halfmoves = 0;
+                                        self.searcher.halfmoves = 0;
                                     } else {
-                                        searcher.halfmoves += 1;
+                                        self.searcher.halfmoves += 1;
                                     }
 
-                                    searcher.hash_history.append(self.position.hash) catch {};
+                                    self.searcher.hash_history.append(self.position.hash) catch {};
                                 }
                             }
                         }
@@ -161,7 +185,7 @@ pub const UciInterface = struct {
                         var fen = tokens.next();
                         if (fen != null) {
                             self.position = Position.new_position_by_fen(fen.?);
-                            searcher.nnue.refresh_accumulator(&self.position);
+                            self.searcher.nnue.refresh_accumulator(&self.position);
 
                             var afterfen = tokens.next();
                             if (afterfen != null) {
@@ -179,20 +203,26 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    self.position.make_move(move.?, &searcher.nnue);
+                                    self.position.make_move(move.?, &self.searcher.nnue);
                                     if (Encode.capture(move.?) != 0 or Encode.pt(move.?) % 6 == 0) {
-                                        searcher.halfmoves = 0;
+                                        self.searcher.halfmoves = 0;
                                     } else {
-                                        searcher.halfmoves += 1;
+                                        self.searcher.halfmoves += 1;
                                     }
 
-                                    searcher.hash_history.append(self.position.hash) catch {};
+                                    self.searcher.hash_history.append(self.position.hash) catch {};
                                 }
                             }
                         }
                     }
                 }
             }
+
+            command_arena.allocator().free(line.?);
         }
     }
 };
+
+fn start_search(searcher: *Search.Searcher, position: *Position.Position, movetime: usize) void {
+    searcher.iterative_deepening(position, movetime);
+}

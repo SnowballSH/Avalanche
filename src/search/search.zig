@@ -37,6 +37,10 @@ pub const Searcher = struct {
     timer: std.time.Timer,
     max_nano: ?u64,
     seldepth: u8,
+    is_searching: bool,
+
+    // communication
+    stop: bool,
 
     // game
     hash_history: std.ArrayList(u64),
@@ -61,6 +65,9 @@ pub const Searcher = struct {
             .timer = undefined,
             .max_nano = null,
             .seldepth = 0,
+            .is_searching = false,
+
+            .stop = false,
 
             .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
             .halfmoves = 0,
@@ -104,6 +111,9 @@ pub const Searcher = struct {
         }
         self.max_nano.? -= 20;
 
+        self.is_searching = true;
+        defer self.is_searching = false;
+
         for (self.killers) |*k| {
             for (k) |*p| {
                 p.* = 0;
@@ -136,16 +146,21 @@ pub const Searcher = struct {
         self.nnue.refresh_accumulator(position);
 
         var dp: u8 = 1;
+        var score: i16 = 0;
         while (dp <= max_depth) {
             self.seldepth = 0;
             for (self.pv_array) |*ptr| {
                 ptr.* = 0;
             }
 
-            var score: i16 = self.negamax(position, alpha, beta, dp);
-            if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+            var score_ = self.negamax(position, alpha, beta, dp);
+            if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+                if (dp != 1) {
+                    dp -= 1;
+                }
                 break;
             }
+            score = score_;
 
             if (score > 0 and INF - score < 50) {
                 stdout.print(
@@ -203,6 +218,49 @@ pub const Searcher = struct {
             bestmove = self.pv_array[0];
         }
 
+        if (score > 0 and INF - score < 50) {
+            stdout.print(
+                "info depth {} seldepth {} nodes {} time {} score mate {}",
+                .{
+                    dp,
+                    self.seldepth,
+                    self.nodes,
+                    self.timer.read() / std.time.ns_per_ms,
+                    INF - score,
+                },
+            ) catch {};
+            if (dp < max_depth - 3) {
+                max_depth = dp + 3;
+            }
+        } else if (score < 0 and INF + score < 50) {
+            stdout.print(
+                "info depth {} seldepth {} nodes {} time {} score mate -{}",
+                .{
+                    dp,
+                    self.seldepth,
+                    self.nodes,
+                    self.timer.read() / std.time.ns_per_ms,
+                    INF + score,
+                },
+            ) catch {};
+            if (dp < max_depth - 8) {
+                max_depth = dp + 8;
+            }
+        } else {
+            stdout.print(
+                "info depth {} seldepth {} nodes {} time {} score cp {}",
+                .{
+                    dp,
+                    self.seldepth,
+                    self.nodes,
+                    self.timer.read() / std.time.ns_per_ms,
+                    score,
+                },
+            ) catch {};
+        }
+
+        stdout.writeByte('\n') catch {};
+
         stdout.print("bestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
         GlobalTT.reset();
@@ -214,11 +272,15 @@ pub const Searcher = struct {
         var beta = beta_;
         var depth = depth_;
 
-        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
             return TIME_UP;
         }
 
         self.nodes += 1;
+
+        if (self.ply == MAX_PLY) {
+            return Eval.evaluate(position, &self.nnue);
+        }
 
         if (self.ply > self.seldepth) {
             self.seldepth = self.ply;
@@ -238,42 +300,40 @@ pub const Searcher = struct {
         defer self.pv_index = old_pv_index;
         self.pv_index += MAX_PLY - self.ply;
 
+        if (std.mem.len(self.hash_history.items) > 1) {
+            var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
+            var limit: i16 = index - self.halfmoves - 1;
+            var count: u8 = 0;
+            while (index >= limit and index >= 0) {
+                if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
+                    count += 1;
+                }
+                if (count >= 2) {
+                    return DRAW;
+                }
+                index -= 2;
+            }
+        }
+
         var in_check = position.is_king_checked_for(position.turn);
 
-        if (!in_check) {
-            if (std.mem.len(self.hash_history.items) > 1) {
-                var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
-                var limit: i16 = index - self.halfmoves - 1;
-                var count: u8 = 0;
-                while (index >= limit and index >= 0) {
-                    if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
-                        count += 1;
+        if (!in_check and depth <= 127) {
+            var entry = GlobalTT.probe(position.hash);
+
+            if (entry != null) {
+                if (entry.?.depth >= depth) {
+                    self.pv_array[old_pv_index] = entry.?.bm;
+
+                    if (entry.?.flag == TT.TTFlag.Exact) {
+                        return entry.?.score;
+                    } else if (entry.?.flag == TT.TTFlag.Lower) {
+                        alpha = std.math.max(alpha, entry.?.score);
+                    } else {
+                        beta = std.math.max(beta, entry.?.score);
                     }
-                    if (count >= 2) {
-                        return DRAW;
-                    }
-                    index -= 2;
-                }
-            }
 
-            if (depth <= 127) {
-                var entry = GlobalTT.probe(position.hash);
-
-                if (entry != null) {
-                    if (entry.?.depth >= depth) {
-                        self.pv_array[old_pv_index] = entry.?.bm;
-
-                        if (entry.?.flag == TT.TTFlag.Exact) {
-                            return entry.?.score;
-                        } else if (entry.?.flag == TT.TTFlag.Lower) {
-                            alpha = std.math.max(alpha, entry.?.score);
-                        } else {
-                            beta = std.math.max(beta, entry.?.score);
-                        }
-
-                        if (alpha >= beta) {
-                            return entry.?.score;
-                        }
+                    if (alpha >= beta) {
+                        return entry.?.score;
                     }
                 }
             }
@@ -289,7 +349,7 @@ pub const Searcher = struct {
             depth += 1;
         }
 
-        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
             return TIME_UP;
         }
 
@@ -336,7 +396,7 @@ pub const Searcher = struct {
             }
         }
 
-        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
             return TIME_UP;
         }
 
@@ -413,7 +473,7 @@ pub const Searcher = struct {
             _ = self.hash_history.pop();
             self.ply -= 1;
 
-            if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+            if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
                 return TIME_UP;
             }
 
@@ -467,14 +527,14 @@ pub const Searcher = struct {
         }
 
         if (depth <= 127) {
-            var flag = if (alpha <= alpha_)
+            var flag = if (bs <= alpha_)
                 TT.TTFlag.Upper
-            else if (alpha >= beta)
+            else if (bs >= beta)
                 TT.TTFlag.Lower
             else
                 TT.TTFlag.Exact;
 
-            GlobalTT.insert(position.hash, @intCast(u8, depth), alpha, flag, bm);
+            GlobalTT.insert(position.hash, @intCast(u8, depth), bs, flag, bm);
         }
 
         return alpha;
@@ -485,7 +545,7 @@ pub const Searcher = struct {
         var alpha = alpha_;
         var beta = beta_;
 
-        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
             return TIME_UP;
         }
 
@@ -506,11 +566,11 @@ pub const Searcher = struct {
         }
 
         // we don't want to overflow plies...
-        if (self.ply >= MAX_PLY) {
+        if (self.ply == MAX_PLY) {
             return stand_pat;
         }
 
-        if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
             return TIME_UP;
         }
 
@@ -521,40 +581,20 @@ pub const Searcher = struct {
         var count: usize = 0;
         var length = std.mem.len(moves.items);
 
-        var oi = Ordering.OrderInfo{
-            .pos = position,
-            .searcher = self,
-        };
+        std.sort.sort(
+            u24,
+            moves.items,
+            Ordering.OrderInfo{
+                .pos = position,
+                .searcher = self,
+            },
+            Ordering.order,
+        );
 
-        var pre_sort = length <= 8;
-
-        if (pre_sort) {
-            std.sort.sort(
-                u24,
-                moves.items,
-                Ordering.OrderInfo{
-                    .pos = position,
-                    .searcher = self,
-                },
-                Ordering.order,
-            );
-        }
+        var bm: u24 = 0;
+        var bs: i16 = -INF;
 
         while (count < length) {
-            // dynamic bubble sort
-            if (!pre_sort) {
-                var index = count + 1;
-                var best: i16 = Ordering.score_move(moves.items[count], oi);
-                while (index < length) {
-                    var s = Ordering.score_move(moves.items[index], oi);
-                    if (best < s) {
-                        best = s;
-                        std.mem.swap(u24, &moves.items[count], &moves.items[index]);
-                    }
-                    index += 1;
-                }
-            }
-
             var m = moves.items[count];
 
             count += 1;
@@ -572,18 +612,23 @@ pub const Searcher = struct {
             position.undo_move(m, &self.nnue);
             self.ply -= 1;
 
-            if (self.max_nano != null and self.timer.read() >= self.max_nano.?) {
+            if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
                 return TIME_UP;
             }
 
             // *** Alpha-beta pruning ***
 
+            if (score > bs) {
+                bs = score;
+            }
             // fail hard
             if (score >= beta) {
                 return beta;
             }
             // better move
             if (score > alpha) {
+                bm = m;
+                bs = score;
                 alpha = score;
             }
         }
