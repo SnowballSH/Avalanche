@@ -11,8 +11,12 @@ If the weights.zig for current net already exists (rebuild), `zig build -Dreleas
 
 ## Changelog
 
-- ### v0.2: [DEV] Search  (+150 ELO)
+- ### v0.2: [DEV] Search  (+200 ELO)
     - History heuristics, killer heuristics
+    - Better LMR
+    - Reversed Futility Pruning
+    - Null Move Pruning
+    - Razoring
     - Stronger NNUE network
         - Trained on human games on https://database.lichess.org/ and engine games.
         - 728 -> dense -> 256 -> clipped_relu -> 256 -> dense -> 8 + PSQT

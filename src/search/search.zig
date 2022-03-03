@@ -100,7 +100,7 @@ pub const Searcher = struct {
         }
     }
 
-    pub fn iterative_deepening(self: *Searcher, position: *Position.Position, movetime_nano: usize) void {
+    pub fn iterative_deepening(self: *Searcher, position: *Position.Position, movetime_nano: usize, force_max_depth: ?u8) void {
         const stdout = std.io.getStdOut().writer();
         self.timer = std.time.Timer.start() catch undefined;
         self.nodes = 0;
@@ -143,6 +143,10 @@ pub const Searcher = struct {
             max_depth = 2;
         }
 
+        if (force_max_depth != null) {
+            max_depth = @minimum(force_max_depth.?, max_depth);
+        }
+
         self.nnue.refresh_accumulator(position);
 
         var dp: u8 = 1;
@@ -155,9 +159,6 @@ pub const Searcher = struct {
 
             var score_ = self.negamax(position, alpha, beta, dp);
             if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
-                if (dp != 1) {
-                    dp -= 1;
-                }
                 break;
             }
             score = score_;
@@ -217,6 +218,8 @@ pub const Searcher = struct {
 
             bestmove = self.pv_array[0];
         }
+
+        dp -= 1;
 
         if (score > 0 and INF - score < 50) {
             stdout.print(

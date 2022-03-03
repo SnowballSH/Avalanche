@@ -113,10 +113,17 @@ pub const UciInterface = struct {
                 _ = Perft.perft_root(&self.position, depth) catch unreachable;
             } else if (std.mem.eql(u8, token.?, "go")) {
                 var movetime: ?u64 = 10 * std.time.ns_per_s;
+                var max_depth: ?u8 = null;
                 while (true) {
                     token = tokens.next();
                     if (token == null) {
                         break;
+                    }
+                    if (std.mem.eql(u8, token.?, "infinite")) {
+                        movetime = 1 << 63;
+                    }
+                    if (std.mem.eql(u8, token.?, "depth")) {
+                        max_depth = std.fmt.parseUnsigned(u8, tokens.next().?, 10) catch null;
                     }
                     if (std.mem.eql(u8, token.?, "movetime")) {
                         token = tokens.next();
@@ -135,7 +142,7 @@ pub const UciInterface = struct {
                 self.search_thread = std.Thread.spawn(
                     .{},
                     start_search,
-                    .{ &self.searcher, &self.position, movetime.? },
+                    .{ &self.searcher, &self.position, movetime.?, max_depth },
                 ) catch |e| {
                     std.debug.panic("Oh no, error!\n{}", .{e});
                     unreachable;
@@ -223,6 +230,6 @@ pub const UciInterface = struct {
     }
 };
 
-fn start_search(searcher: *Search.Searcher, position: *Position.Position, movetime: usize) void {
-    searcher.iterative_deepening(position, movetime);
+fn start_search(searcher: *Search.Searcher, position: *Position.Position, movetime: usize, max_depth: ?u8) void {
+    searcher.iterative_deepening(position, movetime, max_depth);
 }
