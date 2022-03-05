@@ -12,5 +12,6 @@
 
 # Private for now
 nnue/**/*
+nets/data.nnue
 # Built with zig build -- nnue
 src/weights.zig

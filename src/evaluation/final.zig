@@ -49,12 +49,20 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE) i16 {
     if (pos.turn == Piece.Color.Black) {
         stand_pat *= -1;
     }
-    if (std.math.absInt(stand_pat) catch 0 <= 800) {
+    if (std.math.absInt(stand_pat) catch 0 <= 1000) {
         var bucket = @minimum(@divFloor(pos.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
         nnue.evaluate(pos.turn, bucket);
 
         var nn = @truncate(i16, nnue.result[bucket]);
-        stand_pat = @divFloor(stand_pat + nn * 3, 4);
+        if (stand_pat <= 300) {
+            stand_pat = nn;
+        } else if (stand_pat <= 400) {
+            stand_pat = @divFloor(stand_pat + nn * 3, 4);
+        } else if (stand_pat <= 700) {
+            stand_pat = @divFloor(stand_pat + nn, 2);
+        } else {
+            stand_pat = @divFloor(stand_pat * 3 + nn, 4);
+        }
     }
 
     return stand_pat;

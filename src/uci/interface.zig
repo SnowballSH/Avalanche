@@ -34,9 +34,11 @@ pub const UciInterface = struct {
         self.position = Position.new_position_by_fen(Position.STARTPOS);
         defer self.position.deinit();
 
+        var arch = NNUE.NNUE.new();
+
         out: while (true) {
-            // The command will probably be less than 1024 characters
-            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 1024);
+            // The command will probably be less than 8192 characters
+            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 8192);
             if (line == null) {
                 break;
             }
@@ -67,23 +69,33 @@ pub const UciInterface = struct {
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.display();
             } else if (std.mem.eql(u8, token.?, "nnue")) {
-                var arch = NNUE.NNUE.new();
                 arch.re_evaluate(&self.position);
                 var bucket = @minimum(@divFloor(self.position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
-                _ = try stdout.writeAll("Bucket | PSQT  | Layer | Final\n");
+                _ = try stdout.writeAll("Bucket | PSQT  | Layer | Final (White Perspective)\n");
                 for (arch.result) |val, idx| {
                     var score = val;
-                    if (self.position.turn == Piece.Color.Black) {
-                        score = -score;
-                    }
 
                     var psqt = @divFloor(arch.residual[@enumToInt(self.position.turn)][idx], 64);
+                    if (self.position.turn == Piece.Color.Black) {
+                        psqt = -psqt;
+                        score = -score;
+                    }
 
                     if (idx == bucket) {
                         _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}  <-- this bucket is used\n", .{ idx, psqt, score - psqt, score });
                     } else {
                         _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}\n", .{ idx, psqt, score - psqt, score });
                     }
+                }
+            } else if (std.mem.eql(u8, token.?, "nnue_plain")) {
+                arch.re_evaluate(&self.position);
+                for (arch.result) |val| {
+                    var score = val;
+                    if (self.position.turn == Piece.Color.Black) {
+                        score = -score;
+                    }
+
+                    _ = try stdout.print("{}\n", .{score});
                 }
             } else if (std.mem.eql(u8, token.?, "eval")) {
                 token = tokens.next();
@@ -140,7 +152,7 @@ pub const UciInterface = struct {
                 self.searcher.stop = false;
 
                 self.search_thread = std.Thread.spawn(
-                    .{},
+                    .{ .stack_size = 64 * 1024 * 1024 },
                     start_search,
                     .{ &self.searcher, &self.position, movetime.?, max_depth },
                 ) catch |e| {

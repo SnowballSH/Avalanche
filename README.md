@@ -19,7 +19,7 @@ If the weights.zig for current net already exists (rebuild), `zig build -Dreleas
     - Razoring
     - Stronger NNUE network
         - Trained on human games on https://database.lichess.org/ and engine games.
-        - 728 -> dense -> 256 -> clipped_relu -> 256 -> dense -> 8 + PSQT
+        - 728 -> dense -> 256 -> clipped_relu -> 256 -> dense -> 1 + PSQT
 
 - ### v0.1: NNUE  (+275-375 ELO)
     - Efficiently Updatable Neural Network trained on top-level engine tournaments

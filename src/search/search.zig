@@ -454,10 +454,14 @@ pub const Searcher = struct {
             // LMR
             var lmr_depth: i16 = 0;
 
-            if (depth >= 2 and legals >= 3 and m != self.pv_array[self.ply - 1] and is_quiet) {
+            if (depth >= 2 and legals >= 4 and m != self.pv_array[self.ply - 1] and is_quiet) {
                 // TODO include captures after implementing SEE
 
-                lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
+                if (is_quiet) {
+                    lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
+                } else {
+                    lmr_depth = LMR.NoisyLMR[@minimum(31, depth)][@minimum(31, legals)];
+                }
                 if (in_check) {
                     lmr_depth -= 1;
                 }

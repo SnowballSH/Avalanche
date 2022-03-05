@@ -22,7 +22,7 @@ pub const NoisyLMR: [32][32]i16 = init: {
     inline while (depth < 32) {
         var moves = 1;
         inline while (moves < 32) {
-            reductions[depth][moves] = @floatToInt(i16, @floor(std.math.ln(@intToFloat(f16, depth)) * std.math.ln(1.2 * @intToFloat(f16, moves)) / 3.5));
+            reductions[depth][moves] = @floatToInt(i16, @floor(std.math.ln(@intToFloat(f32, depth)) * std.math.ln(1.2 * @intToFloat(f32, moves)) / 3.5));
             moves += 1;
         }
         depth += 1;
