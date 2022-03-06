@@ -40,7 +40,7 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
     return false;
 }
 
-pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE) i16 {
+pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     if (is_material_drawn(pos)) {
         return 0;
     }
@@ -49,21 +49,19 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE) i16 {
     if (pos.turn == Piece.Color.Black) {
         stand_pat *= -1;
     }
-    if (std.math.absInt(stand_pat) catch 0 <= 1000) {
+    if (std.math.absInt(stand_pat) catch 0 <= 1400) {
         var bucket = @minimum(@divFloor(pos.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
         nnue.evaluate(pos.turn, bucket);
 
         var nn = @truncate(i16, nnue.result[bucket]);
-        if (stand_pat <= 300) {
-            stand_pat = nn;
-        } else if (stand_pat <= 400) {
-            stand_pat = @divFloor(stand_pat + nn * 3, 4);
-        } else if (stand_pat <= 700) {
-            stand_pat = @divFloor(stand_pat + nn, 2);
+        stand_pat = @divFloor(stand_pat + nn * 3, 4);
+    }
+    if (fifty > 30) {
+        if (stand_pat > 0) {
+            stand_pat = @maximum(0, stand_pat - fifty);
         } else {
-            stand_pat = @divFloor(stand_pat * 3 + nn, 4);
+            stand_pat = @minimum(0, stand_pat + fifty);
         }
     }
-
     return stand_pat;
 }

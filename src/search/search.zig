@@ -104,6 +104,7 @@ pub const Searcher = struct {
         const stdout = std.io.getStdOut().writer();
         self.timer = std.time.Timer.start() catch undefined;
         self.nodes = 0;
+        self.seldepth = 0;
 
         self.max_nano = movetime_nano;
         if (self.max_nano.? < 30) {
@@ -153,6 +154,7 @@ pub const Searcher = struct {
         var score: i16 = 0;
         while (dp <= max_depth) {
             self.seldepth = 0;
+
             for (self.pv_array) |*ptr| {
                 ptr.* = 0;
             }
@@ -281,8 +283,11 @@ pub const Searcher = struct {
 
         self.nodes += 1;
 
+        var is_root = self.ply == 0;
+        var is_pv = alpha != beta - 1;
+
         if (self.ply == MAX_PLY) {
-            return Eval.evaluate(position, &self.nnue);
+            return Eval.evaluate(position, &self.nnue, self.halfmoves);
         }
 
         if (self.ply > self.seldepth) {
@@ -303,28 +308,52 @@ pub const Searcher = struct {
         defer self.pv_index = old_pv_index;
         self.pv_index += MAX_PLY - self.ply;
 
-        if (std.mem.len(self.hash_history.items) > 1) {
-            var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
-            var limit: i16 = index - self.halfmoves - 1;
-            var count: u8 = 0;
-            while (index >= limit and index >= 0) {
-                if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
-                    count += 1;
+        if (!is_root) {
+            // Repetition
+            if (std.mem.len(self.hash_history.items) > 1) {
+                var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
+                var limit: i16 = index - self.halfmoves - 1;
+                var count: u8 = 0;
+                while (index >= limit and index >= 0) {
+                    if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
+                        count += 1;
+                    }
+                    if (count >= 2) {
+                        return DRAW;
+                    }
+                    index -= 2;
                 }
-                if (count >= 2) {
-                    return DRAW;
-                }
-                index -= 2;
+            }
+
+            // Mate-distance pruning
+            alpha = @maximum(alpha, -INF + self.ply);
+            beta = @minimum(beta, INF - self.ply - 1);
+            if (alpha >= beta) {
+                return alpha;
             }
         }
 
         var in_check = position.is_king_checked_for(position.turn);
 
-        if (!in_check and depth <= 127) {
+        if (in_check) {
+            // Check extension
+            depth += 1;
+        }
+
+        if (depth == 0) {
+            // At horizon, go to quiescence search
+            return self.quiescence_search(position, alpha, beta);
+        }
+
+        var tthit = false;
+
+        if (!is_pv and !in_check and depth <= 127) {
             var entry = GlobalTT.probe(position.hash);
 
             if (entry != null) {
                 if (entry.?.depth >= depth) {
+                    tthit = true;
+
                     self.pv_array[old_pv_index] = entry.?.bm;
 
                     if (entry.?.flag == TT.TTFlag.Exact) {
@@ -342,36 +371,30 @@ pub const Searcher = struct {
             }
         }
 
-        if (depth == 0) {
-            // At horizon, go to quiescence search
-            return self.quiescence_search(position, alpha, beta);
+        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+            return TIME_UP;
         }
 
-        if (in_check) {
-            // Check extension
-            depth += 1;
-        }
+        var eval = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
         if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
             return TIME_UP;
         }
 
-        var eval = Eval.evaluate(position, &self.nnue);
-
         // Pruning
-        var is_pruning_allowed = !in_check;
+        var is_pruning_allowed = !is_pv and !in_check;
 
         if (is_pruning_allowed) {
             // Razoring
             const RazoringMargin: i16 = 375;
-            if (depth < 2 and eval + RazoringMargin < beta) {
+            if (depth < 2 and eval + RazoringMargin < alpha) {
                 return self.quiescence_search(position, alpha, beta);
             }
 
             // Reversed futility pruning
-            const RFPMargin: i16 = 50;
+            const RFPMargin: i16 = 62;
             var reversed_futility_pruning_margin = RFPMargin * depth;
-            if (depth < 7 and eval - reversed_futility_pruning_margin >= beta) {
+            if (depth < 9 and eval - reversed_futility_pruning_margin >= beta) {
                 return eval - reversed_futility_pruning_margin;
             }
 
@@ -397,6 +420,11 @@ pub const Searcher = struct {
                     return score;
                 }
             }
+        }
+
+        var lmr_threashold: u8 = 2;
+        if (is_pv) {
+            lmr_threashold += 1;
         }
 
         if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
@@ -427,6 +455,8 @@ pub const Searcher = struct {
             var m = moves.items[count];
             count += 1;
 
+            // MAKE MOVES
+
             position.make_move(m, &self.nnue);
 
             // illegal?
@@ -451,29 +481,39 @@ pub const Searcher = struct {
             var is_quiet = Encode.capture(m) == 0;
             var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
-            // LMR
             var lmr_depth: i16 = 0;
 
-            if (depth >= 2 and legals >= 4 and m != self.pv_array[self.ply - 1] and is_quiet) {
-                // TODO include captures after implementing SEE
-
-                if (is_quiet) {
+            // Reductions / Prunings
+            if (bs > -INF) {
+                // LMR
+                if (depth > 2 and legals >= lmr_threashold and m != self.pv_array[self.ply - 1] and is_quiet) {
                     lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
-                } else {
-                    lmr_depth = LMR.NoisyLMR[@minimum(31, depth)][@minimum(31, legals)];
-                }
-                if (in_check) {
-                    lmr_depth -= 1;
-                }
-                if (is_killer) {
-                    lmr_depth -= 1;
-                }
 
-                lmr_depth = @minimum(depth - 2, @maximum(1, lmr_depth));
+                    if (in_check) {
+                        lmr_depth -= 1;
+                    }
+                    if (is_killer) {
+                        lmr_depth -= 1;
+                    }
+                    if (is_pv) {
+                        lmr_depth -= 1;
+                    }
+
+                    lmr_depth = @minimum(depth - 2, @maximum(1, lmr_depth));
+                }
             }
 
-            // recursive call to negamax
-            var score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+            var score: i16 = 0;
+
+            // PVS
+            if (legals == 1) {
+                score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+            } else {
+                score = -self.negamax(position, -alpha - 1, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+                if (score > alpha and score < beta) {
+                    score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+                }
+            }
 
             position.undo_move(m, &self.nnue);
             self.halfmoves = self.hm_stack.pop();
@@ -561,7 +601,7 @@ pub const Searcher = struct {
         }
 
         // Static eval
-        var stand_pat = Eval.evaluate(position, &self.nnue);
+        var stand_pat = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
         // *** Static evaluation pruning ***
         if (stand_pat >= beta) {
