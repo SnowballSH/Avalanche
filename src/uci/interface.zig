@@ -124,7 +124,7 @@ pub const UciInterface = struct {
 
                 _ = Perft.perft_root(&self.position, depth) catch unreachable;
             } else if (std.mem.eql(u8, token.?, "go")) {
-                var movetime: ?u64 = 10 * std.time.ns_per_s;
+                var movetime: ?u64 = null;
                 var max_depth: ?u8 = null;
                 while (true) {
                     token = tokens.next();
@@ -133,9 +133,12 @@ pub const UciInterface = struct {
                     }
                     if (std.mem.eql(u8, token.?, "infinite")) {
                         movetime = 1 << 63;
+                        movetime.? /= std.time.ns_per_ms;
+                        break;
                     }
                     if (std.mem.eql(u8, token.?, "depth")) {
                         max_depth = std.fmt.parseUnsigned(u8, tokens.next().?, 10) catch null;
+                        break;
                     }
                     if (std.mem.eql(u8, token.?, "movetime")) {
                         token = tokens.next();
@@ -144,9 +147,109 @@ pub const UciInterface = struct {
                         }
 
                         movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
-                        movetime.? = std.math.max(movetime.? - 50, 10);
-                        movetime.? *= std.time.ns_per_ms;
+                        movetime = std.math.max(movetime.? - 10, 10);
+
+                        break;
                     }
+
+                    if (std.mem.eql(u8, token.?, "wtime")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        if (self.position.turn == Piece.Color.White) {
+                            if (movetime == null) {
+                                movetime = 0;
+                            }
+
+                            var t = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                            var phase = self.position.phase();
+
+                            if (phase >= 21) {
+                                // Opening
+                                t /= 50;
+                            } else if (phase >= 15) {
+                                // Middle game
+                                t /= 20;
+                            } else if (phase >= 6) {
+                                // Middle-end game
+                                t /= 30;
+                            } else {
+                                // Endgame
+                                t /= 50;
+                            }
+
+                            movetime.? += t;
+                        }
+                    } else if (std.mem.eql(u8, token.?, "btime")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        if (self.position.turn == Piece.Color.Black) {
+                            if (movetime == null) {
+                                movetime = 0;
+                            }
+
+                            var t = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                            var phase = self.position.phase();
+
+                            if (phase >= 21) {
+                                // Opening
+                                t /= 50;
+                            } else if (phase >= 15) {
+                                // Middle game
+                                t /= 20;
+                            } else if (phase >= 6) {
+                                // Middle-end game
+                                t /= 30;
+                            } else {
+                                // Endgame
+                                t /= 35;
+                            }
+
+                            movetime.? += t;
+                        }
+                    } else if (std.mem.eql(u8, token.?, "winc")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        if (self.position.turn == Piece.Color.White) {
+                            if (movetime == null) {
+                                movetime = 0;
+                            }
+                            movetime.? += std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                        }
+                    } else if (std.mem.eql(u8, token.?, "binc")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        if (self.position.turn == Piece.Color.Black) {
+                            if (movetime == null) {
+                                movetime = 0;
+                            }
+                            movetime.? += std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                        }
+                    }
+                }
+
+                if (movetime != null) {
+                    if (movetime.? > 50) {
+                        movetime.? -= 8;
+                    } else if (movetime.? > 10) {
+                        movetime.? -= 2;
+                    } else {
+                        movetime = 3;
+                    }
+                    movetime.? *= std.time.ns_per_ms;
+                } else {
+                    movetime = 10000 * std.time.ns_per_ms;
                 }
 
                 self.searcher.stop = false;
