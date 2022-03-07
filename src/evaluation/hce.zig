@@ -210,5 +210,13 @@ pub fn evaluate(position: *Position.Position) i16 {
         score -= BISHOP_PAIR;
     }
 
+    if (position.turn == Piece.Color.White) {
+        if (position.phase() <= 12) {
+            score += 30;
+        } else {
+            score += 15;
+        }
+    }
+
     return score;
 }
