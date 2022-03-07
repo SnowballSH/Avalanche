@@ -168,16 +168,16 @@ pub const UciInterface = struct {
 
                             if (phase >= 21) {
                                 // Opening
-                                t /= 50;
+                                t /= 40;
                             } else if (phase >= 15) {
                                 // Middle game
-                                t /= 20;
+                                t /= 18;
                             } else if (phase >= 6) {
                                 // Middle-end game
-                                t /= 30;
+                                t /= 25;
                             } else {
                                 // Endgame
-                                t /= 50;
+                                t /= 20;
                             }
 
                             movetime.? += t;
@@ -198,16 +198,16 @@ pub const UciInterface = struct {
 
                             if (phase >= 21) {
                                 // Opening
-                                t /= 50;
+                                t /= 40;
                             } else if (phase >= 15) {
                                 // Middle game
-                                t /= 20;
+                                t /= 18;
                             } else if (phase >= 6) {
                                 // Middle-end game
-                                t /= 30;
+                                t /= 25;
                             } else {
                                 // Endgame
-                                t /= 35;
+                                t /= 20;
                             }
 
                             movetime.? += t;
