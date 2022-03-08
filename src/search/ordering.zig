@@ -9,6 +9,7 @@ const std = @import("std");
 pub const OrderInfo = struct {
     pos: *Position.Position,
     searcher: *Search.Searcher,
+    old_pv: u24,
 };
 
 pub fn order(info: OrderInfo, lhs: u24, rhs: u24) bool {
@@ -28,27 +29,31 @@ const MVV_LVA: [6][6]i16 = .{
 pub fn score_move(move: u24, info: OrderInfo) i16 {
     var pos = info.pos;
 
+    if (info.old_pv == move) {
+        return 15000;
+    }
+
     var score: i16 = 0;
     var ts = Position.fen_sq_to_sq(Encode.target(move));
     var pt = Encode.pt(move);
 
     if (Encode.capture(move) != 0) {
         // Captures first!
-        score += 6000;
+        score += 7000;
 
         var captured = @enumToInt(pos.mailbox[ts].?);
         score += MVV_LVA[pt % 6][captured % 6];
     } else {
         if (info.searcher.killers[0][info.searcher.ply] == move) {
-            score += 2500;
+            score += 4000;
         } else if (info.searcher.killers[1][info.searcher.ply] == move) {
-            score += 2000;
+            score += 2500;
         } else {
             score += @intCast(i16, info.searcher.history[Encode.source(move)][Encode.target(move)]);
         }
 
         if (Encode.castling(move) != 0) {
-            score += 500;
+            score += 400;
         }
     }
 

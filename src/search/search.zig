@@ -154,11 +154,6 @@ pub const Searcher = struct {
         var score: i16 = 0;
         while (dp <= max_depth) {
             self.seldepth = 0;
-
-            for (self.pv_array) |*ptr| {
-                ptr.* = 0;
-            }
-
             var score_ = self.negamax(position, alpha, beta, dp);
             if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
                 break;
@@ -302,7 +297,7 @@ pub const Searcher = struct {
             return DRAW;
         }
 
-        // set up PV
+        var old_pv = self.pv_array[self.pv_index];
         self.pv_array[self.pv_index] = 0;
         const old_pv_index = self.pv_index;
         defer self.pv_index = old_pv_index;
@@ -324,7 +319,9 @@ pub const Searcher = struct {
                     index -= 2;
                 }
             }
+        }
 
+        if (!is_root) {
             // Mate-distance pruning
             alpha = @maximum(alpha, -INF + self.ply);
             beta = @minimum(beta, INF - self.ply - 1);
@@ -399,7 +396,7 @@ pub const Searcher = struct {
             }
 
             // Null move pruning
-            var is_null_move_allowed = position.phase() >= 6 and !self.in_null;
+            var is_null_move_allowed = !self.in_null and position.phase() >= 5;
             if (is_null_move_allowed and depth >= 2 and eval > beta) {
                 var r = 4 + @minimum(depth / 4, 3);
                 if (eval > beta + 95) {
@@ -441,6 +438,7 @@ pub const Searcher = struct {
             Ordering.OrderInfo{
                 .pos = position,
                 .searcher = self,
+                .old_pv = old_pv,
             },
             Ordering.order,
         );
@@ -634,6 +632,7 @@ pub const Searcher = struct {
             Ordering.OrderInfo{
                 .pos = position,
                 .searcher = self,
+                .old_pv = 0,
             },
             Ordering.order,
         );

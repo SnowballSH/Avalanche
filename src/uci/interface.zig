@@ -156,6 +156,9 @@ pub const UciInterface = struct {
             } else if (std.mem.eql(u8, token.?, "go")) {
                 var movetime: ?u64 = null;
                 var max_depth: ?u8 = null;
+                var mytime: ?u64 = null;
+                var myinc: ?u64 = null;
+                var movestogo: ?u64 = null;
                 while (true) {
                     token = tokens.next();
                     if (token == null) {
@@ -193,24 +196,13 @@ pub const UciInterface = struct {
                                 movetime = 0;
                             }
 
-                            var t = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
-                            var phase = self.position.phase();
-
-                            if (phase >= 21) {
-                                // Opening
-                                t /= 40;
-                            } else if (phase >= 15) {
-                                // Middle game
-                                t /= 20;
-                            } else if (phase >= 6) {
-                                // Middle-end game
-                                t /= 25;
-                            } else {
-                                // Endgame
-                                t /= 30;
+                            var mt = std.fmt.parseInt(i64, token.?, 10) catch 0;
+                            if (mt <= 0) {
+                                mt = 1;
                             }
+                            var t = @intCast(u64, mt);
 
-                            movetime.? += t;
+                            mytime = t;
                         }
                     } else if (std.mem.eql(u8, token.?, "btime")) {
                         token = tokens.next();
@@ -223,7 +215,62 @@ pub const UciInterface = struct {
                                 movetime = 0;
                             }
 
-                            var t = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                            var mt = std.fmt.parseInt(i64, token.?, 10) catch 0;
+                            if (mt <= 0) {
+                                mt = 1;
+                            }
+                            var t = @intCast(u64, mt);
+
+                            mytime = t;
+                        }
+                    } else if (std.mem.eql(u8, token.?, "winc")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        if (self.position.turn == Piece.Color.White) {
+                            if (movetime == null) {
+                                movetime = 0;
+                            }
+                            myinc = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                        }
+                    } else if (std.mem.eql(u8, token.?, "binc")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        if (self.position.turn == Piece.Color.Black) {
+                            if (movetime == null) {
+                                movetime = 0;
+                            }
+                            myinc = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                        }
+                    } else if (std.mem.eql(u8, token.?, "movestogo")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        movestogo = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
+                        if (movestogo != null and movestogo.? == 0) {
+                            movestogo = null;
+                        }
+                    }
+                }
+
+                if (movetime != null) {
+                    if (mytime != null) {
+                        if (myinc != null) {
+                            if (mytime.? > myinc.? + 10) {
+                                movetime.? += myinc.?;
+                            }
+                        }
+
+                        var t = mytime.?;
+                        if (movestogo != null and movestogo.? <= 30 and movestogo.? >= 1) {
+                            t /= movestogo.? + 1;
+                        } else {
                             var phase = self.position.phase();
 
                             if (phase >= 21) {
@@ -239,37 +286,10 @@ pub const UciInterface = struct {
                                 // Endgame
                                 t /= 30;
                             }
-
-                            movetime.? += t;
                         }
-                    } else if (std.mem.eql(u8, token.?, "winc")) {
-                        token = tokens.next();
-                        if (token == null) {
-                            break;
-                        }
-
-                        if (self.position.turn == Piece.Color.White) {
-                            if (movetime == null) {
-                                movetime = 0;
-                            }
-                            movetime.? += std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
-                        }
-                    } else if (std.mem.eql(u8, token.?, "binc")) {
-                        token = tokens.next();
-                        if (token == null) {
-                            break;
-                        }
-
-                        if (self.position.turn == Piece.Color.Black) {
-                            if (movetime == null) {
-                                movetime = 0;
-                            }
-                            movetime.? += std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
-                        }
+                        movetime.? += t;
                     }
-                }
 
-                if (movetime != null) {
                     if (movetime.? > 50) {
                         movetime.? -= 8;
                     } else if (movetime.? > 10) {
