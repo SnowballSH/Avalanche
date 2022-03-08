@@ -20,27 +20,18 @@ pub const PieceValues: [12]i16 = .{
 };
 
 pub const PieceValuesEg: [12]i16 = .{
-    65, // P
-    330, // N
-    290, // B
-    620, // R
-    1100, // Q
+    115, // P
+    310, // N
+    270, // B
+    680, // R
+    1300, // Q
     0, // K
-    -65, // p
-    -330, // n
-    -290, // b
-    -620, // r
-    -1100, // q
+    -115, // p
+    -310, // n
+    -270, // b
+    -680, // r
+    -1300, // q
     -0, // k
-};
-
-pub const PhaseValues: [6]i16 = .{
-    0, // P
-    1, // N
-    1, // B
-    2, // R
-    4, // Q
-    0, // K
 };
 
 // ^ 56 for black
@@ -120,8 +111,8 @@ pub const PSQT_EG: [6][64]i16 = .{
         000, 000, 000, 000, 000, 000, 000, 000,
         250, 330, 350, 380, 380, 350, 330, 250,
         090, 110, 120, 135, 135, 120, 110, 090,
-        030, 040, 045, 050, 050, 045, 040, 030,
-        010, 020, 015, 020, 020, 015, 020, 010,
+        050, 040, 045, 050, 050, 045, 040, 050,
+        020, 020, 015, 020, 020, 015, 020, 020,
         005, 005, 005, 010, 010, 005, 005, 005,
         -20, -20, -10, -05, -05, -10, -20, -20,
         000, 000, 000, 000, 000, 000, 000, 000,
@@ -190,15 +181,29 @@ pub const BISHOP_PAIR: i16 = 40;
 pub fn evaluate(position: *Position.Position) i16 {
     var score: i16 = 0;
 
+    var eg = position.phase() <= 7;
+
     for (position.mailbox) |p, i| {
         if (p == null) {
             continue;
         }
-        score += PieceValues[@enumToInt(p.?)];
-        if (p.?.color() == Piece.Color.White) {
-            score += PSQT[@enumToInt(p.?) % 6][i];
+        if (eg) {
+            score += PieceValuesEg[@enumToInt(p.?)];
         } else {
-            score -= PSQT[@enumToInt(p.?) % 6][i ^ 56];
+            score += PieceValues[@enumToInt(p.?)];
+        }
+        if (p.?.color() == Piece.Color.White) {
+            if (eg) {
+                score += PSQT_EG[@enumToInt(p.?) % 6][i];
+            } else {
+                score += PSQT[@enumToInt(p.?) % 6][i];
+            }
+        } else {
+            if (eg) {
+                score -= PSQT_EG[@enumToInt(p.?) % 6][i ^ 56];
+            } else {
+                score -= PSQT[@enumToInt(p.?) % 6][i ^ 56];
+            }
         }
     }
 
@@ -208,14 +213,6 @@ pub fn evaluate(position: *Position.Position) i16 {
     }
     if (@popCount(u64, position.bitboards.BlackBishops) >= 2) {
         score -= BISHOP_PAIR;
-    }
-
-    if (position.turn == Piece.Color.White) {
-        if (position.phase() <= 12) {
-            score += 30;
-        } else {
-            score += 15;
-        }
     }
 
     return score;

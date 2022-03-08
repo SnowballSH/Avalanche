@@ -7,6 +7,7 @@ const Perft = @import("./perft.zig");
 const Encode = @import("../move/encode.zig");
 const HCE = @import("../evaluation/hce.zig");
 const NNUE = @import("../evaluation/nnue.zig");
+const Final = @import("../evaluation/final.zig");
 
 pub const UciInterface = struct {
     position: Position.Position,
@@ -68,6 +69,35 @@ pub const UciInterface = struct {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.display();
+            } else if (std.mem.eql(u8, token.?, "eval")) {
+                arch.re_evaluate(&self.position);
+                var score = Final.evaluate(&self.position, &arch, 0);
+                var bucket = @minimum(@divFloor(self.position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
+                var nn = arch.result[bucket];
+                if (self.position.turn == Piece.Color.Black) {
+                    nn = -nn;
+                    score = -score;
+                }
+                var hce = HCE.evaluate(&self.position);
+
+                var tempo: i16 = 0;
+
+                if (self.position.turn == Piece.Color.White) {
+                    if (self.position.phase() <= 10) {
+                        tempo = Final.TEMPO_EG;
+                    } else {
+                        tempo = Final.TEMPO_MG;
+                    }
+                } else {
+                    if (self.position.phase() <= 10) {
+                        tempo = -Final.TEMPO_EG;
+                    } else {
+                        tempo = -Final.TEMPO_MG;
+                    }
+                }
+
+                _ = try stdout.writeAll("HCE  | NNUE | Tempo | Final (White Perspective)\n");
+                _ = try stdout.print("{:<4} | {:<4} | {:<5} | {:<5}\n", .{ hce, nn, tempo, score });
             } else if (std.mem.eql(u8, token.?, "nnue")) {
                 arch.re_evaluate(&self.position);
                 var bucket = @minimum(@divFloor(self.position.phase() * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
@@ -97,7 +127,7 @@ pub const UciInterface = struct {
 
                     _ = try stdout.print("{}\n", .{score});
                 }
-            } else if (std.mem.eql(u8, token.?, "eval")) {
+            } else if (std.mem.eql(u8, token.?, "hce")) {
                 token = tokens.next();
                 if (token != null) {
                     var depth = std.fmt.parseUnsigned(u8, token.?, 10) catch 1;
@@ -171,13 +201,13 @@ pub const UciInterface = struct {
                                 t /= 40;
                             } else if (phase >= 15) {
                                 // Middle game
-                                t /= 18;
+                                t /= 20;
                             } else if (phase >= 6) {
                                 // Middle-end game
                                 t /= 25;
                             } else {
                                 // Endgame
-                                t /= 20;
+                                t /= 30;
                             }
 
                             movetime.? += t;
@@ -201,13 +231,13 @@ pub const UciInterface = struct {
                                 t /= 40;
                             } else if (phase >= 15) {
                                 // Middle game
-                                t /= 18;
+                                t /= 20;
                             } else if (phase >= 6) {
                                 // Middle-end game
                                 t /= 25;
                             } else {
                                 // Endgame
-                                t /= 20;
+                                t /= 30;
                             }
 
                             movetime.? += t;

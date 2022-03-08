@@ -40,6 +40,9 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
     return false;
 }
 
+pub const TEMPO_MG = 6;
+pub const TEMPO_EG = 14;
+
 pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     if (is_material_drawn(pos)) {
         return 0;
@@ -54,8 +57,15 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
         nnue.evaluate(pos.turn, bucket);
 
         var nn = @truncate(i16, nnue.result[bucket]);
-        stand_pat = @divFloor(stand_pat + nn * 3, 4);
+        stand_pat = @divFloor(stand_pat * 2 + nn * 5, 5);
     }
+
+    if (pos.phase() <= 10) {
+        stand_pat += TEMPO_EG;
+    } else {
+        stand_pat += TEMPO_MG;
+    }
+
     if (fifty > 30) {
         if (stand_pat > 0) {
             stand_pat = @maximum(0, stand_pat - fifty);
@@ -63,5 +73,6 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
             stand_pat = @minimum(0, stand_pat + fifty);
         }
     }
+
     return stand_pat;
 }
