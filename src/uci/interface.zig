@@ -50,6 +50,10 @@ pub const UciInterface = struct {
                 break;
             }
 
+            if (std.mem.len(token.?) > 1 and token.?[std.mem.len(token.?) - 1] == '\r') {
+                token = token.?[0 .. std.mem.len(token.?) - 1];
+            }
+
             if (std.mem.eql(u8, token.?, "stop")) {
                 self.searcher.stop = true;
                 self.searcher.is_searching = false;
