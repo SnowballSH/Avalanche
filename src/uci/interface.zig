@@ -65,6 +65,11 @@ pub const UciInterface = struct {
                 _ = try stdout.write("id name Avalanche 0.2\n");
                 _ = try stdout.write("id author SnowballSH\n");
                 _ = try stdout.writeAll("uciok\n");
+            } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
+                self.position.deinit();
+                self.position = Position.new_position_by_fen(Position.STARTPOS);
+                defer self.position.deinit();
+                self.searcher = Search.Searcher.new_searcher();
             } else if (std.mem.eql(u8, token.?, "isready")) {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
@@ -262,7 +267,7 @@ pub const UciInterface = struct {
                 if (movetime != null) {
                     if (mytime != null) {
                         if (myinc != null) {
-                            if (mytime.? > myinc.? + 10) {
+                            if (mytime.? > myinc.? + 500) {
                                 movetime.? += myinc.?;
                             }
                         }
@@ -278,13 +283,13 @@ pub const UciInterface = struct {
                                 t /= 40;
                             } else if (phase >= 15) {
                                 // Middle game
-                                t /= 20;
+                                t /= 21;
                             } else if (phase >= 6) {
                                 // Middle-end game
-                                t /= 25;
+                                t /= 26;
                             } else {
                                 // Endgame
-                                t /= 30;
+                                t /= 35;
                             }
                         }
                         movetime.? += t;
@@ -315,6 +320,8 @@ pub const UciInterface = struct {
 
                 self.search_thread.?.detach();
             } else if (std.mem.eql(u8, token.?, "position")) {
+                self.searcher.hash_history.clearAndFree();
+                self.searcher.halfmoves = 0;
                 token = tokens.next();
                 if (token != null) {
                     self.searcher.halfmoves = 0;

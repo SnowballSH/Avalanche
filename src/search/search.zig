@@ -41,6 +41,7 @@ pub const Searcher = struct {
 
     // communication
     stop: bool,
+    force_nostop: bool,
 
     // game
     hash_history: std.ArrayList(u64),
@@ -68,6 +69,7 @@ pub const Searcher = struct {
             .is_searching = false,
 
             .stop = false,
+            .force_nostop = false,
 
             .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
             .halfmoves = 0,
@@ -150,12 +152,14 @@ pub const Searcher = struct {
 
         self.nnue.refresh_accumulator(position);
 
+        self.force_nostop = true;
+
         var dp: u8 = 1;
         var score: i16 = 0;
         while (dp <= max_depth) {
             self.seldepth = 0;
             var score_ = self.negamax(position, alpha, beta, dp);
-            if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+            if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
                 break;
             }
             score = score_;
@@ -214,6 +218,8 @@ pub const Searcher = struct {
             dp += 1;
 
             bestmove = self.pv_array[0];
+
+            self.force_nostop = false;
         }
 
         dp -= 1;
@@ -259,9 +265,7 @@ pub const Searcher = struct {
             ) catch {};
         }
 
-        stdout.writeByte('\n') catch {};
-
-        stdout.print("bestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
+        stdout.print("\nbestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
         GlobalTT.reset();
     }
@@ -272,7 +276,7 @@ pub const Searcher = struct {
         var beta = beta_;
         var depth = depth_;
 
-        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
@@ -312,6 +316,9 @@ pub const Searcher = struct {
                 while (index >= limit and index >= 0) {
                     if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
                         count += 1;
+                        if (self.ply != 1) {
+                            return DRAW;
+                        }
                     }
                     if (count >= 2) {
                         return DRAW;
@@ -368,13 +375,13 @@ pub const Searcher = struct {
             }
         }
 
-        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
         var eval = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
-        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
@@ -424,7 +431,7 @@ pub const Searcher = struct {
             lmr_threashold += 1;
         }
 
-        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
@@ -518,7 +525,7 @@ pub const Searcher = struct {
             _ = self.hash_history.pop();
             self.ply -= 1;
 
-            if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+            if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
                 return TIME_UP;
             }
 
@@ -590,7 +597,7 @@ pub const Searcher = struct {
         var alpha = alpha_;
         var beta = beta_;
 
-        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
@@ -615,7 +622,7 @@ pub const Searcher = struct {
             return stand_pat;
         }
 
-        if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
@@ -658,7 +665,7 @@ pub const Searcher = struct {
             position.undo_move(m, &self.nnue);
             self.ply -= 1;
 
-            if (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?)) {
+            if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
                 return TIME_UP;
             }
 
