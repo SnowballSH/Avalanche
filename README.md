@@ -2,7 +2,7 @@
 
 [WIP] Bitboard and NNUE Chess Engine written in Zig
 
-Currently plays at around 2100 ELO.
+Currently plays at around 2150 ELO.
 
 ## Compile
 
@@ -19,7 +19,7 @@ If the weights.zig for current net already exists (rebuild), `zig build -Dreleas
 
 ## Changelog
 
-- ### v0.2: [DEV] Search  (+350-450 ELO), ~2100 ELO
+- ### v0.2: [DEV] Search  (+420-500 ELO), ~2150 ELO
     - History heuristics, killer heuristics
     - Better LMR
     - Reversed Futility Pruning
