@@ -8,6 +8,7 @@ const Ordering = @import("./ordering.zig");
 const Encode = @import("../move/encode.zig");
 const TT = @import("../cache/tt.zig");
 const LMR = @import("./lmr.zig");
+const SEE = @import("./see.zig");
 
 const std = @import("std");
 
@@ -154,10 +155,15 @@ pub const Searcher = struct {
 
         self.force_nostop = true;
 
+        var time_last_iter: u64 = 0;
         var dp: u8 = 1;
         var score: i16 = 0;
         while (dp <= max_depth) {
+            var start = self.timer.read();
             self.seldepth = 0;
+            if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() + 500 < time_last_iter) {
+                break;
+            }
             var score_ = self.negamax(position, alpha, beta, dp);
             if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
                 break;
@@ -220,6 +226,7 @@ pub const Searcher = struct {
             bestmove = self.pv_array[0];
 
             self.force_nostop = false;
+            time_last_iter = self.timer.read() - start;
         }
 
         dp -= 1;
@@ -426,7 +433,9 @@ pub const Searcher = struct {
             }
         }
 
-        var lmr_threashold: u8 = 2;
+        // var pruning_threashold: i16 = 6 + depth * depth;
+
+        var lmr_threashold: u8 = 3;
         if (is_pv) {
             lmr_threashold += 1;
         }
@@ -460,6 +469,9 @@ pub const Searcher = struct {
             var m = moves.items[count];
             count += 1;
 
+            var is_quiet = Encode.capture(m) == 0;
+            var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
+
             // MAKE MOVES
 
             position.make_move(m, &self.nnue);
@@ -482,9 +494,6 @@ pub const Searcher = struct {
             self.ply += 1;
 
             // DONE MAKING MOVES
-
-            var is_quiet = Encode.capture(m) == 0;
-            var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
             var lmr_depth: i16 = 0;
 
