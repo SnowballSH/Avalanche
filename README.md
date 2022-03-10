@@ -29,7 +29,7 @@ If the weights.zig for current net already exists (rebuild), `zig build -Dreleas
     - Stronger NNUE network: Flake 2
         - Trained on human games on https://database.lichess.org/ and more engine games.
         - Trained on one million endgame positions
-        - 728 -> dense -> 256 -> clipped_relu -> 256 -> dense -> 1 + PSQT
+        - 728 -> dense -> 512 -> clipped_relu -> 512 -> dense -> 1 + PSQT
 
 - ### v0.1: NNUE  (+275-375 ELO), ~1700 ELO
     - Efficiently Updatable Neural Network trained on top-level engine tournaments

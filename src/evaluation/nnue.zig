@@ -133,8 +133,8 @@ pub const NNUE = struct {
 
     pub fn re_evaluate(self: *NNUE, pos: *Position.Position) void {
         self.refresh_accumulator(pos);
-        for (self.result) |*ptr| {
-            ptr.* = 0;
+        for (self.result) |*ptr, i| {
+            ptr.* = Weights.BIAS_2[i];
         }
 
         for (self.accumulator[@enumToInt(pos.turn)]) |val, l_index| {
@@ -149,7 +149,7 @@ pub const NNUE = struct {
     }
 
     pub fn evaluate(self: *NNUE, turn: Piece.Color, bucket: usize) void {
-        self.result[bucket] = 0;
+        self.result[bucket] = Weights.BIAS_2[bucket];
 
         for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
             self.result[bucket] += Weights.LAYER_2[l_index][bucket] * clipped_relu_one(val);
