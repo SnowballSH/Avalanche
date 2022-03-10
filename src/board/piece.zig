@@ -31,7 +31,7 @@ pub const Color = enum(u1) {
     Black,
 
     pub inline fn invert(self: *Color) Color {
-        return @intToEnum(Color, @enumToInt(self.*) ^ 1);
+        return @intToEnum(Color, ~@enumToInt(self.*));
     }
 };
 

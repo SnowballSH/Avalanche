@@ -3,6 +3,7 @@ const Piece = @import("../board/piece.zig");
 const Encode = @import("../move/encode.zig");
 const HCE = @import("../evaluation/hce.zig");
 const Search = @import("./search.zig");
+const SEE = @import("./see.zig");
 
 const std = @import("std");
 
@@ -30,19 +31,35 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
     var pos = info.pos;
 
     if (info.old_pv == move) {
-        return 15000;
+        return 16000;
     }
 
     var score: i16 = 0;
-    var ts = Position.fen_sq_to_sq(Encode.target(move));
+    var bts = Encode.target(move);
+    var ts = Position.fen_sq_to_sq(bts);
     var pt = Encode.pt(move);
 
     if (Encode.capture(move) != 0) {
         // Captures first!
         score += 7000;
 
+        if (Encode.enpassant(move) != 0) {
+            return score;
+        }
+
+        if (Encode.promote(move) != 0) {
+            return score + 2000 + HCE.PieceValues[Encode.promote(move) % 6];
+        }
+
         var captured = @enumToInt(pos.mailbox[ts].?);
-        score += MVV_LVA[pt % 6][captured % 6];
+        //score += MVV_LVA[pt % 6][captured % 6];
+
+        var attackers = pos.square_attackers(ts, pos.turn.invert());
+        var defenders = pos.square_attackers(ts, pos.turn);
+
+        score += SEE.get_see(pt % 6, captured % 6, attackers, defenders);
+
+        return score;
     } else {
         if (info.searcher.killers[0][info.searcher.ply] == move) {
             score += 4000;

@@ -8,11 +8,13 @@ const Uci = @import("./uci/uci.zig");
 const HCE = @import("./evaluation/hce.zig");
 const Search = @import("./search/search.zig");
 const Interface = @import("./uci/interface.zig");
+const SEE = @import("./search/see.zig");
 
 pub fn main() !void {
     Zobrist.init_zobrist();
     Magic.init_magic();
     Search.init_tt();
+    SEE.init_see();
 
     defer TT.TTArena.deinit();
 

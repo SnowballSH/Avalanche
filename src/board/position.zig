@@ -81,17 +81,148 @@ pub const Position = struct {
                 or Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens) != 0
                 or Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens) != 0
             );
-        } else {
+        }
+        return (
+        Patterns.PawnCapturePatterns[0][square] & self.bitboards.BlackPawns != 0
+            or Patterns.KnightPatterns[square] & self.bitboards.BlackKnights != 0
+            or Patterns.KingPatterns[square] & self.bitboards.BlackKing != 0
+            or Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0
+            or Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0
+        );
+        // zig fmt: on
+    }
+
+    pub fn square_attacked_bb(self: *Position, square: u6, color: Piece.Color) u64 {
+        const bb_all = self.bitboards.WhiteAll | self.bitboards.BlackAll;
+        // zig fmt: off
+        if (color == Piece.Color.White) {
             return (
-            Patterns.PawnCapturePatterns[0][square] & self.bitboards.BlackPawns != 0
-                or Patterns.KnightPatterns[square] & self.bitboards.BlackKnights != 0
-                or Patterns.KingPatterns[square] & self.bitboards.BlackKing != 0
-                or Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens) != 0
-                or Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens) != 0
+                (Patterns.PawnCapturePatterns[1][square] & self.bitboards.WhitePawns)
+                | (Patterns.KnightPatterns[square] & self.bitboards.WhiteKnights)
+                | (Patterns.KingPatterns[square] & self.bitboards.WhiteKing)
+                | (Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.WhiteBishops | self.bitboards.WhiteQueens))
+                | (Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.WhiteRooks | self.bitboards.WhiteQueens))
             );
         }
+        return (
+            (Patterns.PawnCapturePatterns[0][square] & self.bitboards.BlackPawns)
+            | (Patterns.KnightPatterns[square] & self.bitboards.BlackKnights)
+            | (Patterns.KingPatterns[square] & self.bitboards.BlackKing)
+            | (Patterns.get_bishop_attacks(square, bb_all) & (self.bitboards.BlackBishops | self.bitboards.BlackQueens))
+            | (Patterns.get_rook_attacks(square, bb_all) & (self.bitboards.BlackRooks | self.bitboards.BlackQueens))
+        );
         // zig fmt: on
-        return false;
+    }
+
+    pub fn square_attackers(self: *Position, square: u6, color: Piece.Color) u8 {
+        var res: u8 = 0;
+
+        var occupancy_all = self.bitboards.WhiteAll | self.bitboards.BlackAll;
+
+        var bishops_rooks = if (color == Piece.Color.White)
+            (self.bitboards.BlackBishops | self.bitboards.BlackRooks)
+        else
+            (self.bitboards.WhiteBishops | self.bitboards.WhiteRooks);
+        var rooks_queens = if (color == Piece.Color.White)
+            (self.bitboards.BlackQueens | self.bitboards.BlackRooks)
+        else
+            (self.bitboards.WhiteQueens | self.bitboards.WhiteRooks);
+        var bishops_queens = if (color == Piece.Color.White)
+            (self.bitboards.BlackQueens | self.bitboards.BlackBishops)
+        else
+            (self.bitboards.WhiteQueens | self.bitboards.WhiteBishops);
+
+        var king_attacks = Patterns.KingPatterns[square];
+        if (color == Piece.Color.White) {
+            if (king_attacks & self.bitboards.BlackKing != 0) {
+                res |= 1 << 7;
+            }
+        } else {
+            if (king_attacks & self.bitboards.WhiteKing != 0) {
+                res |= 1 << 7;
+            }
+        }
+
+        var queen_attacks = Patterns.get_queen_attacks(square, occupancy_all & ~bishops_rooks);
+        if (color == Piece.Color.White) {
+            if (queen_attacks & self.bitboards.BlackQueens != 0) {
+                res |= 1 << 6;
+            }
+        } else {
+            if (queen_attacks & self.bitboards.WhiteQueens != 0) {
+                res |= 1 << 6;
+            }
+        }
+
+        var rook_attacks = Patterns.get_rook_attacks(square, occupancy_all & ~rooks_queens);
+        if (color == Piece.Color.White) {
+            if (rook_attacks & self.bitboards.BlackRooks != 0) {
+                if (@popCount(u64, rook_attacks & self.bitboards.BlackRooks) == 1) {
+                    res |= 1 << 4;
+                } else {
+                    res |= 3 << 4;
+                }
+            }
+        } else {
+            if (rook_attacks & self.bitboards.WhiteRooks != 0) {
+                if (@popCount(u64, rook_attacks & self.bitboards.WhiteRooks) == 1) {
+                    res |= 1 << 4;
+                } else {
+                    res |= 3 << 4;
+                }
+            }
+        }
+
+        var knight_bishop_count: u8 = 0;
+
+        var knight_attacks = Patterns.KnightPatterns[square];
+        if (color == Piece.Color.White) {
+            if (knight_attacks & self.bitboards.BlackKnights != 0) {
+                knight_bishop_count += @popCount(u64, knight_attacks & self.bitboards.BlackKnights);
+            }
+        } else {
+            if (knight_attacks & self.bitboards.WhiteKnights != 0) {
+                knight_bishop_count += @popCount(u64, knight_attacks & self.bitboards.WhiteKnights);
+            }
+        }
+
+        var bishop_attacks = Patterns.get_bishop_attacks(square, occupancy_all & ~bishops_queens);
+        if (color == Piece.Color.White) {
+            if (bishop_attacks & self.bitboards.BlackBishops != 0) {
+                knight_bishop_count += @popCount(u64, bishop_attacks & self.bitboards.BlackBishops);
+            }
+        } else {
+            if (bishop_attacks & self.bitboards.WhiteBishops != 0) {
+                knight_bishop_count += @popCount(u64, bishop_attacks & self.bitboards.WhiteBishops);
+            }
+        }
+
+        if (knight_bishop_count != 0) {
+            if (knight_bishop_count == 1) {
+                res |= 1 << 1;
+            } else if (knight_bishop_count == 2) {
+                res |= 3 << 1;
+            } else {
+                res |= 7 << 1;
+            }
+        }
+
+        var sq_bb = @as(u64, 1) << square;
+        var potential_enemy_pawns = if (color == Piece.Color.White)
+            (self.bitboards.BlackPawns & king_attacks)
+        else
+            (self.bitboards.WhitePawns & king_attacks);
+
+        var attacking_enemy_pawns = if (color == Piece.Color.White)
+            (((potential_enemy_pawns >> 7) | (potential_enemy_pawns >> 9)) & sq_bb)
+        else
+            (((potential_enemy_pawns << 7) | (potential_enemy_pawns << 9)) & sq_bb);
+
+        if (attacking_enemy_pawns != 0) {
+            res |= 1;
+        }
+
+        return res;
     }
 
     pub fn add_piece(self: *Position, target: u6, piece: Piece.Piece, comptime modhash: bool) void {

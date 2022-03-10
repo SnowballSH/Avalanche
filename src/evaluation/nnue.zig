@@ -3,20 +3,12 @@ pub const Weights = @import("../weights.zig");
 const Position = @import("../board/position.zig");
 const Piece = @import("../board/piece.zig");
 
-pub fn clipped_relu(comptime N: usize, input: [N]i16) void {
-    for (input) |*ptr| {
-        ptr.* = std.math.min(64, std.math.max(0, ptr.*));
-    }
-}
-
-pub fn clipped_relu_one(input: i16) i16 {
+pub inline fn clipped_relu_one(input: i16) i16 {
     return std.math.min(64, std.math.max(0, input));
 }
 
-pub fn normalize(val: i32) i16 {
-    var f = @intToFloat(f32, val);
-
-    return @floatToInt(i16, f * 170.0 / 64.0 / 64.0);
+pub inline fn normalize(val: i32) i16 {
+    return @floatToInt(i16, @intToFloat(f32, val) * 170.0 / 64.0 / 64.0);
 }
 
 pub const NNUE = struct {
