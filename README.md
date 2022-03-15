@@ -9,6 +9,10 @@ Currently plays at around 2200 ELO.
 `zig build -Drelease-fast=true -- nnue` to make weights.zig as well (add NNUE)
 If the weights.zig for current net already exists (rebuild), `zig build -Drelease-fast=true`
 
+Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
+
+Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
+
 ## Credits
 
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
