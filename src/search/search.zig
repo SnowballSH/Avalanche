@@ -448,14 +448,20 @@ pub const Searcher = struct {
         var moves = Movegen.generate_all_pseudo_legal_moves(position);
         defer moves.deinit();
 
+        var oi = Ordering.OrderInfo{
+            .pos = position,
+            .searcher = self,
+            .old_pv = old_pv,
+        };
+
+        for (moves.items) |*k| {
+            k.score = Ordering.score_move(k.m, oi);
+        }
+
         std.sort.sort(
-            u24,
+            Movegen.Move,
             moves.items,
-            Ordering.OrderInfo{
-                .pos = position,
-                .searcher = self,
-                .old_pv = old_pv,
-            },
+            oi,
             Ordering.order,
         );
 
@@ -466,7 +472,7 @@ pub const Searcher = struct {
         var length = std.mem.len(moves.items);
 
         while (count < length) {
-            var m = moves.items[count];
+            var m = moves.items[count].m;
             count += 1;
 
             var is_quiet = Encode.capture(m) == 0;
@@ -619,7 +625,7 @@ pub const Searcher = struct {
 
         // *** Static evaluation pruning ***
         if (stand_pat >= beta) {
-            return beta;
+            return stand_pat;
         }
 
         if (alpha < stand_pat) {
@@ -642,14 +648,20 @@ pub const Searcher = struct {
         var count: usize = 0;
         var length = std.mem.len(moves.items);
 
+        var oi = Ordering.OrderInfo{
+            .pos = position,
+            .searcher = self,
+            .old_pv = 0,
+        };
+
+        for (moves.items) |*k| {
+            k.score = Ordering.score_move(k.m, oi);
+        }
+
         std.sort.sort(
-            u24,
+            Movegen.Move,
             moves.items,
-            Ordering.OrderInfo{
-                .pos = position,
-                .searcher = self,
-                .old_pv = 0,
-            },
+            oi,
             Ordering.order,
         );
 
@@ -657,7 +669,7 @@ pub const Searcher = struct {
         var bs: i16 = -INF;
 
         while (count < length) {
-            var m = moves.items[count];
+            var m = moves.items[count].m;
 
             count += 1;
 

@@ -34,7 +34,8 @@ pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
     var moves = MoveGen.generate_all_pseudo_legal_moves(pos);
     defer moves.deinit();
 
-    for (moves.items) |x| {
+    for (moves.items) |mm| {
+        var x = mm.m;
         pos.*.make_move(x, null);
         if (pos.*.is_king_checked_for(pos.*.turn.invert())) {
             pos.*.undo_move(x, null);
@@ -65,7 +66,8 @@ pub fn perft(pos: *Position.Position, depth: usize, map: *std.ArrayList(Value)) 
     var moves = MoveGen.generate_all_pseudo_legal_moves(pos);
     defer moves.deinit();
 
-    for (moves.items) |x| {
+    for (moves.items) |mm| {
+        var x = mm.m;
         pos.*.make_move(x, null);
         if (pos.*.is_king_checked_for(pos.*.turn.invert())) {
             pos.*.undo_move(x, null);

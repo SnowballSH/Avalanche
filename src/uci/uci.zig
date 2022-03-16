@@ -69,7 +69,8 @@ pub fn uci_to_move(uci: []const u8, position: *Position.Position) ?u24 {
     var valid_moves = Movegen.generate_all_pseudo_legal_moves(position);
     defer valid_moves.deinit();
 
-    for (valid_moves.items) |m| {
+    for (valid_moves.items) |x| {
+        var m = x.m;
         if (Encode.source(m) == source_file + source_rank * 8 and
             Encode.target(m) == target_file + target_rank * 8 and
             Encode.promote(m) == promop)

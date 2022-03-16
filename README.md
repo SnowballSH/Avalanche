@@ -8,6 +8,7 @@ Currently plays at around 2200 ELO.
 
 `zig build -Drelease-fast=true -- nnue` to make weights.zig as well (add NNUE)
 If the weights.zig for current net already exists (rebuild), `zig build -Drelease-fast=true`
+Currently no CPU-specific instructions besides POPCNT and CTZ are used, so one binary should run on any modern machine.
 
 Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
 
@@ -18,7 +19,7 @@ Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming. Hope the war in Ukraine doesn't impact him and he stays safe!
 - https://github.com/amanjpro/zahak for Search ideas
-- https://github.com/dsekercioglu/blackmarlin for NNUE ideas
+- https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM net can be used with Avalanche!)
 - https://github.com/Tearth/Cosette for Movegen ideas
 
 ## Changelog

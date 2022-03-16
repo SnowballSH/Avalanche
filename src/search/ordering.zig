@@ -4,6 +4,7 @@ const Encode = @import("../move/encode.zig");
 const HCE = @import("../evaluation/hce.zig");
 const Search = @import("./search.zig");
 const SEE = @import("./see.zig");
+const Move = @import("../move/movegen.zig").Move;
 
 const std = @import("std");
 
@@ -13,8 +14,8 @@ pub const OrderInfo = struct {
     old_pv: u24,
 };
 
-pub fn order(info: OrderInfo, lhs: u24, rhs: u24) bool {
-    return score_move(lhs, info) > score_move(rhs, info);
+pub fn order(_: OrderInfo, lhs: Move, rhs: Move) bool {
+    return lhs.score > rhs.score;
 }
 
 // MVV_LVA[attacker][captured]
