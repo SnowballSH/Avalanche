@@ -1,8 +1,10 @@
 const Position = @import("../board/position.zig");
 const MoveGen = @import("../move/movegen.zig");
 const Uci = @import("./uci.zig");
+const Encode = @import("../move/encode.zig");
 const TT = @import("../cache/tt.zig");
 const std = @import("std");
+const SEE = @import("../search/see.zig");
 
 const Value = struct {
     hash: u64,
@@ -11,6 +13,36 @@ const Value = struct {
 };
 
 var tt_size: usize = 1 << 15;
+
+pub fn see_perft(pos: *Position.Position) void {
+    const stdout = std.io.getStdOut().writer();
+
+    var moves = MoveGen.generate_all_pseudo_legal_capture_moves(pos);
+
+    for (moves.items) |mm| {
+        var x = mm.m;
+        pos.*.make_move(x, null);
+        if (pos.*.is_king_checked_for(pos.*.turn.invert())) {
+            pos.*.undo_move(x, null);
+            continue;
+        }
+
+        pos.*.undo_move(x, null);
+
+        var bts = Encode.target(x);
+        var ts = Position.fen_sq_to_sq(bts);
+        var pt = Encode.pt(x);
+
+        var captured = @enumToInt(pos.mailbox[ts].?);
+
+        var attackers = pos.square_attackers(bts, pos.turn.invert());
+        var defenders = pos.square_attackers(bts, pos.turn);
+
+        stdout.print("{s}: {}\n", .{ Uci.move_to_uci(x), SEE.get_see(pt % 6, captured % 6, attackers, defenders) }) catch {};
+    }
+
+    moves.deinit();
+}
 
 pub fn perft_root(pos: *Position.Position, depth: usize) !usize {
     if (depth == 0) {

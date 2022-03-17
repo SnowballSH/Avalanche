@@ -28,6 +28,8 @@ const MVV_LVA: [6][6]i16 = .{
     .{ 10, 11, 12, 13, 14, 15 },
 };
 
+pub const CAPTURE_SCORE: i16 = 8000;
+
 pub fn score_move(move: u24, info: OrderInfo) i16 {
     var pos = info.pos;
 
@@ -42,7 +44,7 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
 
     if (Encode.capture(move) != 0) {
         // Captures first!
-        score += 7000;
+        score += CAPTURE_SCORE;
 
         if (Encode.enpassant(move) != 0) {
             return score;
@@ -55,8 +57,8 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
         var captured = @enumToInt(pos.mailbox[ts].?);
         //score += MVV_LVA[pt % 6][captured % 6];
 
-        var attackers = pos.square_attackers(ts, pos.turn.invert());
-        var defenders = pos.square_attackers(ts, pos.turn);
+        var attackers = pos.square_attackers(bts, pos.turn.invert());
+        var defenders = pos.square_attackers(bts, pos.turn);
 
         score += SEE.get_see(pt % 6, captured % 6, attackers, defenders);
 

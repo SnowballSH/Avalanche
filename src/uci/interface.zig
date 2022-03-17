@@ -78,6 +78,8 @@ pub const UciInterface = struct {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.display();
+            } else if (std.mem.eql(u8, token.?, "see")) {
+                Perft.see_perft(&self.position);
             } else if (std.mem.eql(u8, token.?, "eval")) {
                 arch.re_evaluate(&self.position);
                 var score = Final.evaluate(&self.position, &arch, 0);

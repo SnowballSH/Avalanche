@@ -31,6 +31,7 @@ Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
     - Null Move Pruning
     - Razoring
     - Time management
+    - Static Exchange Evaluation
     - Stronger NNUE network: Flake 2
         - Trained on human games on https://database.lichess.org/ and more engine games.
         - Trained on one million endgame positions

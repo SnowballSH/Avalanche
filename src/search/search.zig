@@ -673,6 +673,11 @@ pub const Searcher = struct {
 
             count += 1;
 
+            // losing too much material? Search them during negamax, not here.
+            // if (moves.items[count].score - Ordering.CAPTURE_SCORE < -100) {
+            //     break;
+            // }
+
             position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
@@ -704,6 +709,9 @@ pub const Searcher = struct {
                 bm = m;
                 bs = score;
                 alpha = score;
+            }
+            if (alpha >= beta) {
+                break;
             }
         }
 

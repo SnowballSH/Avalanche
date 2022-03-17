@@ -57,7 +57,7 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
         nnue.evaluate(pos.turn, bucket);
 
         var nn = @truncate(i16, nnue.result[bucket]);
-        stand_pat = @divFloor(stand_pat * 2 + nn * 5, 5);
+        stand_pat = @divFloor(stand_pat + nn * 5, 5);
     }
 
     if (pos.phase() <= 10) {
