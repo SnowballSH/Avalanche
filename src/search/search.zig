@@ -485,6 +485,9 @@ pub const Searcher = struct {
             lmr_threashold += 1;
         }
 
+        //const FP_MARGIN: i16 = 97;
+        //var fp_margin = eval + FP_MARGIN * @intCast(i16, depth);
+
         if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
@@ -524,6 +527,12 @@ pub const Searcher = struct {
             var is_quiet = Encode.capture(m) == 0;
             var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
+            //if (!is_root and bs > -INF) {
+            //    if (depth < 8 and is_quiet and !is_killer and fp_margin <= alpha and std.math.absInt(alpha) catch 0 < INF) {
+            //        continue;
+            //    }
+            //}
+
             // MAKE MOVES
 
             position.make_move(m, &self.nnue);
@@ -549,7 +558,7 @@ pub const Searcher = struct {
 
             var lmr_depth: i16 = 0;
 
-            // Reductions / Prunings
+            // Reductions
             if (bs > -INF) {
                 // LMR
                 if (depth > 2 and legals >= lmr_threashold and (is_quiet or (moves.items[count - 1].score - Ordering.CAPTURE_SCORE < 0))) {
@@ -576,13 +585,9 @@ pub const Searcher = struct {
             var score: i16 = 0;
 
             // PVS
-            if (legals == 1) {
+            score = -self.negamax(position, -alpha - 1, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+            if (score > alpha and score < beta) {
                 score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
-            } else {
-                score = -self.negamax(position, -alpha - 1, -alpha, depth - 1 - @intCast(u8, lmr_depth));
-                if (score > alpha and score < beta) {
-                    score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
-                }
             }
 
             // UNDO MOVES
