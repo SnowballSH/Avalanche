@@ -24,7 +24,7 @@ fn evaluate_internal(attacking_piece: u8, target_piece: u8, attackers: u8, defen
     }
 
     var target_value = PT_VAL[target_piece];
-    var new_attackers = attackers & @intCast(u8, ~(@as(u64, 1) << @intCast(u6, attacking_piece)));
+    var new_attackers = attackers & ~@intCast(u8, (@as(u64, 1) << @intCast(u6, attacking_piece)));
     var new_attacking_piece = if (defenders == 0) 0 else @intCast(u8, @ctz(u64, get_lsb(@intCast(u64, defenders))));
 
     var score = evaluate_internal(new_attacking_piece, attacking_piece, defenders, new_attackers);
@@ -47,10 +47,10 @@ pub fn init_see() void {
 }
 
 pub fn get_see(attacking_piece: u8, target_piece: u8, attackers: u8, defenders: u8) i16 {
-    var attacking_idx = PT_TO_IDX[attacking_piece];
-    var target_idx = PT_TO_IDX[target_piece];
-    var new_attackers = attackers & @intCast(u8, ~(@as(u64, 1) << attacking_idx));
+    const attacking_idx = PT_TO_IDX[attacking_piece];
+    const target_idx = PT_TO_IDX[target_piece];
+    const new_attackers = attackers & ~@intCast(u8, (@as(u64, 1) << attacking_idx));
 
-    var score = SEE_TABLE[attacking_piece][defenders][new_attackers];
+    const score = SEE_TABLE[attacking_piece][defenders][new_attackers];
     return PT_VAL[target_idx] - score;
 }

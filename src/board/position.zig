@@ -117,22 +117,22 @@ pub const Position = struct {
     pub fn square_attackers(self: *Position, square: u6, color: Piece.Color) u8 {
         var res: u8 = 0;
 
-        var occupancy_all = self.bitboards.WhiteAll | self.bitboards.BlackAll;
+        const occupancy_all = self.bitboards.WhiteAll | self.bitboards.BlackAll;
 
-        var bishops_rooks = if (color == Piece.Color.White)
+        const bishops_rooks = if (color == Piece.Color.White)
             (self.bitboards.BlackBishops | self.bitboards.BlackRooks)
         else
             (self.bitboards.WhiteBishops | self.bitboards.WhiteRooks);
-        var rooks_queens = if (color == Piece.Color.White)
+        const rooks_queens = if (color == Piece.Color.White)
             (self.bitboards.BlackQueens | self.bitboards.BlackRooks)
         else
             (self.bitboards.WhiteQueens | self.bitboards.WhiteRooks);
-        var bishops_queens = if (color == Piece.Color.White)
+        const bishops_queens = if (color == Piece.Color.White)
             (self.bitboards.BlackQueens | self.bitboards.BlackBishops)
         else
             (self.bitboards.WhiteQueens | self.bitboards.WhiteBishops);
 
-        var king_attacks = Patterns.KingPatterns[square];
+        const king_attacks = Patterns.KingPatterns[square];
         if (color == Piece.Color.White) {
             if (king_attacks & self.bitboards.BlackKing != 0) {
                 res |= 1 << 7;
@@ -143,7 +143,7 @@ pub const Position = struct {
             }
         }
 
-        var queen_attacks = Patterns.get_queen_attacks(square, occupancy_all & ~bishops_rooks);
+        const queen_attacks = Patterns.get_queen_attacks(square, occupancy_all & ~bishops_rooks);
         if (color == Piece.Color.White) {
             if (queen_attacks & self.bitboards.BlackQueens != 0) {
                 res |= 1 << 6;
@@ -154,7 +154,7 @@ pub const Position = struct {
             }
         }
 
-        var rook_attacks = Patterns.get_rook_attacks(square, occupancy_all & ~rooks_queens);
+        const rook_attacks = Patterns.get_rook_attacks(square, occupancy_all & ~rooks_queens);
         if (color == Piece.Color.White) {
             if (rook_attacks & self.bitboards.BlackRooks != 0) {
                 if (@popCount(u64, rook_attacks & self.bitboards.BlackRooks) == 1) {
@@ -175,7 +175,7 @@ pub const Position = struct {
 
         var knight_bishop_count: u8 = 0;
 
-        var knight_attacks = Patterns.KnightPatterns[square];
+        const knight_attacks = Patterns.KnightPatterns[square];
         if (color == Piece.Color.White) {
             if (knight_attacks & self.bitboards.BlackKnights != 0) {
                 knight_bishop_count += @popCount(u64, knight_attacks & self.bitboards.BlackKnights);
@@ -186,7 +186,7 @@ pub const Position = struct {
             }
         }
 
-        var bishop_attacks = Patterns.get_bishop_attacks(square, occupancy_all & ~bishops_queens);
+        const bishop_attacks = Patterns.get_bishop_attacks(square, occupancy_all & ~bishops_queens);
         if (color == Piece.Color.White) {
             if (bishop_attacks & self.bitboards.BlackBishops != 0) {
                 knight_bishop_count += @popCount(u64, bishop_attacks & self.bitboards.BlackBishops);
@@ -207,13 +207,13 @@ pub const Position = struct {
             }
         }
 
-        var sq_bb = @as(u64, 1) << square;
-        var potential_enemy_pawns = if (color == Piece.Color.White)
+        const sq_bb = BB.ShiftLocations[square];
+        const potential_enemy_pawns = if (color == Piece.Color.White)
             (self.bitboards.BlackPawns & king_attacks)
         else
             (self.bitboards.WhitePawns & king_attacks);
 
-        var attacking_enemy_pawns = if (color == Piece.Color.White)
+        const attacking_enemy_pawns = if (color == Piece.Color.White)
             (((potential_enemy_pawns >> 7) | (potential_enemy_pawns >> 9)) & sq_bb)
         else
             (((potential_enemy_pawns << 7) | (potential_enemy_pawns << 9)) & sq_bb);

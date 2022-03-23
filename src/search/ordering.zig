@@ -31,16 +31,16 @@ const MVV_LVA: [6][6]i16 = .{
 pub const CAPTURE_SCORE: i16 = 8000;
 
 pub fn score_move(move: u24, info: OrderInfo) i16 {
-    var pos = info.pos;
+    const pos = info.pos;
 
     if (info.old_pv == move) {
         return 16000;
     }
 
     var score: i16 = 0;
-    var bts = Encode.target(move);
-    var ts = Position.fen_sq_to_sq(bts);
-    var pt = Encode.pt(move);
+    const bts = Encode.target(move);
+    const ts = Position.fen_sq_to_sq(bts);
+    const pt = Encode.pt(move);
 
     if (Encode.capture(move) != 0) {
         // Captures first!
@@ -54,11 +54,11 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
             return score + 2000 + HCE.PieceValues[Encode.promote(move) % 6];
         }
 
-        var captured = @enumToInt(pos.mailbox[ts].?);
+        const captured = @enumToInt(pos.mailbox[ts].?);
         //score += MVV_LVA[pt % 6][captured % 6];
 
-        var attackers = pos.square_attackers(bts, pos.turn.invert());
-        var defenders = pos.square_attackers(bts, pos.turn);
+        const attackers = pos.square_attackers(bts, pos.turn.invert());
+        const defenders = pos.square_attackers(bts, pos.turn);
 
         score += SEE.get_see(pt % 6, captured % 6, attackers, defenders);
 

@@ -27,7 +27,7 @@ const HISTORY = [64][64]u32;
 pub var GlobalTT: TT.TT = undefined;
 
 pub fn init_tt() void {
-    GlobalTT = TT.TT.new(16);
+    GlobalTT = TT.TT.new(32);
     GlobalTT.reset();
 }
 
@@ -103,6 +103,10 @@ pub const Searcher = struct {
         }
     }
 
+    //
+    // Iterative Deepening
+    // Searches to the given depth until time runs out.
+    //
     pub fn iterative_deepening(self: *Searcher, position: *Position.Position, movetime_nano: usize, force_max_depth: ?u8) void {
         const stdout = std.io.getStdOut().writer();
         self.timer = std.time.Timer.start() catch undefined;
@@ -138,9 +142,6 @@ pub const Searcher = struct {
 
         var bestmove: u24 = 0;
 
-        var alpha = -INF;
-        var beta = INF;
-
         var max_depth: u8 = MAX_PLY;
 
         if (Eval.is_material_drawn(position)) {
@@ -159,12 +160,13 @@ pub const Searcher = struct {
         var dp: u8 = 1;
         var score: i16 = 0;
         while (dp <= max_depth) {
-            var start = self.timer.read();
+            const start = self.timer.read();
             self.seldepth = 0;
             if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() + 500 < time_last_iter) {
                 break;
             }
-            var score_ = self.negamax(position, alpha, beta, dp);
+            // const score_ = self.mtdf(position, score, dp);
+            const score_ = self.negamax(position, -INF, INF, dp);
             if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
                 break;
             }
@@ -277,7 +279,32 @@ pub const Searcher = struct {
         GlobalTT.reset();
     }
 
+    //
+    // MTD(f) search
+    // MTD(f) is an alpha-beta game tree search algorithm modified to use ‘zero-window’ initial search bounds,
+    // and memory (usually a transposition table) to reuse intermediate search results.
+    //
+    pub fn mtdf(self: *Searcher, position: *Position.Position, f: i16, depth: u8) i16 {
+        var g = f;
+        var upper_bound = INF;
+        var lower_bound = -INF;
+
+        while (lower_bound < upper_bound) {
+            const beta = @maximum(g, lower_bound + 1);
+            g = self.negamax(position, beta - 1, beta, depth);
+            if (g < beta) {
+                upper_bound = g;
+            } else {
+                lower_bound = g;
+            }
+        }
+
+        return g;
+    }
+
+    //
     // Negamax alpha-beta tree search with prunings
+    //
     pub fn negamax(self: *Searcher, position: *Position.Position, alpha_: i16, beta_: i16, depth_: u8) i16 {
         var alpha = alpha_;
         var beta = beta_;
@@ -554,6 +581,10 @@ pub const Searcher = struct {
                     self.killers[0][self.ply] = m;
                 }
 
+                // store in PV
+                self.pv_array[old_pv_index] = m;
+                self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
+
                 return beta;
             }
 
@@ -607,7 +638,9 @@ pub const Searcher = struct {
         return alpha;
     }
 
+    //
     // Quiescence search for non-quiet moves
+    //
     pub fn quiescence_search(self: *Searcher, position: *Position.Position, alpha_: i16, beta_: i16) i16 {
         var alpha = alpha_;
         var beta = beta_;
@@ -671,12 +704,12 @@ pub const Searcher = struct {
         while (count < length) {
             var m = moves.items[count].m;
 
-            count += 1;
-
             // losing too much material? Search them during negamax, not here.
             if (moves.items[count].score - Ordering.CAPTURE_SCORE < 0) {
                 break;
             }
+
+            count += 1;
 
             position.make_move(m, &self.nnue);
             // illegal?

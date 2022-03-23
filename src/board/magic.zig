@@ -166,9 +166,9 @@ pub fn get_rook_moves(sq: u6, occupancy: u64) u64 {
 }
 
 fn apply_bishop_magic_for_field(field: u6) void {
-    var shift = MAGIC_BISHOP_SHIFTS[field];
-    var mask = get_bishop_mask(field);
-    var count = @as(i32, 1) << @intCast(u5, shift);
+    const shift = MAGIC_BISHOP_SHIFTS[field];
+    const mask = get_bishop_mask(field);
+    const count = @as(i32, 1) << @intCast(u5, shift);
 
     var permutations: std.ArrayList(u64) = std.ArrayList(u64).initCapacity(std.heap.page_allocator, @intCast(usize, count)) catch unreachable;
     var attacks: std.ArrayList(u64) = std.ArrayList(u64).initCapacity(std.heap.page_allocator, @intCast(usize, count)) catch unreachable;
@@ -183,7 +183,7 @@ fn apply_bishop_magic_for_field(field: u6) void {
         index += 1;
     }
 
-    var result = apply_magic_for_field(
+    const result = apply_magic_for_field(
         shift,
         count,
         mask,
@@ -198,9 +198,9 @@ fn apply_bishop_magic_for_field(field: u6) void {
 }
 
 fn apply_rook_magic_for_field(field: u6) void {
-    var shift = MAGIC_ROOK_SHIFTS[field];
-    var mask = get_rook_mask(field);
-    var count = @as(i32, 1) << @intCast(u5, shift);
+    const shift = MAGIC_ROOK_SHIFTS[field];
+    const mask = get_rook_mask(field);
+    const count = @as(i32, 1) << @intCast(u5, shift);
 
     var permutations: std.ArrayList(u64) = std.ArrayList(u64).initCapacity(std.heap.page_allocator, @intCast(usize, count)) catch unreachable;
     var attacks: std.ArrayList(u64) = std.ArrayList(u64).initCapacity(std.heap.page_allocator, @intCast(usize, count)) catch unreachable;
@@ -215,7 +215,7 @@ fn apply_rook_magic_for_field(field: u6) void {
         index += 1;
     }
 
-    var result = apply_magic_for_field(
+    const result = apply_magic_for_field(
         shift,
         count,
         mask,

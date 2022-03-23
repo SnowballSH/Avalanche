@@ -21,7 +21,7 @@ pub inline fn generate_all_pseudo_legal_capture_moves(board: *Position.Position)
 }
 
 fn generate_all_pseudo_legal_moves_core(board: *Position.Position, comptime gen_quiet: bool) std.ArrayList(Move) {
-    var list = std.ArrayList(Move).initCapacity(std.heap.page_allocator, if (gen_quiet) 48 else 12) catch unreachable;
+    var list = std.ArrayList(Move).initCapacity(std.heap.page_allocator, if (gen_quiet) 64 else 24) catch unreachable;
 
     const bb_all = board.bitboards.WhiteAll | board.bitboards.BlackAll;
 
