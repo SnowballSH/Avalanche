@@ -144,9 +144,10 @@ pub const Searcher = struct {
 
         var max_depth: u8 = MAX_PLY;
 
-        if (Eval.is_material_drawn(position)) {
-            max_depth = 2;
-        }
+        // Material drawn? This should never happen
+        // if (Eval.is_material_drawn(position)) {
+        //     max_depth = 2;
+        // }
 
         if (force_max_depth != null) {
             max_depth = @minimum(force_max_depth.?, max_depth);
@@ -162,16 +163,23 @@ pub const Searcher = struct {
         while (dp <= max_depth) {
             const start = self.timer.read();
             self.seldepth = 0;
+
+            // Not enough time to run next depth
             if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() + 500 < time_last_iter) {
                 break;
             }
+
+            // Search it
+
             // const score_ = self.mtdf(position, score, dp);
             const score_ = self.negamax(position, -INF, INF, dp);
+
             if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
                 break;
             }
             score = score_;
 
+            // print stats
             if (score > 0 and INF - score < 50) {
                 stdout.print(
                     "info depth {} seldepth {} nodes {} time {} score mate {} pv",
@@ -310,31 +318,38 @@ pub const Searcher = struct {
         var beta = beta_;
         var depth = depth_;
 
+        // Time is up
         if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
         self.nodes += 1;
 
+        // Variables
         var is_root = self.ply == 0;
         var is_pv = alpha != beta - 1;
 
+        // Too deep = return eval
         if (self.ply == MAX_PLY) {
             return Eval.evaluate(position, &self.nnue, self.halfmoves);
         }
 
+        // update seldepth
         if (self.ply > self.seldepth) {
             self.seldepth = self.ply;
         }
 
+        // Fifty-move rule
         if (self.halfmoves >= 100) {
             return DRAW;
         }
 
+        // Material drawn game
         if (Eval.is_material_drawn(position)) {
             return DRAW;
         }
 
+        // PV
         var old_pv = self.pv_array[self.pv_index];
         self.pv_array[self.pv_index] = 0;
         const old_pv_index = self.pv_index;
@@ -385,6 +400,7 @@ pub const Searcher = struct {
 
         var tthit = false;
 
+        // TT Probe
         if (!is_pv and !in_check and depth <= 127) {
             var entry = GlobalTT.probe(position.hash);
 
@@ -409,10 +425,12 @@ pub const Searcher = struct {
             }
         }
 
+        // TT can be time-consuming
         if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
         }
 
+        // Static eval
         var eval = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
         if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
@@ -475,6 +493,7 @@ pub const Searcher = struct {
         var moves = Movegen.generate_all_pseudo_legal_moves(position);
         defer moves.deinit();
 
+        // Order and sort
         var oi = Ordering.OrderInfo{
             .pos = position,
             .searcher = self,
@@ -533,8 +552,12 @@ pub const Searcher = struct {
             // Reductions / Prunings
             if (bs > -INF) {
                 // LMR
-                if (depth > 2 and legals >= lmr_threashold and m != self.pv_array[self.ply - 1] and is_quiet) {
-                    lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
+                if (depth > 2 and legals >= lmr_threashold and (is_quiet or (moves.items[count - 1].score - Ordering.CAPTURE_SCORE < 0))) {
+                    if (is_quiet) {
+                        lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
+                    } else {
+                        lmr_depth = LMR.NoisyLMR[@minimum(31, depth)][@minimum(31, legals)];
+                    }
 
                     if (in_check) {
                         lmr_depth -= 1;
@@ -562,6 +585,7 @@ pub const Searcher = struct {
                 }
             }
 
+            // UNDO MOVES
             position.undo_move(m, &self.nnue);
             self.halfmoves = self.hm_stack.pop();
             _ = self.hash_history.pop();
@@ -624,6 +648,7 @@ pub const Searcher = struct {
             }
         }
 
+        // Store in TT
         if (depth <= 127) {
             var flag = if (bs <= alpha_)
                 TT.TTFlag.Upper
