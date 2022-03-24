@@ -165,7 +165,7 @@ pub const Searcher = struct {
             self.seldepth = 0;
 
             // Not enough time to run next depth
-            if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() + 500 < time_last_iter) {
+            if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() < time_last_iter / 4) {
                 break;
             }
 
@@ -317,11 +317,6 @@ pub const Searcher = struct {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
-
-        // Time is up
-        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
-            return TIME_UP;
-        }
 
         self.nodes += 1;
 
@@ -485,8 +480,8 @@ pub const Searcher = struct {
             lmr_threashold += 1;
         }
 
-        //const FP_MARGIN: i16 = 97;
-        //var fp_margin = eval + FP_MARGIN * @intCast(i16, depth);
+        const FP_MARGIN: i16 = 97;
+        var fp_margin = eval + FP_MARGIN * @intCast(i16, depth);
 
         if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
             return TIME_UP;
@@ -518,20 +513,26 @@ pub const Searcher = struct {
         var bm: u24 = 0;
         var bs: i16 = -INF;
         var count: usize = 0;
-        var length = std.mem.len(moves.items);
+        const length = std.mem.len(moves.items);
+        var skip_quiet = false;
 
         while (count < length) {
             var m = moves.items[count].m;
             count += 1;
 
             var is_quiet = Encode.capture(m) == 0;
+            if (is_quiet and skip_quiet) {
+                continue;
+            }
+
             var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
-            //if (!is_root and bs > -INF) {
-            //    if (depth < 8 and is_quiet and !is_killer and fp_margin <= alpha and std.math.absInt(alpha) catch 0 < INF) {
-            //        continue;
-            //    }
-            //}
+            if (!is_root and bs > -INF) {
+                if (depth < 8 and is_quiet and !is_killer and fp_margin <= alpha and std.math.absInt(alpha) catch 0 < INF - 100) {
+                    skip_quiet = true;
+                    continue;
+                }
+            }
 
             // MAKE MOVES
 
@@ -675,9 +676,7 @@ pub const Searcher = struct {
         var alpha = alpha_;
         var beta = beta_;
 
-        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
-            return TIME_UP;
-        }
+        self.nodes += 1;
 
         if (Eval.is_material_drawn(position)) {
             return DRAW;
