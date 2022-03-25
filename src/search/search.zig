@@ -321,8 +321,8 @@ pub const Searcher = struct {
         self.nodes += 1;
 
         // Variables
-        var is_root = self.ply == 0;
-        var is_pv = alpha != beta - 1;
+        const is_root = self.ply == 0;
+        const is_pv = alpha != beta - 1;
 
         // Too deep = return eval
         if (self.ply == MAX_PLY) {
@@ -345,7 +345,7 @@ pub const Searcher = struct {
         }
 
         // PV
-        var old_pv = self.pv_array[self.pv_index];
+        const old_pv = self.pv_array[self.pv_index];
         self.pv_array[self.pv_index] = 0;
         const old_pv_index = self.pv_index;
         defer self.pv_index = old_pv_index;
@@ -381,7 +381,7 @@ pub const Searcher = struct {
             }
         }
 
-        var in_check = position.is_king_checked_for(position.turn);
+        const in_check = position.is_king_checked_for(position.turn);
 
         if (in_check) {
             // Check extension
@@ -426,14 +426,10 @@ pub const Searcher = struct {
         }
 
         // Static eval
-        var eval = Eval.evaluate(position, &self.nnue, self.halfmoves);
-
-        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
-            return TIME_UP;
-        }
+        const eval = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
         // Pruning
-        var is_pruning_allowed = !is_pv and !in_check;
+        const is_pruning_allowed = !is_pv and !in_check;
 
         if (is_pruning_allowed) {
             // Razoring
