@@ -6,7 +6,7 @@ const TT = @import("../cache/tt.zig");
 const std = @import("std");
 const SEE = @import("../search/see.zig");
 
-const Value = struct {
+const Value = packed struct {
     hash: u64,
     depth: u8,
     nodes: u64,

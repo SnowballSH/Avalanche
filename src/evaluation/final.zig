@@ -40,8 +40,8 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
     return false;
 }
 
-pub const TEMPO_MG = 4;
-pub const TEMPO_EG = 14;
+pub const TEMPO_MG = 3;
+pub const TEMPO_EG = 6;
 
 pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     if (is_material_drawn(pos)) {

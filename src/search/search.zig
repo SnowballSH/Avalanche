@@ -27,7 +27,7 @@ const HISTORY = [64][64]u32;
 pub var GlobalTT: TT.TT = undefined;
 
 pub fn init_tt() void {
-    GlobalTT = TT.TT.new(32);
+    GlobalTT = TT.TT.new(24);
     GlobalTT.reset();
 }
 
@@ -103,6 +103,10 @@ pub const Searcher = struct {
         }
     }
 
+    fn stop_search(self: *Searcher) bool {
+        return !self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?));
+    }
+
     //
     // Iterative Deepening
     // Searches to the given depth until time runs out.
@@ -169,18 +173,22 @@ pub const Searcher = struct {
                 break;
             }
 
-            // Search it
+            const alpha: i16 = -INF;
+            const beta: i16 = INF;
 
-            // const score_ = self.mtdf(position, score, dp);
-            const score_ = self.negamax(position, -INF, INF, dp);
+            const score_ = self.negamax(position, alpha, beta, dp);
 
-            if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
+            if (self.stop_search()) {
                 break;
             }
             score = score_;
 
+            if (self.stop_search()) {
+                break;
+            }
+
             // print stats
-            if (score > 0 and INF - score < 50) {
+            if (score > 0 and INF - score < 100) {
                 stdout.print(
                     "info depth {} seldepth {} nodes {} time {} score mate {} pv",
                     .{
@@ -194,7 +202,7 @@ pub const Searcher = struct {
                 if (dp < max_depth - 3) {
                     max_depth = dp + 3;
                 }
-            } else if (score < 0 and INF + score < 50) {
+            } else if (score < 0 and INF + score < 100) {
                 stdout.print(
                     "info depth {} seldepth {} nodes {} time {} score mate -{} pv",
                     .{
@@ -285,29 +293,6 @@ pub const Searcher = struct {
         stdout.print("\nbestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
         GlobalTT.reset();
-    }
-
-    //
-    // MTD(f) search
-    // MTD(f) is an alpha-beta game tree search algorithm modified to use ‘zero-window’ initial search bounds,
-    // and memory (usually a transposition table) to reuse intermediate search results.
-    //
-    pub fn mtdf(self: *Searcher, position: *Position.Position, f: i16, depth: u8) i16 {
-        var g = f;
-        var upper_bound = INF;
-        var lower_bound = -INF;
-
-        while (lower_bound < upper_bound) {
-            const beta = @maximum(g, lower_bound + 1);
-            g = self.negamax(position, beta - 1, beta, depth);
-            if (g < beta) {
-                upper_bound = g;
-            } else {
-                lower_bound = g;
-            }
-        }
-
-        return g;
     }
 
     //
@@ -421,7 +406,7 @@ pub const Searcher = struct {
         }
 
         // TT can be time-consuming
-        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
+        if (self.stop_search()) {
             return TIME_UP;
         }
 
@@ -464,7 +449,7 @@ pub const Searcher = struct {
                 position.undo_null_move();
 
                 if (score >= beta) {
-                    return score;
+                    return beta;
                 }
             }
         }
@@ -479,7 +464,7 @@ pub const Searcher = struct {
         const FP_MARGIN: i16 = 97;
         var fp_margin = eval + FP_MARGIN * @intCast(i16, depth);
 
-        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
+        if (self.stop_search()) {
             return TIME_UP;
         }
 
@@ -593,7 +578,7 @@ pub const Searcher = struct {
             _ = self.hash_history.pop();
             self.ply -= 1;
 
-            if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
+            if (self.stop_search()) {
                 return TIME_UP;
             }
 
@@ -695,7 +680,7 @@ pub const Searcher = struct {
             return stand_pat;
         }
 
-        if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
+        if (self.stop_search()) {
             return TIME_UP;
         }
 
@@ -749,7 +734,7 @@ pub const Searcher = struct {
             position.undo_move(m, &self.nnue);
             self.ply -= 1;
 
-            if (!self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?))) {
+            if (self.stop_search()) {
                 return TIME_UP;
             }
 

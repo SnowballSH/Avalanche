@@ -12,11 +12,11 @@ pub const TTFlag = enum(u3) {
     Exact,
 };
 
-pub const TTData = struct {
+pub const TTData = packed struct {
     hash: u64,
+    flag: TTFlag,
     depth: u8,
     score: i16,
-    flag: TTFlag,
     bm: u24,
 };
 
@@ -27,13 +27,13 @@ pub const TT = struct {
     pub fn new(mb: usize) TT {
         var tt = TT{
             .data = std.ArrayList(TTData).init(TTArena.allocator()),
-            .size = @divFloor(mb * MB, @sizeOf(TTData)),
+            .size = std.math.ceilPowerOfTwo(usize, mb * MB / @sizeOf(TTData)) catch 1000,
         };
 
         tt.data.ensureTotalCapacity(tt.size) catch {};
         tt.data.expandToCapacity();
 
-        std.debug.print("Allocated {} MB, {} items for TT\n", .{ mb, tt.size });
+        std.debug.print("Allocated {} KB, {} items for TT\n", .{ tt.size * @sizeOf(TTData) / KB, tt.size });
 
         return tt;
     }
@@ -49,7 +49,7 @@ pub const TT = struct {
     }
 
     pub fn probe(self: *TT, hash: u64) ?*TTData {
-        var entry = &self.data.items[hash % self.size];
+        var entry = &self.data.items[hash & (self.size - 1)];
 
         if (entry.hash == hash and entry.flag != TTFlag.Invalid and entry.depth != 0 and entry.bm != 0) {
             return entry;
@@ -59,7 +59,7 @@ pub const TT = struct {
     }
 
     pub fn insert(self: *TT, hash: u64, depth: u8, score: i16, flag: TTFlag, bm: u24) void {
-        self.data.items[hash % self.size] = TTData{
+        self.data.items[hash & (self.size - 1)] = TTData{
             .hash = hash,
             .depth = depth,
             .score = score,
