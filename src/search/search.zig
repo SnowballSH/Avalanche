@@ -1,6 +1,7 @@
 const Position = @import("../board/position.zig");
 const Piece = @import("../board/piece.zig");
 const NNUE = @import("../evaluation/nnue.zig");
+const HCE = @import("../evaluation/hce.zig");
 const Eval = @import("../evaluation/final.zig");
 const Movegen = @import("../move/movegen.zig");
 const Uci = @import("../uci/uci.zig");
@@ -12,13 +13,13 @@ const SEE = @import("./see.zig");
 
 const std = @import("std");
 
-pub const INF: i16 = 32767;
+pub const INF: i16 = 32000;
 
 pub const DRAW: i16 = 0;
 
-pub const TIME_UP: i16 = INF - 500;
+pub const TIME_UP: i16 = INF + 500;
 
-pub const MAX_PLY = 127;
+pub const MAX_PLY = 122;
 
 const PVARRAY = [(MAX_PLY * MAX_PLY + MAX_PLY) / 2]u24;
 const KILLER = [2][MAX_PLY]u24;
@@ -55,7 +56,6 @@ pub const Searcher = struct {
 
     killers: KILLER,
     history: HISTORY,
-    in_null: bool,
 
     // NNUE
     nnue: NNUE.NNUE,
@@ -80,7 +80,6 @@ pub const Searcher = struct {
             .pv_index = 0,
             .killers = std.mem.zeroes(KILLER),
             .history = std.mem.zeroes(HISTORY),
-            .in_null = false,
 
             .nnue = NNUE.NNUE.new(),
         };
@@ -169,7 +168,7 @@ pub const Searcher = struct {
             self.seldepth = 0;
 
             // Not enough time to run next depth
-            if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() < time_last_iter / 4) {
+            if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() < time_last_iter / 2) {
                 break;
             }
 
@@ -345,7 +344,7 @@ pub const Searcher = struct {
                 while (index >= limit and index >= 0) {
                     if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
                         count += 1;
-                        if (self.ply != 1) {
+                        if (self.ply > 1) {
                             return DRAW;
                         }
                     }
@@ -418,38 +417,36 @@ pub const Searcher = struct {
 
         if (is_pruning_allowed) {
             // Razoring
-            const RazoringMargin: i16 = 375;
+            const RazoringMargin: i16 = 339;
             if (depth < 2 and eval + RazoringMargin < alpha) {
                 return self.quiescence_search(position, alpha, beta);
             }
 
             // Reversed futility pruning
-            const RFPMargin: i16 = 62;
+            const RFPMargin: i16 = 64;
             var reversed_futility_pruning_margin = RFPMargin * depth;
             if (depth < 9 and eval - reversed_futility_pruning_margin >= beta) {
                 return eval - reversed_futility_pruning_margin;
             }
 
             // Null move pruning
-            var is_null_move_allowed = !self.in_null and position.phase() >= 5;
+            var is_null_move_allowed = position.phase() >= 5;
             if (is_null_move_allowed and depth >= 2 and eval > beta) {
                 var r = 4 + @minimum(depth / 4, 3);
-                if (eval > beta + 95) {
+                if (eval > beta + 100) {
                     r += 1;
                 }
                 r = @minimum(depth, r);
                 position.make_null_move();
                 self.ply += 1;
-                self.in_null = true;
 
                 var score = -self.negamax(position, -beta, -beta + 1, depth - r);
 
-                self.in_null = false;
                 self.ply -= 1;
                 position.undo_null_move();
 
                 if (score >= beta) {
-                    return beta;
+                    return score;
                 }
             }
         }
@@ -548,6 +545,11 @@ pub const Searcher = struct {
                         lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
                     } else {
                         lmr_depth = LMR.NoisyLMR[@minimum(31, depth)][@minimum(31, legals)];
+                        const captured = position.mailbox[Position.fen_sq_to_sq(Encode.target(m))].?;
+                        const LMRCaptureMargin: i16 = 86;
+                        if (eval + HCE.PieceValues[@enumToInt(captured) % 6] + LMRCaptureMargin < beta) {
+                            lmr_depth += 1;
+                        }
                     }
 
                     if (in_check) {
@@ -611,7 +613,7 @@ pub const Searcher = struct {
 
                 // History
                 if (is_quiet) {
-                    self.history[Encode.source(m)][Encode.target(m)] += depth;
+                    self.history[Encode.source(m)][Encode.target(m)] += depth + (depth / 2);
                 }
 
                 // store in PV

@@ -65,9 +65,9 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
         return score;
     } else {
         if (info.searcher.killers[0][info.searcher.ply] == move) {
-            score += 4000;
+            score += 6000;
         } else if (info.searcher.killers[1][info.searcher.ply] == move) {
-            score += 2500;
+            score += 5000;
         } else {
             score += @intCast(i16, info.searcher.history[Encode.source(move)][Encode.target(move)]);
         }
