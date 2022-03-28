@@ -470,7 +470,7 @@ pub const Searcher = struct {
         defer moves.deinit();
 
         // Order and sort
-        var oi = Ordering.OrderInfo{
+        const oi = Ordering.OrderInfo{
             .pos = position,
             .searcher = self,
             .old_pv = old_pv,
@@ -666,7 +666,7 @@ pub const Searcher = struct {
         }
 
         // Static eval
-        var stand_pat = Eval.evaluate(position, &self.nnue, self.halfmoves);
+        const stand_pat = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
         // *** Static evaluation pruning ***
         if (stand_pat >= beta) {
@@ -693,7 +693,7 @@ pub const Searcher = struct {
         var count: usize = 0;
         var length = std.mem.len(moves.items);
 
-        var oi = Ordering.OrderInfo{
+        const oi = Ordering.OrderInfo{
             .pos = position,
             .searcher = self,
             .old_pv = 0,

@@ -44,14 +44,12 @@ pub const UciInterface = struct {
                 break;
             }
 
-            var tokens = std.mem.split(u8, line.?, " ");
+            const tline = std.mem.trim(u8, line.?, "\r");
+
+            var tokens = std.mem.split(u8, tline, " ");
             var token = tokens.next();
             if (token == null) {
                 break;
-            }
-
-            if (std.mem.len(token.?) > 1 and token.?[std.mem.len(token.?) - 1] == '\r') {
-                token = token.?[0 .. std.mem.len(token.?) - 1];
             }
 
             if (std.mem.eql(u8, token.?, "stop")) {
@@ -302,11 +300,11 @@ pub const UciInterface = struct {
                     }
 
                     if (movetime.? > 50) {
-                        movetime.? -= 8;
+                        movetime.? -= 10;
                     } else if (movetime.? > 10) {
-                        movetime.? -= 2;
+                        movetime.? -= 3;
                     } else {
-                        movetime = 3;
+                        movetime = 5;
                     }
                     movetime.? *= std.time.ns_per_ms;
                 } else {
