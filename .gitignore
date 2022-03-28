@@ -16,3 +16,4 @@ nets/data.nnue
 # Built with zig build -- nnue
 src/weights.zig
 lichess-bot
+binaries
