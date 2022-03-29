@@ -14,20 +14,23 @@ pub const TTFlag = enum(u3) {
 
 pub const TTData = packed struct {
     hash: u64,
-    flag: TTFlag,
     depth: u8,
+    age: u16,
     score: i16,
     bm: u24,
+    flag: TTFlag,
 };
 
 pub const TT = struct {
     data: std.ArrayList(TTData),
     size: usize,
+    age: u16,
 
     pub fn new(mb: usize) TT {
         var tt = TT{
             .data = std.ArrayList(TTData).init(TTArena.allocator()),
-            .size = std.math.ceilPowerOfTwo(usize, mb * MB / @sizeOf(TTData)) catch 1000,
+            .size = mb * MB / @sizeOf(TTData),
+            .age = 0,
         };
 
         tt.data.ensureTotalCapacity(tt.size) catch {};
@@ -49,7 +52,7 @@ pub const TT = struct {
     }
 
     pub fn probe(self: *TT, hash: u64) ?*TTData {
-        var entry = &self.data.items[hash & (self.size - 1)];
+        var entry = &self.data.items[hash % self.size];
 
         if (entry.hash == hash and entry.flag != TTFlag.Invalid and entry.depth != 0 and entry.bm != 0) {
             return entry;
@@ -59,12 +62,28 @@ pub const TT = struct {
     }
 
     pub fn insert(self: *TT, hash: u64, depth: u8, score: i16, flag: TTFlag, bm: u24) void {
-        self.data.items[hash & (self.size - 1)] = TTData{
-            .hash = hash,
-            .depth = depth,
-            .score = score,
-            .flag = flag,
-            .bm = bm,
-        };
+        const data = self.data.items[hash % self.size];
+        var replace: bool = false;
+        if (data.hash == 0) {
+            replace = true;
+        } else if (data.hash == hash) {
+            replace = (depth >= data.depth - 3) or (data.flag == TTFlag.Exact);
+        } else {
+            replace = (data.age != self.age) or (depth >= data.depth);
+        }
+        if (replace) {
+            self.data.items[hash % self.size] = TTData{
+                .hash = hash,
+                .depth = depth,
+                .score = score,
+                .flag = flag,
+                .bm = bm,
+                .age = self.age,
+            };
+        }
+    }
+
+    pub fn age(self: *TT) void {
+        self.age +%= 1;
     }
 };

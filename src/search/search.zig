@@ -28,7 +28,7 @@ const HISTORY = [64][64]u32;
 pub var GlobalTT: TT.TT = undefined;
 
 pub fn init_tt() void {
-    GlobalTT = TT.TT.new(24);
+    GlobalTT = TT.TT.new(32);
     GlobalTT.reset();
 }
 
@@ -291,7 +291,7 @@ pub const Searcher = struct {
 
         stdout.print("\nbestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
-        GlobalTT.reset();
+        // GlobalTT.reset();
     }
 
     //
