@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const NNUE_SOURCE = @embedFile("./nets/Flake2.nnue");
+const NNUE_SOURCE = @embedFile("./nets/default.nnue");
 
 fn le_to_u32(comptime idx: usize) u32 {
     return @as(u32, NNUE_SOURCE[idx + 0]) | (@as(u32, NNUE_SOURCE[idx + 1]) << 8) | (@as(u32, NNUE_SOURCE[idx + 2]) << 16) | (@as(u32, NNUE_SOURCE[idx + 3]) << 24);
