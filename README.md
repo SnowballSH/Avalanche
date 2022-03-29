@@ -2,7 +2,7 @@
 
 [WIP] Bitboard and NNUE Chess Engine written in Zig
 
-Currently plays at around 2200 CCRL ELO and 2500 human ELO.
+Currently plays at around 2400 CCRL ELO and 2500 human ELO.
 
 ## Compile
 
@@ -24,13 +24,14 @@ Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
 
 ## Changelog (ELO based on Stockfish limit_strength)
 
-- ### v0.2: [DEV] Search  (+500-650 ELO), ~2220 ELO
+- ### v0.2: Search  (+600-750 ELO), ~2350 ELO
     - History heuristics, killer heuristics
     - Better LMR
     - Reversed Futility Pruning
     - Null Move Pruning
     - Razoring
     - Time management
+    - Better Transposition Table
     - Static Exchange Evaluation
     - Stronger NNUE network: Flake 2
         - Trained on human games on https://database.lichess.org/ and more engine games.
