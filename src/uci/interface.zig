@@ -179,7 +179,11 @@ pub const UciInterface = struct {
                         break;
                     }
                     if (std.mem.eql(u8, token.?, "depth")) {
-                        max_depth = std.fmt.parseUnsigned(u8, tokens.next().?, 10) catch null;
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        max_depth = std.fmt.parseUnsigned(u8, token.?, 10) catch null;
                         break;
                     }
                     if (std.mem.eql(u8, token.?, "movetime")) {

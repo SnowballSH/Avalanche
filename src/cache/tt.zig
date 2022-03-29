@@ -67,7 +67,7 @@ pub const TT = struct {
         if (data.hash == 0) {
             replace = true;
         } else if (data.hash == hash) {
-            replace = (depth >= data.depth - 3) or (data.flag == TTFlag.Exact);
+            replace = (data.depth >= 3 and depth >= data.depth - 3) or (data.flag == TTFlag.Exact);
         } else {
             replace = (data.age != self.age) or (depth >= data.depth);
         }
