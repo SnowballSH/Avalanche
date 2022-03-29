@@ -2,7 +2,6 @@
    
 **/zig-cache
 **/zig-out
-**/*.exe
 **/old_binaries
 .DS_Store
 **/*.bin
@@ -16,4 +15,3 @@ nets/data.nnue
 # Built with zig build -- nnue
 src/weights.zig
 lichess-bot
-binaries
