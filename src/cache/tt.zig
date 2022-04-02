@@ -83,7 +83,7 @@ pub const TT = struct {
         }
     }
 
-    pub fn age(self: *TT) void {
+    pub fn do_age(self: *TT) void {
         self.age +%= 1;
     }
 };

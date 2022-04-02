@@ -19,7 +19,7 @@ Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming. Hope the war in Ukraine doesn't impact him and he stays safe!
 - https://github.com/amanjpro/zahak for Search ideas
-- https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM net can be used with Avalanche!)
+- https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM normal net can be used with Avalanche!)
 - https://github.com/Tearth/Cosette for Movegen ideas
 
 ## Changelog (ELO based on Stockfish limit_strength)

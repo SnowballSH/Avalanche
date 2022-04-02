@@ -292,6 +292,7 @@ pub const Searcher = struct {
         stdout.print("\nbestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
         // GlobalTT.reset();
+        GlobalTT.do_age();
     }
 
     //
