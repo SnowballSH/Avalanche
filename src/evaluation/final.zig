@@ -40,8 +40,8 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
     return false;
 }
 
-pub const TEMPO_MG = 3;
-pub const TEMPO_EG = 6;
+pub const TEMPO_MG = 4;
+pub const TEMPO_EG = 10;
 
 pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     if (is_material_drawn(pos)) {
@@ -58,14 +58,19 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     const nn = @intCast(i16, @minimum(nnue.result[bucket], 32767));
     var stand_pat = nn;
 
-    if (p <= 10) {
+    // var hce = HCE.evaluate(pos);
+    // if (pos.turn == Piece.Color.Black) {
+    //     hce = -hce;
+    // }
+
+    if (p <= 6) {
         stand_pat += TEMPO_EG;
     } else {
         stand_pat += TEMPO_MG;
     }
 
-    if (fifty >= 14) {
-        const red = fifty * (fifty - 2) / 16;
+    if (fifty >= 12 and p <= 8) {
+        const red = fifty * (fifty - 2) / 14;
 
         if (stand_pat > 0) {
             stand_pat = @maximum(0, stand_pat - red);

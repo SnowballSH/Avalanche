@@ -32,6 +32,26 @@ pub fn init_tt() void {
     GlobalTT.reset();
 }
 
+pub const SearchType = struct {
+    null_move: bool,
+    pv: bool,
+};
+
+const NULL_MOVE = SearchType{
+    .null_move = true,
+    .pv = false,
+};
+
+const PV_MOVE = SearchType{
+    .null_move = false,
+    .pv = true,
+};
+
+const NO_NULL_MOVE = SearchType{
+    .null_move = false,
+    .pv = false,
+};
+
 pub const Searcher = struct {
     // info
     ply: u8,
@@ -175,7 +195,7 @@ pub const Searcher = struct {
             const alpha: i16 = -INF;
             const beta: i16 = INF;
 
-            const score_ = self.negamax(position, alpha, beta, dp);
+            const score_ = self.negamax(PV_MOVE, position, alpha, beta, dp);
 
             if (self.stop_search()) {
                 break;
@@ -295,10 +315,28 @@ pub const Searcher = struct {
         GlobalTT.do_age();
     }
 
+    // Prunings & Reductions
+    inline fn do_rfp(depth: u8) bool {
+        return depth < 7;
+    }
+    inline fn rfp(depth: u8) i16 {
+        return @intCast(i16, depth) * 64;
+    }
+
+    inline fn do_nmp(comptime search_type: SearchType, position: *Position.Position, depth: u8, eval: i16, beta: i16) bool {
+        const has_non_pawn = (position.bitboards.WhitePawns | position.bitboards.WhiteKing | position.bitboards.BlackPawns | position.bitboards.BlackKing) != (position.bitboards.WhiteAll | position.bitboards.BlackAll);
+        return search_type.null_move and depth > 5 and eval >= beta and has_non_pawn;
+    }
+
+    inline fn nmp(depth: u8, eval: i16, beta: i16) u8 {
+        const r = 3 + @intCast(u16, depth) / 4 + @intCast(u16, eval - beta) / 200;
+        return @intCast(u8, @maximum(1, depth - @minimum(@intCast(u16, depth), r)));
+    }
+
     //
     // Negamax alpha-beta tree search with prunings
     //
-    pub fn negamax(self: *Searcher, position: *Position.Position, alpha_: i16, beta_: i16, depth_: u8) i16 {
+    pub fn negamax(self: *Searcher, comptime search_type: SearchType, position: *Position.Position, alpha_: i16, beta_: i16, depth_: u8) i16 {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -307,7 +345,7 @@ pub const Searcher = struct {
 
         // Variables
         const is_root = self.ply == 0;
-        const is_pv = alpha != beta - 1;
+        const is_pv = search_type.pv;
 
         // Too deep = return eval
         if (self.ply == MAX_PLY) {
@@ -418,30 +456,23 @@ pub const Searcher = struct {
 
         if (is_pruning_allowed) {
             // Razoring
-            const RazoringMargin: i16 = 339;
+            const RazoringMargin: i16 = 400;
             if (depth < 2 and eval + RazoringMargin < alpha) {
                 return self.quiescence_search(position, alpha, beta);
             }
 
             // Reversed futility pruning
-            const RFPMargin: i16 = 64;
-            var reversed_futility_pruning_margin = RFPMargin * depth;
-            if (depth < 9 and eval - reversed_futility_pruning_margin >= beta) {
-                return eval - reversed_futility_pruning_margin;
+            if (do_rfp(depth) and eval - rfp(depth) >= beta) {
+                return eval;
             }
 
             // Null move pruning
-            var is_null_move_allowed = position.phase() >= 5;
-            if (is_null_move_allowed and depth >= 2 and eval > beta) {
-                var r = 4 + @minimum(depth / 4, 3);
-                if (eval > beta + 100) {
-                    r += 1;
-                }
-                r = @minimum(depth, r);
+            const is_null_move_allowed = do_nmp(search_type, position, depth, eval, beta) and !in_check;
+            if (is_null_move_allowed) {
                 position.make_null_move();
                 self.ply += 1;
 
-                var score = -self.negamax(position, -beta, -beta + 1, depth - r);
+                var score = -self.negamax(NO_NULL_MOVE, position, -beta, -beta + 1, nmp(depth, eval, beta));
 
                 self.ply -= 1;
                 position.undo_null_move();
@@ -570,9 +601,13 @@ pub const Searcher = struct {
             var score: i16 = 0;
 
             // PVS
-            score = -self.negamax(position, -alpha - 1, -alpha, depth - 1 - @intCast(u8, lmr_depth));
-            if (score > alpha and score < beta) {
-                score = -self.negamax(position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+            if (legals == 0) {
+                score = -self.negamax(search_type, position, -alpha - 1, -alpha, depth - 1);
+            } else {
+                score = -self.negamax(NULL_MOVE, position, -alpha - 1, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+                if (score > alpha and score < beta) {
+                    score = -self.negamax(NULL_MOVE, position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+                }
             }
 
             // UNDO MOVES

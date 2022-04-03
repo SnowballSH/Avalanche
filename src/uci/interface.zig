@@ -137,21 +137,7 @@ pub const UciInterface = struct {
                     _ = try stdout.print("{}\n", .{score});
                 }
             } else if (std.mem.eql(u8, token.?, "hce")) {
-                token = tokens.next();
-                if (token != null) {
-                    var depth = std.fmt.parseUnsigned(u8, token.?, 10) catch 1;
-                    depth = std.math.max(depth, 1);
-                    self.searcher.max_nano = null;
-                    self.searcher.nodes = 0;
-                    var score = -self.searcher.negamax(&self.position, -Search.INF, Search.INF, depth);
-                    if (self.position.turn == Piece.Color.Black) {
-                        score = -score;
-                    }
-
-                    try stdout.print("{}\n", .{score});
-                } else {
-                    try stdout.print("{}\n", .{HCE.evaluate(&self.position)});
-                }
+                try stdout.print("{}\n", .{HCE.evaluate(&self.position)});
             } else if (std.mem.eql(u8, token.?, "perft")) {
                 var depth: usize = 1;
                 token = tokens.next();
