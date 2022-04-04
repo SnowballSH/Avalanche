@@ -25,6 +25,8 @@ const PVARRAY = [(MAX_PLY * MAX_PLY + MAX_PLY) / 2]u24;
 const KILLER = [2][MAX_PLY]u24;
 const HISTORY = [64][64]u32;
 
+const HISTORY_MAX = 0xffffffff;
+
 pub var GlobalTT: TT.TT = undefined;
 
 pub fn init_tt() void {
@@ -126,6 +128,14 @@ pub const Searcher = struct {
         return !self.force_nostop and (self.stop or (self.max_nano != null and self.timer.read() >= self.max_nano.?));
     }
 
+    fn age_history(self: *Searcher) void {
+        for (self.history) |*arr| {
+            for (arr) |*x| {
+                x.* = @floatToInt(u32, @maximum(0.0, @minimum(@intToFloat(f64, x.*) / 2, @log(@intToFloat(f64, x.*)) * 4)));
+            }
+        }
+    }
+
     //
     // Iterative Deepening
     // Searches to the given depth until time runs out.
@@ -147,12 +157,6 @@ pub const Searcher = struct {
 
         for (self.killers) |*k| {
             for (k) |*p| {
-                p.* = 0;
-            }
-        }
-
-        for (self.history) |*h| {
-            for (h) |*p| {
                 p.* = 0;
             }
         }
@@ -307,8 +311,8 @@ pub const Searcher = struct {
 
         stdout.print("\nbestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
-        // GlobalTT.reset();
         GlobalTT.do_age();
+        self.age_history();
     }
 
     // Prunings & Reductions
@@ -658,7 +662,9 @@ pub const Searcher = struct {
 
                 // History
                 if (is_quiet) {
-                    self.history[Encode.source(m)][Encode.target(m)] += depth + (depth / 2);
+                    if (self.history[Encode.source(m)][Encode.target(m)] < HISTORY_MAX) {
+                        self.history[Encode.source(m)][Encode.target(m)] += depth + (depth / 2);
+                    }
                 }
 
                 // store in PV
