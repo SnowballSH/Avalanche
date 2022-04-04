@@ -202,10 +202,6 @@ pub const Searcher = struct {
             }
             score = score_;
 
-            if (self.stop_search()) {
-                break;
-            }
-
             // print stats
             if (score > 0 and INF - score < 100) {
                 stdout.print(
@@ -316,6 +312,9 @@ pub const Searcher = struct {
     }
 
     // Prunings & Reductions
+    // Margins manually tuned based on Zahak's original values
+
+    // Reversed Futility Pruning
     inline fn do_rfp(depth: u8) bool {
         return depth < 7;
     }
@@ -323,12 +322,21 @@ pub const Searcher = struct {
         return @intCast(i16, depth) * 64;
     }
 
+    // Futility Pruning
+    inline fn fp(depth: u8) i16 {
+        return @intCast(i16, depth) * 100;
+    }
+
+    // Null Move Pruning
     inline fn do_nmp(comptime search_type: SearchType, position: *Position.Position, depth: u8, eval: i16, beta: i16) bool {
         const has_non_pawn = (position.bitboards.WhitePawns | position.bitboards.WhiteKing | position.bitboards.BlackPawns | position.bitboards.BlackKing) != (position.bitboards.WhiteAll | position.bitboards.BlackAll);
         return search_type.null_move and depth > 5 and eval >= beta and has_non_pawn;
     }
 
     inline fn nmp(depth: u8, eval: i16, beta: i16) u8 {
+        // Assumes eval >= beta
+        std.debug.assert(eval >= beta);
+
         const r = 3 + @intCast(u16, depth) / 4 + @intCast(u16, eval - beta) / 200;
         return @intCast(u8, @maximum(1, depth - @minimum(@intCast(u16, depth), r)));
     }
@@ -490,8 +498,7 @@ pub const Searcher = struct {
             lmr_threashold += 1;
         }
 
-        const FP_MARGIN: i16 = 97;
-        var fp_margin = eval + FP_MARGIN * @intCast(i16, depth);
+        const fp_margin = eval + fp(depth);
 
         if (self.stop_search()) {
             return TIME_UP;
@@ -527,21 +534,20 @@ pub const Searcher = struct {
         var skip_quiet = false;
 
         while (count < length) {
-            var m = moves.items[count].m;
+            const m = moves.items[count].m;
             count += 1;
 
-            var is_quiet = Encode.capture(m) == 0;
+            const is_quiet = Encode.capture(m) == 0;
             if (is_quiet and skip_quiet) {
                 continue;
             }
 
-            var is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
+            const is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
-            if (!is_root and bs > -INF) {
-                if (depth < 8 and is_quiet and !is_killer and fp_margin <= alpha and std.math.absInt(alpha) catch 0 < INF - 100) {
-                    skip_quiet = true;
-                    continue;
-                }
+            // Futility pruning
+            if (!is_root and legals != 0 and !is_pv and is_quiet and depth < 8 and fp_margin <= alpha) {
+                skip_quiet = true;
+                continue;
             }
 
             // MAKE MOVES
@@ -600,13 +606,16 @@ pub const Searcher = struct {
 
             var score: i16 = 0;
 
-            // PVS
+            // PVS, "inspired" by Igel
             if (legals == 0) {
-                score = -self.negamax(search_type, position, -alpha - 1, -alpha, depth - 1);
+                score = -self.negamax(search_type, position, -beta, -alpha, depth - 1);
             } else {
                 score = -self.negamax(NULL_MOVE, position, -alpha - 1, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+                if (lmr_depth > 0 and score > alpha) {
+                    score = -self.negamax(NULL_MOVE, position, -alpha - 1, -alpha, depth - 1);
+                }
                 if (score > alpha and score < beta) {
-                    score = -self.negamax(NULL_MOVE, position, -beta, -alpha, depth - 1 - @intCast(u8, lmr_depth));
+                    score = -self.negamax(NULL_MOVE, position, -beta, -alpha, depth - 1);
                 }
             }
 
