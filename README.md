@@ -12,7 +12,7 @@ Currently no CPU-specific instructions besides POPCNT and CTZ are used, so one b
 
 Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
 
-Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
+Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament: https://lichess.org/LksfW5cl
 
 ## Credits
 
