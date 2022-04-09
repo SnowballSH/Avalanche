@@ -2,7 +2,9 @@
 
 [WIP] Bitboard and NNUE Chess Engine written in Zig
 
-Currently plays at around 2400 CCRL ELO and 2500 human ELO.
+**CCRL ELO (v0.2): 2424**
+
+https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%200.2%2064-bit#Avalanche_0_2_64-bit
 
 ## Compile
 
@@ -24,7 +26,7 @@ Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament
 
 ## Changelog (ELO based on Stockfish limit_strength)
 
-- ### v0.2: Search  (+600-750 ELO), ~2350 ELO
+- ### v0.2: Search  (+724 ELO), 2424 CCRL ELO
     - History heuristics, killer heuristics
     - Better LMR
     - Reversed Futility Pruning
