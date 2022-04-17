@@ -69,6 +69,7 @@ pub const Searcher = struct {
 
     // game
     hash_history: std.ArrayList(u64),
+    move_history: std.ArrayList(u24),
     halfmoves: u8,
     hm_stack: std.ArrayList(u8),
 
@@ -95,6 +96,7 @@ pub const Searcher = struct {
             .force_nostop = false,
 
             .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
+            .move_history = std.ArrayList(u24).init(std.heap.page_allocator),
             .halfmoves = 0,
             .hm_stack = std.ArrayList(u8).init(std.heap.page_allocator),
 
@@ -480,13 +482,17 @@ pub const Searcher = struct {
 
             // Null move pruning
             const is_null_move_allowed = do_nmp(search_type, position, depth, eval, beta) and !in_check;
-            if (is_null_move_allowed) {
+            const lmh = std.mem.len(self.move_history.items);
+            const last_move_is_null_move = lmh != 0 and self.move_history.items[lmh - 1] == 0;
+            if (is_null_move_allowed and !last_move_is_null_move) {
                 position.make_null_move();
+                self.move_history.append(0) catch unreachable;
                 self.ply += 1;
 
                 var score = -self.negamax(NO_NULL_MOVE, position, -beta, -beta + 1, nmp(depth, eval, beta));
 
                 self.ply -= 1;
+                _ = self.move_history.pop();
                 position.undo_null_move();
 
                 if (score >= beta) {
@@ -494,8 +500,6 @@ pub const Searcher = struct {
                 }
             }
         }
-
-        // var pruning_threashold: i16 = 6 + depth * depth;
 
         var lmr_threashold: u8 = 3;
         if (is_pv) {
@@ -556,11 +560,13 @@ pub const Searcher = struct {
 
             // MAKE MOVES
 
+            self.move_history.append(m) catch unreachable;
             position.make_move(m, &self.nnue);
 
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
                 position.undo_move(m, &self.nnue);
+                _ = self.move_history.pop();
                 continue;
             }
 
@@ -625,6 +631,7 @@ pub const Searcher = struct {
 
             // UNDO MOVES
             position.undo_move(m, &self.nnue);
+            _ = self.move_history.pop();
             self.halfmoves = self.hm_stack.pop();
             _ = self.hash_history.pop();
             self.ply -= 1;
@@ -774,10 +781,12 @@ pub const Searcher = struct {
 
             count += 1;
 
+            self.move_history.append(m) catch unreachable;
             position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
                 position.undo_move(m, &self.nnue);
+                _ = self.move_history.pop();
                 continue;
             }
 
@@ -785,6 +794,7 @@ pub const Searcher = struct {
 
             var score = -self.quiescence_search(position, -beta, -alpha);
             position.undo_move(m, &self.nnue);
+            _ = self.move_history.pop();
             self.ply -= 1;
 
             if (self.stop_search()) {

@@ -64,8 +64,8 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 0.2\n");
-                _ = try stdout.write("id author SnowballSH\n");
+                _ = try stdout.write("id name Avalanche 0.3 DEV\n");
+                _ = try stdout.write("id author Yinuo Huang\n");
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
                 self.position.deinit();
