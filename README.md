@@ -2,7 +2,9 @@
 
 [WIP] Bitboard and NNUE Chess Engine written in Zig
 
-Currently plays at around 2400 CCRL ELO and 2500 human ELO.
+**CCRL ELO (v0.2): 2424**
+
+https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%200.2%2064-bit#Avalanche_0_2_64-bit
 
 ## Compile
 
@@ -12,7 +14,7 @@ Currently no CPU-specific instructions besides POPCNT and CTZ are used, so one b
 
 Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
 
-Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
+Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament: https://lichess.org/LksfW5cl
 
 ## Credits
 
@@ -24,7 +26,7 @@ Brilliant endgame win down a knight: https://lichess.org/U7tyeHWm/black
 
 ## Changelog (ELO based on Stockfish limit_strength)
 
-- ### v0.2: Search  (+600-750 ELO), ~2350 ELO
+- ### v0.2: Search  (+724 ELO), 2424 CCRL ELO
     - History heuristics, killer heuristics
     - Better LMR
     - Reversed Futility Pruning
