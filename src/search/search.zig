@@ -149,10 +149,6 @@ pub const Searcher = struct {
         self.seldepth = 0;
 
         self.max_nano = movetime_nano;
-        if (self.max_nano.? < 30) {
-            self.max_nano = 30;
-        }
-        self.max_nano.? -= 20;
 
         self.is_searching = true;
         defer self.is_searching = false;
@@ -486,7 +482,7 @@ pub const Searcher = struct {
             const last_move_is_null_move = lmh != 0 and self.move_history.items[lmh - 1] == 0;
             if (is_null_move_allowed and !last_move_is_null_move) {
                 position.make_null_move();
-                self.move_history.append(0) catch unreachable;
+                self.move_history.append(0) catch {};
                 self.ply += 1;
 
                 var score = -self.negamax(NO_NULL_MOVE, position, -beta, -beta + 1, nmp(depth, eval, beta));
@@ -560,7 +556,7 @@ pub const Searcher = struct {
 
             // MAKE MOVES
 
-            self.move_history.append(m) catch unreachable;
+            self.move_history.append(m) catch {};
             position.make_move(m, &self.nnue);
 
             // illegal?
@@ -781,7 +777,7 @@ pub const Searcher = struct {
 
             count += 1;
 
-            self.move_history.append(m) catch unreachable;
+            self.move_history.append(m) catch {};
             position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {

@@ -350,6 +350,7 @@ pub const UciInterface = struct {
                                     }
 
                                     self.searcher.hash_history.append(self.position.hash) catch {};
+                                    self.searcher.move_history.append(move.?) catch {};
                                 }
                             }
                         }

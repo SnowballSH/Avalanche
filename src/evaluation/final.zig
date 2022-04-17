@@ -43,6 +43,14 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
 pub const TEMPO_MG = 4;
 pub const TEMPO_EG = 10;
 
+pub fn is_basic_eg(pos: *Position.Position) bool {
+    return (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
+        (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteBishops | pos.bitboards.BlackBishops) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
+        (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteQueens | pos.bitboards.BlackQueens) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
+        pos.bitboards.WhiteKing == pos.bitboards.WhiteAll or
+        pos.bitboards.BlackKing == pos.bitboards.BlackAll;
+}
+
 pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     if (is_material_drawn(pos)) {
         return 0;
@@ -50,18 +58,22 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
 
     const p = pos.phase();
 
-    // Uncomment if using multi-bucket net
-    // var bucket = @minimum(@divFloor(p * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
-    const bucket = 0;
-    nnue.evaluate(pos.turn, bucket);
+    var stand_pat: i16 = 0;
 
-    const nn = @intCast(i16, @minimum(nnue.result[bucket], 32767));
-    var stand_pat = nn;
+    if (is_basic_eg(pos)) {
+        stand_pat = HCE.evaluate(pos);
+        if (pos.turn == Piece.Color.Black) {
+            stand_pat = -stand_pat;
+        }
+    } else {
+        // Uncomment if using multi-bucket net
+        // var bucket = @minimum(@divFloor(p * NNUE.Weights.OUTPUT_SIZE, 24), NNUE.Weights.OUTPUT_SIZE - 1);
+        const bucket = 0;
+        nnue.evaluate(pos.turn, bucket);
 
-    // var hce = HCE.evaluate(pos);
-    // if (pos.turn == Piece.Color.Black) {
-    //     hce = -hce;
-    // }
+        const nn = @intCast(i16, @minimum(nnue.result[bucket], 32767));
+        stand_pat = nn;
+    }
 
     if (p <= 6) {
         stand_pat += TEMPO_EG;
@@ -70,7 +82,7 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     }
 
     if (fifty >= 12 and p <= 8) {
-        const red = fifty * (fifty - 2) / 14;
+        const red = fifty * (fifty - 2) / 12;
 
         if (stand_pat > 0) {
             stand_pat = @maximum(0, stand_pat - red);
