@@ -347,7 +347,7 @@ pub const Searcher = struct {
 
     // IIR
     inline fn iir(depth: u8) u8 {
-        if (TTSizeMB <= 32) {
+        if (TTSizeMB <= 128) {
             if (depth >= 6) {
                 return 1;
             } else {
