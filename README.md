@@ -26,9 +26,10 @@ Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament
 
 ## Changelog (ELO based on Stockfish limit_strength)
 
-- ### v0.2.1 (in development)
+- ### v0.2.1 (+40-70 ELO), ~2470 ELO
     - Bug fixes
     - UCI options
+    - Improvements on Search
 
 - ### v0.2: Search  (+721 ELO), 2421 CCRL ELO
     - History heuristics, killer heuristics
