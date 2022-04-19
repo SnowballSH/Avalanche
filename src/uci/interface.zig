@@ -65,7 +65,7 @@ pub const UciInterface = struct {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
                 _ = try stdout.write("id name Avalanche 0.2.1\n");
-                _ = try stdout.write("id author Yinuo Huang\n");
+                _ = try stdout.write("id author Yinuo Huang\n\n");
                 _ = try stdout.write("option name Hash type spin default 32 min 1 max 4096\n");
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "setoption")) {

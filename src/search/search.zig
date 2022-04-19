@@ -345,6 +345,23 @@ pub const Searcher = struct {
         return @intCast(u8, @maximum(1, depth - @minimum(@intCast(u16, depth), r)));
     }
 
+    // IIR
+    inline fn iir(depth: u8) u8 {
+        if (TTSizeMB <= 32) {
+            if (depth >= 6) {
+                return 1;
+            } else {
+                return 0;
+            }
+        } else {
+            if (depth >= 5) {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+    }
+
     //
     // Negamax alpha-beta tree search with prunings
     //
@@ -435,9 +452,8 @@ pub const Searcher = struct {
             var entry = GlobalTT.probe(position.hash);
 
             if (entry != null) {
+                tthit = true;
                 if (entry.?.depth >= depth) {
-                    tthit = true;
-
                     self.pv_array[old_pv_index] = entry.?.bm;
 
                     if (entry.?.flag == TT.TTFlag.Exact) {
@@ -480,9 +496,7 @@ pub const Searcher = struct {
 
             // Null move pruning
             const is_null_move_allowed = do_nmp(search_type, position, depth, eval, beta) and !in_check;
-            const lmh = std.mem.len(self.move_history.items);
-            const last_move_is_null_move = lmh != 0 and self.move_history.items[lmh - 1] == 0;
-            if (is_null_move_allowed and !last_move_is_null_move) {
+            if (is_null_move_allowed) {
                 position.make_null_move();
                 self.move_history.append(0) catch {};
                 self.ply += 1;
@@ -497,6 +511,10 @@ pub const Searcher = struct {
                     return score;
                 }
             }
+        }
+
+        if (!tthit) {
+            depth -= iir(depth);
         }
 
         var lmr_threashold: u8 = 3;
