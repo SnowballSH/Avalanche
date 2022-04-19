@@ -1,10 +1,10 @@
 # Avalanche
 
-[WIP] Bitboard and NNUE Chess Engine written in Zig
+[WIP] UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 **CCRL ELO (v0.2): 2421**
 
-https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%200.2%2064-bit#Avalanche_0_2_64-bit
+[Avalanche's CCRL Profile](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%200.2%2064-bit#Avalanche_0_2_64-bit)
 
 ## Compile
 
@@ -25,6 +25,10 @@ Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament
 - https://github.com/Tearth/Cosette for Movegen ideas
 
 ## Changelog (ELO based on Stockfish limit_strength)
+
+- ### v0.2.1 (in development)
+    - Bug fixes
+    - UCI options
 
 - ### v0.2: Search  (+721 ELO), 2421 CCRL ELO
     - History heuristics, killer heuristics

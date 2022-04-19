@@ -30,7 +30,7 @@ pub const UciInterface = struct {
 
         self.searcher = Search.Searcher.new_searcher();
 
-        _ = try stdout.writeAll("Avalanche 0.2 by SnowballSH\n");
+        _ = try stdout.writeAll("Avalanche 0.2.1 by SnowballSH\n");
 
         self.position = Position.new_position_by_fen(Position.STARTPOS);
         defer self.position.deinit();
@@ -64,9 +64,39 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 0.3 DEV\n");
+                _ = try stdout.write("id name Avalanche 0.2.1\n");
                 _ = try stdout.write("id author Yinuo Huang\n");
+                _ = try stdout.write("option name Hash type spin default 32 min 1 max 4096\n");
                 _ = try stdout.writeAll("uciok\n");
+            } else if (std.mem.eql(u8, token.?, "setoption")) {
+                while (true) {
+                    token = tokens.next();
+                    if (token == null or !std.mem.eql(u8, token.?, "name")) {
+                        break;
+                    }
+
+                    token = tokens.next();
+                    if (token == null) {
+                        break;
+                    }
+                    if (std.mem.eql(u8, token.?, "Hash")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        const value = std.fmt.parseUnsigned(usize, token.?, 10) catch Search.TTSizeMB;
+                        Search.TTSizeMB = value;
+                        Search.init_tt();
+                    }
+
+                    break;
+                }
             } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
                 self.position.deinit();
                 self.position = Position.new_position_by_fen(Position.STARTPOS);

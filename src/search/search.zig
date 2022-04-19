@@ -29,8 +29,10 @@ const HISTORY_MAX = 0xffffffff;
 
 pub var GlobalTT: TT.TT = undefined;
 
+pub var TTSizeMB: usize = 32;
+
 pub fn init_tt() void {
-    GlobalTT = TT.TT.new(32);
+    GlobalTT = TT.TT.new(TTSizeMB);
     GlobalTT.reset();
 }
 

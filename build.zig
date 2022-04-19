@@ -160,11 +160,14 @@ fn do_nnue() void {
 }
 
 pub fn build(b: *std.build.Builder) void {
-    if (b.args != null) {
-        for (b.args.?) |arg| {
-            if (std.mem.eql(u8, arg, "nnue")) {
-                do_nnue();
-                break;
+    const dev_mode = false;
+    if (!dev_mode) {
+        if (b.args != null) {
+            for (b.args.?) |arg| {
+                if (std.mem.eql(u8, arg, "nnue")) {
+                    do_nnue();
+                    break;
+                }
             }
         }
     }
