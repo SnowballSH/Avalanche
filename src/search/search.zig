@@ -71,6 +71,7 @@ pub const Searcher = struct {
 
     // game
     hash_history: std.ArrayList(u64),
+    eval_history: std.ArrayList(i16),
     move_history: std.ArrayList(u24),
     halfmoves: u8,
     hm_stack: std.ArrayList(u8),
@@ -99,6 +100,7 @@ pub const Searcher = struct {
 
             .hash_history = std.ArrayList(u64).init(std.heap.page_allocator),
             .move_history = std.ArrayList(u24).init(std.heap.page_allocator),
+            .eval_history = std.ArrayList(i16).init(std.heap.page_allocator),
             .halfmoves = 0,
             .hm_stack = std.ArrayList(u8).init(std.heap.page_allocator),
 
@@ -189,12 +191,13 @@ pub const Searcher = struct {
         var score: i16 = 0;
         while (dp <= max_depth) {
             const start = self.timer.read();
-            self.seldepth = 0;
 
             // Not enough time to run next depth
             if (self.max_nano != null and self.timer.read() < self.max_nano.? and self.max_nano.? - self.timer.read() < time_last_iter / 2) {
                 break;
             }
+
+            self.seldepth = 0;
 
             const alpha: i16 = -INF;
             const beta: i16 = INF;
@@ -322,8 +325,8 @@ pub const Searcher = struct {
     inline fn do_rfp(depth: u8) bool {
         return depth < 7;
     }
-    inline fn rfp(depth: u8) i16 {
-        return @intCast(i16, depth) * 64;
+    inline fn rfp(depth: u8, improving: bool) i16 {
+        return (@intCast(i16, depth) - @intCast(i16, @boolToInt(improving))) * 50;
     }
 
     // Futility Pruning
@@ -334,7 +337,7 @@ pub const Searcher = struct {
     // Null Move Pruning
     inline fn do_nmp(comptime search_type: SearchType, position: *Position.Position, depth: u8, eval: i16, beta: i16) bool {
         const has_non_pawn = (position.bitboards.WhitePawns | position.bitboards.WhiteKing | position.bitboards.BlackPawns | position.bitboards.BlackKing) != (position.bitboards.WhiteAll | position.bitboards.BlackAll);
-        return search_type.null_move and depth > 5 and eval >= beta and has_non_pawn;
+        return search_type.null_move and depth > 4 and eval >= beta and has_non_pawn;
     }
 
     inline fn nmp(depth: u8, eval: i16, beta: i16) u8 {
@@ -347,7 +350,7 @@ pub const Searcher = struct {
 
     // IIR
     inline fn iir(depth: u8) u8 {
-        if (depth >= 5) {
+        if (depth >= 8) {
             return 1;
         } else {
             return 0;
@@ -451,13 +454,13 @@ pub const Searcher = struct {
                     if (entry.?.flag == TT.TTFlag.Exact) {
                         return entry.?.score;
                     } else if (entry.?.flag == TT.TTFlag.Lower) {
-                        alpha = std.math.max(alpha, entry.?.score);
+                        if (entry.?.score >= beta) {
+                            return entry.?.score;
+                        }
                     } else {
-                        beta = std.math.max(beta, entry.?.score);
-                    }
-
-                    if (alpha >= beta) {
-                        return entry.?.score;
+                        if (entry.?.score <= alpha) {
+                            return entry.?.score;
+                        }
                     }
                 }
             }
@@ -470,6 +473,7 @@ pub const Searcher = struct {
 
         // Static eval
         const eval = Eval.evaluate(position, &self.nnue, self.halfmoves);
+        const improving = if (self.ply < 2 or in_check) false else eval > self.eval_history.items[self.ply - 2];
 
         // Pruning
         const is_pruning_allowed = !is_pv and !in_check;
@@ -482,7 +486,7 @@ pub const Searcher = struct {
             }
 
             // Reversed futility pruning
-            if (do_rfp(depth) and eval - rfp(depth) >= beta) {
+            if (do_rfp(depth) and eval - rfp(depth, improving) >= beta) {
                 return eval;
             }
 
@@ -491,12 +495,14 @@ pub const Searcher = struct {
             if (is_null_move_allowed) {
                 position.make_null_move();
                 self.move_history.append(0) catch {};
+                self.eval_history.append(eval) catch {};
                 self.ply += 1;
 
                 var score = -self.negamax(NO_NULL_MOVE, position, -beta, -beta + 1, nmp(depth, eval, beta));
 
                 self.ply -= 1;
                 _ = self.move_history.pop();
+                _ = self.eval_history.pop();
                 position.undo_null_move();
 
                 if (score >= beta) {
@@ -505,7 +511,7 @@ pub const Searcher = struct {
             }
         }
 
-        if (!tthit) {
+        if (!tthit and !is_pv and !is_root and !improving) {
             depth -= iir(depth);
         }
 
@@ -561,20 +567,18 @@ pub const Searcher = struct {
             const is_killer = self.killers[0][self.ply] == m or self.killers[1][self.ply] == m;
 
             // Futility pruning
-            if (!is_root and legals != 0 and !is_pv and is_quiet and depth < 8 and fp_margin <= alpha) {
+            if (legals != 0 and !is_pv and is_quiet and depth < 8 and fp_margin <= alpha) {
                 skip_quiet = true;
                 continue;
             }
 
             // MAKE MOVES
 
-            self.move_history.append(m) catch {};
             position.make_move(m, &self.nnue);
 
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
                 position.undo_move(m, &self.nnue);
-                _ = self.move_history.pop();
                 continue;
             }
 
@@ -585,6 +589,8 @@ pub const Searcher = struct {
                 self.halfmoves += 1;
             }
             self.hash_history.append(position.hash) catch {};
+            self.move_history.append(m) catch {};
+            self.eval_history.append(eval) catch {};
 
             legals += 1;
             self.ply += 1;
@@ -602,19 +608,23 @@ pub const Searcher = struct {
                     } else {
                         lmr_depth = LMR.NoisyLMR[@minimum(31, depth)][@minimum(31, legals)];
                         const captured = position.mailbox[Position.fen_sq_to_sq(Encode.target(m))].?;
-                        const LMRCaptureMargin: i16 = 86;
+                        const LMRCaptureMargin: i16 = 85;
                         if (eval + HCE.PieceValues[@enumToInt(captured) % 6] + LMRCaptureMargin < beta) {
                             lmr_depth += 1;
                         }
                     }
 
-                    if (in_check) {
-                        lmr_depth -= 1;
+                    if (self.history[Encode.source(m)][Encode.target(m)] <= 100) {
+                        lmr_depth += 1;
                     }
-                    if (is_killer) {
+
+                    if (in_check or is_killer) {
                         lmr_depth -= 1;
                     }
                     if (is_pv) {
+                        lmr_depth -= 1;
+                    }
+                    if (improving) {
                         lmr_depth -= 1;
                     }
 
@@ -624,7 +634,7 @@ pub const Searcher = struct {
 
             var score: i16 = 0;
 
-            // PVS, "inspired" by Igel
+            // PVS
             if (legals == 0) {
                 score = -self.negamax(search_type, position, -beta, -alpha, depth - 1);
             } else {
@@ -640,6 +650,7 @@ pub const Searcher = struct {
             // UNDO MOVES
             position.undo_move(m, &self.nnue);
             _ = self.move_history.pop();
+            _ = self.eval_history.pop();
             self.halfmoves = self.hm_stack.pop();
             _ = self.hash_history.pop();
             self.ply -= 1;
@@ -667,28 +678,27 @@ pub const Searcher = struct {
 
             if (score > bs) {
                 bs = score;
+                bm = m;
             }
 
             // better move
             if (score > alpha) {
                 alpha = score;
-                bs = score;
-                bm = m;
 
                 // History
                 if (is_quiet) {
                     if (self.history[Encode.source(m)][Encode.target(m)] < HISTORY_MAX) {
-                        self.history[Encode.source(m)][Encode.target(m)] += depth + (depth / 2);
+                        self.history[Encode.source(m)][Encode.target(m)] += depth;
                     }
                 }
 
                 // store in PV
                 self.pv_array[old_pv_index] = m;
                 self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
-            }
 
-            if (alpha >= beta) {
-                break;
+                if (alpha >= beta) {
+                    break;
+                }
             }
         }
 
@@ -704,18 +714,19 @@ pub const Searcher = struct {
         }
 
         // Store in TT
-        if (depth <= 127) {
+        if (!skip_quiet and depth <= 127 and bs > -INF and bm != 0) {
             var flag = if (bs <= alpha_)
                 TT.TTFlag.Upper
-            else if (bs >= beta)
-                TT.TTFlag.Lower
             else
-                TT.TTFlag.Exact;
+                (if (bs >= beta)
+                    TT.TTFlag.Lower
+                else
+                    TT.TTFlag.Exact);
 
             GlobalTT.insert(position.hash, @intCast(u8, depth), bs, flag, bm);
         }
 
-        return alpha;
+        return bs;
     }
 
     //
@@ -731,16 +742,42 @@ pub const Searcher = struct {
             return DRAW;
         }
 
+        const in_check = position.is_king_checked_for(position.turn);
+
+        // TT Probe
+        if (!in_check) {
+            var entry = GlobalTT.probe(position.hash);
+
+            if (entry != null) {
+                if (entry.?.flag == TT.TTFlag.Exact) {
+                    return entry.?.score;
+                } else if (entry.?.flag == TT.TTFlag.Lower) {
+                    if (entry.?.score >= beta) {
+                        return entry.?.score;
+                    }
+                } else {
+                    if (entry.?.score <= alpha) {
+                        return entry.?.score;
+                    }
+                }
+            }
+        }
+
         // Static eval
         const stand_pat = Eval.evaluate(position, &self.nnue, self.halfmoves);
 
-        // *** Static evaluation pruning ***
-        if (stand_pat >= beta) {
-            return stand_pat;
-        }
-
-        if (alpha < stand_pat) {
-            alpha = stand_pat;
+        // Delta Pruning
+        if (!in_check) {
+            if (stand_pat + 900 <= alpha) {
+                return stand_pat;
+            }
+            // Static evaluation pruning
+            if (stand_pat > alpha) {
+                alpha = stand_pat;
+                if (stand_pat >= alpha) {
+                    return stand_pat;
+                }
+            }
         }
 
         // we don't want to overflow plies...
@@ -782,19 +819,28 @@ pub const Searcher = struct {
         while (count < length) {
             var m = moves.items[count].m;
 
+            const see_score = moves.items[count].score - Ordering.CAPTURE_SCORE;
+
             // losing too much material? Search them during negamax, not here.
-            if (moves.items[count].score - Ordering.CAPTURE_SCORE < 0) {
+            if (see_score < 0) {
                 break;
             }
 
             count += 1;
 
-            self.move_history.append(m) catch {};
+            // SEE Beta CutOff, based on Koivisto
+            const QSEE_THRESHOLD = 200;
+            if (stand_pat + see_score - QSEE_THRESHOLD >= beta) {
+                return beta;
+            }
+            if (stand_pat + see_score + QSEE_THRESHOLD <= alpha) {
+                continue;
+            }
+
             position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
                 position.undo_move(m, &self.nnue);
-                _ = self.move_history.pop();
                 continue;
             }
 
@@ -802,7 +848,6 @@ pub const Searcher = struct {
 
             var score = -self.quiescence_search(position, -beta, -alpha);
             position.undo_move(m, &self.nnue);
-            _ = self.move_history.pop();
             self.ply -= 1;
 
             if (self.stop_search()) {
@@ -813,22 +858,19 @@ pub const Searcher = struct {
 
             if (score > bs) {
                 bs = score;
+                bm = m;
             }
-            // fail hard
-            if (score >= beta) {
-                return beta;
-            }
+
             // better move
             if (score > alpha) {
-                bm = m;
-                bs = score;
                 alpha = score;
-            }
-            if (alpha >= beta) {
-                break;
+                // fail hard
+                if (score >= beta) {
+                    break;
+                }
             }
         }
 
-        return alpha;
+        return if (bs > -INF) bs else alpha;
     }
 };

@@ -46,9 +46,7 @@ pub const TEMPO_EG = 10;
 pub fn is_basic_eg(pos: *Position.Position) bool {
     return (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
         (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteBishops | pos.bitboards.BlackBishops) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
-        (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteQueens | pos.bitboards.BlackQueens) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
-        pos.bitboards.WhiteKing == pos.bitboards.WhiteAll or
-        pos.bitboards.BlackKing == pos.bitboards.BlackAll;
+        (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteQueens | pos.bitboards.BlackQueens) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll);
 }
 
 pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
@@ -81,8 +79,12 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
         stand_pat += TEMPO_MG;
     }
 
-    if (fifty >= 12 and p <= 8) {
-        const red = fifty * (fifty - 2) / 12;
+    if (fifty >= 14 and p <= 14) {
+        var red = fifty * (fifty - 2) / 12;
+
+        if (fifty >= 60) {
+            red += 40;
+        }
 
         if (stand_pat > 0) {
             stand_pat = @maximum(0, stand_pat - red);
