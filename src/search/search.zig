@@ -526,37 +526,26 @@ pub const Searcher = struct {
             return TIME_UP;
         }
 
-        // generate moves
-        var moves = Movegen.generate_all_pseudo_legal_moves(position);
+        var stage = Movegen.Stage.start;
+        var moves = std.ArrayList(Movegen.Move).initCapacity(std.heap.page_allocator, 32) catch unreachable;
         defer moves.deinit();
 
-        // Order and sort
+        var legals: u16 = 0;
+        var bm: u24 = 0;
+        var bs: i16 = -INF;
+        var count: usize = 0;
+        var skip_quiet = false;
         const oi = Ordering.OrderInfo{
             .pos = position,
             .searcher = self,
             .old_pv = old_pv,
         };
 
-        for (moves.items) |*k| {
-            k.score = Ordering.score_move(k.m, oi);
-        }
-
-        std.sort.sort(
-            Movegen.Move,
-            moves.items,
-            oi,
-            Ordering.order,
-        );
-
-        var legals: u16 = 0;
-        var bm: u24 = 0;
-        var bs: i16 = -INF;
-        var count: usize = 0;
-        const length = std.mem.len(moves.items);
-        var skip_quiet = false;
-
-        while (count < length) {
-            const m = moves.items[count].m;
+        while (true) {
+            const m = Movegen.get_next_move(oi, &moves, &stage, count).m;
+            if (stage == Movegen.Stage.end) {
+                break;
+            }
             count += 1;
 
             const is_quiet = Encode.capture(m) == 0;
