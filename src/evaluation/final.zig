@@ -1,6 +1,7 @@
 const std = @import("std");
 const Position = @import("../board/position.zig");
 const Piece = @import("../board/piece.zig");
+const C = @import("../c.zig");
 
 const HCE = @import("./hce.zig");
 const NNUE = @import("./nnue.zig");
@@ -40,8 +41,51 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
     return false;
 }
 
-pub const TEMPO_MG = 3;
-pub const TEMPO_EG = 9;
+pub fn is_material_drawish(pos: *Position.Position) bool {
+    var pw = @popCount(u64, pos.bitboards.WhiteAll);
+    var pb = @popCount(u64, pos.bitboards.BlackAll);
+    if (pw == 3) {
+        if (pb == 1) {
+            if (@popCount(u64, pos.bitboards.WhiteKnights) == 2) {
+                // KNNvK
+                return true;
+            }
+        } else if (pb == 2) {
+            if (@popCount(u64, pos.bitboards.WhiteKnights | pos.bitboards.WhiteBishops) == 2 and (pos.bitboards.BlackBishops | pos.bitboards.BlackKnights) != 0) {
+                // KNBvKB-like
+                return true;
+            }
+        }
+    } else if (pb == 3) {
+        if (pw == 1) {
+            if (@popCount(u64, pos.bitboards.BlackKnights) == 2) {
+                // KNNvK
+                return true;
+            }
+        } else if (pw == 2) {
+            if (@popCount(u64, pos.bitboards.BlackKnights | pos.bitboards.BlackBishops) == 2 and (pos.bitboards.WhiteBishops | pos.bitboards.WhiteKnights) != 0) {
+                // KNBvKB-like
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+pub fn is_opposite_bishop(pos: *Position.Position) bool {
+    if (C.SQ_C.WHITE_SQUARES & pos.bitboards.WhiteBishops != 0 and C.SQ_C.BLACK_SQUARES & pos.bitboards.WhiteBishops == 0 and C.SQ_C.WHITE_SQUARES & pos.bitboards.BlackBishops == 0 and C.SQ_C.BLACK_SQUARES & pos.bitboards.BlackBishops != 0) {
+        return true;
+    }
+    if (C.SQ_C.WHITE_SQUARES & pos.bitboards.WhiteBishops == 0 and C.SQ_C.BLACK_SQUARES & pos.bitboards.WhiteBishops != 0 and C.SQ_C.WHITE_SQUARES & pos.bitboards.BlackBishops != 0 and C.SQ_C.BLACK_SQUARES & pos.bitboards.BlackBishops == 0) {
+        return true;
+    }
+
+    return false;
+}
+
+pub const TEMPO_MG = 2;
+pub const TEMPO_EG = 5;
 
 pub fn is_basic_eg(pos: *Position.Position) bool {
     return (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
@@ -75,11 +119,19 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
 
     if (p <= 6) {
         stand_pat += TEMPO_EG;
+        if (is_opposite_bishop(pos) and stand_pat <= 120) {
+            stand_pat = @divFloor(stand_pat, 2);
+        } else if (stand_pat <= 80 and pos.bitboards.WhiteKing != pos.bitboards.WhiteAll and pos.bitboards.BlackKing != pos.bitboards.BlackAll) {
+            stand_pat = @divFloor(stand_pat, 2);
+        }
+        if (is_material_drawish(pos)) {
+            stand_pat = @divFloor(stand_pat, 4);
+        }
     } else {
         stand_pat += TEMPO_MG;
     }
 
-    if (fifty >= 14 and p <= 14) {
+    if (fifty >= 14 and p <= 12) {
         var red = fifty * (fifty - 2) / 40;
 
         if (fifty >= 50) {

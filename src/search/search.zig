@@ -702,7 +702,7 @@ pub const Searcher = struct {
             GlobalTT.insert(position.hash, @intCast(u8, depth), bs, flag, bm);
         }
 
-        return bs;
+        return alpha;
     }
 
     //
@@ -720,6 +720,23 @@ pub const Searcher = struct {
 
         const in_check = position.is_king_checked_for(position.turn);
 
+        // Static eval
+        const stand_pat = Eval.evaluate(position, &self.nnue, self.halfmoves);
+
+        // Delta Pruning
+        if (!in_check) {
+            if (stand_pat + 900 <= alpha) {
+                return stand_pat;
+            }
+            // Static evaluation pruning
+            if (stand_pat > alpha) {
+                alpha = stand_pat;
+                if (stand_pat >= alpha) {
+                    return stand_pat;
+                }
+            }
+        }
+
         // TT Probe
         if (!in_check) {
             var entry = GlobalTT.probe(position.hash);
@@ -735,23 +752,6 @@ pub const Searcher = struct {
                     if (entry.?.score <= alpha) {
                         return entry.?.score;
                     }
-                }
-            }
-        }
-
-        // Static eval
-        const stand_pat = Eval.evaluate(position, &self.nnue, self.halfmoves);
-
-        // Delta Pruning
-        if (!in_check) {
-            if (stand_pat + 900 <= alpha) {
-                return stand_pat;
-            }
-            // Static evaluation pruning
-            if (stand_pat > alpha) {
-                alpha = stand_pat;
-                if (stand_pat >= alpha) {
-                    return stand_pat;
                 }
             }
         }
@@ -804,15 +804,6 @@ pub const Searcher = struct {
 
             count += 1;
 
-            // SEE Beta CutOff, based on Koivisto
-            const QSEE_THRESHOLD = 200;
-            if (stand_pat + see_score - QSEE_THRESHOLD >= beta) {
-                return beta;
-            }
-            if (stand_pat + see_score + QSEE_THRESHOLD <= alpha) {
-                continue;
-            }
-
             position.make_move(m, &self.nnue);
             // illegal?
             if (position.is_king_checked_for(position.turn.invert())) {
@@ -847,6 +838,6 @@ pub const Searcher = struct {
             }
         }
 
-        return if (bs > -INF) bs else alpha;
+        return alpha;
     }
 };
