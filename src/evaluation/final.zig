@@ -40,8 +40,8 @@ pub fn is_material_drawn(pos: *Position.Position) bool {
     return false;
 }
 
-pub const TEMPO_MG = 4;
-pub const TEMPO_EG = 10;
+pub const TEMPO_MG = 3;
+pub const TEMPO_EG = 9;
 
 pub fn is_basic_eg(pos: *Position.Position) bool {
     return (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
@@ -80,9 +80,9 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
     }
 
     if (fifty >= 14 and p <= 14) {
-        var red = fifty * (fifty - 2) / 12;
+        var red = fifty * (fifty - 2) / 40;
 
-        if (fifty >= 60) {
+        if (fifty >= 50) {
             red += 40;
         }
 

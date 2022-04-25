@@ -218,7 +218,7 @@ pub const Searcher = struct {
                         self.seldepth,
                         self.nodes,
                         self.timer.read() / std.time.ns_per_ms,
-                        INF - score,
+                        @divFloor(INF - score + 1, 2),
                     },
                 ) catch {};
                 if (dp < max_depth - 3) {
@@ -232,7 +232,7 @@ pub const Searcher = struct {
                         self.seldepth,
                         self.nodes,
                         self.timer.read() / std.time.ns_per_ms,
-                        INF + score,
+                        @divFloor(INF + score - 1, 2),
                     },
                 ) catch {};
                 if (dp < max_depth - 8) {
@@ -337,7 +337,7 @@ pub const Searcher = struct {
     // Null Move Pruning
     inline fn do_nmp(comptime search_type: SearchType, position: *Position.Position, depth: u8, eval: i16, beta: i16) bool {
         const has_non_pawn = (position.bitboards.WhitePawns | position.bitboards.WhiteKing | position.bitboards.BlackPawns | position.bitboards.BlackKing) != (position.bitboards.WhiteAll | position.bitboards.BlackAll);
-        return search_type.null_move and depth > 4 and eval >= beta and has_non_pawn;
+        return search_type.null_move and depth > 3 and eval >= beta and has_non_pawn;
     }
 
     inline fn nmp(depth: u8, eval: i16, beta: i16) u8 {
@@ -346,15 +346,6 @@ pub const Searcher = struct {
 
         const r = 3 + @intCast(u16, depth) / 4 + @intCast(u16, eval - beta) / 200;
         return @intCast(u8, @maximum(1, depth - @minimum(@intCast(u16, depth), r)));
-    }
-
-    // IIR
-    inline fn iir(depth: u8) u8 {
-        if (depth >= 8) {
-            return 1;
-        } else {
-            return 0;
-        }
     }
 
     //
@@ -506,13 +497,9 @@ pub const Searcher = struct {
                 position.undo_null_move();
 
                 if (score >= beta) {
-                    return score;
+                    return beta;
                 }
             }
-        }
-
-        if (!tthit and !is_pv and !is_root and !improving) {
-            depth -= iir(depth);
         }
 
         var lmr_threashold: u8 = 3;
@@ -603,7 +590,7 @@ pub const Searcher = struct {
                         }
                     }
 
-                    if (self.history[Encode.source(m)][Encode.target(m)] <= 100) {
+                    if (self.history[Encode.source(m)][Encode.target(m)] <= 60) {
                         lmr_depth += 1;
                     }
 
