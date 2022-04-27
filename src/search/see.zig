@@ -1,56 +1,66 @@
 const std = @import("std");
+const Position = @import("../board/position.zig");
+const Piece = @import("../board/piece.zig");
+const Patterns = @import("../board/patterns.zig");
+const Encode = @import("../move/encode.zig");
+const BB = @import("../board/bitboard.zig");
 
-const PT_TO_IDX: [6]u3 = .{ 0, 1, 1, 4, 6, 7 };
-const PT_VAL: [8]i16 = .{ 100, 300, 300, 300, 510, 510, 920, 10000 };
+const SEE_VAL: [6]i16 = .{
+    100, 345, 350, 530, 1000, 10000,
+};
 
-inline fn get_lsb(x: u64) u64 {
-    return x & -%x;
-}
+pub fn see(pos: *Position.Position, move: u24) i16 {
+    var max_depth: usize = 0;
+    const SEARCH_DEPTH: usize = 16;
+    var gains: [SEARCH_DEPTH]i16 = std.mem.zeroes([SEARCH_DEPTH]i16);
+    var turn = pos.turn.invert();
+    var defenders: u64 = undefined;
+    var pbb: u64 = undefined;
+    const all_pieces: u64 = pos.bitboards.WhiteAll | pos.bitboards.BlackAll;
+    var blockers = all_pieces & ~BB.ShiftLocations[Encode.source(move)];
+    const target = Encode.target(move);
 
-fn evaluate(target_piece: u8, attackers: u8, defenders: u8) i16 {
-    if (attackers == 0) {
-        return 0;
-    }
+    gains[0] = SEE_VAL[@enumToInt(pos.mailbox[Position.fen_sq_to_sq(target)].?) % 6];
+    var last_piece_val = SEE_VAL[Encode.pt(move) % 6];
 
-    var attacking_piece_index = @intCast(u8, @ctz(u64, get_lsb(@intCast(u64, attackers))));
-    var target = PT_TO_IDX[target_piece];
+    var depth: usize = 1;
+    outer: while (depth < SEARCH_DEPTH) : (depth += 1) {
+        gains[depth] = last_piece_val - gains[depth - 1];
+        defenders = if (turn == Piece.Color.White)
+            pos.bitboards.WhiteAll
+        else
+            pos.bitboards.BlackAll;
+        defenders &= blockers;
 
-    return evaluate_internal(attacking_piece_index, target, attackers, defenders);
-}
-
-fn evaluate_internal(attacking_piece: u8, target_piece: u8, attackers: u8, defenders: u8) i16 {
-    if (attackers == 0) {
-        return 0;
-    }
-
-    var target_value = PT_VAL[target_piece];
-    var new_attackers = attackers & ~@intCast(u8, (@as(u64, 1) << @intCast(u6, attacking_piece)));
-    var new_attacking_piece = if (defenders == 0) 0 else @intCast(u8, @ctz(u64, get_lsb(@intCast(u64, defenders))));
-
-    var score = evaluate_internal(new_attacking_piece, attacking_piece, defenders, new_attackers);
-    return @maximum(0, target_value - score);
-}
-
-pub var SEE_TABLE: [6][256][256]i16 = undefined;
-
-pub fn init_see() void {
-    var a: u8 = 0;
-    while (a < 6) : (a += 1) {
-        var b: usize = 0;
-        while (b < 256) : (b += 1) {
-            var c: usize = 0;
-            while (c < 256) : (c += 1) {
-                SEE_TABLE[a][b][c] = evaluate(a, @intCast(u8, b), @intCast(u8, c));
+        var pt: usize = 0;
+        while (pt < 6) : (pt += 1) {
+            last_piece_val = SEE_VAL[pt];
+            pbb = if (pt == 0)
+                Patterns.PawnCapturePatterns[@enumToInt(turn.invert())][target] & defenders & (pos.bitboards.WhitePawns | pos.bitboards.BlackPawns)
+            else if (pt == 1)
+                Patterns.KnightPatterns[target] & defenders & (pos.bitboards.WhiteKnights | pos.bitboards.BlackKnights)
+            else if (pt == 2)
+                Patterns.get_bishop_attacks(target, blockers) & defenders & (pos.bitboards.WhiteBishops | pos.bitboards.BlackBishops)
+            else if (pt == 3)
+                Patterns.get_rook_attacks(target, blockers) & defenders & (pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks)
+            else if (pt == 4)
+                Patterns.get_queen_attacks(target, blockers) & defenders & (pos.bitboards.WhiteQueens | pos.bitboards.BlackQueens)
+            else
+                Patterns.KingPatterns[target] & defenders & (pos.bitboards.WhiteKing | pos.bitboards.BlackKing);
+            if (pbb != 0) {
+                blockers &= ~(BB.ShiftLocations[@ctz(u64, pbb)]);
+                turn = turn.invert();
+                continue :outer;
             }
         }
+        max_depth = depth;
+        break;
     }
-}
 
-pub fn get_see(attacking_piece: u8, target_piece: u8, attackers: u8, defenders: u8) i16 {
-    const attacking_idx = PT_TO_IDX[attacking_piece];
-    const target_idx = PT_TO_IDX[target_piece];
-    const new_attackers = attackers & ~@intCast(u8, (@as(u64, 1) << attacking_idx));
+    depth = max_depth - 1;
+    while (depth >= 1) : (depth -= 1) {
+        gains[depth - 1] = -@maximum(-gains[depth - 1], gains[depth]);
+    }
 
-    const score = SEE_TABLE[attacking_piece][defenders][new_attackers];
-    return PT_VAL[target_idx] - score;
+    return gains[0];
 }

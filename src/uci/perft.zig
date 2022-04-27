@@ -29,16 +29,7 @@ pub fn see_perft(pos: *Position.Position) void {
 
         pos.*.undo_move(x, null);
 
-        var bts = Encode.target(x);
-        var ts = Position.fen_sq_to_sq(bts);
-        var pt = Encode.pt(x);
-
-        var captured = @enumToInt(pos.mailbox[ts].?);
-
-        var attackers = pos.square_attackers(bts, pos.turn.invert());
-        var defenders = pos.square_attackers(bts, pos.turn);
-
-        stdout.print("{s}: {}\n", .{ Uci.move_to_uci(x), SEE.get_see(pt % 6, captured % 6, attackers, defenders) }) catch {};
+        stdout.print("{s}: {}\n", .{ Uci.move_to_uci(x), SEE.see(pos, x) }) catch {};
     }
 
     moves.deinit();

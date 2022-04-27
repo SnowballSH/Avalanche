@@ -38,9 +38,9 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
     }
 
     var score: i16 = 0;
-    const bts = Encode.target(move);
-    const ts = Position.fen_sq_to_sq(bts);
-    const pt = Encode.pt(move);
+    // const bts = Encode.target(move);
+    // const ts = Position.fen_sq_to_sq(bts);
+    // const pt = Encode.pt(move);
 
     if (Encode.capture(move) != 0) {
         // Captures first!
@@ -54,13 +54,9 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
             return score + 2000 + HCE.PieceValues[Encode.promote(move) % 6];
         }
 
-        const captured = @enumToInt(pos.mailbox[ts].?);
+        // const captured = @enumToInt(pos.mailbox[ts].?);
         //score += MVV_LVA[pt % 6][captured % 6];
-
-        const attackers = pos.square_attackers(bts, pos.turn.invert());
-        const defenders = pos.square_attackers(bts, pos.turn);
-
-        score += SEE.get_see(pt % 6, captured % 6, attackers, defenders);
+        score += SEE.see(pos, move);
 
         return score;
     } else {

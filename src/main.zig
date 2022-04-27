@@ -14,7 +14,6 @@ pub fn main() !void {
     Zobrist.init_zobrist();
     Magic.init_magic();
     Search.init_tt();
-    SEE.init_see();
 
     defer TT.TTArena.deinit();
 
