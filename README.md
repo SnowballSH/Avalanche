@@ -28,13 +28,13 @@ Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament
 
 - ### v0.3 (in development): ???  (+??? ELO), ??? ELO
 
-- ### v0.2.2 (+40-70 ELO), ~2470 ELO
+- ### v0.2.2 (+70-120 ELO), ~2510 ELO
     - Bug fixes
     - LMR tuning
     - New SEE algorithm
     - Aspiration Windows
 
-- ### v0.2.1 (+40-70 ELO), ~2470 ELO
+- ### v0.2.1 (+6-20 ELO), ~2430 ELO
     - Bug fixes
     - UCI options
     - Improvements on Search

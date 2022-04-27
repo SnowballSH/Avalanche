@@ -140,7 +140,7 @@ pub const Searcher = struct {
     fn age_history(self: *Searcher) void {
         for (self.history) |*arr| {
             for (arr) |*x| {
-                x.* = @floatToInt(u32, @maximum(0.0, @minimum(@intToFloat(f64, x.*) / 2, @log(@intToFloat(f64, x.*)) * 4)));
+                x.* = @floatToInt(u32, @maximum(0.0, @minimum(@intToFloat(f64, x.*) / 2, @log(@intToFloat(f64, x.*)) * 2)));
             }
         }
     }
@@ -470,9 +470,6 @@ pub const Searcher = struct {
                             return entry.?.score;
                         }
                     }
-                    if (alpha > beta) {
-                        return entry.?.score;
-                    }
                 }
             }
         }
@@ -781,10 +778,6 @@ pub const Searcher = struct {
                     if (entry.?.score <= alpha) {
                         return entry.?.score;
                     }
-                }
-
-                if (alpha > beta) {
-                    return entry.?.score;
                 }
             }
         }

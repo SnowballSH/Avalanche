@@ -64,7 +64,7 @@ pub const TT = struct {
     pub fn insert(self: *TT, hash: u64, depth: u8, score: i16, flag: TTFlag, bm: u24) void {
         const data = self.data.items[hash % self.size];
         var replace: bool = false;
-        if (data.hash == 0) {
+        if (data.hash == 0 or (data.depth < 3 and depth >= data.depth)) {
             replace = true;
         } else if (data.hash == hash) {
             replace = (data.depth >= 3 and depth >= data.depth - 3) or (data.flag == TTFlag.Exact);
