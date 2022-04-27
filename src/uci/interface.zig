@@ -30,7 +30,7 @@ pub const UciInterface = struct {
 
         self.searcher = Search.Searcher.new_searcher();
 
-        _ = try stdout.writeAll("Avalanche 0.3a by SnowballSH\n");
+        _ = try stdout.writeAll("Avalanche 0.2.2 by SnowballSH\n");
 
         self.position = Position.new_position_by_fen(Position.STARTPOS);
         defer self.position.deinit();
@@ -64,7 +64,7 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 0.3a\n");
+                _ = try stdout.write("id name Avalanche 0.2.2\n");
                 _ = try stdout.write("id author Yinuo Huang\n\n");
                 _ = try stdout.write("option name Hash type spin default 32 min 1 max 4096\n");
                 _ = try stdout.writeAll("uciok\n");
