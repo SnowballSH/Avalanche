@@ -160,7 +160,7 @@ fn do_nnue() void {
 }
 
 pub fn build(b: *std.build.Builder) void {
-    const dev_mode = true;
+    const dev_mode = false;
     if (!dev_mode) {
         if (b.args != null) {
             for (b.args.?) |arg| {
