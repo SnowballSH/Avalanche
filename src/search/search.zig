@@ -83,6 +83,8 @@ pub const Searcher = struct {
     killers: KILLER,
     history: HISTORY,
 
+    root_bm: u24,
+
     // NNUE
     nnue: NNUE.NNUE,
 
@@ -108,6 +110,7 @@ pub const Searcher = struct {
             .pv_index = 0,
             .killers = std.mem.zeroes(KILLER),
             .history = std.mem.zeroes(HISTORY),
+            .root_bm = 0,
 
             .nnue = NNUE.NNUE.new(),
         };
@@ -186,6 +189,9 @@ pub const Searcher = struct {
 
         self.force_nostop = true;
 
+        var alpha: i16 = -INF;
+        var beta: i16 = INF;
+
         var time_last_iter: u64 = 0;
         var dp: u8 = 1;
         var score: i16 = 0;
@@ -199,15 +205,30 @@ pub const Searcher = struct {
 
             self.seldepth = 0;
 
-            const alpha: i16 = -INF;
-            const beta: i16 = INF;
-
             const score_ = self.negamax(PV_MOVE, position, alpha, beta, dp);
 
             if (self.stop_search()) {
                 break;
             }
             score = score_;
+
+            // Aspiration Windows
+            if (score <= alpha) {
+                alpha = -INF;
+            } else if (score >= beta) {
+                beta = INF;
+            } else {
+                const AspirationWindow: i16 = 23;
+                alpha = score - AspirationWindow;
+                beta = score + AspirationWindow;
+
+                if (self.root_bm != 0) {
+                    dp += 1;
+                    self.force_nostop = false;
+                    time_last_iter = self.timer.read() - start;
+                    bestmove = self.root_bm;
+                }
+            }
 
             // print stats
             if (score > 0 and INF - score < 100) {
@@ -261,15 +282,8 @@ pub const Searcher = struct {
                 i += 1;
             }
             stdout.writeByte('\n') catch {};
-            dp += 1;
-
-            bestmove = self.pv_array[0];
-
-            self.force_nostop = false;
-            time_last_iter = self.timer.read() - start;
+            // dp += 1;
         }
-
-        dp -= 1;
 
         if (score > 0 and INF - score < 50) {
             stdout.print(
@@ -326,7 +340,7 @@ pub const Searcher = struct {
         return depth < 7;
     }
     inline fn rfp(depth: u8, improving: bool) i16 {
-        return (@intCast(i16, depth) - @intCast(i16, @boolToInt(improving))) * 50;
+        return (@intCast(i16, depth) - @intCast(i16, @boolToInt(improving))) * 64;
     }
 
     // Futility Pruning
@@ -433,12 +447,15 @@ pub const Searcher = struct {
 
         var tthit = false;
 
+        var hashmove: u24 = 0;
+
         // TT Probe
         if (!is_pv and !in_check and depth <= 127) {
             var entry = GlobalTT.probe(position.hash);
 
             if (entry != null) {
                 tthit = true;
+                hashmove = entry.?.bm;
                 if (entry.?.depth >= depth) {
                     self.pv_array[old_pv_index] = entry.?.bm;
 
@@ -452,6 +469,9 @@ pub const Searcher = struct {
                         if (entry.?.score <= alpha) {
                             return entry.?.score;
                         }
+                    }
+                    if (alpha > beta) {
+                        return entry.?.score;
                     }
                 }
             }
@@ -529,7 +549,7 @@ pub const Searcher = struct {
         };
 
         while (true) {
-            const m = Movegen.get_next_move(oi, &moves, &stage, count).m;
+            const m = Movegen.get_next_move(oi, &moves, &stage, count, hashmove).m;
             if (stage == Movegen.Stage.end) {
                 break;
             }
@@ -578,7 +598,7 @@ pub const Searcher = struct {
             // Reductions
             if (bs > -INF) {
                 // LMR
-                if (depth > 2 and legals >= lmr_threashold and (is_quiet or (moves.items[count - 1].score - Ordering.CAPTURE_SCORE < 0))) {
+                if (!is_root and depth > 2 and legals >= lmr_threashold and (is_quiet or (moves.items[count - 1].score - Ordering.CAPTURE_SCORE < 0))) {
                     if (is_quiet) {
                         lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
                     } else {
@@ -648,6 +668,9 @@ pub const Searcher = struct {
                 // store in PV
                 self.pv_array[old_pv_index] = m;
                 self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
+                if (is_root) {
+                    self.root_bm = bm;
+                }
 
                 return beta;
             }
@@ -671,6 +694,9 @@ pub const Searcher = struct {
                 // store in PV
                 self.pv_array[old_pv_index] = m;
                 self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
+                if (is_root) {
+                    self.root_bm = bm;
+                }
 
                 if (alpha >= beta) {
                     break;
@@ -737,11 +763,14 @@ pub const Searcher = struct {
             }
         }
 
+        var hashmove: u24 = 0;
+
         // TT Probe
         if (!in_check) {
             var entry = GlobalTT.probe(position.hash);
 
             if (entry != null) {
+                hashmove = entry.?.bm;
                 if (entry.?.flag == TT.TTFlag.Exact) {
                     return entry.?.score;
                 } else if (entry.?.flag == TT.TTFlag.Lower) {
@@ -752,6 +781,10 @@ pub const Searcher = struct {
                     if (entry.?.score <= alpha) {
                         return entry.?.score;
                     }
+                }
+
+                if (alpha > beta) {
+                    return entry.?.score;
                 }
             }
         }
@@ -779,7 +812,7 @@ pub const Searcher = struct {
         };
 
         for (moves.items) |*k| {
-            k.score = Ordering.score_move(k.m, oi);
+            k.score = Ordering.score_move(k.m, oi, hashmove);
         }
 
         std.sort.sort(
@@ -795,11 +828,13 @@ pub const Searcher = struct {
         while (count < length) {
             var m = moves.items[count].m;
 
-            const see_score = moves.items[count].score - Ordering.CAPTURE_SCORE;
+            if (Encode.enpassant(m) == 0 and Encode.promote(m) == 0) {
+                const see_score = moves.items[count].score - Ordering.CAPTURE_SCORE;
 
-            // losing too much material? Search them during negamax, not here.
-            if (see_score < 0) {
-                break;
+                // losing too much material? Search them during negamax, not here.
+                if (see_score < 0) {
+                    break;
+                }
             }
 
             count += 1;

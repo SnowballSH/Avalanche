@@ -20,14 +20,14 @@ pub const Stage = enum {
     end,
 };
 
-pub fn get_next_move(oi: Ordering.OrderInfo, list: *std.ArrayList(Move), stage: *Stage, count: usize) Move {
+pub fn get_next_move(oi: Ordering.OrderInfo, list: *std.ArrayList(Move), stage: *Stage, count: usize, hashmove: u24) Move {
     while (std.mem.len(list.items) <= count) {
         if (stage.* == Stage.start) {
             generate_all_pseudo_legal_moves_core(list, oi.pos, false, true);
             var i = count;
             while (i < std.mem.len(list.items)) : (i += 1) {
                 var k = &list.items[i];
-                k.score = Ordering.score_move(k.m, oi);
+                k.score = Ordering.score_move(k.m, oi, hashmove);
             }
             stage.* = Stage.captures;
         } else if (stage.* == Stage.captures) {
@@ -35,7 +35,7 @@ pub fn get_next_move(oi: Ordering.OrderInfo, list: *std.ArrayList(Move), stage: 
             var i = count;
             while (i < std.mem.len(list.items)) : (i += 1) {
                 var k = &list.items[i];
-                k.score = Ordering.score_move(k.m, oi);
+                k.score = Ordering.score_move(k.m, oi, hashmove);
             }
             stage.* = Stage.quiet;
         } else if (stage.* == Stage.quiet) {
@@ -50,7 +50,15 @@ pub fn get_next_move(oi: Ordering.OrderInfo, list: *std.ArrayList(Move), stage: 
     var i = count;
     while (i < std.mem.len(list.items)) : (i += 1) {
         var k = list.items[i];
-        if (k.score > max_score) {
+        var s = k.score;
+        if (Encode.capture(k.m) != 0) {
+            if (s - Ordering.CAPTURE_SCORE < 0) {
+                s -= 20000;
+            } else {
+                s += 100;
+            }
+        }
+        if (s > max_score) {
             max_score = k.score;
             max_idx = i;
         }
@@ -60,13 +68,13 @@ pub fn get_next_move(oi: Ordering.OrderInfo, list: *std.ArrayList(Move), stage: 
 }
 
 pub inline fn generate_all_pseudo_legal_moves(board: *Position.Position) std.ArrayList(Move) {
-    var list = std.ArrayList(Move).initCapacity(std.heap.page_allocator, 32) catch unreachable;
+    var list = std.ArrayList(Move).initCapacity(std.heap.page_allocator, 24) catch unreachable;
     generate_all_pseudo_legal_moves_core(&list, board, true, true);
     return list;
 }
 
 pub inline fn generate_all_pseudo_legal_capture_moves(board: *Position.Position) std.ArrayList(Move) {
-    var list = std.ArrayList(Move).initCapacity(std.heap.page_allocator, 16) catch unreachable;
+    var list = std.ArrayList(Move).initCapacity(std.heap.page_allocator, 10) catch unreachable;
     generate_all_pseudo_legal_moves_core(&list, board, false, true);
     return list;
 }

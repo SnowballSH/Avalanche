@@ -28,13 +28,17 @@ const MVV_LVA: [6][6]i16 = .{
     .{ 10, 11, 12, 13, 14, 15 },
 };
 
-pub const CAPTURE_SCORE: i16 = 7000;
+pub const CAPTURE_SCORE: i16 = 7500;
 
-pub fn score_move(move: u24, info: OrderInfo) i16 {
+pub fn score_move(move: u24, info: OrderInfo, hash_move: u24) i16 {
     const pos = info.pos;
 
+    if (move == hash_move) {
+        return 22000;
+    }
+
     if (info.old_pv == move) {
-        return 16000;
+        return 10000;
     }
 
     var score: i16 = 0;
@@ -56,25 +60,25 @@ pub fn score_move(move: u24, info: OrderInfo) i16 {
 
         // const captured = @enumToInt(pos.mailbox[ts].?);
         //score += MVV_LVA[pt % 6][captured % 6];
-        score += SEE.see(pos, move);
+        score += SEE.see(32, pos, move);
 
         return score;
     } else {
         if (info.searcher.killers[0][info.searcher.ply] == move) {
-            score += 4000;
+            score += 5000;
         } else if (info.searcher.killers[1][info.searcher.ply] == move) {
-            score += 3000;
+            score += 4000;
         } else {
             score += @intCast(i16, info.searcher.history[Encode.source(move)][Encode.target(move)]);
         }
 
         if (Encode.castling(move) != 0) {
-            score += 400;
+            return 500;
         }
     }
 
     if (Encode.promote(move) != 0) {
-        score += 9500 + HCE.PieceValues[Encode.promote(move) % 6];
+        score += 7500 + HCE.PieceValues[Encode.promote(move) % 6];
     }
 
     return score;

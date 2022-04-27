@@ -7,7 +7,7 @@ pub const QuietLMR: [32][32]i16 = init: {
     inline while (depth < 32) {
         var moves = 1;
         inline while (moves < 32) {
-            reductions[depth][moves] = @floatToInt(i16, @floor(0.8 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(1.2 * @intToFloat(f32, moves)) / 2.5));
+            reductions[depth][moves] = @floatToInt(i16, @floor(0.6 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(1.2 * @intToFloat(f32, moves)) / 2.5));
             moves += 1;
         }
         depth += 1;
@@ -22,7 +22,7 @@ pub const NoisyLMR: [32][32]i16 = init: {
     inline while (depth < 32) {
         var moves = 1;
         inline while (moves < 32) {
-            reductions[depth][moves] = @floatToInt(i16, @floor(std.math.ln(@intToFloat(f32, depth)) * std.math.ln(1.2 * @intToFloat(f32, moves)) / 3.5));
+            reductions[depth][moves] = @floatToInt(i16, @floor(std.math.ln(@intToFloat(f32, depth)) * std.math.ln(1.2 * @intToFloat(f32, moves)) / 3.6));
             moves += 1;
         }
         depth += 1;

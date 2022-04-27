@@ -84,8 +84,8 @@ pub fn is_opposite_bishop(pos: *Position.Position) bool {
     return false;
 }
 
-pub const TEMPO_MG = 2;
-pub const TEMPO_EG = 5;
+pub const TEMPO_MG = 1;
+pub const TEMPO_EG = 2;
 
 pub fn is_basic_eg(pos: *Position.Position) bool {
     return (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or

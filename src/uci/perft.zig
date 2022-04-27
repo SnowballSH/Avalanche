@@ -29,7 +29,7 @@ pub fn see_perft(pos: *Position.Position) void {
 
         pos.*.undo_move(x, null);
 
-        stdout.print("{s}: {}\n", .{ Uci.move_to_uci(x), SEE.see(pos, x) }) catch {};
+        stdout.print("{s}: {}\n", .{ Uci.move_to_uci(x), SEE.see(32, pos, x) }) catch {};
     }
 
     moves.deinit();

@@ -9,9 +9,8 @@ const SEE_VAL: [6]i16 = .{
     100, 345, 350, 530, 1000, 10000,
 };
 
-pub fn see(pos: *Position.Position, move: u24) i16 {
+pub fn see(comptime SEARCH_DEPTH: usize, pos: *Position.Position, move: u24) i16 {
     var max_depth: usize = 0;
-    const SEARCH_DEPTH: usize = 16;
     var gains: [SEARCH_DEPTH]i16 = std.mem.zeroes([SEARCH_DEPTH]i16);
     var turn = pos.turn.invert();
     var defenders: u64 = undefined;
@@ -20,7 +19,9 @@ pub fn see(pos: *Position.Position, move: u24) i16 {
     var blockers = all_pieces & ~BB.ShiftLocations[Encode.source(move)];
     const target = Encode.target(move);
 
-    gains[0] = SEE_VAL[@enumToInt(pos.mailbox[Position.fen_sq_to_sq(target)].?) % 6];
+    var ptn = pos.mailbox[Position.fen_sq_to_sq(target)];
+
+    gains[0] = if (ptn != null) SEE_VAL[@enumToInt(ptn.?) % 6] else 0;
     var last_piece_val = SEE_VAL[Encode.pt(move) % 6];
 
     var depth: usize = 1;
@@ -57,9 +58,11 @@ pub fn see(pos: *Position.Position, move: u24) i16 {
         break;
     }
 
-    depth = max_depth - 1;
-    while (depth >= 1) : (depth -= 1) {
-        gains[depth - 1] = -@maximum(-gains[depth - 1], gains[depth]);
+    if (max_depth >= 1) {
+        depth = max_depth - 1;
+        while (depth >= 1) : (depth -= 1) {
+            gains[depth - 1] = -@maximum(-gains[depth - 1], gains[depth]);
+        }
     }
 
     return gains[0];
