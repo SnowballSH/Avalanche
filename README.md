@@ -2,7 +2,7 @@
 
 [WIP] UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
-**CCRL ELO (v0.2): 2421**
+**CCRL ELO (v0.2.1): 2566**
 
 [Avalanche's CCRL Profile](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%200.2%2064-bit#Avalanche_0_2_64-bit)
 
@@ -28,13 +28,13 @@ Brilliant win down an exchange against SoFCheck 0.9b in CCRL Gauntlet Tournament
 
 - ### v0.3 (in development): ???  (+??? ELO), ??? ELO
 
-- ### v0.2.2 (+70-120 ELO), ~2510 ELO
+- ### v0.2.2 (+70-120 ELO), ~2610 ELO
     - Bug fixes
     - LMR tuning
     - New SEE algorithm
     - Aspiration Windows
 
-- ### v0.2.1 (+6-20 ELO), ~2430 ELO
+- ### v0.2.1 (+145 ELO), 2566 CCRL ELO
     - Bug fixes
     - UCI options
     - Improvements on Search
