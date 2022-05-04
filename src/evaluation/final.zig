@@ -131,18 +131,9 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
         stand_pat += TEMPO_MG;
     }
 
-    if (fifty >= 14 and p <= 12) {
-        var red = fifty * (fifty - 2) / 40;
-
-        if (fifty >= 50) {
-            red += 40;
-        }
-
-        if (stand_pat > 0) {
-            stand_pat = @maximum(0, stand_pat - red);
-        } else {
-            stand_pat = @minimum(0, stand_pat + red);
-        }
+    if (fifty >= 12) {
+        stand_pat *= 100 - fifty;
+        stand_pat = @divFloor(stand_pat, 100);
     }
 
     return stand_pat;

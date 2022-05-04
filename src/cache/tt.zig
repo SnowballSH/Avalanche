@@ -15,7 +15,6 @@ pub const TTFlag = enum(u3) {
 pub const TTData = packed struct {
     hash: u64,
     depth: u8,
-    age: u16,
     score: i16,
     bm: u24,
     flag: TTFlag,
@@ -24,13 +23,11 @@ pub const TTData = packed struct {
 pub const TT = struct {
     data: std.ArrayList(TTData),
     size: usize,
-    age: u16,
 
     pub fn new(mb: usize) TT {
         var tt = TT{
             .data = std.ArrayList(TTData).init(TTArena.allocator()),
             .size = mb * MB / @sizeOf(TTData),
-            .age = 0,
         };
 
         tt.data.ensureTotalCapacity(tt.size) catch {};
@@ -54,7 +51,7 @@ pub const TT = struct {
     pub fn probe(self: *TT, hash: u64) ?*TTData {
         var entry = &self.data.items[hash % self.size];
 
-        if (entry.hash == hash and entry.flag != TTFlag.Invalid and entry.depth != 0 and entry.bm != 0) {
+        if (entry.hash == hash and entry.flag != TTFlag.Invalid and entry.bm != 0 and entry.depth != 0) {
             return entry;
         }
 
@@ -62,28 +59,35 @@ pub const TT = struct {
     }
 
     pub fn insert(self: *TT, hash: u64, depth: u8, score: i16, flag: TTFlag, bm: u24) void {
-        const data = self.data.items[hash % self.size];
-        var replace: bool = false;
-        if (data.hash == 0 or (data.depth < 3 and depth >= data.depth)) {
-            replace = true;
-        } else if (data.hash == hash) {
-            replace = (data.depth >= 3 and depth >= data.depth - 3) or (data.flag == TTFlag.Exact);
-        } else {
-            replace = (data.age != self.age) or (depth >= data.depth);
-        }
-        if (replace) {
-            self.data.items[hash % self.size] = TTData{
-                .hash = hash,
-                .depth = depth,
-                .score = score,
-                .flag = flag,
-                .bm = bm,
-                .age = self.age,
-            };
-        }
+        self.data.items[hash % self.size] = TTData{
+            .hash = hash,
+            .depth = depth,
+            .score = score,
+            .flag = flag,
+            .bm = bm,
+        };
     }
 
-    pub fn do_age(self: *TT) void {
-        self.age +%= 1;
+    pub fn hashfull(self: *TT) usize {
+        var count: usize = 0;
+        if (self.size <= 10000) {
+            var i: usize = @minimum(self.size, 1000) / 2 - 500;
+            const to: usize = i + 1000;
+            while (i < to) : (i += 1) {
+                if (self.data.items[i].flag != TTFlag.Invalid and self.data.items[i].hash != 0) {
+                    count += 1;
+                }
+            }
+        } else {
+            var i: usize = self.size / 2 - 2000;
+            const to: usize = i + 4000;
+            while (i < to) : (i += 1) {
+                if (self.data.items[i].flag != TTFlag.Invalid and self.data.items[i].hash != 0) {
+                    count += 1;
+                }
+            }
+            count >>= 2;
+        }
+        return count;
     }
 };

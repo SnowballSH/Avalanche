@@ -230,15 +230,21 @@ pub const Searcher = struct {
                 }
             }
 
+            stdout.print(
+                "info depth {} seldepth {} nodes {} time {} score ",
+                .{
+                    dp,
+                    self.seldepth,
+                    self.nodes,
+                    self.timer.read() / std.time.ns_per_ms,
+                },
+            ) catch {};
+
             // print stats
             if (score > 0 and INF - score < 100) {
                 stdout.print(
-                    "info depth {} seldepth {} nodes {} time {} score mate {} pv",
+                    "mate {} pv",
                     .{
-                        dp,
-                        self.seldepth,
-                        self.nodes,
-                        self.timer.read() / std.time.ns_per_ms,
                         @divFloor(INF - score + 1, 2),
                     },
                 ) catch {};
@@ -247,12 +253,8 @@ pub const Searcher = struct {
                 }
             } else if (score < 0 and INF + score < 100) {
                 stdout.print(
-                    "info depth {} seldepth {} nodes {} time {} score mate -{} pv",
+                    "mate -{} pv",
                     .{
-                        dp,
-                        self.seldepth,
-                        self.nodes,
-                        self.timer.read() / std.time.ns_per_ms,
                         @divFloor(INF + score - 1, 2),
                     },
                 ) catch {};
@@ -261,12 +263,8 @@ pub const Searcher = struct {
                 }
             } else {
                 stdout.print(
-                    "info depth {} seldepth {} nodes {} time {} score cp {} pv",
+                    "cp {} pv",
                     .{
-                        dp,
-                        self.seldepth,
-                        self.nodes,
-                        self.timer.read() / std.time.ns_per_ms,
                         score,
                     },
                 ) catch {};
@@ -285,42 +283,35 @@ pub const Searcher = struct {
             // dp += 1;
         }
 
+        stdout.print(
+            "info depth {} seldepth {} nodes {} time {} hashfull {} score ",
+            .{
+                dp,
+                self.seldepth,
+                self.nodes,
+                self.timer.read() / std.time.ns_per_ms,
+                GlobalTT.hashfull(),
+            },
+        ) catch {};
+
         if (score > 0 and INF - score < 50) {
             stdout.print(
-                "info depth {} seldepth {} nodes {} time {} score mate {}",
+                "mate {}",
                 .{
-                    dp,
-                    self.seldepth,
-                    self.nodes,
-                    self.timer.read() / std.time.ns_per_ms,
-                    INF - score,
+                    @divFloor(INF - score + 1, 2),
                 },
             ) catch {};
-            if (dp < max_depth - 3) {
-                max_depth = dp + 3;
-            }
         } else if (score < 0 and INF + score < 50) {
             stdout.print(
-                "info depth {} seldepth {} nodes {} time {} score mate -{}",
+                "mate -{}",
                 .{
-                    dp,
-                    self.seldepth,
-                    self.nodes,
-                    self.timer.read() / std.time.ns_per_ms,
-                    INF + score,
+                    @divFloor(INF + score - 1, 2),
                 },
             ) catch {};
-            if (dp < max_depth - 8) {
-                max_depth = dp + 8;
-            }
         } else {
             stdout.print(
-                "info depth {} seldepth {} nodes {} time {} score cp {}",
+                "cp {}",
                 .{
-                    dp,
-                    self.seldepth,
-                    self.nodes,
-                    self.timer.read() / std.time.ns_per_ms,
                     score,
                 },
             ) catch {};
@@ -328,7 +319,6 @@ pub const Searcher = struct {
 
         stdout.print("\nbestmove {s}\n", .{Uci.move_to_uci(bestmove)}) catch {};
 
-        GlobalTT.do_age();
         self.age_history();
     }
 
