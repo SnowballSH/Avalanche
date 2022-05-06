@@ -84,8 +84,8 @@ pub fn is_opposite_bishop(pos: *Position.Position) bool {
     return false;
 }
 
-pub const TEMPO_MG = 1;
-pub const TEMPO_EG = 2;
+pub const TEMPO_MG = 5;
+pub const TEMPO_EG = 10;
 
 pub fn is_basic_eg(pos: *Position.Position) bool {
     return (pos.bitboards.WhiteKing | pos.bitboards.BlackKing | pos.bitboards.WhiteRooks | pos.bitboards.BlackRooks) == (pos.bitboards.WhiteAll | pos.bitboards.BlackAll) or
@@ -102,7 +102,9 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
 
     var stand_pat: i16 = 0;
 
-    if (is_basic_eg(pos)) {
+    const basic = is_basic_eg(pos);
+
+    if (basic) {
         stand_pat = HCE.evaluate(pos);
         if (pos.turn == Piece.Color.Black) {
             stand_pat = -stand_pat;
@@ -119,9 +121,9 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
 
     if (p <= 6) {
         stand_pat += TEMPO_EG;
-        if (is_opposite_bishop(pos) and stand_pat <= 120) {
+        if (!basic and is_opposite_bishop(pos) and stand_pat <= 100) {
             stand_pat = @divFloor(stand_pat, 2);
-        } else if (stand_pat <= 80 and pos.bitboards.WhiteKing != pos.bitboards.WhiteAll and pos.bitboards.BlackKing != pos.bitboards.BlackAll) {
+        } else if (stand_pat <= 70 and pos.bitboards.WhiteKing != pos.bitboards.WhiteAll and pos.bitboards.BlackKing != pos.bitboards.BlackAll) {
             stand_pat = @divFloor(stand_pat, 2);
         }
         if (is_material_drawish(pos)) {
@@ -131,9 +133,18 @@ pub fn evaluate(pos: *Position.Position, nnue: *NNUE.NNUE, fifty: u8) i16 {
         stand_pat += TEMPO_MG;
     }
 
-    if (fifty >= 12) {
-        stand_pat *= 100 - fifty;
-        stand_pat = @divFloor(stand_pat, 100);
+    if (fifty >= 20 and p <= 12) {
+        var red = fifty * (fifty - 2) / 40;
+
+        if (fifty >= 40) {
+            red += 50;
+        }
+
+        if (stand_pat > 0) {
+            stand_pat = @maximum(0, stand_pat - red);
+        } else {
+            stand_pat = @minimum(0, stand_pat + red);
+        }
     }
 
     return stand_pat;

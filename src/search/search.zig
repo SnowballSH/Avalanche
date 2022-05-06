@@ -212,23 +212,10 @@ pub const Searcher = struct {
             }
             score = score_;
 
-            // Aspiration Windows
-            if (score <= alpha) {
-                alpha = -INF;
-            } else if (score >= beta) {
-                beta = INF;
-            } else {
-                const AspirationWindow: i16 = 23;
-                alpha = score - AspirationWindow;
-                beta = score + AspirationWindow;
-
-                if (self.root_bm != 0) {
-                    dp += 1;
-                    self.force_nostop = false;
-                    time_last_iter = self.timer.read() - start;
-                    bestmove = self.root_bm;
-                }
-            }
+            dp += 1;
+            self.force_nostop = false;
+            time_last_iter = self.timer.read() - start;
+            bestmove = self.pv_array[0];
 
             stdout.print(
                 "info depth {} seldepth {} nodes {} time {} score ",
@@ -248,9 +235,6 @@ pub const Searcher = struct {
                         @divFloor(INF - score + 1, 2),
                     },
                 ) catch {};
-                if (dp < max_depth - 3) {
-                    max_depth = dp + 3;
-                }
             } else if (score < 0 and INF + score < 100) {
                 stdout.print(
                     "mate -{} pv",
@@ -258,9 +242,6 @@ pub const Searcher = struct {
                         @divFloor(INF + score - 1, 2),
                     },
                 ) catch {};
-                if (dp < max_depth - 8) {
-                    max_depth = dp + 8;
-                }
             } else {
                 stdout.print(
                     "cp {} pv",
@@ -402,7 +383,7 @@ pub const Searcher = struct {
                 while (index >= limit and index >= 0) {
                     if (self.hash_history.items[@intCast(usize, index)] == position.hash) {
                         count += 1;
-                        if (self.ply > 1) {
+                        if (!is_root) {
                             return DRAW;
                         }
                     }
@@ -449,15 +430,22 @@ pub const Searcher = struct {
                 if (entry.?.depth >= depth) {
                     self.pv_array[old_pv_index] = entry.?.bm;
 
+                    var s = entry.?.score;
+                    if (s < -INF + 100) {
+                        s += 100;
+                    } else if (s > INF - 100) {
+                        s -= 100;
+                    }
+
                     if (entry.?.flag == TT.TTFlag.Exact) {
                         return entry.?.score;
                     } else if (entry.?.flag == TT.TTFlag.Lower) {
-                        if (entry.?.score >= beta) {
-                            return entry.?.score;
+                        if (s >= beta) {
+                            return s;
                         }
                     } else {
-                        if (entry.?.score <= alpha) {
-                            return entry.?.score;
+                        if (s <= alpha) {
+                            return s;
                         }
                     }
                 }
@@ -509,7 +497,7 @@ pub const Searcher = struct {
             }
         }
 
-        var lmr_threashold: u8 = 3;
+        var lmr_threashold: u8 = 2;
         if (is_pv) {
             lmr_threashold += 1;
         }
@@ -585,17 +573,8 @@ pub const Searcher = struct {
             // Reductions
             if (bs > -INF) {
                 // LMR
-                if (!is_root and depth > 2 and legals >= lmr_threashold and (is_quiet or (moves.items[count - 1].score - Ordering.CAPTURE_SCORE < 0))) {
-                    if (is_quiet) {
-                        lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
-                    } else {
-                        lmr_depth = LMR.NoisyLMR[@minimum(31, depth)][@minimum(31, legals)];
-                        const captured = position.mailbox[Position.fen_sq_to_sq(Encode.target(m))].?;
-                        const LMRCaptureMargin: i16 = 85;
-                        if (eval + HCE.PieceValues[@enumToInt(captured) % 6] + LMRCaptureMargin < beta) {
-                            lmr_depth += 1;
-                        }
-                    }
+                if (!is_root and depth > 2 and legals >= lmr_threashold and is_quiet) {
+                    lmr_depth = LMR.QuietLMR[@minimum(31, depth)][@minimum(31, legals)];
 
                     if (self.history[Encode.source(m)][Encode.target(m)] <= 60) {
                         lmr_depth += 1;
@@ -656,7 +635,7 @@ pub const Searcher = struct {
                 self.pv_array[old_pv_index] = m;
                 self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
                 if (is_root) {
-                    self.root_bm = bm;
+                    self.root_bm = m;
                 }
 
                 return beta;
@@ -665,6 +644,9 @@ pub const Searcher = struct {
             if (score > bs) {
                 bs = score;
                 bm = m;
+                if (is_root) {
+                    self.root_bm = m;
+                }
             }
 
             // better move
@@ -682,7 +664,7 @@ pub const Searcher = struct {
                 self.pv_array[old_pv_index] = m;
                 self.movcpy(old_pv_index + 1, self.pv_index, MAX_PLY - self.ply - 1);
                 if (is_root) {
-                    self.root_bm = bm;
+                    self.root_bm = m;
                 }
 
                 if (alpha >= beta) {
@@ -703,7 +685,7 @@ pub const Searcher = struct {
         }
 
         // Store in TT
-        if (!skip_quiet and depth <= 127 and bs > -INF and bm != 0) {
+        if (!skip_quiet and depth <= 127 and bm != 0 and bs > -INF) {
             var flag = if (bs <= alpha_)
                 TT.TTFlag.Upper
             else
@@ -726,6 +708,8 @@ pub const Searcher = struct {
         var beta = beta_;
 
         self.nodes += 1;
+
+        self.seldepth = @maximum(self.seldepth, self.ply);
 
         if (Eval.is_material_drawn(position)) {
             return DRAW;
