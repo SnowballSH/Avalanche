@@ -40,6 +40,13 @@ pub fn move_to_uci(move: u24) []u8 {
     }
 }
 
+pub fn uci_to_sq(a: u8, b: u8) u6 {
+    var file = a - 'a';
+    var rank = b - '1';
+
+    return @intCast(u6, file + rank * 8);
+}
+
 pub fn uci_to_move(uci: []const u8, position: *Position.Position) ?u24 {
     if (std.mem.len(uci) < 4) {
         return null;

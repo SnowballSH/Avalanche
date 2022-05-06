@@ -23,6 +23,7 @@ pub const Position = struct {
     ep_stack: std.ArrayList(?u6),
     hash_stack: std.ArrayList(u64),
     hash: u64,
+    hm: u16,
 
     pub fn deinit(self: *Position) void {
         self.capture_stack.deinit();
@@ -659,6 +660,7 @@ pub fn new_position_by_fen(fen: anytype) Position {
         .ep_stack = std.ArrayList(?u6).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .hash_stack = std.ArrayList(u64).initCapacity(std.heap.page_allocator, 16) catch unreachable,
         .hash = 0,
+        .hm = 0,
     };
 
     var index: usize = 0;
@@ -783,10 +785,28 @@ pub fn new_position_by_fen(fen: anytype) Position {
 
     index += 1;
     if (index < fen.len) {
+        // EP
         if (fen[index] == '-') {
             position.ep = null;
+        } else if (index + 1 < fen.len) {
+            position.ep = Uci.uci_to_sq(fen[index], fen[index + 1]);
+            index += 1;
         }
-        // TODO: parse ep
+        index += 1;
+
+        // HM
+        if (index < fen.len) {
+            var hm: u16 = 0;
+            while (fen[index] == ' ') : (index += 1) {}
+            while (index < fen.len and fen[index] != ' ') : (index += 1) {
+                hm = hm * 10 + @intCast(u16, fen[index] - '0');
+            }
+            position.hm = hm;
+            index += 1;
+        } else {
+            position.hash = position.calculate_hash();
+            return position;
+        }
     } else {
         position.hash = position.calculate_hash();
         return position;

@@ -156,16 +156,6 @@ pub const UciInterface = struct {
                         _ = try stdout.print("{:<6} | {:<5} | {:<5} | {:<5}\n", .{ idx, psqt, score - psqt, score });
                     }
                 }
-            } else if (std.mem.eql(u8, token.?, "nnue_plain")) {
-                arch.re_evaluate(&self.position);
-                for (arch.result) |val| {
-                    var score = val;
-                    if (self.position.turn == Piece.Color.Black) {
-                        score = -score;
-                    }
-
-                    _ = try stdout.print("{}\n", .{score});
-                }
             } else if (std.mem.eql(u8, token.?, "hce")) {
                 try stdout.print("{}\n", .{HCE.evaluate(&self.position)});
             } else if (std.mem.eql(u8, token.?, "perft")) {
@@ -391,6 +381,7 @@ pub const UciInterface = struct {
                         if (fen != null) {
                             self.position = Position.new_position_by_fen(fen.?);
                             self.searcher.nnue.refresh_accumulator(&self.position);
+                            self.searcher.halfmoves = @intCast(u8, self.position.hm);
 
                             var afterfen = tokens.next();
                             if (afterfen != null) {
