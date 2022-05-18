@@ -53,4 +53,14 @@ test "Bitboards" {
     var b: types.Bitboard = 0b01101000;
     try expect(@enumToInt(types.pop_lsb(&b)) == 3);
     try expect(b == 0b01100000);
+
+    var bb_i: types.Bitboard = 0x3c18183c0000;
+    try expect(types.shift_bitboard(bb_i, types.Direction.North) == 0x3c18183c000000);
+    try expect(types.shift_bitboard(bb_i, types.Direction.NorthNorth) == 0x3c18183c00000000);
+    try expect(types.shift_bitboard(bb_i, types.Direction.South) == 0x3c18183c00);
+    try expect(types.shift_bitboard(bb_i, types.Direction.SouthSouth) == 0x3c18183c);
+    try expect(types.shift_bitboard(bb_i, types.Direction.East) == 0x783030780000);
+    try expect(types.shift_bitboard(bb_i, types.Direction.West) == 0x1e0c0c1e0000);
+    try expect(types.shift_bitboard(bb_i, types.Direction.SouthEast) == 0x7830307800);
+    try expect(types.shift_bitboard(bb_i, types.Direction.NorthWest) == 0x1e0c0c1e000000);
 }
