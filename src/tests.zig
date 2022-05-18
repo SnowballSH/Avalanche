@@ -11,6 +11,13 @@ test "Basic Piece and Color" {
     try expect(p.color() == types.Color.Black);
 }
 
+test "Directions" {
+    try expect(types.Direction.North.relative_dir(types.Color.Black) == types.Direction.South);
+    try expect(types.Direction.SouthEast.relative_dir(types.Color.Black) == types.Direction.NorthWest);
+
+    try expect(types.Direction.SouthSouth.relative_dir(types.Color.White) == types.Direction.SouthSouth);
+}
+
 test "Square" {
     var sq: types.Square = types.Square.d4;
     try expect(sq.inc().* == types.Square.e4);
@@ -25,4 +32,25 @@ test "Square" {
     try expect(sq.sub(types.Direction.SouthWest) == types.Square.f5);
 }
 
-test "Bitboards" {}
+test "Rank & File" {
+    try expect(types.Rank.RANK2.relative_rank(types.Color.Black) == types.Rank.RANK7);
+    try expect(types.Rank.RANK5.relative_rank(types.Color.Black) == types.Rank.RANK4);
+    try expect(types.Rank.RANK8.relative_rank(types.Color.White) == types.Rank.RANK8);
+}
+
+test "Square & Rank & File" {
+    try expect(types.Square.b2.rank() == types.Rank.RANK2);
+    try expect(types.Square.b2.file() == types.File.BFILE);
+
+    try expect(types.Square.new(types.File.EFILE, types.Rank.RANK4) == types.Square.e4);
+    try expect(types.Square.e4.rank() == types.Rank.RANK4);
+    try expect(types.Square.e4.file() == types.File.EFILE);
+}
+
+test "Bitboards" {
+    try expect(types.popcount(0b0110111010010) == 7);
+    try expect(types.lsb(0b01101000) == 3);
+    var b: types.Bitboard = 0b01101000;
+    try expect(@enumToInt(types.pop_lsb(&b)) == 3);
+    try expect(b == 0b01100000);
+}

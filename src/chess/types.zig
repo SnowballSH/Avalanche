@@ -23,6 +23,10 @@ pub const Direction = enum(i32) {
     // Double Push
     NorthNorth = 16,
     SouthSouth = -16,
+
+    pub inline fn relative_dir(self: Direction, comptime c: Color) Direction {
+        return if (c == Color.White) self else @intToEnum(Direction, -@enumToInt(self));
+    }
 };
 
 pub const N_PT: usize = 6;
@@ -100,6 +104,26 @@ pub const Square = enum(i32) {
     pub inline fn sub(self: Square, d: Direction) Square {
         return @intToEnum(Square, @enumToInt(self) - @enumToInt(d));
     }
+
+    pub inline fn rank(self: Square) Rank {
+        return @intToEnum(Rank, @enumToInt(self) >> 3);
+    }
+
+    pub inline fn file(self: Square) File {
+        return @intToEnum(File, @enumToInt(self) & 0b111);
+    }
+
+    pub inline fn diagonal(self: Square) i32 {
+        return @intCast(i32, 7 + @enumToInt(self.rank()) - @enumToInt(self.file()));
+    }
+
+    pub inline fn anti_diagonal(self: Square) i32 {
+        return @intCast(i32, @enumToInt(self.rank()) + @enumToInt(self.file()));
+    }
+
+    pub inline fn new(f: File, r: Rank) Square {
+        return @intToEnum(Square, @enumToInt(f) | (@enumToInt(r) << 3));
+    }
 };
 
 pub const File = enum(u8) {
@@ -122,6 +146,10 @@ pub const Rank = enum(u8) {
     RANK6,
     RANK7,
     RANK8,
+
+    pub inline fn relative_rank(self: Rank, comptime c: Color) Rank {
+        return if (c == Color.White) self else @intToEnum(Rank, @enumToInt(Rank.RANK8) - @enumToInt(self));
+    }
 };
 
 // Magic stuff
@@ -202,3 +230,57 @@ pub fn debug_print_bitboard(b: Bitboard) void {
     }
     std.debug.print("\n", .{});
 }
+
+pub const k1: Bitboard = 0x5555555555555555;
+pub const k2: Bitboard = 0x3333333333333333;
+pub const k3: Bitboard = 0x0f0f0f0f0f0f0f0f;
+pub const kf: Bitboard = 0x0101010101010101;
+
+pub inline fn popcount(x: Bitboard) i32 {
+    return @intCast(i32, @popCount(u64, x));
+}
+
+pub inline fn lsb(x: Bitboard) i32 {
+    return @intCast(i32, @ctz(u64, x));
+    // Ancient machines:
+    //const DEBRUIJN64: [64]i32 = .{
+    //    // zig fmt: off
+    //    0, 47,  1, 56, 48, 27,  2, 60,
+    //    57, 49, 41, 37, 28, 16,  3, 61,
+    //    54, 58, 35, 52, 50, 42, 21, 44,
+    //    38, 32, 29, 23, 17, 11,  4, 62,
+    //    46, 55, 26, 59, 40, 36, 15, 53,
+    //    34, 51, 20, 43, 31, 22, 10, 45,
+    //    25, 39, 14, 33, 19, 30,  9, 24,
+    //    13, 18,  8, 12,  7,  6,  5, 63
+    //    // zig fmt: on
+    //};
+    // const MagicNumber: Bitboard = 0x03f79d71b4cb0a89;
+    // return DEBRUIJN64[(MagicNumber *% (x ^ (x-%1))) >> 58];
+}
+
+pub inline fn pop_lsb(x: *Bitboard) Square {
+    var l = lsb(x.*);
+    x.* &= x.* - 1;
+    return @intToEnum(Square, l);
+}
+
+pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
+    return switch (d) {
+        Direction.North => x << 8,
+        Direction.South => x >> 8,
+        Direction.NorthNorth => x << 16,
+        Direction.SouthSouth => x >> 16,
+        Direction.East => (x & ~MaskFile[@enumToInt(File.HFILE)]) << 1,
+        Direction.West => (x & ~MaskFile[@enumToInt(File.AFILE)]) >> 1,
+        Direction.NorthEast => (x & ~MaskFile[@enumToInt(File.HFILE)]) << 9,
+        Direction.NorthWest => (x & ~MaskFile[@enumToInt(File.AFILE)]) << 7,
+        Direction.SouthEast => (x & ~MaskFile[@enumToInt(File.HFILE)]) >> 7,
+        Direction.SouthWest => (x & ~MaskFile[@enumToInt(File.AFILE)]) >> 9,
+        else => 0,
+    };
+}
+
+pub const MoveTypeString: [16]*const []u8 = .{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N", "B", "R", "Q" };
+
+pub fn debug_print_move() void {}
