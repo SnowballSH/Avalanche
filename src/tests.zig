@@ -64,3 +64,35 @@ test "Bitboards" {
     try expect(types.shift_bitboard(bb_i, types.Direction.SouthEast) == 0x7830307800);
     try expect(types.shift_bitboard(bb_i, types.Direction.NorthWest) == 0x1e0c0c1e000000);
 }
+
+test "Move" {
+    try expect(@sizeOf(types.Move) == 2);
+    try expect(@bitSizeOf(types.Move) == 16);
+
+    {
+        var m = types.Move.empty();
+        try expect(m.get_from() == types.Square.a1);
+        try expect(m.get_to() == types.Square.a1);
+    }
+
+    {
+        var m = types.Move.new_from_to(types.Square.g1, types.Square.f3);
+        try expect(m.get_from() == types.Square.g1);
+        try expect(m.get_to() == types.Square.f3);
+        try expect(m.get_flags() == types.MoveFlags.QUIET);
+    }
+
+    {
+        var m = types.Move.new_from_string("g1f3");
+        try expect(m.get_from() == types.Square.g1);
+        try expect(m.get_to() == types.Square.f3);
+        try expect(m.get_flags() == types.MoveFlags.QUIET);
+    }
+
+    {
+        var m = types.Move.new_from_to_flag(types.Square.e2, types.Square.e4, types.MoveFlags.DOUBLE_PUSH);
+        try expect(m.get_from() == types.Square.e2);
+        try expect(m.get_to() == types.Square.e4);
+        try expect(m.get_flags() == types.MoveFlags.DOUBLE_PUSH);
+    }
+}

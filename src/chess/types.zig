@@ -280,6 +280,70 @@ pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
     };
 }
 
-pub const MoveTypeString: [16]*const []u8 = .{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N", "B", "R", "Q" };
+pub const MoveTypeString = [_]*const []u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N", "B", "R", "Q" };
+
+pub const MoveFlags = enum(u4) {
+    QUIET = 0b0000,
+    DOUBLE_PUSH = 0b0001,
+    OO = 0b0010,
+    OOO = 0b0011,
+    CAPTURE = 0b1000,
+    CAPTURES = 0b1111,
+    EN_PASSANT = 0b1010,
+    PROMOTIONS = 0b0111,
+    PROMOTION_CAPTURES = 0b1100,
+};
+
+pub const PR_KNIGHT: u4 = 0b0100;
+pub const PR_BISHOP: u4 = 0b0101;
+pub const PR_ROOK: u4 = 0b0110;
+pub const PR_QUEEN: u4 = 0b0111;
+pub const PC_KNIGHT: u4 = 0b1100;
+pub const PC_BISHOP: u4 = 0b1101;
+pub const PC_ROOK: u4 = 0b1110;
+pub const PC_QUEEN: u4 = 0b1111;
+
+// Packed Struct makes it fit into a 16-bit integer.
+pub const Move = packed struct {
+    flags: u4,
+    from: u6,
+    to: u6,
+
+    pub inline fn get_flags(self: Move) MoveFlags {
+        return @intToEnum(MoveFlags, self.flags);
+    }
+
+    pub inline fn get_from(self: Move) Square {
+        return @intToEnum(Square, self.from);
+    }
+
+    pub inline fn get_to(self: Move) Square {
+        return @intToEnum(Square, self.to);
+    }
+
+    pub inline fn empty() Move {
+        return Move{ .flags = 0, .from = 0, .to = 0 };
+    }
+
+    pub inline fn clone(self: Move) Move {
+        return Move{ .flags = self.flags, .from = self.from, .to = self.to };
+    }
+
+    pub inline fn new_from_to(from: Square, to: Square) Move {
+        return Move{ .flags = 0, .from = @intCast(u6, @enumToInt(from)), .to = @intCast(u6, @enumToInt(to)) };
+    }
+
+    pub inline fn new_from_to_flag(from: Square, to: Square, flag: MoveFlags) Move {
+        return Move{ .flags = @enumToInt(flag), .from = @intCast(u6, @enumToInt(from)), .to = @intCast(u6, @enumToInt(to)) };
+    }
+
+    pub fn new_from_string(move: [:0]const u8) Move {
+        return Move{
+            .flags = 0,
+            .from = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[0] - 'a'), @intToEnum(Rank, move[1] - '1')))),
+            .to = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[2] - 'a'), @intToEnum(Rank, move[3] - '1')))),
+        };
+    }
+};
 
 pub fn debug_print_move() void {}
