@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("./chess/types.zig");
+const tables = @import("./chess/tables.zig");
 const expect = std.testing.expect;
 
 test "Basic Piece and Color" {
@@ -47,7 +48,7 @@ test "Square & Rank & File" {
     try expect(types.Square.e4.file() == types.File.EFILE);
 }
 
-test "Bitboards" {
+test "Bitboard general" {
     try expect(types.popcount(0b0110111010010) == 7);
     try expect(types.lsb(0b01101000) == 3);
     var b: types.Bitboard = 0b01101000;
@@ -95,4 +96,15 @@ test "Move" {
         try expect(m.get_to() == types.Square.e4);
         try expect(m.get_flags() == types.MoveFlags.DOUBLE_PUSH);
     }
+
+    {
+        var m = types.Move.new_from_to_flag(types.Square.e4, types.Square.e5, types.MoveFlags.CAPTURE);
+        try expect(m.is_capture());
+        try expect(m.equals_to(m));
+    }
+}
+
+test "Bitboard operations" {
+    try expect(tables.reverse_bitboard(0x24180000000000) == 0x182400);
+    try expect(tables.reverse_bitboard(0x40040000200200) == 0x40040000200200);
 }

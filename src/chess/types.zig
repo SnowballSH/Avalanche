@@ -155,7 +155,7 @@ pub const Rank = enum(u8) {
 // Magic stuff
 
 // zig fmt: off
-pub const SquareToString = .{
+pub const SquareToString = [_][:0]const u8{
     "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
     "a2", "b2", "c2", "d2", "e2", "f2", "g2", "h2",
     "a3", "b3", "c3", "d3", "e3", "f3", "g3", "h3",
@@ -280,7 +280,7 @@ pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
     };
 }
 
-pub const MoveTypeString = [_]*const []u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N", "B", "R", "Q" };
+pub const MoveTypeString = [_][:0]const u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N", "B", "R", "Q" };
 
 pub const MoveFlags = enum(u4) {
     QUIET = 0b0000,
@@ -344,6 +344,20 @@ pub const Move = packed struct {
             .to = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[2] - 'a'), @intToEnum(Rank, move[3] - '1')))),
         };
     }
-};
 
-pub fn debug_print_move() void {}
+    pub inline fn is_capture(self: Move) bool {
+        return (self.flags & @enumToInt(MoveFlags.CAPTURES)) != 0;
+    }
+
+    pub inline fn equals_to(self: Move, other: Move) bool {
+        return self.from == other.from and self.to == other.to;
+    }
+
+    pub fn debug_print(self: Move) void {
+        std.debug.print("{s}{s}{s}\n", .{
+            SquareToString[self.from],
+            SquareToString[self.to],
+            MoveTypeString[self.flags],
+        });
+    }
+};
