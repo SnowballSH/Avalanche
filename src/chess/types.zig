@@ -124,7 +124,27 @@ pub const Square = enum(i32) {
     pub inline fn new(f: File, r: Rank) Square {
         return @intToEnum(Square, @enumToInt(f) | (@enumToInt(r) << 3));
     }
+
+    pub inline fn index(self: Square) u8 {
+        return @intCast(u8, @enumToInt(self));
+    }
 };
+
+pub inline fn rank_plain(sq: usize) usize {
+    return sq >> 3;
+}
+
+pub inline fn file_plain(sq: usize) usize {
+    return sq & 0b111;
+}
+
+pub inline fn diagonal_plain(sq: usize) usize {
+    return 7 + rank_plain(sq) - file_plain(sq);
+}
+
+pub inline fn anti_diagonal_plain(sq: usize) usize {
+    return rank_plain(sq) + file_plain(sq);
+}
 
 pub const File = enum(u8) {
     AFILE,
@@ -135,6 +155,10 @@ pub const File = enum(u8) {
     FFILE,
     GFILE,
     HFILE,
+
+    pub inline fn index(self: File) u8 {
+        return @enumToInt(self);
+    }
 };
 
 pub const Rank = enum(u8) {
@@ -146,6 +170,10 @@ pub const Rank = enum(u8) {
     RANK6,
     RANK7,
     RANK8,
+
+    pub inline fn index(self: Rank) u8 {
+        return @enumToInt(self);
+    }
 
     pub inline fn relative_rank(self: Rank, comptime c: Color) Rank {
         return if (c == Color.White) self else @intToEnum(Rank, @enumToInt(Rank.RANK8) - @enumToInt(self));

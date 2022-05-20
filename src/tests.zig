@@ -108,3 +108,14 @@ test "Bitboard operations" {
     try expect(tables.reverse_bitboard(0x24180000000000) == 0x182400);
     try expect(tables.reverse_bitboard(0x40040000200200) == 0x40040000200200);
 }
+
+test "Magic Bitboard Slidng Pieces" {
+    tables.init_rook_attacks();
+    tables.init_bishop_attacks();
+
+    try expect(tables.get_rook_attacks(types.Square.a1, 0x80124622004420) == 0x10101010101013e);
+    try expect(tables.get_rook_attacks(types.Square.e4, 0x80124622004420) == 0x10102e101010);
+
+    try expect(tables.get_bishop_attacks(types.Square.e4, 0x80124622004420) == 0x182442800284400);
+    try expect(tables.get_bishop_attacks(types.Square.a1, 0x80124622004420) == 0x8040201008040200);
+}
