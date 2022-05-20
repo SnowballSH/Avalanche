@@ -118,4 +118,7 @@ test "Magic Bitboard Slidng Pieces" {
 
     try expect(tables.get_bishop_attacks(types.Square.e4, 0x80124622004420) == 0x182442800284400);
     try expect(tables.get_bishop_attacks(types.Square.a1, 0x80124622004420) == 0x8040201008040200);
+
+    try expect(tables.get_xray_rook_attacks(types.Square.e4, 0x11014004a10d3d0, 0x100048100000) == 0x10000086001000);
+    try expect(tables.get_xray_bishop_attacks(types.Square.e4, 0x108a48c0c1294500, 0x2400000280000) == 0x180000000004400);
 }
