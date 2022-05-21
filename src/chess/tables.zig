@@ -303,3 +303,26 @@ pub fn init_all() void {
     init_line_between();
     init_pseudo_legal();
 }
+
+pub inline fn get_attacks(comptime pt: types.PieceType, sq: types.Square, occ: types.Bitboard) types.Bitboard {
+    std.debug.assert(pt != types.PieceType.Pawn); // Use get_pawn_attacks() instead
+    return switch (pt) {
+        types.PieceType.Rook => get_rook_attacks(sq, occ),
+        types.PieceType.Bishop => get_bishop_attacks(sq, occ),
+        types.PieceType.Queen => get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ),
+        _ => PseudoLegalAttacks[@enumToInt(pt)][sq.index()],
+    };
+}
+
+// Get Pawn attacks of a given color and square
+pub inline fn get_pawn_attacks(comptime color: types.Color, sq: types.Square) types.Bitboard {
+    return PawnAttacks[@enumToInt(color)][sq.index()];
+}
+
+// Get Pawn attacks of every pawn on bitboard
+pub inline fn get_pawn_attacks_bb(comptime color: types.Color, bb: types.Bitboard) types.Bitboard {
+    return if (color == types.Color.White)
+        types.shift_bitboard(bb, types.Direction.NorthWest) | types.shift_bitboard(bb, types.Direction.NorthEast)
+    else
+        types.shift_bitboard(bb, types.Direction.SouthWest) | types.shift_bitboard(bb, types.Direction.SouthEast);
+}

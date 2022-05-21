@@ -138,3 +138,14 @@ test "Squares and Line Between" {
     try expect(tables.LineOf[types.Square.b7.index()][types.Square.g2.index()] == 0x102040810204080);
     try expect(tables.LineOf[types.Square.a1.index()][types.Square.g4.index()] == 0);
 }
+
+test "Pawn Attacks" {
+    tables.init_pseudo_legal();
+
+    try expect(tables.get_pawn_attacks(types.Color.Black, types.Square.e5) == 0x28000000);
+    try expect(tables.get_pawn_attacks(types.Color.White, types.Square.e4) == 0x2800000000);
+    try expect(tables.get_pawn_attacks(types.Color.White, types.Square.a5) == 0x20000000000);
+
+    try expect(tables.get_pawn_attacks_bb(types.Color.White, 0x2800000200400) == 0x5400000500a0000);
+    try expect(tables.get_pawn_attacks_bb(types.Color.Black, 0x2800000200400) == 0x5400000500a);
+}

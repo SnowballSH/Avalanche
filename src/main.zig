@@ -5,5 +5,5 @@ const tables = @import("./chess/tables.zig");
 pub fn main() anyerror!void {
     tables.init_all();
 
-    std.debug.print("{}", .{tables.LineOf[types.Square.e3.index()][types.Square.e7.index()]});
+    std.debug.print("{}", .{tables.get_pawn_attacks(types.Color.Black, types.Square.e5)});
 }
