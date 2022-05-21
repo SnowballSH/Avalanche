@@ -254,3 +254,52 @@ pub fn init_squares_between() void {
         }
     }
 }
+
+// Line between squares
+
+// Bitboard for line of two squares, 0 if they are not aligned
+pub var LineOf: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);
+
+pub fn init_line_between() void {
+    var sq1: usize = @enumToInt(types.Square.a1);
+
+    while (sq1 <= @enumToInt(types.Square.h8)) : (sq1 += 1) {
+        var sq2: usize = @enumToInt(types.Square.a1);
+
+        while (sq2 <= @enumToInt(types.Square.h8)) : (sq2 += 1) {
+            if (types.file_plain(sq1) == types.file_plain(sq2) or types.rank_plain(sq1) == types.rank_plain(sq2)) {
+                LineOf[sq1][sq2] = get_rook_attacks_for_init(@intToEnum(types.Square, sq1), 0) & get_rook_attacks_for_init(@intToEnum(types.Square, sq2), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
+            } else if (types.diagonal_plain(sq1) == types.diagonal_plain(sq2) or types.anti_diagonal_plain(sq1) == types.anti_diagonal_plain(sq2)) {
+                LineOf[sq1][sq2] = get_bishop_attacks_for_init(@intToEnum(types.Square, sq1), 0) & get_bishop_attacks_for_init(@intToEnum(types.Square, sq2), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
+            } else {
+                LineOf[sq1][sq2] = 0;
+            }
+        }
+    }
+}
+
+// Pseudo-legal attacks array
+
+pub var PseudoLegalAttacks: [types.N_PT][64]types.Bitboard = std.mem.zeroes([types.N_PT][64]types.Bitboard);
+pub var PawnAttacks: [types.N_COLORS][64]types.Bitboard = std.mem.zeroes([types.N_COLORS][64]types.Bitboard);
+
+pub fn init_pseudo_legal() void {
+    std.mem.copy(types.Bitboard, PawnAttacks[0][0..64], WhitePawnAttacks[0..64]);
+    std.mem.copy(types.Bitboard, PawnAttacks[1][0..64], BlackPawnAttacks[0..64]);
+    std.mem.copy(types.Bitboard, PseudoLegalAttacks[@enumToInt(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
+    var sq: usize = @enumToInt(types.Square.a1);
+
+    while (sq <= @enumToInt(types.Square.h8)) : (sq += 1) {
+        PseudoLegalAttacks[@enumToInt(types.PieceType.Bishop)][sq] = get_bishop_attacks_for_init(@intToEnum(types.Square, sq), 0);
+        PseudoLegalAttacks[@enumToInt(types.PieceType.Rook)][sq] = get_rook_attacks_for_init(@intToEnum(types.Square, sq), 0);
+        PseudoLegalAttacks[@enumToInt(types.PieceType.Queen)][sq] = PseudoLegalAttacks[@enumToInt(types.PieceType.Bishop)][sq] | PseudoLegalAttacks[@enumToInt(types.PieceType.Rook)][sq];
+    }
+}
+
+pub fn init_all() void {
+    init_bishop_attacks();
+    init_rook_attacks();
+    init_squares_between();
+    init_line_between();
+    init_pseudo_legal();
+}

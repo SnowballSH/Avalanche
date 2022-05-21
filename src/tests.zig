@@ -123,11 +123,18 @@ test "Magic Bitboard Slidng Pieces" {
     try expect(tables.get_xray_bishop_attacks(types.Square.e4, 0x108a48c0c1294500, 0x2400000280000) == 0x180000000004400);
 }
 
-test "Squares Between" {
+test "Squares and Line Between" {
     tables.init_squares_between();
+    tables.init_line_between();
     try expect(tables.SquaresBetween[types.Square.b4.index()][types.Square.f4.index()] == 0x1c000000);
     try expect(tables.SquaresBetween[types.Square.e3.index()][types.Square.e7.index()] == 0x101010000000);
     try expect(tables.SquaresBetween[types.Square.b2.index()][types.Square.g7.index()] == 0x201008040000);
     try expect(tables.SquaresBetween[types.Square.b7.index()][types.Square.g2.index()] == 0x40810200000);
     try expect(tables.SquaresBetween[types.Square.a1.index()][types.Square.g4.index()] == 0);
+
+    try expect(tables.LineOf[types.Square.b4.index()][types.Square.f4.index()] == 0xff000000);
+    try expect(tables.LineOf[types.Square.e3.index()][types.Square.e7.index()] == 0x1010101010101010);
+    try expect(tables.LineOf[types.Square.b2.index()][types.Square.g7.index()] == 0x8040201008040201);
+    try expect(tables.LineOf[types.Square.b7.index()][types.Square.g2.index()] == 0x102040810204080);
+    try expect(tables.LineOf[types.Square.a1.index()][types.Square.g4.index()] == 0);
 }
