@@ -230,3 +230,27 @@ pub inline fn get_xray_bishop_attacks(square: types.Square, occ: types.Bitboard,
     var attacks = get_bishop_attacks(square, occ);
     return attacks ^ get_bishop_attacks(square, occ ^ (blockers & attacks));
 }
+
+// Squares between squares
+
+// Bitboard for the squares between two squares, 0 if they are not aligned
+pub var SquaresBetween: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);
+
+pub fn init_squares_between() void {
+    var sq1: usize = @enumToInt(types.Square.a1);
+
+    while (sq1 <= @enumToInt(types.Square.h8)) : (sq1 += 1) {
+        var sq2: usize = @enumToInt(types.Square.a1);
+
+        while (sq2 <= @enumToInt(types.Square.h8)) : (sq2 += 1) {
+            var sqs = types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
+            if (types.file_plain(sq1) == types.file_plain(sq2) or types.rank_plain(sq1) == types.rank_plain(sq2)) {
+                SquaresBetween[sq1][sq2] = get_rook_attacks_for_init(@intToEnum(types.Square, sq1), sqs) & get_rook_attacks_for_init(@intToEnum(types.Square, sq2), sqs);
+            } else if (types.diagonal_plain(sq1) == types.diagonal_plain(sq2) or types.anti_diagonal_plain(sq1) == types.anti_diagonal_plain(sq2)) {
+                SquaresBetween[sq1][sq2] = get_bishop_attacks_for_init(@intToEnum(types.Square, sq1), sqs) & get_bishop_attacks_for_init(@intToEnum(types.Square, sq2), sqs);
+            } else {
+                SquaresBetween[sq1][sq2] = 0;
+            }
+        }
+    }
+}

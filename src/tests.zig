@@ -122,3 +122,12 @@ test "Magic Bitboard Slidng Pieces" {
     try expect(tables.get_xray_rook_attacks(types.Square.e4, 0x11014004a10d3d0, 0x100048100000) == 0x10000086001000);
     try expect(tables.get_xray_bishop_attacks(types.Square.e4, 0x108a48c0c1294500, 0x2400000280000) == 0x180000000004400);
 }
+
+test "Squares Between" {
+    tables.init_squares_between();
+    try expect(tables.SquaresBetween[types.Square.b4.index()][types.Square.f4.index()] == 0x1c000000);
+    try expect(tables.SquaresBetween[types.Square.e3.index()][types.Square.e7.index()] == 0x101010000000);
+    try expect(tables.SquaresBetween[types.Square.b2.index()][types.Square.g7.index()] == 0x201008040000);
+    try expect(tables.SquaresBetween[types.Square.b7.index()][types.Square.g2.index()] == 0x40810200000);
+    try expect(tables.SquaresBetween[types.Square.a1.index()][types.Square.g4.index()] == 0);
+}
