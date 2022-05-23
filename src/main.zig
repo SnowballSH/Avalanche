@@ -1,9 +1,14 @@
 const std = @import("std");
 const types = @import("./chess/types.zig");
 const tables = @import("./chess/tables.zig");
+const zobrist = @import("./chess/zobrist.zig");
+const position = @import("./chess/position.zig");
 
 pub fn main() anyerror!void {
     tables.init_all();
+    zobrist.init_zobrist();
 
-    std.debug.print("{}", .{tables.get_pawn_attacks(types.Color.Black, types.Square.e5)});
+    var pos = position.Position.new();
+    pos.set_fen(types.DEFAULT_FEN[0..]);
+    pos.debug_print();
 }

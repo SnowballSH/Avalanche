@@ -71,6 +71,10 @@ pub const Piece = enum(u8) {
     pub inline fn color(self: Piece) Color {
         return @intToEnum(Color, (@enumToInt(self) & 0b1000) >> 3);
     }
+
+    pub inline fn index(self: Piece) u8 {
+        return @enumToInt(self);
+    }
 };
 
 // Square & Bitboard
@@ -79,7 +83,7 @@ pub const Bitboard = u64;
 
 pub const N_SQUARES = 64;
 
-pub const Square = enum(i32) {
+pub const Square = enum(u8) {
     // zig fmt: off
     a1, b1, c1, d1, e1, f1, g1, h1,
     a2, b2, c2, d2, e2, f2, g2, h2,
@@ -389,3 +393,52 @@ pub const Move = packed struct {
         });
     }
 };
+
+pub const WhiteOOMask: Bitboard = 0x90;
+pub const WhiteOOOMask: Bitboard = 0x11;
+
+pub const WhiteOOBetweenMask: Bitboard = 0x60;
+pub const WhiteOOOBetweenMask: Bitboard = 0xe;
+
+pub const BlackOOMask: Bitboard = 0x9000000000000000;
+pub const BlackOOOMask: Bitboard = 0x1100000000000000;
+
+pub const BlackOOBetweenMask: Bitboard = 0x6000000000000000;
+pub const BlackOOOBetweenMask: Bitboard = 0xe00000000000000;
+
+pub const AllCastlingMask: Bitboard = 0x9100000000000091;
+
+pub inline fn get_oo_mask(comptime color: Color) Bitboard {
+    return switch (color) {
+        Color.White => WhiteOOMask,
+        Color.Black => BlackOOMask,
+    };
+}
+
+pub inline fn get_ooo_mask(comptime color: Color) Bitboard {
+    return switch (color) {
+        Color.White => WhiteOOOMask,
+        Color.Black => BlackOOOMask,
+    };
+}
+
+pub inline fn get_oo_blocker_mask(comptime color: Color) Bitboard {
+    return switch (color) {
+        Color.White => WhiteOOBetweenMask,
+        Color.Black => BlackOOBetweenMask,
+    };
+}
+
+pub inline fn get_ooo_blocker_mask(comptime color: Color) Bitboard {
+    return switch (color) {
+        Color.White => WhiteOOOBetweenMask,
+        Color.Black => BlackOOOBetweenMask,
+    };
+}
+
+pub inline fn ignore_ooo_danger(comptime color: Color) Bitboard {
+    return switch (color) {
+        Color.White => 0x2,
+        Color.Black => 0x200000000000000,
+    };
+}

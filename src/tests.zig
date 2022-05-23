@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("./chess/types.zig");
 const tables = @import("./chess/tables.zig");
+const position = @import("./chess/position.zig");
 const expect = std.testing.expect;
 
 test "Basic Piece and Color" {
@@ -148,4 +149,24 @@ test "Pawn Attacks" {
 
     try expect(tables.get_pawn_attacks_bb(types.Color.White, 0x2800000200400) == 0x5400000500a0000);
     try expect(tables.get_pawn_attacks_bb(types.Color.Black, 0x2800000200400) == 0x5400000500a);
+}
+
+test "Position" {
+    var pos = position.Position.new();
+
+    try expect(pos.hash == 0);
+    try expect(pos.turn == types.Color.White);
+    try expect(pos.game_ply == 0);
+    try expect(pos.mailbox[0] == types.Piece.NO_PIECE);
+
+    pos.add_piece(types.Piece.WHITE_KNIGHT, types.Square.f3);
+    try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.WHITE_KNIGHT);
+    try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0x200000);
+
+    pos.remove_piece(types.Square.f3);
+    try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.NO_PIECE);
+    try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0);
+
+    pos = position.Position.new();
+    pos.set_fen(types.DEFAULT_FEN[0..]);
 }
