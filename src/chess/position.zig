@@ -22,6 +22,14 @@ pub const UndoInfo = packed struct {
             .ep_sq = types.Square.NO_SQUARE,
         };
     }
+
+    pub fn from(old: UndoInfo) UndoInfo {
+        return UndoInfo{
+            .entry = old.entry,
+            .captured = types.Piece.NO_PIECE,
+            .ep_sq = types.Square.NO_SQUARE,
+        };
+    }
 };
 
 // A chess position
@@ -76,6 +84,7 @@ pub const Position = struct {
     }
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
+        self.* = Position.new();
         var sq: i32 = @intCast(i32, @enumToInt(types.Square.a8));
         var tokens = std.mem.tokenize(u8, fen, " ");
         var bd = tokens.next().?;
@@ -155,28 +164,28 @@ pub const Position = struct {
     }
 
     pub inline fn diagonal_sliders(self: Position, comptime color: types.Color) types.Bitboard {
-        return if (color == types.Color.WHITE)
+        return if (color == types.Color.White)
             self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()]
         else
             self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()];
     }
 
     pub inline fn orthogonal_sliders(self: Position, comptime color: types.Color) types.Bitboard {
-        return if (color == types.Color.WHITE)
+        return if (color == types.Color.White)
             self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()]
         else
             self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()];
     }
 
     pub inline fn all_pieces(self: Position, comptime color: types.Color) types.Bitboard {
-        return if (color == types.Color.WHITE)
+        return if (color == types.Color.White)
             self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()]
         else
             self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()];
     }
 
     pub inline fn attackers_from(self: Position, comptime color: types.Color, sq: types.Square, occ: types.Bitboard) types.Bitboard {
-        if (color == types.Color.WHITE) {
+        if (color == types.Color.White) {
             const p = (tables.BlackPawnAttacks[sq.index()] & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]);
             const n = (tables.get_attacks(types.PieceType.Knight, sq, occ) & self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()]);
             const b = (tables.get_attacks(types.PieceType.Bishop, sq, occ) & self.diagonal_sliders(color));
@@ -191,8 +200,163 @@ pub const Position = struct {
         }
     }
 
-    // TODO!
-    //pub inline fn in_check(self: Position, comptime color: types.Color) bool {
-    //    return self.checkers != 0;
-    //}
+    pub inline fn in_check(self: Position, comptime color: types.Color) bool {
+        comptime var king: types.Piece = types.Piece.new_comptime(color, types.PieceType.King);
+        comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+        return self.attackers_from(opp, @intToEnum(types.Square, types.lsb(self.piece_bitboards[king.index()])), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
+    }
+
+    // Moving pieces
+
+    pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
+        self.turn = self.turn.invert();
+        self.game_ply += 1;
+        self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
+
+        var flags = move.get_flags();
+        self.history[self.game_ply].entry |= types.SquareIndexBB[move.to] | types.SquareIndexBB[move.from];
+
+        switch (flags) {
+            types.MoveFlags.QUIET => {
+                self.move_piece_quiet(move.get_from(), move.get_to());
+            },
+            types.MoveFlags.DOUBLE_PUSH => {
+                self.move_piece_quiet(move.get_from(), move.get_to());
+
+                self.history[self.game_ply].ep_sq = move.get_from().add(types.Direction.North.relative_dir(color));
+            },
+            types.MoveFlags.OO => {
+                if (color == types.Color.White) {
+                    self.move_piece_quiet(types.Square.e1, types.Square.g1);
+                    self.move_piece_quiet(types.Square.h1, types.Square.f1);
+                } else {
+                    self.move_piece_quiet(types.Square.e8, types.Square.g8);
+                    self.move_piece_quiet(types.Square.h8, types.Square.f8);
+                }
+            },
+            types.MoveFlags.OOO => {
+                if (color == types.Color.White) {
+                    self.move_piece_quiet(types.Square.e1, types.Square.c1);
+                    self.move_piece_quiet(types.Square.a1, types.Square.d1);
+                } else {
+                    self.move_piece_quiet(types.Square.e8, types.Square.c8);
+                    self.move_piece_quiet(types.Square.a8, types.Square.d8);
+                }
+            },
+            types.MoveFlags.EN_PASSANT => {
+                self.move_piece_quiet(move.get_from(), move.get_to());
+                self.remove_piece(move.get_to().add(types.Direction.South.relative_dir(color)));
+            },
+            else => {
+                var index = @enumToInt(flags);
+                switch (index) {
+                    types.PR_KNIGHT => {
+                        self.remove_piece(move.get_from());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Knight), move.get_to());
+                    },
+                    types.PR_BISHOP => {
+                        self.remove_piece(move.get_from());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Bishop), move.get_to());
+                    },
+                    types.PR_ROOK => {
+                        self.remove_piece(move.get_from());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Rook), move.get_to());
+                    },
+                    types.PR_QUEEN => {
+                        self.remove_piece(move.get_from());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Queen), move.get_to());
+                    },
+                    types.PC_KNIGHT => {
+                        self.remove_piece(move.get_from());
+                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.remove_piece(move.get_to());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Knight), move.get_to());
+                    },
+                    types.PC_BISHOP => {
+                        self.remove_piece(move.get_from());
+                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.remove_piece(move.get_to());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Bishop), move.get_to());
+                    },
+                    types.PC_ROOK => {
+                        self.remove_piece(move.get_from());
+                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.remove_piece(move.get_to());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Rook), move.get_to());
+                    },
+                    types.PC_QUEEN => {
+                        self.remove_piece(move.get_from());
+                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.remove_piece(move.get_to());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Queen), move.get_to());
+                    },
+                    else => {
+                        if (flags == types.MoveFlags.CAPTURE) {
+                            self.history[self.game_ply].captured = self.mailbox[move.to];
+                            self.move_piece(move.get_from(), move.get_to());
+                        }
+                    },
+                }
+            },
+        }
+    }
+
+    pub fn undo_move(self: *Position, comptime color: types.Color, move: types.Move) void {
+        var flags = move.get_flags();
+        comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+
+        switch (flags) {
+            types.MoveFlags.QUIET => {
+                self.move_piece_quiet(move.get_to(), move.get_from());
+            },
+            types.MoveFlags.DOUBLE_PUSH => {
+                self.move_piece_quiet(move.get_to(), move.get_from());
+            },
+            types.MoveFlags.OO => {
+                if (color == types.Color.White) {
+                    self.move_piece_quiet(types.Square.g1, types.Square.e1);
+                    self.move_piece_quiet(types.Square.f1, types.Square.h1);
+                } else {
+                    self.move_piece_quiet(types.Square.g8, types.Square.e8);
+                    self.move_piece_quiet(types.Square.f8, types.Square.h8);
+                }
+            },
+            types.MoveFlags.OOO => {
+                if (color == types.Color.White) {
+                    self.move_piece_quiet(types.Square.c1, types.Square.e1);
+                    self.move_piece_quiet(types.Square.d1, types.Square.a1);
+                } else {
+                    self.move_piece_quiet(types.Square.c8, types.Square.e8);
+                    self.move_piece_quiet(types.Square.d8, types.Square.a8);
+                }
+            },
+            types.MoveFlags.EN_PASSANT => {
+                self.move_piece_quiet(move.get_to(), move.get_from());
+                self.add_piece(types.Piece.new_comptime(opp, types.PieceType.Pawn), move.get_to().add(types.Direction.South.relative_dir(color)));
+            },
+            else => {
+                var index = @enumToInt(flags);
+                switch (index) {
+                    types.PR_KNIGHT, types.PR_BISHOP, types.PR_ROOK, types.PR_QUEEN => {
+                        self.remove_piece(move.get_to());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Pawn), move.get_from());
+                    },
+                    types.PC_KNIGHT, types.PC_BISHOP, types.PC_ROOK, types.PC_QUEEN => {
+                        self.remove_piece(move.get_to());
+                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Pawn), move.get_from());
+                        self.add_piece(self.history[self.game_ply].captured, move.get_to());
+                    },
+                    else => {
+                        if (flags == types.MoveFlags.CAPTURE) {
+                            self.move_piece(move.get_to(), move.get_from());
+                            self.add_piece(self.history[self.game_ply].captured, move.get_to());
+                        }
+                    },
+                }
+            },
+        }
+
+        self.turn = opp;
+        self.game_ply -= 1;
+    }
 };

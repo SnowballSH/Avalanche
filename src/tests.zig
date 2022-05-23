@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("./chess/types.zig");
 const tables = @import("./chess/tables.zig");
 const position = @import("./chess/position.zig");
+const zobrist = @import("./chess/zobrist.zig");
 const expect = std.testing.expect;
 
 test "Basic Piece and Color" {
@@ -152,6 +153,8 @@ test "Pawn Attacks" {
 }
 
 test "Position" {
+    zobrist.init_zobrist();
+
     var pos = position.Position.new();
 
     try expect(pos.hash == 0);
@@ -168,5 +171,22 @@ test "Position" {
     try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0);
 
     pos = position.Position.new();
+
+    pos.set_fen("rnbqkbnr/1ppp1pp1/p6p/4p3/8/1P3N2/PBPPPPPP/RN1QKB1R w KQkq"[0..]);
+    try expect(pos.attackers_from(types.Color.White, types.Square.e5, 0) == 0x200200);
+    try expect(!pos.in_check(types.Color.White));
+
+    // queen check
+    pos.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4PP1q/8/PPPP2PP/RNBQKBNR w KQkq"[0..]);
+    try expect(pos.attackers_from(types.Color.Black, types.Square.e1, 0) == 0x80000000);
+    try expect(pos.in_check(types.Color.White));
+    try expect(!pos.in_check(types.Color.Black));
+
+    // blocked
+    pos.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4PP1q/6P1/PPPP3P/RNBQKBNR b KQkq"[0..]);
+    try expect(!pos.in_check(types.Color.White));
+
     pos.set_fen(types.DEFAULT_FEN[0..]);
+    pos.play_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
+    pos.undo_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
 }

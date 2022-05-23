@@ -310,7 +310,7 @@ pub inline fn get_attacks(comptime pt: types.PieceType, sq: types.Square, occ: t
         types.PieceType.Rook => get_rook_attacks(sq, occ),
         types.PieceType.Bishop => get_bishop_attacks(sq, occ),
         types.PieceType.Queen => get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ),
-        _ => PseudoLegalAttacks[@enumToInt(pt)][sq.index()],
+        else => PseudoLegalAttacks[@enumToInt(pt)][sq.index()],
     };
 }
 

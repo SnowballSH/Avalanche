@@ -11,4 +11,8 @@ pub fn main() anyerror!void {
     var pos = position.Position.new();
     pos.set_fen(types.DEFAULT_FEN[0..]);
     pos.debug_print();
+    pos.play_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
+    pos.debug_print();
+    pos.undo_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
+    pos.debug_print();
 }

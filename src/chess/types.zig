@@ -60,7 +60,11 @@ pub const Piece = enum(u8) {
     BLACK_KING,
     NO_PIECE,
 
-    pub fn new(c: Color, pt: PieceType) Piece {
+    pub inline fn new(c: Color, pt: PieceType) Piece {
+        return @intToEnum(Piece, (@enumToInt(c) << 3) + @enumToInt(pt));
+    }
+
+    pub inline fn new_comptime(comptime c: Color, comptime pt: PieceType) Piece {
         return @intToEnum(Piece, (@enumToInt(c) << 3) + @enumToInt(pt));
     }
 
@@ -369,7 +373,7 @@ pub const Move = packed struct {
         return Move{ .flags = @enumToInt(flag), .from = @intCast(u6, @enumToInt(from)), .to = @intCast(u6, @enumToInt(to)) };
     }
 
-    pub fn new_from_string(move: [:0]const u8) Move {
+    pub fn new_from_string(move: []const u8) Move {
         return Move{
             .flags = 0,
             .from = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[0] - 'a'), @intToEnum(Rank, move[1] - '1')))),
