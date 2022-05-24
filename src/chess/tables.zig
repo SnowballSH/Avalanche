@@ -287,6 +287,7 @@ pub fn init_pseudo_legal() void {
     std.mem.copy(types.Bitboard, PawnAttacks[0][0..64], WhitePawnAttacks[0..64]);
     std.mem.copy(types.Bitboard, PawnAttacks[1][0..64], BlackPawnAttacks[0..64]);
     std.mem.copy(types.Bitboard, PseudoLegalAttacks[@enumToInt(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
+    std.mem.copy(types.Bitboard, PseudoLegalAttacks[@enumToInt(types.PieceType.King)][0..64], KingAttacks[0..64]);
     var sq: usize = @enumToInt(types.Square.a1);
 
     while (sq <= @enumToInt(types.Square.h8)) : (sq += 1) {
@@ -304,7 +305,7 @@ pub fn init_all() void {
     init_pseudo_legal();
 }
 
-pub inline fn get_attacks(comptime pt: types.PieceType, sq: types.Square, occ: types.Bitboard) types.Bitboard {
+pub inline fn get_attacks(pt: types.PieceType, sq: types.Square, occ: types.Bitboard) types.Bitboard {
     std.debug.assert(pt != types.PieceType.Pawn); // Use get_pawn_attacks() instead
     return switch (pt) {
         types.PieceType.Rook => get_rook_attacks(sq, occ),

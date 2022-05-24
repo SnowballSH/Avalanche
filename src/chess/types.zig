@@ -316,7 +316,7 @@ pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
     };
 }
 
-pub const MoveTypeString = [_][:0]const u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N", "B", "R", "Q" };
+pub const MoveTypeString = [_][:0]const u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N (capture)", "B (capture)", "R (capture)", "Q (capture)" };
 
 pub const MoveFlags = enum(u4) {
     QUIET = 0b0000,
@@ -328,6 +328,12 @@ pub const MoveFlags = enum(u4) {
     EN_PASSANT = 0b1010,
     PROMOTIONS = 0b0111,
     PROMOTION_CAPTURES = 0b1100,
+
+    PR_KNIGHT = 0b0100,
+    PR_BISHOP = 0b0101,
+    PR_ROOK = 0b0110,
+    PC_BISHOP = 0b1101,
+    PC_ROOK = 0b1110,
 };
 
 pub const PR_KNIGHT: u4 = 0b0100;
@@ -379,6 +385,13 @@ pub const Move = packed struct {
             .from = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[0] - 'a'), @intToEnum(Rank, move[1] - '1')))),
             .to = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[2] - 'a'), @intToEnum(Rank, move[3] - '1')))),
         };
+    }
+
+    pub fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *std.ArrayList(Move)) void {
+        var to_t = to;
+        while (to_t != 0) {
+            list.append(Move.new_from_to_flag(from, pop_lsb(&to_t), flag)) catch {};
+        }
     }
 
     pub inline fn is_capture(self: Move) bool {

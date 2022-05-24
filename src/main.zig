@@ -9,10 +9,12 @@ pub fn main() anyerror!void {
     zobrist.init_zobrist();
 
     var pos = position.Position.new();
-    pos.set_fen(types.DEFAULT_FEN[0..]);
+    pos.set_fen(types.KIWIPETE[0..]);
     pos.debug_print();
-    pos.play_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
-    pos.debug_print();
-    pos.undo_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
-    pos.debug_print();
+    var list = std.ArrayList(types.Move).initCapacity(std.heap.page_allocator, 16) catch unreachable;
+    pos.generate_legal_moves(types.Color.White, &list);
+    for (list.items) |move| {
+        move.debug_print();
+    }
+    std.debug.print("Total Size: {}\n", .{list.items.len});
 }
