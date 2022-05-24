@@ -26,7 +26,7 @@ Brilliant win against Blunder 7.6.0 in CCRL division 7 tournament: https://liche
 
 ## Changelog (ELO based on Stockfish limit_strength)
 
-- ### v0.3 (in development): ???  (+??? ELO), ??? ELO
+- ### v1.0 **REWRITE: In Progress. See rewrite branch.**
 
 - ### v0.2.2 (+63 ELO), 2629 CCRL ELO
     - Bug fixes
