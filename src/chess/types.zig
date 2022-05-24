@@ -403,7 +403,7 @@ pub const Move = packed struct {
     }
 
     pub fn debug_print(self: Move) void {
-        std.debug.print("{s}{s}{s}\n", .{
+        std.debug.print("{s}{s}{s}", .{
             SquareToString[self.from],
             SquareToString[self.to],
             MoveTypeString[self.flags],

@@ -306,7 +306,6 @@ pub fn init_all() void {
 }
 
 pub inline fn get_attacks(pt: types.PieceType, sq: types.Square, occ: types.Bitboard) types.Bitboard {
-    std.debug.assert(pt != types.PieceType.Pawn); // Use get_pawn_attacks() instead
     return switch (pt) {
         types.PieceType.Rook => get_rook_attacks(sq, occ),
         types.PieceType.Bishop => get_bishop_attacks(sq, occ),
