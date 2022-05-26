@@ -104,6 +104,7 @@ pub const Position = struct {
             self.turn = types.Color.White;
         } else {
             self.turn = types.Color.Black;
+            self.hash ^= zobrist.TurnHash;
         }
 
         self.history[self.game_ply].entry = types.AllCastlingMask;
@@ -112,15 +113,19 @@ pub const Position = struct {
             switch (ch) {
                 'K' => {
                     self.history[self.game_ply].entry &= ~types.WhiteOOMask;
+                    self.hash ^= zobrist.CastleHash[0];
                 },
                 'Q' => {
                     self.history[self.game_ply].entry &= ~types.WhiteOOOMask;
+                    self.hash ^= zobrist.CastleHash[2];
                 },
                 'k' => {
                     self.history[self.game_ply].entry &= ~types.BlackOOMask;
+                    self.hash ^= zobrist.CastleHash[1];
                 },
                 'q' => {
                     self.history[self.game_ply].entry &= ~types.BlackOOOMask;
+                    self.hash ^= zobrist.CastleHash[3];
                 },
                 else => {},
             }
@@ -141,22 +146,13 @@ pub const Position = struct {
     }
 
     pub fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
-        // NO_SQUARE or NO_PIECE should have hash of 0, so XOR doesn't affect hash
-        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()];
-        self.hash ^= zobrist.ZobristTable[self.mailbox[to.index()].index()][to.index()];
-        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
-
-        const mask = types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
-        self.piece_bitboards[self.mailbox[from.index()].index()] ^= mask;
-        self.piece_bitboards[self.mailbox[to.index()].index()] &= ~mask;
-        self.mailbox[to.index()] = self.mailbox[from.index()];
-        self.mailbox[from.index()] = types.Piece.NO_PIECE;
+        self.remove_piece(to);
+        self.move_piece_quiet(from, to);
     }
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
     pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
-        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()];
-        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
+        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()] ^ zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
 
         self.piece_bitboards[self.mailbox[from.index()].index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
         self.mailbox[to.index()] = self.mailbox[from.index()];
@@ -210,6 +206,7 @@ pub const Position = struct {
 
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
         self.turn = self.turn.invert();
+        self.hash ^= zobrist.TurnHash;
         self.game_ply += 1;
         self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
 
@@ -229,18 +226,22 @@ pub const Position = struct {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.e1, types.Square.g1);
                     self.move_piece_quiet(types.Square.h1, types.Square.f1);
+                    self.hash ^= zobrist.CastleHash[0];
                 } else {
                     self.move_piece_quiet(types.Square.e8, types.Square.g8);
                     self.move_piece_quiet(types.Square.h8, types.Square.f8);
+                    self.hash ^= zobrist.CastleHash[1];
                 }
             },
             types.MoveFlags.OOO => {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.e1, types.Square.c1);
                     self.move_piece_quiet(types.Square.a1, types.Square.d1);
+                    self.hash ^= zobrist.CastleHash[2];
                 } else {
                     self.move_piece_quiet(types.Square.e8, types.Square.c8);
                     self.move_piece_quiet(types.Square.a8, types.Square.d8);
+                    self.hash ^= zobrist.CastleHash[3];
                 }
             },
             types.MoveFlags.EN_PASSANT => {
@@ -316,18 +317,22 @@ pub const Position = struct {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.g1, types.Square.e1);
                     self.move_piece_quiet(types.Square.f1, types.Square.h1);
+                    self.hash ^= zobrist.CastleHash[0];
                 } else {
                     self.move_piece_quiet(types.Square.g8, types.Square.e8);
                     self.move_piece_quiet(types.Square.f8, types.Square.h8);
+                    self.hash ^= zobrist.CastleHash[1];
                 }
             },
             types.MoveFlags.OOO => {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.c1, types.Square.e1);
                     self.move_piece_quiet(types.Square.d1, types.Square.a1);
+                    self.hash ^= zobrist.CastleHash[2];
                 } else {
                     self.move_piece_quiet(types.Square.c8, types.Square.e8);
                     self.move_piece_quiet(types.Square.d8, types.Square.a8);
+                    self.hash ^= zobrist.CastleHash[3];
                 }
             },
             types.MoveFlags.EN_PASSANT => {
@@ -357,6 +362,7 @@ pub const Position = struct {
         }
 
         self.turn = opp;
+        self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;
     }
 

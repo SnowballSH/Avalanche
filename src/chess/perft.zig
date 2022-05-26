@@ -17,9 +17,15 @@ pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) u
     }
 
     for (list.items) |move| {
+        //var hash = pos.hash;
         pos.play_move(color, move);
         nodes += perft(opp, pos, depth - 1);
         pos.undo_move(color, move);
+        //if (hash != pos.hash) {
+        //    pos.debug_print();
+        //    std.debug.print("{} {} {}\n", .{ hash, pos.hash, move });
+        //    std.debug.assert(hash == pos.hash);
+        //}
     }
 
     return nodes;
