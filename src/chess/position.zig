@@ -113,19 +113,15 @@ pub const Position = struct {
             switch (ch) {
                 'K' => {
                     self.history[self.game_ply].entry &= ~types.WhiteOOMask;
-                    self.hash ^= zobrist.CastleHash[0];
                 },
                 'Q' => {
                     self.history[self.game_ply].entry &= ~types.WhiteOOOMask;
-                    self.hash ^= zobrist.CastleHash[2];
                 },
                 'k' => {
                     self.history[self.game_ply].entry &= ~types.BlackOOMask;
-                    self.hash ^= zobrist.CastleHash[1];
                 },
                 'q' => {
                     self.history[self.game_ply].entry &= ~types.BlackOOOMask;
-                    self.hash ^= zobrist.CastleHash[3];
                 },
                 else => {},
             }
@@ -221,27 +217,24 @@ pub const Position = struct {
                 self.move_piece_quiet(move.get_from(), move.get_to());
 
                 self.history[self.game_ply].ep_sq = move.get_from().add(types.Direction.North.relative_dir(color));
+                self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
             },
             types.MoveFlags.OO => {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.e1, types.Square.g1);
                     self.move_piece_quiet(types.Square.h1, types.Square.f1);
-                    self.hash ^= zobrist.CastleHash[0];
                 } else {
                     self.move_piece_quiet(types.Square.e8, types.Square.g8);
                     self.move_piece_quiet(types.Square.h8, types.Square.f8);
-                    self.hash ^= zobrist.CastleHash[1];
                 }
             },
             types.MoveFlags.OOO => {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.e1, types.Square.c1);
                     self.move_piece_quiet(types.Square.a1, types.Square.d1);
-                    self.hash ^= zobrist.CastleHash[2];
                 } else {
                     self.move_piece_quiet(types.Square.e8, types.Square.c8);
                     self.move_piece_quiet(types.Square.a8, types.Square.d8);
-                    self.hash ^= zobrist.CastleHash[3];
                 }
             },
             types.MoveFlags.EN_PASSANT => {
@@ -293,7 +286,8 @@ pub const Position = struct {
                     },
                     else => {
                         if (flags == types.MoveFlags.CAPTURE) {
-                            self.history[self.game_ply].captured = self.mailbox[move.to];
+                            var c = self.mailbox[move.to];
+                            self.history[self.game_ply].captured = c;
                             self.move_piece(move.get_from(), move.get_to());
                         }
                     },
@@ -312,27 +306,24 @@ pub const Position = struct {
             },
             types.MoveFlags.DOUBLE_PUSH => {
                 self.move_piece_quiet(move.get_to(), move.get_from());
+                self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
             },
             types.MoveFlags.OO => {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.g1, types.Square.e1);
                     self.move_piece_quiet(types.Square.f1, types.Square.h1);
-                    self.hash ^= zobrist.CastleHash[0];
                 } else {
                     self.move_piece_quiet(types.Square.g8, types.Square.e8);
                     self.move_piece_quiet(types.Square.f8, types.Square.h8);
-                    self.hash ^= zobrist.CastleHash[1];
                 }
             },
             types.MoveFlags.OOO => {
                 if (color == types.Color.White) {
                     self.move_piece_quiet(types.Square.c1, types.Square.e1);
                     self.move_piece_quiet(types.Square.d1, types.Square.a1);
-                    self.hash ^= zobrist.CastleHash[2];
                 } else {
                     self.move_piece_quiet(types.Square.c8, types.Square.e8);
                     self.move_piece_quiet(types.Square.d8, types.Square.a8);
-                    self.hash ^= zobrist.CastleHash[3];
                 }
             },
             types.MoveFlags.EN_PASSANT => {

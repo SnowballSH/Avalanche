@@ -10,6 +10,6 @@ pub fn main() anyerror!void {
     zobrist.init_zobrist();
 
     var pos = position.Position.new();
-    pos.set_fen(types.DEFAULT_FEN[0..]);
-    perft.perft_test(&pos, 5);
+    pos.set_fen(types.KIWIPETE_FEN[0..]);
+    perft.perft_test(&pos, 6);
 }
