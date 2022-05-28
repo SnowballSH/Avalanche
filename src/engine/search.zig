@@ -54,7 +54,7 @@ pub const Searcher = struct {
                 self.timer.read() / std.time.ns_per_ms,
                 score,
             }) catch {};
-            bm.debug_print();
+            bm.uci_print();
             out.writeByte('\n') catch {};
         }
 
@@ -64,9 +64,9 @@ pub const Searcher = struct {
             self.timer.read() / std.time.ns_per_ms,
             score,
         }) catch {};
-        bm.debug_print();
+        bm.uci_print();
         out.writeAll("\nbestmove ") catch {};
-        bm.debug_print();
+        bm.uci_print();
         out.writeByte('\n') catch {};
 
         return score;

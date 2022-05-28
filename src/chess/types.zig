@@ -414,6 +414,13 @@ pub const Move = packed struct {
             MoveTypeString[self.flags],
         });
     }
+
+    pub fn uci_print(self: Move) void {
+        std.debug.print("{s}{s}", .{
+            SquareToString[self.from],
+            SquareToString[self.to],
+        });
+    }
 };
 
 pub const WhiteOOMask: Bitboard = 0x90;

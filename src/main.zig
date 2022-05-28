@@ -18,6 +18,6 @@ pub fn main() anyerror!void {
     // perft.perft_test(&pos, 6);
     // std.debug.print("{}\n", .{hce.evaluate(&pos)});
     var searcher = search.Searcher.new();
-    searcher.max_millis = 3000;
+    searcher.max_millis = 5000;
     _ = searcher.iterative_deepening(&pos, types.Color.White);
 }
