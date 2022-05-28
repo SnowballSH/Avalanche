@@ -3,6 +3,7 @@ const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const hce = @import("./hce.zig");
+const tt = @import("./tt.zig");
 
 pub const MAX_PLY = 100;
 
@@ -85,6 +86,29 @@ pub const Searcher = struct {
             return hce.evaluate(pos);
         }
 
+        if (pos.in_check(color)) {
+            depth += 1;
+        }
+
+        var entry = tt.GlobalTT.get(pos.hash, depth);
+        if (entry != null) {
+            switch (entry.?.flag) {
+                .Exact => {
+                    return entry.?.eval;
+                },
+                .Lower => {
+                    alpha = @maximum(alpha, entry.?.eval);
+                },
+                .Upper => {
+                    beta = @minimum(beta, entry.?.eval);
+                },
+                else => {},
+            }
+            if (alpha >= beta) {
+                return entry.?.eval;
+            }
+        }
+
         if (depth == 0) {
             return self.quiescence_search(pos, color, alpha, beta);
         }
@@ -92,6 +116,9 @@ pub const Searcher = struct {
         if (self.should_stop()) {
             return 0;
         }
+
+        // Search
+        var tt_flag = tt.Bound.Upper;
 
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         pos.generate_legal_moves(color, &movelist);
@@ -106,6 +133,8 @@ pub const Searcher = struct {
             }
         }
 
+        var best_move = types.Move.empty();
+
         for (movelist.items) |move| {
             self.ply += 1;
             pos.play_move(color, move);
@@ -118,16 +147,27 @@ pub const Searcher = struct {
             }
 
             if (score > alpha) {
+                best_move = move;
                 if (is_root) {
                     self.best_move = move;
                 }
                 if (score >= beta) {
+                    tt_flag = tt.Bound.Lower;
                     alpha = beta;
                     break;
                 }
                 alpha = score;
+                tt_flag = tt.Bound.Exact;
             }
         }
+
+        tt.GlobalTT.set(tt.Item{
+            .eval = alpha,
+            .bestmove = best_move,
+            .flag = tt_flag,
+            .depth = @intCast(u14, depth),
+            .hash = pos.hash,
+        });
 
         return alpha;
     }

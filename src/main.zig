@@ -5,11 +5,13 @@ const zobrist = @import("./chess/zobrist.zig");
 const position = @import("./chess/position.zig");
 const perft = @import("./chess/perft.zig");
 const search = @import("./engine/search.zig");
+const tt = @import("./engine/tt.zig");
 const hce = @import("./engine/hce.zig");
 
 pub fn main() anyerror!void {
     tables.init_all();
     zobrist.init_zobrist();
+    tt.GlobalTT.reset(16);
 
     var pos = position.Position.new();
     pos.set_fen(types.DEFAULT_FEN[0..]);
