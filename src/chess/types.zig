@@ -37,6 +37,10 @@ pub const PieceType = enum(u8) {
     Rook,
     Queen,
     King,
+
+    pub inline fn index(self: PieceType) u8 {
+        return @enumToInt(self);
+    }
 };
 
 pub const PieceString = "PNBRQK~>pnbrqk.";
