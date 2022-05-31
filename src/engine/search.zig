@@ -13,6 +13,8 @@ pub const Searcher = struct {
 
     nodes: u64,
     ply: u32,
+    stop: bool,
+    is_searching: bool,
 
     best_move: types.Move,
 
@@ -23,11 +25,14 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.timer.read() / std.time.ns_per_ms > self.max_millis;
+        return self.stop or self.timer.read() / std.time.ns_per_ms > self.max_millis + 3;
     }
 
-    pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color) hce.Score {
-        var out = std.io.getStdOut().writer();
+    pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
+        var out = std.io.bufferedWriter(std.io.getStdOut().writer());
+        var outW = out.writer();
+        self.stop = false;
+        self.is_searching = true;
 
         self.timer = std.time.Timer.start() catch unreachable;
 
@@ -35,39 +40,45 @@ pub const Searcher = struct {
         var bm = types.Move.empty();
 
         var depth: usize = 1;
-        while (depth < MAX_PLY) : (depth += 1) {
+        var bound: usize = if (max_depth == null) MAX_PLY - 1 else max_depth.?;
+        while (depth <= bound) : (depth += 1) {
             self.ply = 0;
 
             var val = self.negamax(pos, color, depth, -hce.MateScore, hce.MateScore);
 
             if (self.should_stop()) {
-                depth -= 1;
                 break;
             }
 
             score = val;
             bm = self.best_move;
 
-            out.print("info depth {} nodes {} time {} cp {} pv ", .{
+            outW.print("info depth {} nodes {} time {} score cp {} pv ", .{
                 depth,
                 self.nodes,
                 self.timer.read() / std.time.ns_per_ms,
                 score,
             }) catch {};
-            bm.uci_print();
-            out.writeByte('\n') catch {};
+            bm.uci_print(outW);
+            outW.writeByte('\n') catch {};
+            out.flush() catch {};
         }
 
-        out.print("info depth {} nodes {} time {} cp {} pv ", .{
-            depth,
+        outW.print("info depth {} nodes {} time {} score cp {} pv ", .{
+            depth - 1,
             self.nodes,
             self.timer.read() / std.time.ns_per_ms,
             score,
         }) catch {};
-        bm.uci_print();
-        out.writeAll("\nbestmove ") catch {};
-        bm.uci_print();
-        out.writeByte('\n') catch {};
+        bm.uci_print(outW);
+        outW.writeAll("\nbestmove ") catch {};
+        bm.uci_print(outW);
+        outW.writeByte('\n') catch {};
+        out.flush() catch {};
+
+        self.is_searching = false;
+
+        tt.GlobalTT.clear();
 
         return score;
     }
@@ -121,6 +132,7 @@ pub const Searcher = struct {
         var tt_flag = tt.Bound.Upper;
 
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
+        defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
 
         if (movelist.items.len == 0) {
@@ -188,6 +200,7 @@ pub const Searcher = struct {
         }
 
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 2) catch unreachable;
+        defer movelist.deinit();
         pos.generate_q_moves(color, &movelist);
 
         var eval = hce.evaluate(pos);

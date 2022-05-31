@@ -5,6 +5,10 @@ const zobrist = @import("./zobrist.zig");
 const position = @import("./position.zig");
 
 pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) usize {
+    if (depth == 0) {
+        return 1;
+    }
+
     var nodes: usize = 0;
     comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 

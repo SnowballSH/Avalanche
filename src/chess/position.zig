@@ -79,7 +79,9 @@ pub const Position = struct {
         std.debug.print("{s}", .{line});
         std.debug.print("{s}\n", .{letters});
 
-        std.debug.print("{s} to move\n", .{if (self.turn == types.Color.White) "White" else "Black"});
+        var s = if (self.turn == types.Color.White) "White" else "Black";
+
+        std.debug.print("{s} to move\n", .{s});
         std.debug.print("Hash: 0x{x}\n", .{self.hash});
     }
 
@@ -126,6 +128,14 @@ pub const Position = struct {
                 else => {},
             }
         }
+    }
+
+    pub inline fn phase(self: *Position) usize {
+        var val: usize = 0;
+        val += @intCast(usize, types.popcount(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]));
+        val += @intCast(usize, types.popcount(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]) * 2);
+        val += @intCast(usize, types.popcount(self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()]) * 4);
+        return val;
     }
 
     pub inline fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
@@ -520,9 +530,9 @@ pub const Position = struct {
                 var entry = self.history[self.game_ply].entry;
                 if (0 == ((entry & types.get_oo_mask(color)) | ((all_bb | danger) & types.get_oo_blocker_mask(color)))) {
                     if (color == types.Color.White) {
-                        list.append(types.Move.new_from_to_flag(types.Square.e1, types.Square.h1, types.MoveFlags.OO)) catch {};
+                        list.append(types.Move.new_from_to_flag(types.Square.e1, types.Square.g1, types.MoveFlags.OO)) catch {};
                     } else {
-                        list.append(types.Move.new_from_to_flag(types.Square.e8, types.Square.h8, types.MoveFlags.OO)) catch {};
+                        list.append(types.Move.new_from_to_flag(types.Square.e8, types.Square.g8, types.MoveFlags.OO)) catch {};
                     }
                 }
                 if (0 == ((entry & types.get_ooo_mask(color)) | ((all_bb | (danger & ~types.ignore_ooo_danger(color))) & types.get_ooo_blocker_mask(color)))) {

@@ -1,4 +1,5 @@
 const std = @import("std");
+const position = @import("./position.zig");
 
 pub const N_COLORS: usize = 2;
 pub const Color = enum(u8) {
@@ -322,6 +323,7 @@ pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
 }
 
 pub const MoveTypeString = [_][:0]const u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N (capture)", "B (capture)", "R (capture)", "Q (capture)" };
+pub const PromMoveTypeString = [_][:0]const u8{ "", "", "", " ", "n", "b", "r", "q", "", "", "", "", "n", "b", "r", "q" };
 
 pub const MoveFlags = enum(u4) {
     QUIET = 0b0000,
@@ -384,11 +386,33 @@ pub const Move = packed struct {
         return Move{ .flags = @enumToInt(flag), .from = @intCast(u6, @enumToInt(from)), .to = @intCast(u6, @enumToInt(to)) };
     }
 
-    pub fn new_from_string(move: []const u8) Move {
+    pub fn new_from_string(pos: *position.Position, move: []const u8) Move {
+        var list = std.ArrayList(Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
+        defer list.deinit();
+        var f = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[0] - 'a'), @intToEnum(Rank, move[1] - '1'))));
+        var t = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[2] - 'a'), @intToEnum(Rank, move[3] - '1'))));
+        var p: ?u8 = if (move.len >= 5) move[4] else null;
+        if (pos.turn == Color.White) {
+            pos.generate_legal_moves(Color.White, &list);
+        } else {
+            pos.generate_legal_moves(Color.Black, &list);
+        }
+
+        for (list.items) |m| {
+            if (m.from == f and m.to == t) {
+                if (p != null) {
+                    if (p.? != PromMoveTypeString[m.flags][0]) {
+                        continue;
+                    }
+                }
+                return m;
+            }
+        }
+        std.debug.panic("move not found: {s}", .{move});
         return Move{
             .flags = 0,
-            .from = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[0] - 'a'), @intToEnum(Rank, move[1] - '1')))),
-            .to = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[2] - 'a'), @intToEnum(Rank, move[3] - '1')))),
+            .from = f,
+            .to = t,
         };
     }
 
@@ -415,11 +439,11 @@ pub const Move = packed struct {
         });
     }
 
-    pub fn uci_print(self: Move) void {
-        std.debug.print("{s}{s}", .{
+    pub fn uci_print(self: Move, writer: anytype) void {
+        writer.print("{s}{s}", .{
             SquareToString[self.from],
             SquareToString[self.to],
-        });
+        }) catch {};
     }
 };
 
