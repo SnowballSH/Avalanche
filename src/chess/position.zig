@@ -15,11 +15,15 @@ pub const UndoInfo = packed struct {
     // EP square
     ep_sq: types.Square,
 
+    // Fifty-move rule counter
+    fifty: u16,
+
     pub fn new() UndoInfo {
         return UndoInfo{
             .entry = 0,
             .captured = types.Piece.NO_PIECE,
             .ep_sq = types.Square.NO_SQUARE,
+            .fifty = 0,
         };
     }
 
@@ -28,6 +32,7 @@ pub const UndoInfo = packed struct {
             .entry = old.entry,
             .captured = types.Piece.NO_PIECE,
             .ep_sq = types.Square.NO_SQUARE,
+            .fifty = old.fifty + 1,
         };
     }
 };
@@ -218,6 +223,11 @@ pub const Position = struct {
 
         var flags = move.get_flags();
         self.history[self.game_ply].entry |= types.SquareIndexBB[move.to] | types.SquareIndexBB[move.from];
+
+        var pt = self.mailbox[move.from].piece_type();
+        if (pt == types.PieceType.Pawn or move.is_capture()) {
+            self.history[self.game_ply].fifty = 0;
+        }
 
         switch (flags) {
             types.MoveFlags.QUIET => {

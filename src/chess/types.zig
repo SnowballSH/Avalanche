@@ -341,6 +341,16 @@ pub const MoveFlags = enum(u4) {
     PR_ROOK = 0b0110,
     PC_BISHOP = 0b1101,
     PC_ROOK = 0b1110,
+
+    pub inline fn promote_type(self: MoveFlags) PieceType {
+        return switch (@enumToInt(self) & @enumToInt(MoveFlags.PROMOTIONS)) {
+            PR_KNIGHT => PieceType.Knight,
+            PR_BISHOP => PieceType.Bishop,
+            PR_ROOK => PieceType.Rook,
+            PR_QUEEN => PieceType.Queen,
+            else => unreachable,
+        };
+    }
 };
 
 pub const PR_KNIGHT: u4 = 0b0100;
@@ -357,6 +367,10 @@ pub const Move = packed struct {
     flags: u4,
     from: u6,
     to: u6,
+
+    pub inline fn to_u16(self: Move) u16 {
+        return (@intCast(u16, self.flags) << 12) | (@intCast(u16, self.from) << 6) | @intCast(u16, self.to);
+    }
 
     pub inline fn get_flags(self: Move) MoveFlags {
         return @intToEnum(MoveFlags, self.flags);
@@ -424,7 +438,11 @@ pub const Move = packed struct {
     }
 
     pub inline fn is_capture(self: Move) bool {
-        return (self.flags & @enumToInt(MoveFlags.CAPTURES)) != 0;
+        return (self.flags == 8) or (self.flags == 10) or (self.flags >= 12 and self.flags <= 15);
+    }
+
+    pub inline fn is_promotion(self: Move) bool {
+        return (self.flags >= 4 and self.flags <= 7) or (self.flags >= 12 and self.flags <= 15);
     }
 
     pub inline fn equals_to(self: Move, other: Move) bool {
@@ -444,6 +462,11 @@ pub const Move = packed struct {
             SquareToString[self.from],
             SquareToString[self.to],
         }) catch {};
+        if (self.is_promotion()) {
+            writer.print("{c}", .{
+                PromMoveTypeString[self.flags][0],
+            }) catch {};
+        }
     }
 };
 

@@ -153,21 +153,38 @@ pub const PSQT: [6][2][64]Score = .{
 
 pub fn evaluate(pos: *position.Position) Score {
     var score: Score = 0;
+    var mg: Score = 0;
+    var eg: Score = 0;
     for (pos.mailbox) |piece, index| {
         if (piece == types.Piece.NO_PIECE) {
             continue;
         }
         var i = piece.piece_type().index();
         if (piece.color() == types.Color.White) {
-            score += Mateiral[i][0];
-            score += PSQT[i][0][index ^ 56];
+            mg += Mateiral[i][0];
+            mg += PSQT[i][0][index ^ 56];
+            eg += Mateiral[i][1];
+            eg += PSQT[i][1][index ^ 56];
         } else {
-            score -= Mateiral[i][0];
-            score -= PSQT[i][0][index];
+            mg -= Mateiral[i][0];
+            mg -= PSQT[i][0][index];
+            eg -= Mateiral[i][1];
+            eg -= PSQT[i][1][index];
         }
     }
+
+    // Tapered eval
+    var phase = pos.phase();
+    var mg_phase = @intCast(i32, phase);
+    if (mg_phase > 24) {
+        mg_phase = 24;
+    }
+    var eg_phase = 24 - mg_phase;
+
+    score = @divFloor(mg * mg_phase + eg * eg_phase, 24);
+
     if (pos.turn == types.Color.Black) {
-        score = -score;
+        return -score;
     }
     return score;
 }

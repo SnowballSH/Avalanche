@@ -4,22 +4,29 @@ const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const hce = @import("./hce.zig");
 const tt = @import("./tt.zig");
+const movepick = @import("./movepick.zig");
 
 pub const MAX_PLY = 100;
 
 pub const Searcher = struct {
-    max_millis: u64,
-    timer: std.time.Timer,
+    max_millis: u64 = 0,
+    timer: std.time.Timer = undefined,
 
-    nodes: u64,
-    ply: u32,
-    stop: bool,
-    is_searching: bool,
+    nodes: u64 = 0,
+    ply: u32 = 0,
+    stop: bool = false,
+    is_searching: bool = false,
 
-    best_move: types.Move,
+    hash_history: std.ArrayList(u64) = undefined,
+
+    best_move: types.Move = undefined,
+
+    killer: [MAX_PLY][2]types.Move = undefined,
 
     pub fn new() Searcher {
-        var s = std.mem.zeroes(Searcher);
+        var s = Searcher{};
+
+        s.hash_history = std.ArrayList(u64).init(std.heap.c_allocator);
 
         return s;
     }
@@ -83,6 +90,27 @@ pub const Searcher = struct {
         return score;
     }
 
+    pub fn is_draw(self: *Searcher, pos: *position.Position) bool {
+        if (pos.history[pos.game_ply].fifty >= 100) {
+            return true;
+        }
+
+        if (std.mem.len(self.hash_history.items) > 1) {
+            var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
+            var limit: i16 = index - @intCast(i16, pos.history[pos.game_ply].fifty) - 1;
+            var count: u8 = 0;
+            while (index >= limit and index >= 0) {
+                if (self.hash_history.items[@intCast(usize, index)] == pos.hash) {
+                    count += 1;
+                    return true;
+                }
+                index -= 2;
+            }
+        }
+
+        return false;
+    }
+
     pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score) hce.Score {
         var alpha = alpha_;
         var beta = beta_;
@@ -95,6 +123,21 @@ pub const Searcher = struct {
 
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
+        }
+
+        if (!is_root) {
+            if (self.is_draw(pos)) {
+                return 0;
+            }
+
+            // Mate-distance pruning
+
+            var r_alpha = if (alpha > -hce.MateScore + @intCast(i32, self.ply)) alpha else -hce.MateScore + @intCast(i32, self.ply);
+            var r_beta = if (beta < hce.MateScore - @intCast(i32, self.ply) - 1) beta else hce.MateScore - @intCast(i32, self.ply) - 1;
+
+            if (r_alpha >= r_beta) {
+                return r_alpha;
+            }
         }
 
         if (pos.in_check(color)) {
@@ -134,8 +177,12 @@ pub const Searcher = struct {
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
+        var move_size = movelist.items.len;
 
-        if (movelist.items.len == 0) {
+        self.killer[self.ply + 1][0] = types.Move.empty();
+        self.killer[self.ply + 1][1] = types.Move.empty();
+
+        if (move_size == 0) {
             if (pos.in_check(color)) {
                 // Checkmate
                 return -hce.MateScore + @intCast(i32, self.ply);
@@ -145,14 +192,25 @@ pub const Searcher = struct {
             }
         }
 
+        var evallist = movepick.score_moves(self, pos, &movelist);
+        defer evallist.deinit();
+
         var best_move = types.Move.empty();
 
-        for (movelist.items) |move| {
+        var index: usize = 0;
+
+        while (index < move_size) : (index += 1) {
+            var move = movepick.get_next_best(&movelist, &evallist, index);
+
+            var is_capture = move.is_capture();
+
             self.ply += 1;
             pos.play_move(color, move);
+            self.hash_history.append(pos.hash) catch {};
             var score = -self.negamax(pos, opp_color, depth - 1, -beta, -alpha);
             self.ply -= 1;
             pos.undo_move(color, move);
+            _ = self.hash_history.pop();
 
             if (self.should_stop()) {
                 return 0;
@@ -160,16 +218,21 @@ pub const Searcher = struct {
 
             if (score > alpha) {
                 best_move = move;
+                alpha = score;
+                tt_flag = tt.Bound.Exact;
+
                 if (is_root) {
                     self.best_move = move;
                 }
-                if (score >= beta) {
+                if (alpha >= beta) {
                     tt_flag = tt.Bound.Lower;
-                    alpha = beta;
+                    if (!is_capture) {
+                        var temp = self.killer[self.ply][0];
+                        self.killer[self.ply][0] = move;
+                        self.killer[self.ply][1] = temp;
+                    }
                     break;
                 }
-                alpha = score;
-                tt_flag = tt.Bound.Exact;
             }
         }
 
@@ -202,6 +265,7 @@ pub const Searcher = struct {
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 2) catch unreachable;
         defer movelist.deinit();
         pos.generate_q_moves(color, &movelist);
+        var move_size = movelist.items.len;
 
         var eval = hce.evaluate(pos);
 
@@ -210,8 +274,14 @@ pub const Searcher = struct {
         }
         alpha = @maximum(alpha, eval);
 
-        for (movelist.items) |move| {
-            // std.debug.assert(move.flags & @enumToInt(types.MoveFlags.CAPTURES) != 0);
+        var evallist = movepick.score_moves(self, pos, &movelist);
+        defer evallist.deinit();
+
+        var index: usize = 0;
+
+        while (index < move_size) : (index += 1) {
+            var move = movepick.get_next_best(&movelist, &evallist, index);
+
             self.ply += 1;
             pos.play_move(color, move);
             var score = -self.quiescence_search(pos, opp_color, -beta, -alpha);
