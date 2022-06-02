@@ -13,7 +13,7 @@ pub const QuietLMR: [64][64]i32 = init: {
     inline while (depth < 64) : (depth += 1) {
         var moves = 1;
         inline while (moves < 64) : (moves += 1) {
-            reductions[depth][moves] = @floatToInt(i32, @floor(0.52 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.52));
+            reductions[depth][moves] = @floatToInt(i32, @floor(0.50 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.50));
         }
     }
     break :init reductions;

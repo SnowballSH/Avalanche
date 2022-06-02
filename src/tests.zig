@@ -86,13 +86,6 @@ test "Move" {
     }
 
     {
-        var m = types.Move.new_from_string("g1f3");
-        try expect(m.get_from() == types.Square.g1);
-        try expect(m.get_to() == types.Square.f3);
-        try expect(m.get_flags() == types.MoveFlags.QUIET);
-    }
-
-    {
         var m = types.Move.new_from_to_flag(types.Square.e2, types.Square.e4, types.MoveFlags.DOUBLE_PUSH);
         try expect(m.get_from() == types.Square.e2);
         try expect(m.get_to() == types.Square.e4);
@@ -187,6 +180,7 @@ test "Position" {
     try expect(!pos.in_check(types.Color.White));
 
     pos.set_fen(types.DEFAULT_FEN[0..]);
-    pos.play_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
-    pos.undo_move(types.Color.White, types.Move.new_from_string("e2e4"[0..]));
+    var m = types.Move.new_from_string(&pos, "e2e4"[0..]);
+    pos.play_move(types.Color.White, m);
+    pos.undo_move(types.Color.White, m);
 }
