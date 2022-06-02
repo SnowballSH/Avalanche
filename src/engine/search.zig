@@ -6,6 +6,19 @@ const hce = @import("./hce.zig");
 const tt = @import("./tt.zig");
 const movepick = @import("./movepick.zig");
 
+pub const QuietLMR: [64][64]i32 = init: {
+    @setEvalBranchQuota(64 * 64 * 6);
+    var reductions: [64][64]i32 = undefined;
+    var depth = 1;
+    inline while (depth < 64) : (depth += 1) {
+        var moves = 1;
+        inline while (moves < 64) : (moves += 1) {
+            reductions[depth][moves] = @floatToInt(i32, @floor(0.52 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.52));
+        }
+    }
+    break :init reductions;
+};
+
 pub const MAX_PLY = 100;
 
 pub const Searcher = struct {
@@ -22,6 +35,7 @@ pub const Searcher = struct {
     best_move: types.Move = undefined,
 
     killer: [MAX_PLY][2]types.Move = undefined,
+    history: [2][64][64]u32 = undefined,
 
     pub fn new() Searcher {
         var s = Searcher{};
@@ -29,6 +43,11 @@ pub const Searcher = struct {
         s.hash_history = std.ArrayList(u64).init(std.heap.c_allocator);
 
         return s;
+    }
+
+    pub fn reset_heuristics(self: *Searcher) void {
+        self.killer = undefined;
+        self.history = undefined;
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
@@ -40,6 +59,7 @@ pub const Searcher = struct {
         var outW = out.writer();
         self.stop = false;
         self.is_searching = true;
+        self.reset_heuristics();
 
         self.timer = std.time.Timer.start() catch unreachable;
 
@@ -144,22 +164,36 @@ pub const Searcher = struct {
             depth += 1;
         }
 
+        var on_pv: bool = beta - alpha > 1;
+
+        var hashmove = types.Move.empty();
         var entry = tt.GlobalTT.get(pos.hash, depth);
+
         if (entry != null) {
-            switch (entry.?.flag) {
-                .Exact => {
-                    return entry.?.eval;
-                },
-                .Lower => {
-                    alpha = @maximum(alpha, entry.?.eval);
-                },
-                .Upper => {
-                    beta = @minimum(beta, entry.?.eval);
-                },
-                else => {},
+            var tt_eval = entry.?.eval;
+            if (tt_eval > hce.MateScore - 100 and tt_eval <= hce.MateScore) {
+                tt_eval -= @intCast(hce.Score, self.ply);
+            } else if (tt_eval < -hce.MateScore + 100 and tt_eval >= -hce.MateScore) {
+                tt_eval += @intCast(hce.Score, self.ply);
             }
-            if (alpha >= beta) {
-                return entry.?.eval;
+            hashmove = entry.?.bestmove;
+
+            if (depth == 0 or !on_pv) {
+                switch (entry.?.flag) {
+                    .Exact => {
+                        return tt_eval;
+                    },
+                    .Lower => {
+                        alpha = @maximum(alpha, tt_eval);
+                    },
+                    .Upper => {
+                        beta = @minimum(beta, tt_eval);
+                    },
+                    else => {},
+                }
+                if (alpha >= beta) {
+                    return tt_eval;
+                }
             }
         }
 
@@ -192,7 +226,7 @@ pub const Searcher = struct {
             }
         }
 
-        var evallist = movepick.score_moves(self, pos, &movelist);
+        var evallist = movepick.score_moves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
         var best_move = types.Move.empty();
@@ -207,7 +241,44 @@ pub const Searcher = struct {
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
-            var score = -self.negamax(pos, opp_color, depth - 1, -beta, -alpha);
+
+            var new_depth = depth - 1;
+
+            var score: hce.Score = 0;
+            if (index == 0) {
+                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha);
+            } else {
+                // LMR
+                var reduction: i32 = 0;
+
+                if (depth >= 3 and !is_capture and index > 2 * @intCast(usize, @boolToInt(is_root))) {
+                    reduction = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
+
+                    if (on_pv) {
+                        reduction -= 2;
+                    }
+
+                    if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16()) {
+                        reduction -= 1;
+                    }
+
+                    if (reduction >= new_depth) {
+                        reduction = @intCast(i32, new_depth - 1);
+                    } else if (reduction < 0) {
+                        reduction = 0;
+                    }
+                }
+
+                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha);
+
+                if (score > alpha and reduction > 0) {
+                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha);
+                }
+                if (score > alpha and score < beta) {
+                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha);
+                }
+            }
+
             self.ply -= 1;
             pos.undo_move(color, move);
             _ = self.hash_history.pop();
@@ -230,6 +301,8 @@ pub const Searcher = struct {
                         var temp = self.killer[self.ply][0];
                         self.killer[self.ply][0] = move;
                         self.killer[self.ply][1] = temp;
+
+                        self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
                     }
                     break;
                 }
@@ -274,7 +347,7 @@ pub const Searcher = struct {
         }
         alpha = @maximum(alpha, eval);
 
-        var evallist = movepick.score_moves(self, pos, &movelist);
+        var evallist = movepick.score_moves(self, pos, &movelist, types.Move.empty());
         defer evallist.deinit();
 
         var index: usize = 0;

@@ -253,13 +253,13 @@ pub const UciInterface = struct {
                                 t /= 36;
                             } else if (phase >= 15) {
                                 // Middle game
-                                t /= 18;
+                                t /= 20;
                             } else if (phase >= 6) {
                                 // Middle-end game
-                                t /= 20;
+                                t /= 24;
                             } else {
                                 // Endgame
-                                t /= 30;
+                                t /= 34;
                             }
                         }
                         movetime.? += t;

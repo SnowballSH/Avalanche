@@ -11,12 +11,16 @@ pub const SortHash: SortScore = 7000000;
 pub const SortCapture: SortScore = 6000000;
 pub const SortKiller: SortScore = 5000000;
 
-pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move)) std.ArrayList(SortScore) {
+pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
+
+    var hm = hashmove.to_u16();
 
     for (list.items) |move_| {
         var move: *const types.Move = &move_;
-        if (move.is_capture() or move.is_promotion()) {
+        if (hm == move.to_u16()) {
+            res.appendAssumeCapacity(SortHash);
+        } else if (move.is_capture() or move.is_promotion()) {
             var s_piece: SortScore = hce.Mateiral[pos.mailbox[move.from].piece_type().index()][0];
             var s_captured: SortScore = if (move.get_flags() == types.MoveFlags.EN_PASSANT) hce.Mateiral[0][0] else hce.Mateiral[pos.mailbox[move.to].piece_type().index()][0];
             var s_promotion: SortScore = if (move.is_promotion()) hce.Mateiral[move.get_flags().promote_type().index()][0] else 0;
@@ -25,7 +29,7 @@ pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *s
         } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16() or searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
             res.appendAssumeCapacity(SortKiller);
         } else {
-            res.appendAssumeCapacity(1);
+            res.appendAssumeCapacity(1 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]));
         }
     }
 
