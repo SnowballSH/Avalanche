@@ -173,11 +173,10 @@ pub const Searcher = struct {
 
             // Mate-distance pruning
 
-            var r_alpha = if (alpha > -hce.MateScore + @intCast(i32, self.ply)) alpha else -hce.MateScore + @intCast(i32, self.ply);
-            var r_beta = if (beta < hce.MateScore - @intCast(i32, self.ply) - 1) beta else hce.MateScore - @intCast(i32, self.ply) - 1;
-
-            if (r_alpha >= r_beta) {
-                return r_alpha;
+            alpha = @maximum(alpha, -hce.MateScore + @intCast(hce.Score, self.ply));
+            beta = @minimum(beta, hce.MateScore - @intCast(hce.Score, self.ply) - 1);
+            if (alpha >= beta) {
+                return alpha;
             }
         }
 
