@@ -213,6 +213,10 @@ pub const Position = struct {
         return self.attackers_from(opp, @intToEnum(types.Square, types.lsb(self.piece_bitboards[king.index()])), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
     }
 
+    pub inline fn has_non_pawns(self: Position) bool {
+        return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()] != self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black);
+    }
+
     // Moving pieces
 
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
@@ -375,6 +379,27 @@ pub const Position = struct {
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;
+    }
+
+    pub inline fn play_null_move(self: *Position) void {
+        self.turn = self.turn.invert();
+        self.hash ^= zobrist.TurnHash;
+        self.game_ply += 1;
+        self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
+
+        if (self.history[self.game_ply - 1].ep_sq != types.Square.NO_SQUARE) {
+            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply - 1].ep_sq.file().index()];
+        }
+    }
+
+    pub inline fn undo_null_move(self: *Position) void {
+        self.turn = self.turn.invert();
+        self.hash ^= zobrist.TurnHash;
+        self.game_ply -= 1;
+
+        if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
+            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
+        }
     }
 
     // Generate all LEGAL moves

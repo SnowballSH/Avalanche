@@ -293,7 +293,7 @@ pub const UciInterface = struct {
                 if (token != null) {
                     if (std.mem.eql(u8, token.?, "startpos")) {
                         self.position.set_fen(types.DEFAULT_FEN[0..]);
-                        self.searcher.hash_history.clearAndFree();
+                        self.searcher.hash_history.clearRetainingCapacity();
                         self.searcher.hash_history.append(self.position.hash) catch {};
 
                         token = tokens.next();
@@ -322,7 +322,7 @@ pub const UciInterface = struct {
                         var fen = tokens.next();
                         if (fen != null) {
                             self.position.set_fen(fen.?);
-                            self.searcher.hash_history.clearAndFree();
+                            self.searcher.hash_history.clearRetainingCapacity();
                             self.searcher.hash_history.append(self.position.hash) catch {};
 
                             var afterfen = tokens.next();

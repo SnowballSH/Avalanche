@@ -31,6 +31,7 @@ pub const Searcher = struct {
     is_searching: bool = false,
 
     hash_history: std.ArrayList(u64) = undefined,
+    eval_history: [MAX_PLY]hce.Score = undefined,
 
     best_move: types.Move = undefined,
 
@@ -40,14 +41,33 @@ pub const Searcher = struct {
     pub fn new() Searcher {
         var s = Searcher{};
 
-        s.hash_history = std.ArrayList(u64).init(std.heap.c_allocator);
+        s.hash_history = std.ArrayList(u64).initCapacity(std.heap.c_allocator, MAX_PLY) catch unreachable;
+        s.reset_heuristics();
 
         return s;
     }
 
     pub fn reset_heuristics(self: *Searcher) void {
-        self.killer = undefined;
-        self.history = undefined;
+        {
+            var i: usize = 0;
+            while (i < MAX_PLY) : (i += 1) {
+                self.killer[i][0] = types.Move.empty();
+                self.killer[i][1] = types.Move.empty();
+            }
+        }
+
+        {
+            var i: usize = 0;
+            while (i < 2) : (i += 1) {
+                var j: usize = 0;
+                while (j < 64) : (j += 1) {
+                    var k: usize = 0;
+                    while (k < 64) : (k += 1) {
+                        self.history[i][j][k] = 0;
+                    }
+                }
+            }
+        }
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
@@ -60,6 +80,7 @@ pub const Searcher = struct {
         self.stop = false;
         self.is_searching = true;
         self.reset_heuristics();
+        self.nodes = 0;
 
         self.timer = std.time.Timer.start() catch unreachable;
 
@@ -71,7 +92,7 @@ pub const Searcher = struct {
         while (depth <= bound) : (depth += 1) {
             self.ply = 0;
 
-            var val = self.negamax(pos, color, depth, -hce.MateScore, hce.MateScore);
+            var val = self.negamax(pos, color, depth, -hce.MateScore, hce.MateScore, false);
 
             if (self.should_stop()) {
                 break;
@@ -131,7 +152,7 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score) hce.Score {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool) hce.Score {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -160,16 +181,20 @@ pub const Searcher = struct {
             }
         }
 
-        if (pos.in_check(color)) {
+        var in_check = pos.in_check(color);
+
+        if (in_check) {
             depth += 1;
         }
 
         var on_pv: bool = beta - alpha > 1;
 
         var hashmove = types.Move.empty();
+        var tthit = false;
         var entry = tt.GlobalTT.get(pos.hash, depth);
 
-        if (entry != null) {
+        if (entry != null and !in_check) {
+            tthit = true;
             var tt_eval = entry.?.eval;
             if (tt_eval > hce.MateScore - 100 and tt_eval <= hce.MateScore) {
                 tt_eval -= @intCast(hce.Score, self.ply);
@@ -197,12 +222,41 @@ pub const Searcher = struct {
             }
         }
 
+        if (self.should_stop()) {
+            return 0;
+        }
+
         if (depth == 0) {
             return self.quiescence_search(pos, color, alpha, beta);
         }
 
-        if (self.should_stop()) {
-            return 0;
+        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
+        var best_score: hce.Score = static_eval;
+
+        self.eval_history[self.ply] = static_eval;
+
+        // Prunings
+        if (!in_check and !on_pv) {
+            // Null move pruning
+
+            if (!is_null and depth >= 2 and best_score >= beta and !tthit and pos.has_non_pawns()) {
+                var r = 4 + depth / 4 + @intCast(usize, @minimum(3, @divFloor(best_score - beta, 128)));
+
+                if (r >= depth) {
+                    r = depth - 1;
+                }
+
+                pos.play_null_move();
+                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true);
+                pos.undo_null_move();
+
+                if (null_score >= beta) {
+                    if (hce.is_near_mate(null_score)) {
+                        return beta;
+                    }
+                    return null_score;
+                }
+            }
         }
 
         // Search
@@ -246,7 +300,7 @@ pub const Searcher = struct {
 
             var score: hce.Score = 0;
             if (index == 0) {
-                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha);
+                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false);
             } else {
                 // LMR
                 var reduction: i32 = 0;
@@ -269,13 +323,13 @@ pub const Searcher = struct {
                     }
                 }
 
-                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha);
+                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false);
 
                 if (score > alpha and reduction > 0) {
-                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha);
+                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false);
                 }
                 if (score > alpha and score < beta) {
-                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha);
+                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false);
                 }
             }
 
@@ -302,7 +356,7 @@ pub const Searcher = struct {
                         self.killer[self.ply][0] = move;
                         self.killer[self.ply][1] = temp;
 
-                        self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
+                        self.history[@enumToInt(color)][move.from][move.to] = @minimum(self.history[@enumToInt(color)][move.from][move.to] + @intCast(u32, depth * depth), 2000000000);
                     }
                     break;
                 }

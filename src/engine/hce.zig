@@ -188,3 +188,7 @@ pub fn evaluate(pos: *position.Position) Score {
     }
     return score;
 }
+
+pub inline fn is_near_mate(score: Score) bool {
+    return score >= MateScore - 100 or score <= -MateScore + 100;
+}
