@@ -191,11 +191,12 @@ pub const Searcher = struct {
 
         var hashmove = types.Move.empty();
         var tthit = false;
+        var tt_eval: hce.Score = 0;
         var entry = tt.GlobalTT.get(pos.hash, depth);
 
         if (entry != null and !in_check) {
             tthit = true;
-            var tt_eval = entry.?.eval;
+            tt_eval = entry.?.eval;
             if (tt_eval > hce.MateScore - 100 and tt_eval <= hce.MateScore) {
                 tt_eval -= @intCast(hce.Score, self.ply);
             } else if (tt_eval < -hce.MateScore + 100 and tt_eval >= -hce.MateScore) {
@@ -237,9 +238,18 @@ pub const Searcher = struct {
 
         // Prunings
         if (!in_check and !on_pv) {
-            // Null move pruning
+            // Razoring
+            if (depth <= 1 and static_eval + 250 < alpha) {
+                return self.quiescence_search(pos, color, alpha, beta);
+            }
 
-            if (!is_null and depth >= 2 and best_score >= beta and !tthit and pos.has_non_pawns()) {
+            // Static nmp
+            if (depth <= 8 and best_score - @intCast(hce.Score, 90 * depth) > beta) {
+                return best_score;
+            }
+
+            // Null move pruning
+            if (!is_null and depth >= 2 and best_score >= beta and (!tthit or entry.?.flag != tt.Bound.Upper or tt_eval >= beta) and pos.has_non_pawns()) {
                 var r = 4 + depth / 4 + @intCast(usize, @minimum(3, @divFloor(best_score - beta, 128)));
 
                 if (r >= depth) {
