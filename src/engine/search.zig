@@ -34,6 +34,8 @@ pub const Searcher = struct {
     eval_history: [MAX_PLY]hce.Score = undefined,
 
     best_move: types.Move = undefined,
+    pv: [MAX_PLY][MAX_PLY]types.Move = undefined,
+    pv_size: [MAX_PLY]usize = undefined,
 
     killer: [MAX_PLY][2]types.Move = undefined,
     history: [2][64][64]u32 = undefined,
@@ -66,6 +68,17 @@ pub const Searcher = struct {
                         self.history[i][j][k] = 0;
                     }
                 }
+            }
+        }
+
+        {
+            var j: usize = 0;
+            while (j < MAX_PLY) : (j += 1) {
+                var k: usize = 0;
+                while (k < MAX_PLY) : (k += 1) {
+                    self.pv[j][k] = types.Move.empty();
+                }
+                self.pv_size[j] = 0;
             }
         }
     }
@@ -101,24 +114,64 @@ pub const Searcher = struct {
             score = val;
             bm = self.best_move;
 
-            outW.print("info depth {} nodes {} time {} score cp {} pv ", .{
+            outW.print("info depth {} nodes {} time {} score ", .{
                 depth,
                 self.nodes,
                 self.timer.read() / std.time.ns_per_ms,
-                score,
             }) catch {};
-            bm.uci_print(outW);
+
+            if (std.math.absInt(score) catch 0 >= (hce.MateScore - hce.MaxMate)) {
+                outW.print("mate {} pv", .{
+                    (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+                }) catch {};
+            } else {
+                outW.print("cp {} pv", .{
+                    score,
+                }) catch {};
+            }
+
+            if (self.pv_size[0] > 0) {
+                var i: usize = 0;
+                while (i < self.pv_size[0]) : (i += 1) {
+                    outW.writeByte(' ') catch {};
+                    self.pv[0][i].uci_print(outW);
+                }
+            } else {
+                outW.writeByte(' ') catch {};
+                bm.uci_print(outW);
+            }
+
             outW.writeByte('\n') catch {};
             out.flush() catch {};
         }
 
-        outW.print("info depth {} nodes {} time {} score cp {} pv ", .{
-            depth - 1,
+        outW.print("info depth {} nodes {} time {} score ", .{
+            depth,
             self.nodes,
             self.timer.read() / std.time.ns_per_ms,
-            score,
         }) catch {};
-        bm.uci_print(outW);
+
+        if (std.math.absInt(score) catch 0 >= (hce.MateScore - hce.MaxMate)) {
+            outW.print("mate {} pv", .{
+                (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+            }) catch {};
+        } else {
+            outW.print("cp {} pv", .{
+                score,
+            }) catch {};
+        }
+
+        if (self.pv_size[0] > 0) {
+            var i: usize = 0;
+            while (i < self.pv_size[0]) : (i += 1) {
+                outW.writeByte(' ') catch {};
+                self.pv[0][i].uci_print(outW);
+            }
+        } else {
+            outW.writeByte(' ') catch {};
+            bm.uci_print(outW);
+        }
+
         outW.writeAll("\nbestmove ") catch {};
         bm.uci_print(outW);
         outW.writeByte('\n') catch {};
@@ -132,7 +185,7 @@ pub const Searcher = struct {
     }
 
     pub fn is_draw(self: *Searcher, pos: *position.Position) bool {
-        if (pos.history[pos.game_ply].fifty >= 100) {
+        if (pos.history[pos.game_ply].fifty >= hce.MaxMate) {
             return true;
         }
 
@@ -161,6 +214,7 @@ pub const Searcher = struct {
         var is_root = self.ply == 0;
 
         self.nodes += 1;
+        self.pv_size[self.ply] = 0;
 
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
@@ -196,9 +250,9 @@ pub const Searcher = struct {
         if (entry != null and !in_check) {
             tthit = true;
             tt_eval = entry.?.eval;
-            if (tt_eval > hce.MateScore - 100 and tt_eval <= hce.MateScore) {
+            if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
                 tt_eval -= @intCast(hce.Score, self.ply);
-            } else if (tt_eval < -hce.MateScore + 100 and tt_eval >= -hce.MateScore) {
+            } else if (tt_eval < -hce.MateScore + hce.MaxMate and tt_eval >= -hce.MateScore) {
                 tt_eval += @intCast(hce.Score, self.ply);
             }
             hashmove = entry.?.bestmove;
@@ -227,6 +281,7 @@ pub const Searcher = struct {
         }
 
         if (depth == 0) {
+            self.nodes -= 1;
             return self.quiescence_search(pos, color, alpha, beta);
         }
 
@@ -282,7 +337,7 @@ pub const Searcher = struct {
         if (move_size == 0) {
             if (pos.in_check(color)) {
                 // Checkmate
-                return -hce.MateScore + @intCast(i32, self.ply);
+                return -hce.MateScore + @intCast(hce.Score, self.ply);
             } else {
                 // Stalemate
                 return 0;
@@ -293,6 +348,7 @@ pub const Searcher = struct {
         defer evallist.deinit();
 
         var best_move = types.Move.empty();
+        best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
 
         var index: usize = 0;
 
@@ -350,30 +406,37 @@ pub const Searcher = struct {
                 return 0;
             }
 
-            if (score > alpha) {
+            if (score > best_score) {
+                best_score = score;
                 best_move = move;
-                alpha = score;
-                tt_flag = tt.Bound.Exact;
+                if (score > alpha) {
+                    alpha = score;
+                    tt_flag = tt.Bound.Exact;
 
-                if (is_root) {
-                    self.best_move = move;
-                }
-                if (alpha >= beta) {
-                    tt_flag = tt.Bound.Lower;
-                    if (!is_capture) {
-                        var temp = self.killer[self.ply][0];
-                        self.killer[self.ply][0] = move;
-                        self.killer[self.ply][1] = temp;
+                    self.pv[self.ply][0] = move;
+                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
-                        self.history[@enumToInt(color)][move.from][move.to] = @minimum(self.history[@enumToInt(color)][move.from][move.to] + @intCast(u32, depth * depth), 2000000000);
+                    if (is_root) {
+                        self.best_move = move;
                     }
-                    break;
+                    if (alpha >= beta) {
+                        tt_flag = tt.Bound.Lower;
+                        if (!is_capture) {
+                            var temp = self.killer[self.ply][0];
+                            self.killer[self.ply][0] = move;
+                            self.killer[self.ply][1] = temp;
+
+                            self.history[@enumToInt(color)][move.from][move.to] = @minimum(self.history[@enumToInt(color)][move.from][move.to] + @intCast(u32, depth * depth), 2000000000);
+                        }
+                        break;
+                    }
                 }
             }
         }
 
         tt.GlobalTT.set(tt.Item{
-            .eval = alpha,
+            .eval = best_score,
             .bestmove = best_move,
             .flag = tt_flag,
             .depth = @intCast(u14, depth),
@@ -389,10 +452,26 @@ pub const Searcher = struct {
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
         self.nodes += 1;
+        self.pv_size[self.ply] = 0;
 
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
         }
+
+        //var in_check = pos.in_check(color);
+
+        // Stand Pat pruning
+        //var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
+        //if (!in_check) {
+        //    best_score = hce.evaluate(pos);
+
+        //    if (best_score >= beta) {
+        //        return beta;
+        //    }
+        //    if (best_score > alpha) {
+        //        alpha = best_score;
+        //    }
+        //}
 
         if (self.should_stop()) {
             return 0;
@@ -428,12 +507,20 @@ pub const Searcher = struct {
                 return 0;
             }
 
+            //if (score > best_score) {
+            //best_score = score;
             if (score > alpha) {
-                if (score >= beta) {
-                    alpha = beta;
-                    break;
-                }
+                self.pv[self.ply][0] = move;
+                std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+
                 alpha = score;
+            }
+            //}
+
+            if (alpha >= beta) {
+                alpha = beta;
+                break;
             }
         }
 

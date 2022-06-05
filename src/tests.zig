@@ -3,6 +3,7 @@ const types = @import("./chess/types.zig");
 const tables = @import("./chess/tables.zig");
 const position = @import("./chess/position.zig");
 const zobrist = @import("./chess/zobrist.zig");
+const hce = @import("./engine/hce.zig");
 const expect = std.testing.expect;
 
 test "Basic Piece and Color" {
@@ -180,7 +181,18 @@ test "Position" {
     try expect(!pos.in_check(types.Color.White));
 
     pos.set_fen(types.DEFAULT_FEN[0..]);
-    var m = types.Move.new_from_string(&pos, "e2e4"[0..]);
-    pos.play_move(types.Color.White, m);
-    pos.undo_move(types.Color.White, m);
+    var score = hce.evaluate(&pos);
+
+    var m1 = types.Move.new_from_string(&pos, "e2e4"[0..]);
+    pos.play_move(types.Color.White, m1);
+    var m2 = types.Move.new_from_string(&pos, "d7d5"[0..]);
+    pos.play_move(types.Color.Black, m2);
+    var m3 = types.Move.new_from_string(&pos, "e4d5"[0..]);
+    pos.play_move(types.Color.White, m3);
+
+    pos.undo_move(types.Color.White, m3);
+    pos.undo_move(types.Color.Black, m2);
+    pos.undo_move(types.Color.White, m1);
+
+    try expect(score == hce.evaluate(&pos));
 }

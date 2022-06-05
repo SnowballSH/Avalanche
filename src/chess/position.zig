@@ -3,6 +3,7 @@ const types = @import("./types.zig");
 const tables = @import("./tables.zig");
 const zobrist = @import("./zobrist.zig");
 const utils = @import("./utils.zig");
+const hce = @import("../engine/hce.zig");
 
 // Stores information for undoing a move.
 pub const UndoInfo = packed struct {
@@ -40,30 +41,34 @@ pub const UndoInfo = packed struct {
 // A chess position
 pub const Position = struct {
     // Bitboards of each piece
-    piece_bitboards: [types.N_PIECES]types.Bitboard,
+    piece_bitboards: [types.N_PIECES]types.Bitboard = undefined,
     // Mailbox representation of the board
-    mailbox: [types.N_SQUARES]types.Piece,
+    mailbox: [types.N_SQUARES]types.Piece = undefined,
     // Current player
-    turn: types.Color,
+    turn: types.Color = types.Color.White,
     // Ply since game started
-    game_ply: u32,
+    game_ply: u32 = 0,
     // Zobrist Hash
-    hash: u64,
+    hash: u64 = 0,
 
     // History of Undo information
-    history: [256]UndoInfo,
+    history: [256]UndoInfo = undefined,
 
     // Stores the enemy pieces that are attacking the king
-    checkers: types.Bitboard,
+    checkers: types.Bitboard = 0,
 
     // Stores the pieces that are pinned to the king
-    pinned: types.Bitboard,
+    pinned: types.Bitboard = 0,
+
+    // Classical Evaluator
+    evaluator: hce.DynamicEvaluator = undefined,
 
     pub fn new() Position {
-        var pos = std.mem.zeroes(Position);
+        var pos = Position{};
 
         std.mem.set(types.Piece, pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         pos.history[0] = UndoInfo.new();
+        pos.evaluator = hce.DynamicEvaluator{};
 
         return pos;
     }
@@ -133,6 +138,8 @@ pub const Position = struct {
                 else => {},
             }
         }
+
+        self.evaluator.full_refresh(self);
     }
 
     pub inline fn phase(self: *Position) usize {
@@ -144,25 +151,28 @@ pub const Position = struct {
     }
 
     pub inline fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
+        self.evaluator.add_piece(pc, sq, self);
         self.mailbox[sq.index()] = pc;
         self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
         self.hash ^= zobrist.ZobristTable[pc.index()][sq.index()];
     }
 
     pub inline fn remove_piece(self: *Position, sq: types.Square) void {
+        self.evaluator.remove_piece(sq, self);
         const pc = self.mailbox[sq.index()].index();
         self.hash ^= zobrist.ZobristTable[pc][sq.index()];
         self.piece_bitboards[pc] &= ~types.SquareIndexBB[sq.index()];
         self.mailbox[sq.index()] = types.Piece.NO_PIECE;
     }
 
-    pub fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
+    pub inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
         self.remove_piece(to);
         self.move_piece_quiet(from, to);
     }
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
     pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
+        self.evaluator.move_piece_quiet(from, to, self);
         self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()] ^ zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
 
         self.piece_bitboards[self.mailbox[from.index()].index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];

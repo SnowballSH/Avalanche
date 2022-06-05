@@ -22,7 +22,7 @@ pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *s
             res.appendAssumeCapacity(SortHash);
         } else if (move.is_capture() or move.is_promotion()) {
             var s_piece: SortScore = hce.Mateiral[pos.mailbox[move.from].piece_type().index()][0];
-            var s_captured: SortScore = if (move.get_flags() == types.MoveFlags.EN_PASSANT) hce.Mateiral[0][0] else hce.Mateiral[pos.mailbox[move.to].piece_type().index()][0];
+            var s_captured: SortScore = if (pos.mailbox[move.to] == types.Piece.NO_PIECE) hce.Mateiral[0][0] else hce.Mateiral[pos.mailbox[move.to].piece_type().index()][0];
             var s_promotion: SortScore = if (move.is_promotion()) hce.Mateiral[move.get_flags().promote_type().index()][0] else 0;
 
             res.appendAssumeCapacity(SortCapture + 10 * (s_captured + s_promotion) - s_piece);
