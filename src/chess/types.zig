@@ -85,6 +85,10 @@ pub const Piece = enum(u8) {
     pub inline fn index(self: Piece) u8 {
         return @enumToInt(self);
     }
+
+    pub inline fn pure_index(self: Piece) usize {
+        return if (@enumToInt(self) <= 5) @enumToInt(self) else @enumToInt(self) - 2;
+    }
 };
 
 // Square & Bitboard

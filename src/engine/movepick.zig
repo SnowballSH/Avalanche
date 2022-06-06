@@ -7,9 +7,9 @@ const search = @import("./search.zig");
 
 pub const SortScore = i32;
 
-pub const SortHash: SortScore = 7000000;
-pub const SortCapture: SortScore = 6000000;
-pub const SortKiller: SortScore = 5000000;
+pub const SortHash: SortScore = 1700000;
+pub const SortCapture: SortScore = 1600000;
+pub const SortKiller: SortScore = 1500000;
 
 pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;

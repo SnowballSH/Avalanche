@@ -8,11 +8,13 @@ const search = @import("./engine/search.zig");
 const tt = @import("./engine/tt.zig");
 const hce = @import("./engine/hce.zig");
 const interface = @import("./engine/interface.zig");
+const weights = @import("./engine/weights.zig");
 
 pub fn main() anyerror!void {
     tables.init_all();
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);
+    weights.do_nnue();
 
     var inter = interface.UciInterface.new();
     return inter.main_loop();

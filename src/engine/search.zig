@@ -13,13 +13,14 @@ pub const QuietLMR: [64][64]i32 = init: {
     inline while (depth < 64) : (depth += 1) {
         var moves = 1;
         inline while (moves < 64) : (moves += 1) {
-            reductions[depth][moves] = @floatToInt(i32, @floor(0.50 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.50));
+            reductions[depth][moves] = @floatToInt(i32, @floor(0.45 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.60));
         }
     }
     break :init reductions;
 };
 
-pub const MAX_PLY = 100;
+pub const MAX_PLY = 128;
+pub const MAX_GAMEPLY = 512;
 
 pub const Searcher = struct {
     max_millis: u64 = 0,
@@ -43,7 +44,7 @@ pub const Searcher = struct {
     pub fn new() Searcher {
         var s = Searcher{};
 
-        s.hash_history = std.ArrayList(u64).initCapacity(std.heap.c_allocator, MAX_PLY) catch unreachable;
+        s.hash_history = std.ArrayList(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
         s.reset_heuristics();
 
         return s;
@@ -79,6 +80,7 @@ pub const Searcher = struct {
                     self.pv[j][k] = types.Move.empty();
                 }
                 self.pv_size[j] = 0;
+                self.eval_history[j] = 0;
             }
         }
     }
@@ -120,10 +122,13 @@ pub const Searcher = struct {
                 self.timer.read() / std.time.ns_per_ms,
             }) catch {};
 
-            if (std.math.absInt(score) catch 0 >= (hce.MateScore - hce.MaxMate)) {
+            if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
                 outW.print("mate {} pv", .{
                     (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
                 }) catch {};
+                if (bound == MAX_PLY - 1) {
+                    bound = depth + 2;
+                }
             } else {
                 outW.print("cp {} pv", .{
                     score,
@@ -189,6 +194,10 @@ pub const Searcher = struct {
             return true;
         }
 
+        if (hce.is_material_draw(pos)) {
+            return true;
+        }
+
         if (std.mem.len(self.hash_history.items) > 1) {
             var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
             var limit: i16 = index - @intCast(i16, pos.history[pos.game_ply].fifty) - 1;
@@ -250,14 +259,14 @@ pub const Searcher = struct {
         if (entry != null and !in_check) {
             tthit = true;
             tt_eval = entry.?.eval;
-            if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
-                tt_eval -= @intCast(hce.Score, self.ply);
-            } else if (tt_eval < -hce.MateScore + hce.MaxMate and tt_eval >= -hce.MateScore) {
-                tt_eval += @intCast(hce.Score, self.ply);
+            if (tt_eval > hce.MateScore - 100 and tt_eval <= hce.MateScore) {
+                tt_eval -= 100;
+            } else if (tt_eval < -hce.MateScore + 100 and tt_eval >= -hce.MateScore) {
+                tt_eval += 100;
             }
             hashmove = entry.?.bestmove;
 
-            if (depth == 0 or !on_pv) {
+            if (pos.history[pos.game_ply].fifty < 90 and (depth == 0 or !on_pv)) {
                 switch (entry.?.flag) {
                     .Exact => {
                         return tt_eval;
@@ -350,12 +359,17 @@ pub const Searcher = struct {
         var best_move = types.Move.empty();
         best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
 
-        var index: usize = 0;
+        var skip_quiet = false;
 
+        var index: usize = 0;
         while (index < move_size) : (index += 1) {
             var move = movepick.get_next_best(&movelist, &evallist, index);
 
             var is_capture = move.is_capture();
+
+            if (skip_quiet and !is_capture) {
+                continue;
+            }
 
             self.ply += 1;
             pos.play_move(color, move);
@@ -435,13 +449,15 @@ pub const Searcher = struct {
             }
         }
 
-        tt.GlobalTT.set(tt.Item{
-            .eval = best_score,
-            .bestmove = best_move,
-            .flag = tt_flag,
-            .depth = @intCast(u14, depth),
-            .hash = pos.hash,
-        });
+        if (!skip_quiet) {
+            tt.GlobalTT.set(tt.Item{
+                .eval = best_score,
+                .bestmove = best_move,
+                .flag = tt_flag,
+                .depth = @intCast(u14, depth),
+                .hash = pos.hash,
+            });
+        }
 
         return alpha;
     }
@@ -454,24 +470,32 @@ pub const Searcher = struct {
         self.nodes += 1;
         self.pv_size[self.ply] = 0;
 
+        if (hce.is_material_draw(pos)) {
+            return 0;
+        }
+
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
         }
 
-        //var in_check = pos.in_check(color);
+        var in_check = pos.in_check(color);
 
         // Stand Pat pruning
-        //var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
-        //if (!in_check) {
-        //    best_score = hce.evaluate(pos);
+        var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
+        if (!in_check) {
+            best_score = hce.evaluate(pos);
 
-        //    if (best_score >= beta) {
-        //        return beta;
-        //    }
-        //    if (best_score > alpha) {
-        //        alpha = best_score;
-        //    }
-        //}
+            if (best_score + 1000 <= alpha) {
+                return best_score;
+            }
+
+            if (best_score >= beta) {
+                return beta;
+            }
+            if (best_score > alpha) {
+                alpha = best_score;
+            }
+        }
 
         if (self.should_stop()) {
             return 0;
@@ -507,16 +531,16 @@ pub const Searcher = struct {
                 return 0;
             }
 
-            //if (score > best_score) {
-            //best_score = score;
-            if (score > alpha) {
-                self.pv[self.ply][0] = move;
-                std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+            if (score > best_score) {
+                best_score = score;
+                if (score > alpha) {
+                    self.pv[self.ply][0] = move;
+                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
-                alpha = score;
+                    alpha = score;
+                }
             }
-            //}
 
             if (alpha >= beta) {
                 alpha = beta;
