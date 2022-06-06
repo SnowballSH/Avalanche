@@ -2,7 +2,7 @@
 
 [WIP] UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
-**CCRL ELO (v0.2.2): 2624**
+**CCRL ELO (v0.2.2): 2629**
 
 [Avalanche's CCRL Profile](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%200.2.2%2064-bit#Avalanche_0_2_2_64-bit)
 
@@ -26,9 +26,12 @@ Brilliant win against Blunder 7.6.0 in CCRL division 7 tournament: https://liche
 
 ## Changelog (ELO based on Stockfish limit_strength)
 
-- ### v0.3 (in development): ???  (+??? ELO), ??? ELO
+- ### v1.0 ~2600 CCRL ELO, WIP
+    - Faster Movegen
+    - Rewrite
+    - 256-neuron NNUE trained on 30 million positions on depth 3
 
-- ### v0.2.2 (+70-120 ELO), ~2610 ELO
+- ### v0.2.2 (+63 ELO), 2629 CCRL ELO
     - Bug fixes
     - LMR tuning
     - New SEE algorithm
