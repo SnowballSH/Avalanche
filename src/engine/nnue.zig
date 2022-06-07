@@ -11,7 +11,7 @@ pub inline fn normalize(val: i32) i16 {
     return @intCast(i16, @divFloor(val * 85, 2048)); // * 170.0 / 64.0 / 64.0
 }
 
-const UseResidual = false;
+const UseResidual = true;
 
 pub const NNUE = struct {
     activations: [2][weights.INPUT_SIZE]bool,
