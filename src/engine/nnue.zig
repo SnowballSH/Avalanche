@@ -11,6 +11,8 @@ pub inline fn normalize(val: i32) i16 {
     return @intCast(i16, @divFloor(val * 85, 2048)); // * 170.0 / 64.0 / 64.0
 }
 
+const UseResidual = false;
+
 pub const NNUE = struct {
     activations: [2][weights.INPUT_SIZE]bool,
     accumulator: [2][weights.HIDDEN_SIZE]i16,
@@ -35,10 +37,12 @@ pub const NNUE = struct {
             ptr.* = false;
         }
 
-        // Reset psqt
-        for (self.residual) |*m| {
-            for (m) |*ptr| {
-                ptr.* = 0;
+        if (UseResidual) {
+            // Reset psqt
+            for (self.residual) |*m| {
+                for (m) |*ptr| {
+                    ptr.* = 0;
+                }
             }
         }
 
@@ -68,11 +72,13 @@ pub const NNUE = struct {
                 ptr.* += weights.LAYER_1[bi][l_index];
             }
 
-            for (self.residual[0]) |*ptr, res_index| {
-                ptr.* += weights.PSQT[wi][res_index];
-            }
-            for (self.residual[1]) |*ptr, res_index| {
-                ptr.* += weights.PSQT[bi][res_index];
+            if (UseResidual) {
+                for (self.residual[0]) |*ptr, res_index| {
+                    ptr.* += weights.PSQT[wi][res_index];
+                }
+                for (self.residual[1]) |*ptr, res_index| {
+                    ptr.* += weights.PSQT[bi][res_index];
+                }
             }
         }
     }
@@ -91,11 +97,13 @@ pub const NNUE = struct {
             ptr.* -= weights.LAYER_1[bi][l_index];
         }
 
-        for (self.residual[0]) |*ptr, res_index| {
-            ptr.* -= weights.PSQT[wi][res_index];
-        }
-        for (self.residual[1]) |*ptr, res_index| {
-            ptr.* -= weights.PSQT[bi][res_index];
+        if (UseResidual) {
+            for (self.residual[0]) |*ptr, res_index| {
+                ptr.* -= weights.PSQT[wi][res_index];
+            }
+            for (self.residual[1]) |*ptr, res_index| {
+                ptr.* -= weights.PSQT[bi][res_index];
+            }
         }
     }
 
@@ -113,11 +121,13 @@ pub const NNUE = struct {
             ptr.* += weights.LAYER_1[bi][l_index];
         }
 
-        for (self.residual[0]) |*ptr, res_index| {
-            ptr.* += weights.PSQT[wi][res_index];
-        }
-        for (self.residual[1]) |*ptr, res_index| {
-            ptr.* += weights.PSQT[bi][res_index];
+        if (UseResidual) {
+            for (self.residual[0]) |*ptr, res_index| {
+                ptr.* += weights.PSQT[wi][res_index];
+            }
+            for (self.residual[1]) |*ptr, res_index| {
+                ptr.* += weights.PSQT[bi][res_index];
+            }
         }
     }
 
@@ -134,7 +144,11 @@ pub const NNUE = struct {
         }
 
         for (self.result) |*ptr, idx| {
-            ptr.* = normalize(ptr.*) + @divFloor(self.residual[@enumToInt(pos.turn)][idx], 64);
+            if (UseResidual) {
+                ptr.* = normalize(ptr.*) + @divFloor(self.residual[@enumToInt(pos.turn)][idx], 64);
+            } else {
+                ptr.* = normalize(ptr.*);
+            }
         }
     }
 
@@ -145,6 +159,10 @@ pub const NNUE = struct {
             self.result[bucket] += weights.LAYER_2[l_index][bucket] * clipped_relu_one(val);
         }
 
-        self.result[bucket] = normalize(self.result[bucket]) + @divFloor(self.residual[@enumToInt(turn)][bucket], 64);
+        if (UseResidual) {
+            self.result[bucket] = normalize(self.result[bucket]) + @divFloor(self.residual[@enumToInt(turn)][bucket], 64);
+        } else {
+            self.result[bucket] = normalize(self.result[bucket]);
+        }
     }
 };

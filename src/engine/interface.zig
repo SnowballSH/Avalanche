@@ -4,6 +4,7 @@ const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const perft = @import("../chess/perft.zig");
 const hce = @import("./hce.zig");
+const nnue = @import("./nnue.zig");
 const tt = @import("./tt.zig");
 const search = @import("./search.zig");
 
@@ -99,6 +100,32 @@ pub const UciInterface = struct {
                 _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.debug_print();
+            } else if (std.mem.eql(u8, token.?, "export_net")) {
+                token = tokens.next();
+                if (token != null) {
+                    const file = std.fs.cwd().createFile(
+                        token.?,
+                        .{ .read = true },
+                    ) catch {
+                        std.debug.panic("Unable to open {s}", .{token.?});
+                    };
+                    defer file.close();
+
+                    var writer = file.writer();
+                    writer.writeByte('[') catch {};
+                    std.json.stringify(nnue.weights.LAYER_1, std.json.StringifyOptions{}, writer) catch {};
+                    writer.writeByte(',') catch {};
+                    std.json.stringify(nnue.weights.BIAS_1, std.json.StringifyOptions{}, writer) catch {};
+                    writer.writeByte(',') catch {};
+                    std.json.stringify(nnue.weights.LAYER_2, std.json.StringifyOptions{}, writer) catch {};
+                    writer.writeByte(',') catch {};
+                    std.json.stringify(nnue.weights.BIAS_2, std.json.StringifyOptions{}, writer) catch {};
+                    writer.writeByte(',') catch {};
+                    std.json.stringify(nnue.weights.PSQT, std.json.StringifyOptions{}, writer) catch {};
+                    writer.writeByte(']') catch {};
+
+                    stdout.print("Done. Exported to {s}.\n", .{token.?}) catch {};
+                }
             } else if (std.mem.eql(u8, token.?, "perft")) {
                 var depth: u32 = 1;
                 token = tokens.next();
