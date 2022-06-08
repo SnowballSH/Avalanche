@@ -154,27 +154,38 @@ pub const PSQT: [6][2][64]Score = .{
     },
 };
 
+const CenterManhattanDistance = [64]Score{
+    6, 5, 4, 3, 3, 4, 5, 6,
+    5, 4, 3, 2, 2, 3, 4, 5,
+    4, 3, 2, 1, 1, 2, 3, 4,
+    3, 2, 1, 0, 0, 1, 2, 3,
+    3, 2, 1, 0, 0, 1, 2, 3,
+    4, 3, 2, 1, 1, 2, 3, 4,
+    5, 4, 3, 2, 2, 3, 4, 5,
+    6, 5, 4, 3, 3, 4, 5, 6,
+};
+
 pub const DynamicEvaluator = struct {
     score_mg: Score = 0,
-    score_eg: Score = 0,
+    score_eg_non_mat: Score = 0,
+    score_eg_material: Score = 0,
     nnue_evaluator: nnue.NNUE = nnue.NNUE.new(),
 
     pub fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
         if (UseNNUE) {
             self.nnue_evaluator.activate(pc, sq.index());
+        }
+        const i = pc.piece_type().index();
+        if (pc.color() == types.Color.White) {
+            self.score_mg += Mateiral[i][0];
+            self.score_mg += PSQT[i][0][sq.index() ^ 56];
+            self.score_eg_material += Mateiral[i][1];
+            self.score_eg_non_mat += PSQT[i][1][sq.index() ^ 56];
         } else {
-            const i = pc.piece_type().index();
-            if (pc.color() == types.Color.White) {
-                self.score_mg += Mateiral[i][0];
-                self.score_mg += PSQT[i][0][sq.index() ^ 56];
-                self.score_eg += Mateiral[i][1];
-                self.score_eg += PSQT[i][1][sq.index() ^ 56];
-            } else {
-                self.score_mg -= Mateiral[i][0];
-                self.score_mg -= PSQT[i][0][sq.index()];
-                self.score_eg -= Mateiral[i][1];
-                self.score_eg -= PSQT[i][1][sq.index()];
-            }
+            self.score_mg -= Mateiral[i][0];
+            self.score_mg -= PSQT[i][0][sq.index()];
+            self.score_eg_material -= Mateiral[i][1];
+            self.score_eg_non_mat -= PSQT[i][1][sq.index()];
         }
     }
 
@@ -184,19 +195,18 @@ pub const DynamicEvaluator = struct {
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
                 self.nnue_evaluator.deactivate(pc, sq.index());
+            }
+            const i = pc.piece_type().index();
+            if (pc.color() == types.Color.White) {
+                self.score_mg -= Mateiral[i][0];
+                self.score_mg -= PSQT[i][0][sq.index() ^ 56];
+                self.score_eg_material -= Mateiral[i][1];
+                self.score_eg_non_mat -= PSQT[i][1][sq.index() ^ 56];
             } else {
-                const i = pc.piece_type().index();
-                if (pc.color() == types.Color.White) {
-                    self.score_mg -= Mateiral[i][0];
-                    self.score_mg -= PSQT[i][0][sq.index() ^ 56];
-                    self.score_eg -= Mateiral[i][1];
-                    self.score_eg -= PSQT[i][1][sq.index() ^ 56];
-                } else {
-                    self.score_mg += Mateiral[i][0];
-                    self.score_mg += PSQT[i][0][sq.index()];
-                    self.score_eg += Mateiral[i][1];
-                    self.score_eg += PSQT[i][1][sq.index()];
-                }
+                self.score_mg += Mateiral[i][0];
+                self.score_mg += PSQT[i][0][sq.index()];
+                self.score_eg_material += Mateiral[i][1];
+                self.score_eg_non_mat += PSQT[i][1][sq.index()];
             }
         }
     }
@@ -212,19 +222,18 @@ pub const DynamicEvaluator = struct {
             if (UseNNUE) {
                 self.nnue_evaluator.deactivate(pc, from.index());
                 self.nnue_evaluator.activate(pc, to.index());
+            }
+            const i = pc.piece_type().index();
+            if (pc.color() == types.Color.White) {
+                self.score_mg -= PSQT[i][0][from.index() ^ 56];
+                self.score_mg += PSQT[i][0][to.index() ^ 56];
+                self.score_eg_non_mat -= PSQT[i][1][from.index() ^ 56];
+                self.score_eg_non_mat += PSQT[i][1][to.index() ^ 56];
             } else {
-                const i = pc.piece_type().index();
-                if (pc.color() == types.Color.White) {
-                    self.score_mg -= PSQT[i][0][from.index() ^ 56];
-                    self.score_mg += PSQT[i][0][to.index() ^ 56];
-                    self.score_eg -= PSQT[i][1][from.index() ^ 56];
-                    self.score_eg += PSQT[i][1][to.index() ^ 56];
-                } else {
-                    self.score_mg += PSQT[i][0][from.index()];
-                    self.score_mg -= PSQT[i][0][to.index()];
-                    self.score_eg += PSQT[i][1][from.index()];
-                    self.score_eg -= PSQT[i][1][to.index()];
-                }
+                self.score_mg += PSQT[i][0][from.index()];
+                self.score_mg -= PSQT[i][0][to.index()];
+                self.score_eg_non_mat += PSQT[i][1][from.index()];
+                self.score_eg_non_mat -= PSQT[i][1][to.index()];
             }
         }
     }
@@ -232,46 +241,102 @@ pub const DynamicEvaluator = struct {
     pub fn full_refresh(self: *DynamicEvaluator, pos: *position.Position) void {
         if (UseNNUE) {
             self.nnue_evaluator.refresh_accumulator(pos);
-        } else {
-            var mg: Score = 0;
-            var eg: Score = 0;
-            for (pos.mailbox) |piece, index| {
-                if (piece == types.Piece.NO_PIECE) {
-                    continue;
-                }
-                var i = piece.piece_type().index();
-                if (piece.color() == types.Color.White) {
-                    mg += Mateiral[i][0];
-                    mg += PSQT[i][0][index ^ 56];
-                    eg += Mateiral[i][1];
-                    eg += PSQT[i][1][index ^ 56];
-                } else {
-                    mg -= Mateiral[i][0];
-                    mg -= PSQT[i][0][index];
-                    eg -= Mateiral[i][1];
-                    eg -= PSQT[i][1][index];
-                }
-            }
-
-            self.score_mg = mg;
-            self.score_eg = eg;
         }
+        var mg: Score = 0;
+        var eg_material: Score = 0;
+        var eg_non_mat: Score = 0;
+        for (pos.mailbox) |piece, index| {
+            if (piece == types.Piece.NO_PIECE) {
+                continue;
+            }
+            var i = piece.piece_type().index();
+            if (piece.color() == types.Color.White) {
+                mg += Mateiral[i][0];
+                mg += PSQT[i][0][index ^ 56];
+                eg_material += Mateiral[i][1];
+                eg_non_mat += PSQT[i][1][index ^ 56];
+            } else {
+                mg -= Mateiral[i][0];
+                mg -= PSQT[i][0][index];
+                eg_material -= Mateiral[i][1];
+                eg_non_mat -= PSQT[i][1][index];
+            }
+        }
+
+        self.score_mg = mg;
+        self.score_eg_material = eg_material;
+        self.score_eg_non_mat = eg_non_mat;
     }
 };
 
+pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) Score {
+    var k1 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()]));
+    var k2 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()]));
+
+    var r1 = @intCast(Score, k1.rank().index());
+    var r2 = @intCast(Score, k2.rank().index());
+    var c1 = @intCast(Score, k1.file().index());
+    var c2 = @intCast(Score, k2.file().index());
+
+    var score: Score = 0;
+    var m_dist: Score = (std.math.absInt(r1 - r2) catch 0) + (std.math.absInt(c1 - c2) catch 0);
+
+    if (white_winning) {
+        score -= m_dist * 5;
+        score += CenterManhattanDistance[k2.index()] * 10;
+    } else {
+        score += m_dist * 5;
+        score -= CenterManhattanDistance[k1.index()] * 10;
+    }
+
+    return score;
+}
+
 pub inline fn evaluate(pos: *position.Position) Score {
-    if (UseNNUE) {
+    var phase = pos.phase();
+    if (UseNNUE and (phase >= 5 or pos.has_pawns())) {
         return evaluate_nnue(pos);
     } else {
         // Tapered eval
-        var phase = pos.phase();
-        var mg_phase = @intCast(i32, phase);
+
+        var mg_phase: Score = 0;
+        var eg_phase: Score = 0;
+        var mg_score: Score = 0;
+        var eg_score: Score = 0;
+
+        mg_phase = @intCast(i32, phase);
         if (mg_phase > 24) {
             mg_phase = 24;
         }
-        var eg_phase = 24 - mg_phase;
+        eg_phase = 24 - mg_phase;
 
-        var score = @divFloor(pos.evaluator.score_mg * mg_phase + pos.evaluator.score_eg * eg_phase, 24);
+        mg_score = pos.evaluator.score_mg;
+        eg_score = pos.evaluator.score_eg_material;
+
+        while (true) {
+            // Late endgame with one side winning
+            if (phase <= 4 and phase >= 1 and !pos.has_pawns()) {
+                if (pos.piece_bitboards[types.Piece.BLACK_KING.index()] == pos.all_pieces(types.Color.Black)) {
+                    // White is winning
+                    eg_score += distance_eval(pos, true);
+                    eg_score += @divFloor(pos.evaluator.score_eg_non_mat, 2);
+                    eg_score = @maximum(100, eg_score - @intCast(Score, pos.history[pos.game_ply].fifty));
+                    break;
+                } else if (pos.piece_bitboards[types.Piece.WHITE_KING.index()] == pos.all_pieces(types.Color.White)) {
+                    // Black is winning
+                    eg_score += distance_eval(pos, false);
+                    eg_score += @divFloor(pos.evaluator.score_eg_non_mat, 2);
+                    eg_score = @minimum(-100, eg_score + @intCast(Score, pos.history[pos.game_ply].fifty));
+                    break;
+                }
+            }
+
+            eg_score += pos.evaluator.score_eg_non_mat;
+
+            break;
+        }
+
+        var score = @divFloor(mg_score * mg_phase + eg_score * eg_phase, 24);
         if (pos.turn == types.Color.White) {
             return score;
         } else {

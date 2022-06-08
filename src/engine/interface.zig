@@ -34,7 +34,7 @@ pub const UciInterface = struct {
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
         out: while (true) {
-            if (!self.searcher.is_searching) {
+            if (!self.searcher.is_searching and self.search_thread != null) {
                 self.search_thread.?.join();
             }
 

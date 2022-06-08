@@ -227,6 +227,10 @@ pub const Position = struct {
         return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()] != self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black);
     }
 
+    pub inline fn has_pawns(self: Position) bool {
+        return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] != 0;
+    }
+
     // Moving pieces
 
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {

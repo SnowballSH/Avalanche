@@ -4,12 +4,14 @@ const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const hce = @import("./hce.zig");
 const search = @import("./search.zig");
+const see = @import("./see.zig");
 
 pub const SortScore = i32;
 
-pub const SortHash: SortScore = 1700000;
-pub const SortCapture: SortScore = 1600000;
-pub const SortKiller: SortScore = 1500000;
+pub const SortHash: SortScore = 15000;
+pub const SortWinningCapture: SortScore = 8000;
+pub const SortLosingCapture: SortScore = -35000;
+pub const SortKiller: SortScore = 4000;
 
 pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
@@ -18,19 +20,32 @@ pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *s
 
     for (list.items) |move_| {
         var move: *const types.Move = &move_;
+        var score: SortScore = 0;
         if (hm == move.to_u16()) {
-            res.appendAssumeCapacity(SortHash);
-        } else if (move.is_capture() or move.is_promotion()) {
-            var s_piece: SortScore = hce.Mateiral[pos.mailbox[move.from].piece_type().index()][0];
-            var s_captured: SortScore = if (pos.mailbox[move.to] == types.Piece.NO_PIECE) hce.Mateiral[0][0] else hce.Mateiral[pos.mailbox[move.to].piece_type().index()][0];
-            var s_promotion: SortScore = if (move.is_promotion()) hce.Mateiral[move.get_flags().promote_type().index()][0] else 0;
+            score += SortHash;
+        } else if (move.is_capture()) {
+            if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
+                score += SortWinningCapture;
+            } else {
+                var see_value = see.see(pos, move.*);
 
-            res.appendAssumeCapacity(SortCapture + 10 * (s_captured + s_promotion) - s_piece);
+                if (see_value >= 0) {
+                    score += SortWinningCapture + see_value;
+                } else {
+                    score += SortLosingCapture + see_value;
+                }
+            }
         } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16() or searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
-            res.appendAssumeCapacity(SortKiller);
+            score += SortKiller;
         } else {
-            res.appendAssumeCapacity(-30000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]));
+            score += -30000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
         }
+
+        if (move.is_promotion()) {
+            score += see.SeeWeight[move.get_flags().promote_type().index()];
+        }
+
+        res.appendAssumeCapacity(score);
     }
 
     return res;

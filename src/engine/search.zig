@@ -542,6 +542,10 @@ pub const Searcher = struct {
         while (index < move_size) : (index += 1) {
             var move = movepick.get_next_best(&movelist, &evallist, index);
 
+            if (evallist.items[index] < 0) {
+                break;
+            }
+
             self.ply += 1;
             pos.play_move(color, move);
             var score = -self.quiescence_search(pos, opp_color, -beta, -alpha);
