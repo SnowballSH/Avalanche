@@ -52,7 +52,7 @@ pub const Position = struct {
     hash: u64 = 0,
 
     // History of Undo information
-    history: [256]UndoInfo = undefined,
+    history: [2048]UndoInfo = undefined,
 
     // Stores the enemy pieces that are attacking the king
     checkers: types.Bitboard = 0,

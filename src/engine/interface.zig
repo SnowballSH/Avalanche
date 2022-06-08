@@ -34,6 +34,10 @@ pub const UciInterface = struct {
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
         out: while (true) {
+            if (!self.searcher.is_searching) {
+                self.search_thread.?.join();
+            }
+
             // The command will probably be less than 8192 characters
             var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 8192);
             if (line == null) {
@@ -305,6 +309,11 @@ pub const UciInterface = struct {
 
                 self.searcher.stop = false;
 
+                if (self.search_thread != null) {
+                    self.search_thread.?.join();
+                    self.search_thread = null;
+                }
+
                 self.search_thread = std.Thread.spawn(
                     .{ .stack_size = 64 * 1024 * 1024 },
                     start_search,
@@ -313,8 +322,6 @@ pub const UciInterface = struct {
                     std.debug.panic("Oh no, error on thread spawn!\n{}", .{e});
                     unreachable;
                 };
-
-                self.search_thread.?.detach();
             } else if (std.mem.eql(u8, token.?, "position")) {
                 token = tokens.next();
                 if (token != null) {
@@ -379,6 +386,8 @@ pub const UciInterface = struct {
 
             command_arena.allocator().free(line.?);
         }
+
+        self.search_thread.?.join();
     }
 };
 
