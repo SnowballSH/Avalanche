@@ -13,14 +13,14 @@ pub const QuietLMR: [64][64]i32 = init: {
     inline while (depth < 64) : (depth += 1) {
         var moves = 1;
         inline while (moves < 64) : (moves += 1) {
-            reductions[depth][moves] = @floatToInt(i32, @floor(0.65 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.25));
+            reductions[depth][moves] = @floatToInt(i32, @floor(0.70 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.25));
         }
     }
     break :init reductions;
 };
 
 pub const MAX_PLY = 128;
-pub const MAX_GAMEPLY = 512;
+pub const MAX_GAMEPLY = 1024;
 
 pub const Searcher = struct {
     max_millis: u64 = 0,
@@ -96,6 +96,7 @@ pub const Searcher = struct {
         self.is_searching = true;
         self.reset_heuristics();
         self.nodes = 0;
+        self.best_move = types.Move.empty();
 
         self.timer = std.time.Timer.start() catch unreachable;
 
@@ -103,7 +104,7 @@ pub const Searcher = struct {
         var bm = types.Move.empty();
 
         var depth: usize = 1;
-        var bound: usize = if (max_depth == null) MAX_PLY - 1 else max_depth.?;
+        var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
         while (depth <= bound) : (depth += 1) {
             self.ply = 0;
 
@@ -190,7 +191,7 @@ pub const Searcher = struct {
     }
 
     pub fn is_draw(self: *Searcher, pos: *position.Position) bool {
-        if (pos.history[pos.game_ply].fifty >= hce.MaxMate) {
+        if (pos.history[pos.game_ply].fifty >= 100) {
             return true;
         }
 
@@ -222,7 +223,6 @@ pub const Searcher = struct {
 
         var is_root = self.ply == 0;
 
-        self.nodes += 1;
         self.pv_size[self.ply] = 0;
 
         if (self.ply == MAX_PLY) {
@@ -230,27 +230,37 @@ pub const Searcher = struct {
         }
 
         if (!is_root) {
-            if (self.is_draw(pos)) {
-                return 0;
-            }
-
             // Mate-distance pruning
+            var r_alpha = @maximum(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
+            var r_beta = @minimum(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
 
-            alpha = @maximum(alpha, -hce.MateScore + @intCast(hce.Score, self.ply));
-            beta = @minimum(beta, hce.MateScore - @intCast(hce.Score, self.ply) - 1);
-            if (alpha >= beta) {
-                return alpha;
+            if (r_alpha >= r_beta) {
+                return r_alpha;
             }
         }
 
         var in_check = pos.in_check(color);
 
+        // Check Extension
         if (in_check) {
             depth += 1;
         }
 
+        // Horizon
+        if (depth == 0) {
+            return self.quiescence_search(pos, color, alpha, beta);
+        }
+
+        self.nodes += 1;
+
+        // Draw check
+        if (!is_root and self.is_draw(pos)) {
+            return 0;
+        }
+
         var on_pv: bool = beta - alpha > 1;
 
+        // TT Probe
         var hashmove = types.Move.empty();
         var tthit = false;
         var tt_eval: hce.Score = 0;
@@ -259,12 +269,15 @@ pub const Searcher = struct {
         if (entry != null and !in_check) {
             tthit = true;
             tt_eval = entry.?.eval;
-            if (tt_eval > hce.MateScore - 100 and tt_eval <= hce.MateScore) {
-                tt_eval -= 100;
-            } else if (tt_eval < -hce.MateScore + 100 and tt_eval >= -hce.MateScore) {
-                tt_eval += 100;
+            if (tt_eval > hce.MateScore - 50 and tt_eval <= hce.MateScore) {
+                tt_eval -= @intCast(hce.Score, self.ply);
+            } else if (tt_eval < -hce.MateScore + 50 and tt_eval >= -hce.MateScore) {
+                tt_eval += @intCast(hce.Score, self.ply);
             }
             hashmove = entry.?.bestmove;
+            if (is_root) {
+                self.best_move = hashmove;
+            }
 
             if (pos.history[pos.game_ply].fifty < 90 and (depth == 0 or !on_pv)) {
                 switch (entry.?.flag) {
@@ -289,11 +302,6 @@ pub const Searcher = struct {
             return 0;
         }
 
-        if (depth == 0) {
-            self.nodes -= 1;
-            return self.quiescence_search(pos, color, alpha, beta);
-        }
-
         var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
         var best_score: hce.Score = static_eval;
 
@@ -306,28 +314,31 @@ pub const Searcher = struct {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
-            // Static nmp
-            if (depth <= 8 and best_score - @intCast(hce.Score, 90 * depth) > beta) {
-                return best_score;
+            // Reverse Futility Pruning
+            if (depth <= 8 and !hce.is_near_mate(beta)) {
+                if (static_eval - 120 * @intCast(hce.Score, depth) >= beta) {
+                    return static_eval;
+                }
             }
 
             // Null move pruning
-            if (!is_null and depth >= 2 and best_score >= beta and (!tthit or entry.?.flag != tt.Bound.Upper or tt_eval >= beta) and pos.has_non_pawns()) {
-                var r = 4 + depth / 4 + @intCast(usize, @minimum(3, @divFloor(best_score - beta, 128)));
+            if (!is_null and depth >= 2 and static_eval >= beta and pos.has_non_pawns()) {
+                var r = 4 + depth / 4;
 
-                if (r >= depth) {
-                    r = depth - 1;
+                if (r >= depth - 1) {
+                    r = depth - 2;
                 }
 
                 pos.play_null_move();
-                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true);
+                var null_score = -self.negamax(pos, opp_color, depth - r - 1, -beta, -beta + 1, true);
                 pos.undo_null_move();
 
+                if (self.should_stop()) {
+                    return 0;
+                }
+
                 if (null_score >= beta) {
-                    if (hce.is_near_mate(null_score)) {
-                        return beta;
-                    }
-                    return null_score;
+                    return beta;
                 }
             }
         }
@@ -441,7 +452,17 @@ pub const Searcher = struct {
                             self.killer[self.ply][0] = move;
                             self.killer[self.ply][1] = temp;
 
-                            self.history[@enumToInt(color)][move.from][move.to] = @minimum(self.history[@enumToInt(color)][move.from][move.to] + @intCast(u32, depth * depth), 2000000000);
+                            self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
+
+                            if (self.history[@enumToInt(color)][move.from][move.to] >= 30000) {
+                                for (self.history) |*a| {
+                                    for (a) |*b| {
+                                        for (b) |*c| {
+                                            c.* = @divFloor(c.*, 2);
+                                        }
+                                    }
+                                }
+                            }
                         }
                         break;
                     }

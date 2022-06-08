@@ -6,16 +6,6 @@ inline fn le_to_u32(idx: usize) u32 {
     return @as(u32, NNUE_SOURCE[idx + 0]) | (@as(u32, NNUE_SOURCE[idx + 1]) << 8) | (@as(u32, NNUE_SOURCE[idx + 2]) << 16) | (@as(u32, NNUE_SOURCE[idx + 3]) << 24);
 }
 
-fn le_to_i32(idx: usize) i32 {
-    var num = le_to_u32(idx);
-    var k = @intCast(i32, num & 0b0111_1111_1111_1111_1111_1111_1111_1111);
-    if (num & 0b1000_0000_0000_0000_0000_0000_0000_0000 != 0) {
-        k = ~(2147483647 - k);
-    }
-
-    return k;
-}
-
 fn next_u32(idx: *usize) u32 {
     var v = le_to_u32(idx.*);
     idx.* += 4;

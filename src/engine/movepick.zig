@@ -29,7 +29,7 @@ pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *s
         } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16() or searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
             res.appendAssumeCapacity(SortKiller);
         } else {
-            res.appendAssumeCapacity(1 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]));
+            res.appendAssumeCapacity(-30000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]));
         }
     }
 
