@@ -24,9 +24,12 @@ Brilliant win against Blunder 7.6.0 in CCRL division 7 tournament: https://liche
 - https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM normal net can be used with Avalanche!)
 - https://github.com/Tearth/Cosette for Movegen ideas
 
-## Changelog (ELO based on Stockfish limit_strength)
+## Changelog
 
-- ### v1.0 **REWRITE: In Progress. See rewrite branch.**
+- ### v1.0 ~2660 CCRL ELO, WIP
+    - Faster Movegen
+    - Rewrite
+    - 512-neuron NNUE trained on 50 million positions on depth 4
 
 - ### v0.2.2 (+63 ELO), 2629 CCRL ELO
     - Bug fixes

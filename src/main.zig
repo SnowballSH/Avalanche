@@ -1,23 +1,21 @@
 const std = @import("std");
-const Position = @import("./board/position.zig");
-const Perft = @import("./uci/perft.zig");
-const Magic = @import("./board/magic.zig");
-const Zobrist = @import("./board/zobrist.zig");
-const TT = @import("./cache/tt.zig");
-const Uci = @import("./uci/uci.zig");
-const HCE = @import("./evaluation/hce.zig");
-const Search = @import("./search/search.zig");
-const Interface = @import("./uci/interface.zig");
-const SEE = @import("./search/see.zig");
+const types = @import("./chess/types.zig");
+const tables = @import("./chess/tables.zig");
+const zobrist = @import("./chess/zobrist.zig");
+const position = @import("./chess/position.zig");
+const perft = @import("./chess/perft.zig");
+const search = @import("./engine/search.zig");
+const tt = @import("./engine/tt.zig");
+const hce = @import("./engine/hce.zig");
+const interface = @import("./engine/interface.zig");
+const weights = @import("./engine/weights.zig");
 
-pub fn main() !void {
-    Zobrist.init_zobrist();
-    Magic.init_magic();
-    Search.init_tt();
+pub fn main() anyerror!void {
+    tables.init_all();
+    zobrist.init_zobrist();
+    tt.GlobalTT.reset(16);
+    weights.do_nnue();
 
-    defer TT.TTArena.deinit();
-
-    var interface = Interface.UciInterface.new();
-
-    try interface.main_loop();
+    var inter = interface.UciInterface.new();
+    return inter.main_loop();
 }
