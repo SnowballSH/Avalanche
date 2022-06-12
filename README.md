@@ -1,6 +1,6 @@
 # Avalanche
 
-[WIP] UCI Chess Engine written in Zig, using Bitboards and NNUE.
+UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 **CCRL ELO (v0.2.2): 2629**
 
@@ -8,9 +8,7 @@
 
 ## Compile
 
-`zig build -Drelease-fast=true -- nnue` to make weights.zig as well (add NNUE)
-If the weights.zig for current net already exists (rebuild), `zig build -Drelease-fast=true`
-Currently no CPU-specific instructions besides POPCNT and CTZ are used, so one binary should run on any modern machine.
+`zig build -Drelease-fast`
 
 Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
 
@@ -19,16 +17,15 @@ Brilliant win against Blunder 7.6.0 in CCRL division 7 tournament: https://liche
 ## Credits
 
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
-- Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming. Hope the war in Ukraine doesn't impact him and he stays safe!
-- https://github.com/amanjpro/zahak for Search ideas
+- https://github.com/nkarve/surge for movegen inspiration.
+- Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
 - https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM normal net can be used with Avalanche!)
-- https://github.com/Tearth/Cosette for Movegen ideas
 
 ## Changelog
 
-- ### v1.0 ~2660 CCRL ELO, WIP
-    - Faster Movegen
-    - Rewrite
+- ### v1.0 ~2700 CCRL ELO, WIP
+    - Faster Movegen: heavily inspired by Surge
+    - Complete Core Rewrite
     - 512-neuron NNUE trained on 50 million positions on depth 4
 
 - ### v0.2.2 (+63 ELO), 2629 CCRL ELO
