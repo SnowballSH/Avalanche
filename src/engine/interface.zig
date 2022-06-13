@@ -34,10 +34,6 @@ pub const UciInterface = struct {
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
         out: while (true) {
-            if (!self.searcher.is_searching and self.search_thread != null) {
-                self.search_thread.?.join();
-            }
-
             // The command will probably be less than 8192 characters
             var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 8192);
             if (line == null) {
@@ -64,7 +60,7 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 1.0 dev\n");
+                _ = try stdout.write("id name Avalanche 1.0.0\n");
                 _ = try stdout.write("id author Yinuo Huang\n\n");
                 _ = try stdout.write("option name Hash type spin default 16 min 1 max 4096\n");
                 _ = try stdout.writeAll("uciok\n");
@@ -309,11 +305,6 @@ pub const UciInterface = struct {
 
                 self.searcher.stop = false;
 
-                if (self.search_thread != null) {
-                    self.search_thread.?.join();
-                    self.search_thread = null;
-                }
-
                 self.search_thread = std.Thread.spawn(
                     .{ .stack_size = 64 * 1024 * 1024 },
                     start_search,
@@ -322,6 +313,7 @@ pub const UciInterface = struct {
                     std.debug.panic("Oh no, error on thread spawn!\n{}", .{e});
                     unreachable;
                 };
+                self.search_thread.?.detach();
             } else if (std.mem.eql(u8, token.?, "position")) {
                 token = tokens.next();
                 if (token != null) {
@@ -386,8 +378,6 @@ pub const UciInterface = struct {
 
             command_arena.allocator().free(line.?);
         }
-
-        self.search_thread.?.join();
     }
 };
 
