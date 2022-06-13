@@ -13,7 +13,7 @@ pub const QuietLMR: [64][64]i32 = init: {
     inline while (depth < 64) : (depth += 1) {
         var moves = 1;
         inline while (moves < 64) : (moves += 1) {
-            reductions[depth][moves] = @floatToInt(i32, @floor(0.70 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.25));
+            reductions[depth][moves] = @floatToInt(i32, @floor(0.75 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.25));
         }
     }
     break :init reductions;
@@ -103,53 +103,70 @@ pub const Searcher = struct {
         var score = -hce.MateScore;
         var bm = types.Move.empty();
 
+        var alpha = -hce.MateScore;
+        var beta = hce.MateScore;
+
         var depth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
-        while (depth <= bound) : (depth += 1) {
+        while (depth <= bound) {
             self.ply = 0;
 
-            var val = self.negamax(pos, color, depth, -hce.MateScore, hce.MateScore, false);
+            var val = self.negamax(pos, color, depth, alpha, beta, false);
 
             if (self.should_stop()) {
                 break;
             }
 
             score = val;
-            bm = self.best_move;
 
-            outW.print("info depth {} nodes {} time {} score ", .{
-                depth,
-                self.nodes,
-                self.timer.read() / std.time.ns_per_ms,
-            }) catch {};
-
-            if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
-                outW.print("mate {} pv", .{
-                    (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
-                }) catch {};
-                if (bound == MAX_PLY - 1) {
-                    bound = depth + 2;
-                }
+            if (score <= alpha) {
+                alpha = -hce.MateScore;
+            } else if (score >= beta) {
+                beta = hce.MateScore;
             } else {
-                outW.print("cp {} pv", .{
-                    score,
-                }) catch {};
-            }
+                bm = self.best_move;
 
-            if (self.pv_size[0] > 0) {
-                var i: usize = 0;
-                while (i < self.pv_size[0]) : (i += 1) {
+                outW.print("info depth {} nodes {} time {} score ", .{
+                    depth,
+                    self.nodes,
+                    self.timer.read() / std.time.ns_per_ms,
+                }) catch {};
+
+                if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
+                    outW.print("mate {} pv", .{
+                        (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+                    }) catch {};
+                    if (bound == MAX_PLY - 1) {
+                        bound = depth + 2;
+                    }
+                } else {
+                    outW.print("cp {} pv", .{
+                        score,
+                    }) catch {};
+                }
+
+                if (self.pv_size[0] > 0) {
+                    var i: usize = 0;
+                    while (i < self.pv_size[0]) : (i += 1) {
+                        outW.writeByte(' ') catch {};
+                        self.pv[0][i].uci_print(outW);
+                    }
+                } else {
                     outW.writeByte(' ') catch {};
-                    self.pv[0][i].uci_print(outW);
+                    bm.uci_print(outW);
                 }
-            } else {
-                outW.writeByte(' ') catch {};
-                bm.uci_print(outW);
-            }
 
-            outW.writeByte('\n') catch {};
-            out.flush() catch {};
+                outW.writeByte('\n') catch {};
+                out.flush() catch {};
+
+                alpha = score - 20;
+                beta = score + 20;
+
+                depth += 1;
+            }
         }
+
+        self.best_move = bm;
 
         outW.print("info depth {} nodes {} time {} score ", .{
             depth,
