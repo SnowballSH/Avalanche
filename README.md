@@ -3,6 +3,7 @@
 UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 **CCRL ELO (v0.2.2): 2629**
+**v1.0.0 estimate: 2720**
 
 [Avalanche's CCRL Profile](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%200.2.2%2064-bit#Avalanche_0_2_2_64-bit)
 
@@ -12,7 +13,7 @@ UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
 
-Brilliant win against Blunder 7.6.0 in CCRL division 7 tournament: https://lichess.org/eENdzud8/white
+Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6: https://lichess.org/study/1UVjx7eE/vY896gMZ#0
 
 ## Credits
 
