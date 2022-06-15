@@ -1,8 +1,19 @@
-zig build -Drelease-fast=true -Dtarget=x86_64-windows
-mv ./zig-out/bin/Avalanche.exe ./binaries/Avalanche_x86_64_windows_1.0.0.exe
-zig build -Drelease-fast=true -Dtarget=x86_64-windows -Dcpu=haswell
-mv ./zig-out/bin/Avalanche.exe ./binaries/Avalanche_x86_64_windows_haswell_1.0.0.exe
-zig build -Drelease-fast=true -Dtarget=x86_64-linux
-mv ./zig-out/bin/Avalanche ./binaries/Avalanche_x86_64_linux_1.0.0
-zig build -Drelease-fast=true -Dtarget=aarch64-macos
-cp ./zig-out/bin/Avalanche ./binaries/Avalanche_aarch64_macos_1.0.0
+declare -a targets=("x86_64-windows" "x86_64-linux" "x86_64-macos" "aarch64-macos")
+mkdir -p "artifacts/"
+for target in "${targets[@]}"; do
+    mkdir -p artifacts/$target
+    echo "Building target ${target}..."
+    zig build -Dtarget=${target} -Drelease-fast --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-1.0.0"
+    
+    if [[ "${target}" != "aarch64-macos" ]]; then
+        zig build -Dtarget=${target} -Drelease-fast -Dcpu=haswell --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-haswell-1.0.0"
+    else
+        zig build -Dtarget=${target} -Drelease-fast -Dcpu=apple_m1 --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-m1-1.0.0"
+    fi
+    cat README.md > artifacts/${target}/README.md
+    cp LICENSE artifacts/${target}/
+    cd artifacts/${target}/
+    zip -9 -r ${target}.zip *.md bin/* LICENSE
+    mv ${target}.zip ../
+    cd ../..
+done
