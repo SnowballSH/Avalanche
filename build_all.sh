@@ -10,7 +10,7 @@ for target in "${targets[@]}"; do
     else
         zig build -Dtarget=${target} -Drelease-fast -Dcpu=apple_m1 --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-m1-1.0.0"
     fi
-    sed -e '1,5d' < README.md > artifacts/${target}/README.md
+    cat README.md > artifacts/${target}/README.md
     cp LICENSE artifacts/${target}/
     cd artifacts/${target}/
     zip -9 -r ${target}.zip *.md bin/* LICENSE
