@@ -1,8 +1,6 @@
-
-   
 **/zig-cache
 **/zig-out
-**/old_binaries
+**/artifacts
 .DS_Store
 **/*.bin
 **/*.pgn
