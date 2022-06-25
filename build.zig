@@ -71,7 +71,7 @@ pub fn build(b: *std.build.Builder) void {
         do_nnue();
     }
 
-    //exe.linkLibC();
+    exe.linkLibC();
     exe.install();
 
     const run_cmd = exe.run();
