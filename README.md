@@ -3,9 +3,12 @@
 UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 **CCRL ELO (v0.2.2): 2629**
-**v1.0.0 estimate: 2720**
 
-[Avalanche's CCRL Profile](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%200.2.2%2064-bit#Avalanche_0_2_2_64-bit)
+**v1.0.0 estimate: 2725**
+
+[Avalanche's CCRL Profile for v0.2.2](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%200.2.2%2064-bit#Avalanche_0_2_2_64-bit)
+
+[Avalanche's CCRL Profile for v1.0.0](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.0.0%2064-bit#Avalanche_1_0_0_64-bit)
 
 ## Compile
 
@@ -17,6 +20,8 @@ Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6:
 
 ## Credits
 
+- [Dan Ellis Echavarria](https://github.com/Deecellar) for writing the github action CI :D
+
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
@@ -24,7 +29,7 @@ Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6:
 
 ## Changelog
 
-- ### v1.0 ~2700 CCRL ELO, WIP
+- ### v1.0 ~2725 CCRL ELO
     - Faster Movegen: heavily inspired by Surge
     - Complete Core Rewrite
     - 512-neuron NNUE trained on 50 million positions on depth 4
