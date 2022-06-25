@@ -6,9 +6,9 @@ for target in "${targets[@]}"; do
     zig build -Dtarget=${target} -Drelease-fast --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-1.0.0"
     
     if [[ "${target}" != "aarch64-macos" ]]; then
-        zig build -Dtarget=${target} -Drelease-fast -Dcpu=haswell --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-haswell-1.0.0"
+        zig build -Dtarget=${target} -Dno_nn -Drelease-fast -Dcpu=haswell --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-haswell-1.0.0"
     else
-        zig build -Dtarget=${target} -Drelease-fast -Dcpu=apple_m1 --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-m1-1.0.0"
+        zig build -Dtarget=${target} -Dno_nn -Drelease-fast -Dcpu=apple_m1 --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-m1-1.0.0"
     fi
     cat README.md > artifacts/${target}/README.md
     cp LICENSE artifacts/${target}/

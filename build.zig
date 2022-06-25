@@ -47,8 +47,6 @@ fn do_nnue() void {
 }
 
 pub fn build(b: *std.build.Builder) void {
-    do_nnue();
-
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -64,9 +62,16 @@ pub fn build(b: *std.build.Builder) void {
     exe.setTarget(target);
     exe.setBuildMode(mode);
 
-    exe.linkLibC();
-    // exe.linkSystemLibrary("c++");
-    exe.addIncludeDir("./src/c");
+    const build_options = b.addOptions();
+    exe.addOptions("build_options", build_options);
+    const foo_value = b.option(bool, "no_nn", "Don't parse NNUE") orelse false;
+    build_options.addOption(bool, "no_nn", foo_value);
+
+    if (!foo_value) {
+        do_nnue();
+    }
+
+    //exe.linkLibC();
     exe.install();
 
     const run_cmd = exe.run();
