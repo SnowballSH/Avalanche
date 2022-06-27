@@ -14,7 +14,9 @@ UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 `zig build -Drelease-fast`
 
-Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine (It might not be online until I host it some time in the future... but you can still view its games!)
+Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
+
+Feel free to challenge it!
 
 Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6: https://lichess.org/study/1UVjx7eE/vY896gMZ#0
 
