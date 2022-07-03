@@ -90,6 +90,8 @@ pub const Searcher = struct {
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
+        const aspiration_window: hce.Score = 25;
+
         var out = std.io.bufferedWriter(std.io.getStdOut().writer());
         var outW = out.writer();
         self.stop = false;
@@ -159,30 +161,14 @@ pub const Searcher = struct {
                 outW.writeByte('\n') catch {};
                 out.flush() catch {};
 
-                alpha = score - 20;
-                beta = score + 20;
+                alpha = score - aspiration_window;
+                beta = score + aspiration_window;
 
                 depth += 1;
             }
         }
 
         self.best_move = bm;
-
-        outW.print("info depth {} nodes {} time {} score ", .{
-            depth,
-            self.nodes,
-            self.timer.read() / std.time.ns_per_ms,
-        }) catch {};
-
-        if (std.math.absInt(score) catch 0 >= (hce.MateScore - hce.MaxMate)) {
-            outW.print("mate {} pv", .{
-                (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
-            }) catch {};
-        } else {
-            outW.print("cp {} pv", .{
-                score,
-            }) catch {};
-        }
 
         if (self.pv_size[0] > 0) {
             var i: usize = 0;
@@ -381,7 +367,7 @@ pub const Searcher = struct {
             }
         }
 
-        var evallist = movepick.score_moves(self, pos, &movelist, hashmove);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
         var best_move = types.Move.empty();
@@ -391,7 +377,7 @@ pub const Searcher = struct {
 
         var index: usize = 0;
         while (index < move_size) : (index += 1) {
-            var move = movepick.get_next_best(&movelist, &evallist, index);
+            var move = movepick.getNextBest(&movelist, &evallist, index);
 
             var is_capture = move.is_capture();
 
@@ -412,11 +398,11 @@ pub const Searcher = struct {
                 // LMR
                 var reduction: i32 = 0;
 
-                if (depth >= 3 and !is_capture and index > 2 * @intCast(usize, @boolToInt(is_root))) {
+                if (depth >= 2 and !is_capture and index >= 2 * @intCast(usize, @boolToInt(is_root))) {
                     reduction = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
 
                     if (on_pv) {
-                        reduction -= 2;
+                        reduction -= 1;
                     }
 
                     if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16()) {
@@ -551,13 +537,13 @@ pub const Searcher = struct {
         }
         alpha = @maximum(alpha, eval);
 
-        var evallist = movepick.score_moves(self, pos, &movelist, types.Move.empty());
+        var evallist = movepick.scoreMoves(self, pos, &movelist, types.Move.empty());
         defer evallist.deinit();
 
         var index: usize = 0;
 
         while (index < move_size) : (index += 1) {
-            var move = movepick.get_next_best(&movelist, &evallist, index);
+            var move = movepick.getNextBest(&movelist, &evallist, index);
 
             if (evallist.items[index] < 0) {
                 break;
