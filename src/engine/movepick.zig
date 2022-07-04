@@ -13,7 +13,7 @@ pub const SortWinningCapture: SortScore = 8000;
 pub const SortLosingCapture: SortScore = -35000;
 pub const SortKiller: SortScore = 4000;
 
-pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
+pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
 
     var hm = hashmove.to_u16();
@@ -51,7 +51,7 @@ pub fn score_moves(searcher: *search.Searcher, pos: *position.Position, list: *s
     return res;
 }
 
-pub fn get_next_best(list: *std.ArrayList(types.Move), evals: *std.ArrayList(SortScore), i: usize) types.Move {
+pub fn getNextBest(list: *std.ArrayList(types.Move), evals: *std.ArrayList(SortScore), i: usize) types.Move {
     var move_size = list.items.len;
     var j = i + 1;
     while (j < move_size) : (j += 1) {

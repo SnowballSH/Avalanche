@@ -307,7 +307,7 @@ pub const UciInterface = struct {
 
                 self.search_thread = std.Thread.spawn(
                     .{ .stack_size = 64 * 1024 * 1024 },
-                    start_search,
+                    startSearch,
                     .{ &self.searcher, &self.position, movetime.?, max_depth },
                 ) catch |e| {
                     std.debug.panic("Oh no, error on thread spawn!\n{}", .{e});
@@ -381,7 +381,7 @@ pub const UciInterface = struct {
     }
 };
 
-fn start_search(searcher: *search.Searcher, pos: *position.Position, movetime: usize, max_depth: ?u8) void {
+fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: usize, max_depth: ?u8) void {
     searcher.max_millis = movetime;
     if (pos.turn == types.Color.White) {
         _ = searcher.iterative_deepening(pos, types.Color.White, max_depth);
