@@ -26,6 +26,8 @@ pub const Searcher = struct {
     max_millis: u64 = 0,
     timer: std.time.Timer = undefined,
 
+    time_stop: bool = false,
+
     nodes: u64 = 0,
     ply: u32 = 0,
     stop: bool = false,
@@ -96,6 +98,7 @@ pub const Searcher = struct {
         var outW = out.writer();
         self.stop = false;
         self.is_searching = true;
+        self.time_stop = false;
         self.reset_heuristics();
         self.nodes = 0;
         self.best_move = types.Move.empty();
@@ -115,7 +118,7 @@ pub const Searcher = struct {
 
             var val = self.negamax(pos, color, depth, alpha, beta, false);
 
-            if (self.should_stop()) {
+            if (self.time_stop or self.should_stop()) {
                 break;
             }
 
@@ -224,6 +227,11 @@ pub const Searcher = struct {
         var depth = depth_;
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
+        if (self.nodes & 1023 == 0 and self.should_stop()) {
+            self.time_stop = true;
+            return 0;
+        }
+
         var is_root = self.ply == 0;
 
         self.pv_size[self.ply] = 0;
@@ -301,10 +309,6 @@ pub const Searcher = struct {
             }
         }
 
-        if (self.should_stop()) {
-            return 0;
-        }
-
         var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
         var best_score: hce.Score = static_eval;
 
@@ -312,20 +316,16 @@ pub const Searcher = struct {
 
         // Prunings
         if (!in_check and !on_pv) {
-            // Razoring
-            if (depth <= 1 and static_eval + 250 < alpha) {
-                return self.quiescence_search(pos, color, alpha, beta);
-            }
-
             // Reverse Futility Pruning
-            if (depth <= 8 and !hce.is_near_mate(beta)) {
-                if (static_eval - 120 * @intCast(hce.Score, depth) >= beta) {
+            if (depth <= 6 and !hce.is_near_mate(beta)) {
+                if (static_eval - 50 * @intCast(hce.Score, depth) >= beta) {
                     return static_eval;
                 }
             }
 
             // Null move pruning
             if (!is_null and depth >= 2 and static_eval >= beta and pos.has_non_pawns()) {
+                // var r: usize = 3;
                 var r = 4 + depth / 4;
 
                 if (r >= depth - 1) {
@@ -336,12 +336,12 @@ pub const Searcher = struct {
                 var null_score = -self.negamax(pos, opp_color, depth - r - 1, -beta, -beta + 1, true);
                 pos.undo_null_move();
 
-                if (self.should_stop()) {
+                if (self.time_stop) {
                     return 0;
                 }
 
                 if (null_score >= beta) {
-                    return beta;
+                    return null_score;
                 }
             }
         }
@@ -430,7 +430,7 @@ pub const Searcher = struct {
             pos.undo_move(color, move);
             _ = self.hash_history.pop();
 
-            if (self.should_stop()) {
+            if (self.time_stop) {
                 return 0;
             }
 
@@ -491,6 +491,11 @@ pub const Searcher = struct {
         var beta = beta_;
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
+        if (self.nodes & 1023 == 0 and self.should_stop()) {
+            self.time_stop = true;
+            return 0;
+        }
+
         self.nodes += 1;
         self.pv_size[self.ply] = 0;
 
@@ -521,8 +526,12 @@ pub const Searcher = struct {
             }
         }
 
-        if (self.should_stop()) {
-            return 0;
+        // TT Probe
+        var hashmove = types.Move.empty();
+        var entry = tt.GlobalTT.get(pos.hash, 0);
+
+        if (entry != null) {
+            hashmove = entry.?.bestmove;
         }
 
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 2) catch unreachable;
@@ -537,7 +546,7 @@ pub const Searcher = struct {
         }
         alpha = @maximum(alpha, eval);
 
-        var evallist = movepick.scoreMoves(self, pos, &movelist, types.Move.empty());
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
         var index: usize = 0;
@@ -555,7 +564,7 @@ pub const Searcher = struct {
             self.ply -= 1;
             pos.undo_move(color, move);
 
-            if (self.should_stop()) {
+            if (self.time_stop) {
                 return 0;
             }
 
@@ -566,13 +575,12 @@ pub const Searcher = struct {
                     std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
                     self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
+                    if (score >= beta) {
+                        return beta;
+                    }
+
                     alpha = score;
                 }
-            }
-
-            if (alpha >= beta) {
-                alpha = beta;
-                break;
             }
         }
 
