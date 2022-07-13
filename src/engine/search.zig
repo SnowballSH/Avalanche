@@ -173,18 +173,7 @@ pub const Searcher = struct {
 
         self.best_move = bm;
 
-        if (self.pv_size[0] > 0) {
-            var i: usize = 0;
-            while (i < self.pv_size[0]) : (i += 1) {
-                outW.writeByte(' ') catch {};
-                self.pv[0][i].uci_print(outW);
-            }
-        } else {
-            outW.writeByte(' ') catch {};
-            bm.uci_print(outW);
-        }
-
-        outW.writeAll("\nbestmove ") catch {};
+        outW.writeAll("bestmove ") catch {};
         bm.uci_print(outW);
         outW.writeByte('\n') catch {};
         out.flush() catch {};
