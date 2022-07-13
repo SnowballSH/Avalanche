@@ -286,6 +286,10 @@ pub inline fn popcount(x: Bitboard) i32 {
     return @intCast(i32, @popCount(u64, x));
 }
 
+pub inline fn popcount_usize(x: Bitboard) usize {
+    return @intCast(usize, @popCount(u64, x));
+}
+
 pub inline fn lsb(x: Bitboard) i32 {
     return @intCast(i32, @ctz(u64, x));
     // Ancient machines:

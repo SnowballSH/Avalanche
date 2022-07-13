@@ -10,9 +10,9 @@ pub const QuietLMR: [64][64]i32 = init: {
     @setEvalBranchQuota(64 * 64 * 6);
     var reductions: [64][64]i32 = undefined;
     var depth = 1;
-    inline while (depth < 64) : (depth += 1) {
+    while (depth < 64) : (depth += 1) {
         var moves = 1;
-        inline while (moves < 64) : (moves += 1) {
+        while (moves < 64) : (moves += 1) {
             reductions[depth][moves] = @floatToInt(i32, @floor(0.75 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.25));
         }
     }
@@ -87,7 +87,7 @@ pub const Searcher = struct {
         }
     }
 
-    pub inline fn should_stop(self: *Searcher) bool {
+    pub fn should_stop(self: *Searcher) bool {
         return self.stop or self.timer.read() / std.time.ns_per_ms > self.max_millis + 3;
     }
 
@@ -194,8 +194,8 @@ pub const Searcher = struct {
             return true;
         }
 
-        if (std.mem.len(self.hash_history.items) > 1) {
-            var index: i16 = @intCast(i16, std.mem.len(self.hash_history.items)) - 3;
+        if (self.hash_history.items.len > 1) {
+            var index: i16 = @intCast(i16, self.hash_history.items.len) - 3;
             var limit: i16 = index - @intCast(i16, pos.history[pos.game_ply].fifty) - 1;
             var count: u8 = 0;
             while (index >= limit and index >= 0) {
@@ -224,6 +224,10 @@ pub const Searcher = struct {
         var is_root = self.ply == 0;
 
         self.pv_size[self.ply] = 0;
+
+        if (depth != 0) {
+            tt.GlobalTT.prefetch(pos.hash);
+        }
 
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
@@ -491,6 +495,8 @@ pub const Searcher = struct {
         if (hce.is_material_draw(pos)) {
             return 0;
         }
+
+        // tt.GlobalTT.prefetch(pos.hash);
 
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);

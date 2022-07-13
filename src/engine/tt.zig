@@ -55,8 +55,16 @@ pub const TranspositionTable = struct {
         }
     }
 
-    pub fn set(self: *TranspositionTable, entry: Item) void {
+    pub inline fn set(self: *TranspositionTable, entry: Item) void {
         self.data.items[entry.hash % self.size] = entry;
+    }
+
+    pub fn prefetch(self: *TranspositionTable, hash: u64) void {
+        @prefetch(&self.data.items[hash % self.size], .{
+            .rw = .read,
+            .locality = 1,
+            .cache = .data,
+        });
     }
 
     pub fn get(self: *TranspositionTable, hash: u64, depth: usize) ?Item {

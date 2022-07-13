@@ -2,7 +2,7 @@ const std = @import("std");
 
 var NNUE_SOURCE: [12]u8 = undefined;
 
-inline fn le_to_u32(idx: usize) u32 {
+fn le_to_u32(idx: usize) u32 {
     return @as(u32, NNUE_SOURCE[idx + 0]) | (@as(u32, NNUE_SOURCE[idx + 1]) << 8) | (@as(u32, NNUE_SOURCE[idx + 2]) << 16) | (@as(u32, NNUE_SOURCE[idx + 3]) << 24);
 }
 

@@ -269,7 +269,7 @@ pub const DynamicEvaluator = struct {
     }
 };
 
-pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) Score {
+pub fn distance_eval(pos: *position.Position, comptime white_winning: bool) Score {
     var k1 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()]));
     var k2 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()]));
 
@@ -292,7 +292,7 @@ pub inline fn distance_eval(pos: *position.Position, comptime white_winning: boo
     return score;
 }
 
-pub inline fn evaluate(pos: *position.Position) Score {
+pub fn evaluate(pos: *position.Position) Score {
     var phase = pos.phase();
     if (UseNNUE and (phase >= 5 or pos.has_pawns())) {
         return evaluate_nnue(pos);
@@ -380,6 +380,6 @@ pub fn is_material_draw(pos: *position.Position) bool {
 
 pub const MaxMate: i32 = 200;
 
-pub inline fn is_near_mate(score: Score) bool {
+pub fn is_near_mate(score: Score) bool {
     return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;
 }

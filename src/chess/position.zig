@@ -142,22 +142,22 @@ pub const Position = struct {
         self.evaluator.full_refresh(self);
     }
 
-    pub inline fn phase(self: *Position) usize {
+    pub fn phase(self: *Position) usize {
         var val: usize = 0;
-        val += @intCast(usize, types.popcount(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]));
-        val += @intCast(usize, types.popcount(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]) * 2);
-        val += @intCast(usize, types.popcount(self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()]) * 4);
+        val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]);
+        val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]) * 2;
+        val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()]) * 4;
         return val;
     }
 
-    pub inline fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
+    pub fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
         self.evaluator.add_piece(pc, sq, self);
         self.mailbox[sq.index()] = pc;
         self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
         self.hash ^= zobrist.ZobristTable[pc.index()][sq.index()];
     }
 
-    pub inline fn remove_piece(self: *Position, sq: types.Square) void {
+    pub fn remove_piece(self: *Position, sq: types.Square) void {
         self.evaluator.remove_piece(sq, self);
         const pc = self.mailbox[sq.index()].index();
         self.hash ^= zobrist.ZobristTable[pc][sq.index()];
@@ -171,7 +171,7 @@ pub const Position = struct {
     }
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
-    pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
+    pub fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
         self.evaluator.move_piece_quiet(from, to, self);
         self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()] ^ zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
 
@@ -395,7 +395,7 @@ pub const Position = struct {
         self.game_ply -= 1;
     }
 
-    pub inline fn play_null_move(self: *Position) void {
+    pub fn play_null_move(self: *Position) void {
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply += 1;
@@ -406,7 +406,7 @@ pub const Position = struct {
         }
     }
 
-    pub inline fn undo_null_move(self: *Position) void {
+    pub fn undo_null_move(self: *Position) void {
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;

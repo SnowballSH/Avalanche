@@ -77,7 +77,7 @@ pub const BlackPawnAttacks = [64]types.Bitboard{
     0x28000000000000, 0x50000000000000, 0xa0000000000000, 0x40000000000000,
 };
 
-pub fn reverse_bitboard(b_: types.Bitboard) types.Bitboard {
+pub inline fn reverse_bitboard(b_: types.Bitboard) types.Bitboard {
     var b = b_;
     b = (b & 0x5555555555555555) << 1 | ((b >> 1) & 0x5555555555555555);
     b = (b & 0x3333333333333333) << 2 | ((b >> 2) & 0x3333333333333333);
@@ -89,7 +89,7 @@ pub fn reverse_bitboard(b_: types.Bitboard) types.Bitboard {
 }
 
 // Hyperbola Quintessence Algorithm
-pub fn sliding_attack(square_: types.Square, occ: types.Bitboard, mask: types.Bitboard) types.Bitboard {
+pub inline fn sliding_attack(square_: types.Square, occ: types.Bitboard, mask: types.Bitboard) types.Bitboard {
     var square = square_.index();
     return (((mask & occ) -% types.SquareIndexBB[square] *% 2) ^
         reverse_bitboard(reverse_bitboard(mask & occ) -% reverse_bitboard(types.SquareIndexBB[square]) *% 2)) & mask;
@@ -97,7 +97,7 @@ pub fn sliding_attack(square_: types.Square, occ: types.Bitboard, mask: types.Bi
 
 // ROOK MAGIC BITBOARDS
 
-fn get_rook_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
+inline fn get_rook_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return sliding_attack(square, occ, types.MaskFile[@enumToInt(square.file())]) | sliding_attack(square, occ, types.MaskRank[@enumToInt(square.rank())]);
 }
 
@@ -165,7 +165,7 @@ pub inline fn get_xray_rook_attacks(square: types.Square, occ: types.Bitboard, b
 
 // BISHOP MAGIC BITBOARDS
 
-fn get_bishop_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
+inline fn get_bishop_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return sliding_attack(square, occ, types.MaskDiagonal[@intCast(usize, square.diagonal())]) | sliding_attack(square, occ, types.MaskAntiDiagonal[@intCast(usize, square.anti_diagonal())]);
 }
 
