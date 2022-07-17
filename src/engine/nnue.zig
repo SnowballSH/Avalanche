@@ -3,6 +3,8 @@ pub const weights = @import("./weights.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 
+const VECTOR_SIZE = weights.VECTOR_SIZE;
+
 pub inline fn clipped_relu_one(input: i16) i16 {
     return @minimum(64, @maximum(0, input));
 }
@@ -66,11 +68,16 @@ pub const NNUE = struct {
             self.activations[0][wi] = true;
             self.activations[1][bi] = true;
 
-            for (self.accumulator[0]) |*ptr, l_index| {
-                ptr.* += weights.LAYER_1[wi][l_index];
-            }
-            for (self.accumulator[1]) |*ptr, l_index| {
-                ptr.* += weights.LAYER_1[bi][l_index];
+            inline for (@as([weights.HIDDEN_SIZE / VECTOR_SIZE]u0, undefined)) |_, i| {
+                var vaw: @Vector(VECTOR_SIZE, i16) = self.accumulator[0][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].*;
+                vaw += weights.LAYER_1[wi][i];
+
+                self.accumulator[0][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].* = vaw;
+
+                var vab: @Vector(VECTOR_SIZE, i16) = self.accumulator[1][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].*;
+                vab += weights.LAYER_1[bi][i];
+
+                self.accumulator[1][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].* = vab;
             }
 
             if (UseResidual) {
@@ -91,11 +98,16 @@ pub const NNUE = struct {
         self.activations[0][wi] = false;
         self.activations[1][bi] = false;
 
-        for (self.accumulator[0]) |*ptr, l_index| {
-            ptr.* -= weights.LAYER_1[wi][l_index];
-        }
-        for (self.accumulator[1]) |*ptr, l_index| {
-            ptr.* -= weights.LAYER_1[bi][l_index];
+        inline for (@as([weights.HIDDEN_SIZE / VECTOR_SIZE]u0, undefined)) |_, i| {
+            var vaw: @Vector(VECTOR_SIZE, i16) = self.accumulator[0][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].*;
+            vaw -= weights.LAYER_1[wi][i];
+
+            self.accumulator[0][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].* = vaw;
+
+            var vab: @Vector(VECTOR_SIZE, i16) = self.accumulator[1][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].*;
+            vab -= weights.LAYER_1[bi][i];
+
+            self.accumulator[1][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].* = vab;
         }
 
         if (UseResidual) {
@@ -115,11 +127,16 @@ pub const NNUE = struct {
         self.activations[0][wi] = true;
         self.activations[1][bi] = true;
 
-        for (self.accumulator[0]) |*ptr, l_index| {
-            ptr.* += weights.LAYER_1[wi][l_index];
-        }
-        for (self.accumulator[1]) |*ptr, l_index| {
-            ptr.* += weights.LAYER_1[bi][l_index];
+        inline for (@as([weights.HIDDEN_SIZE / VECTOR_SIZE]u0, undefined)) |_, i| {
+            var vaw: @Vector(VECTOR_SIZE, i16) = self.accumulator[0][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].*;
+            vaw += weights.LAYER_1[wi][i];
+
+            self.accumulator[0][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].* = vaw;
+
+            var vab: @Vector(VECTOR_SIZE, i16) = self.accumulator[1][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].*;
+            vab += weights.LAYER_1[bi][i];
+
+            self.accumulator[1][(i * VECTOR_SIZE)..][0..VECTOR_SIZE].* = vab;
         }
 
         if (UseResidual) {
