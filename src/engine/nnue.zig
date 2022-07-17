@@ -8,7 +8,8 @@ pub inline fn clipped_relu_one(input: i16) i16 {
 }
 
 pub inline fn normalize(val: i32) i16 {
-    return @intCast(i16, @divFloor(val * 85, 2048)); // * 170.0 / 64.0 / 64.0
+    return @intCast(i16, @divTrunc(val * 85, 2048)); // * 170.0 / 64.0 / 64.0
+    // return @floatToInt(i16, @intToFloat(f32, val) * 170.0 / 4096.0);
 }
 
 const UseResidual = true;

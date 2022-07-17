@@ -10,7 +10,11 @@ const hce = @import("./engine/hce.zig");
 const interface = @import("./engine/interface.zig");
 const weights = @import("./engine/weights.zig");
 
+const arch = @import("build_options");
+
 pub fn main() anyerror!void {
+    std.debug.print("Using NNUE of architecture {}x{}x{}\n", .{ arch.INPUT_SIZE, arch.HIDDEN_SIZE, arch.OUTPUT_SIZE });
+
     tables.init_all();
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);

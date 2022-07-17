@@ -12,40 +12,6 @@ fn next_u32(idx: *usize) u32 {
     return v;
 }
 
-fn do_nnue() void {
-    const file = std.fs.cwd().createFile(
-        "src/arch.zig",
-        .{ .read = true },
-    ) catch {
-        std.debug.panic("Unable to open src/arch.zig", .{});
-    };
-    defer file.close();
-    const nnue_file = std.fs.cwd().openFile(
-        "nets/default.nnue",
-        .{},
-    ) catch {
-        std.debug.panic("Unable to open nets/default.nnue", .{});
-    };
-    defer nnue_file.close();
-    _ = nnue_file.read(NNUE_SOURCE[0..]) catch {
-        std.debug.panic("Unable to read nets/default.nnue", .{});
-    };
-
-    const writer = file.writer();
-
-    var index: usize = 0;
-
-    var input_size = next_u32(&index);
-    var hidden_size = next_u32(&index);
-    var output_size = next_u32(&index);
-
-    writer.print("pub const INPUT_SIZE: usize = {};\npub const HIDDEN_SIZE: usize = {};\npub const OUTPUT_SIZE: usize = {};\n", .{
-        input_size,
-        hidden_size,
-        output_size,
-    }) catch {};
-}
-
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
@@ -64,11 +30,28 @@ pub fn build(b: *std.build.Builder) void {
 
     const build_options = b.addOptions();
     exe.addOptions("build_options", build_options);
-    const foo_value = b.option(bool, "no_nn", "Don't parse NNUE") orelse false;
-    build_options.addOption(bool, "no_nn", foo_value);
 
-    if (!foo_value) {
-        do_nnue();
+    {
+        const nnue_file = std.fs.cwd().openFile(
+            "nets/default.nnue",
+            .{},
+        ) catch {
+            std.debug.panic("Unable to open nets/default.nnue", .{});
+        };
+        defer nnue_file.close();
+        _ = nnue_file.read(NNUE_SOURCE[0..]) catch {
+            std.debug.panic("Unable to read nets/default.nnue", .{});
+        };
+
+        var index: usize = 0;
+
+        var input_size = next_u32(&index);
+        var hidden_size = next_u32(&index);
+        var output_size = next_u32(&index);
+
+        build_options.addOption(usize, "INPUT_SIZE", @intCast(usize, input_size));
+        build_options.addOption(usize, "HIDDEN_SIZE", @intCast(usize, hidden_size));
+        build_options.addOption(usize, "OUTPUT_SIZE", @intCast(usize, output_size));
     }
 
     exe.linkLibC();

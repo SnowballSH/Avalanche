@@ -1,5 +1,5 @@
 const std = @import("std");
-const arch = @import("../arch.zig");
+const arch = @import("build_options");
 
 const NNUE_SOURCE = @embedFile("../../nets/default.nnue");
 
