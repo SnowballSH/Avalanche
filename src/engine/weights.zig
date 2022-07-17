@@ -2,27 +2,27 @@ const std = @import("std");
 const arch = @import("build_options");
 
 const builtin = @import("builtin");
-pub fn suggestVectorSizeForCpu(comptime T: type, cpu: std.Target.Cpu) usize {
-    switch (cpu.arch) {
-        .x86_64 => {
-            // Note: This is mostly just guesswork. It'd be great if someone more qualified were to take a
-            // proper look at this.
+pub fn suggestVectorSizeForCpu(comptime T: type, comptime cpu: std.Target.Cpu) usize {
+    comptime {
+        switch (cpu.arch) {
+            .x86_64 => {
+                // Note: This is mostly just guesswork. It'd be great if someone more qualified were to take a
+                // proper look at this.
 
-            if (T == bool and std.Target.x86.featureSetHas(.prefer_mask_registers)) return 64;
-
-            const vector_bit_size = blk: {
-                if (std.Target.x86.featureSetHas(.avx512f)) break :blk 512;
-                if (std.Target.x86.featureSetHas(.prefer_256_bit)) break :blk 256;
-                if (std.Target.x86.featureSetHas(.prefer_128_bit)) break :blk 128;
-                break :blk 64;
-            };
-            const element_bit_size = @maximum(8, std.math.ceilPowerOfTwo(T, @bitSizeOf(T)) catch @panic("Never"));
-            return @divExact(vector_bit_size, element_bit_size);
-        },
-        else => {
-            const element_bit_size = @maximum(8, std.math.ceilPowerOfTwo(T, @bitSizeOf(T)) catch @panic("Never"));
-            return @divExact(128, element_bit_size);
-        },
+                if (T == bool and std.Target.x86.featureSetHas(.prefer_mask_registers)) return 64;
+                const vector_bit_size = blk: {
+                    if (std.Target.x86.featureSetHas(cpu.features, .avx512f)) break :blk 512;
+                    if (std.Target.x86.featureSetHas(cpu.features, .prefer_256_bit)) break :blk 256;
+                    if (std.Target.x86.featureSetHas(cpu.features, .prefer_128_bit)) break :blk 128 else break :blk 64;
+                };
+                const element_bit_size = @maximum(8, std.math.ceilPowerOfTwo(T, @bitSizeOf(T)) catch @panic("Hit a never case"));
+                return @divExact(vector_bit_size, element_bit_size);
+            },
+            else => {
+                const element_bit_size = @maximum(8, std.math.ceilPowerOfTwo(T, @bitSizeOf(T)) catch @panic("Hit a never case"));
+                return @divExact(128, element_bit_size);
+            },
+        }
     }
 }
 
