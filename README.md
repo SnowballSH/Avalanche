@@ -25,9 +25,25 @@ Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6:
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
 - https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM normal net can be used with Avalanche!)
 
+## Originality Status
+
+- General
+    - This is the first released chess engine written in the **Zig Programming Language**. Although there are Zig libraries for chess, Avalanche is completely stand-alone and does not use any external libraries.
+- Move Generator
+    - Algorithm is inspired by Surge, but code is 100% hand-written in Zig.
+- Search
+    - Avalanche has a fairy simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually. I hope to add more sophisticated prunings and extensions in the future.
+- Evaluation
+    - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is removed from Avalanche's main evaluation**.
+    - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow and the data is generated through self-play games. I hope to make it public in the future.
+- UCI Interface/Communication code
+    - 100% original
+- Testing
+    - SPRT Testing of new features is ran on a local instance of https://github.com/AndyGrant/OpenBench.
+
 ## Changelog
 
-- ### v1.0.0 (+113 ELO) 2742 CCRL ELO
+- ### v1.0.0 (+113 ELO) 2743 CCRL ELO
     - Faster Movegen: heavily inspired by Surge
     - Complete Core Rewrite
     - 512-neuron NNUE trained on 50 million positions on depth 4
