@@ -216,6 +216,9 @@ pub const Searcher = struct {
         var depth = depth_;
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
+        // >> Step 1: Preparations
+
+        // Step 1.1: Stop if time is up
         if (self.nodes & 1023 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
@@ -225,16 +228,18 @@ pub const Searcher = struct {
 
         self.pv_size[self.ply] = 0;
 
+        // Step 1.2: Prefetch
         if (depth != 0) {
             tt.GlobalTT.prefetch(pos.hash);
         }
 
+        // Step 1.3: Ply Overflow Check
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
         }
 
+        // Step 1.4: Mate-distance pruning
         if (!is_root) {
-            // Mate-distance pruning
             var r_alpha = @maximum(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
             var r_beta = @minimum(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
 
@@ -245,26 +250,26 @@ pub const Searcher = struct {
 
         var in_check = pos.in_check(color);
 
-        // Check Extension
+        // Step 4.1: Check Extension (moved up)
         if (in_check) {
             depth += 1;
         }
 
-        // Horizon
+        // Step 1.5: Go to Quiescence Search at Horizon
         if (depth == 0) {
             return self.quiescence_search(pos, color, alpha, beta);
         }
 
         self.nodes += 1;
 
-        // Draw check
+        // Step 1.6: Draw check
         if (!is_root and self.is_draw(pos)) {
             return 0;
         }
 
         var on_pv: bool = beta - alpha > 1;
 
-        // TT Probe
+        // >> Step 2: TT Probe
         var hashmove = types.Move.empty();
         var tthit = false;
         var tt_eval: hce.Score = 0;
@@ -307,16 +312,16 @@ pub const Searcher = struct {
 
         self.eval_history[self.ply] = static_eval;
 
-        // Prunings
+        // >> Step 3: Prunings
         if (!in_check and !on_pv) {
-            // Reverse Futility Pruning
+            // Step 3.1: Reverse Futility Pruning
             if (depth <= 6 and !hce.is_near_mate(beta)) {
                 if (static_eval - 50 * @intCast(hce.Score, depth) >= beta) {
                     return static_eval;
                 }
             }
 
-            // Null move pruning
+            // Step 3.2: Null move pruning
             if (!is_null and depth >= 2 and static_eval >= beta and pos.has_non_pawns()) {
                 // var r: usize = 3;
                 var r = 4 + depth / 4;
@@ -339,9 +344,12 @@ pub const Searcher = struct {
             }
         }
 
-        // Search
+        // >> Step 4: Extensions
+
+        // >> Step 5: Search
         var tt_flag = tt.Bound.Upper;
 
+        // Step 5.1: Move Generation
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
@@ -360,9 +368,11 @@ pub const Searcher = struct {
             }
         }
 
+        // Step 5.2: Move Ordering
         var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
+        // Step 5.3: Move Iteration
         var best_move = types.Move.empty();
         best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
 
@@ -388,7 +398,7 @@ pub const Searcher = struct {
             if (index == 0) {
                 score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false);
             } else {
-                // LMR
+                // Step 5.4: Late-Move Reduction
                 var reduction: i32 = 0;
 
                 if (depth >= 2 and !is_capture and index >= 2 * @intCast(usize, @boolToInt(is_root))) {
@@ -409,6 +419,7 @@ pub const Searcher = struct {
                     }
                 }
 
+                // Step 5.5: Principal-Variation-Search (PVS)
                 score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false);
 
                 if (score > alpha and reduction > 0) {
@@ -427,6 +438,7 @@ pub const Searcher = struct {
                 return 0;
             }
 
+            // Step 5.6: Alpha-Beta Pruning
             if (score > best_score) {
                 best_score = score;
                 best_move = move;
@@ -466,6 +478,7 @@ pub const Searcher = struct {
             }
         }
 
+        // >> Step 7: Transposition Table Update
         if (!skip_quiet) {
             tt.GlobalTT.set(tt.Item{
                 .eval = best_score,
@@ -484,6 +497,9 @@ pub const Searcher = struct {
         var beta = beta_;
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
+        // >> Step 1: Preparation
+
+        // Step 1.1: Stop if time is up
         if (self.nodes & 1023 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
@@ -492,27 +508,34 @@ pub const Searcher = struct {
         self.nodes += 1;
         self.pv_size[self.ply] = 0;
 
+        // Step 1.2: Material Draw Check
         if (hce.is_material_draw(pos)) {
             return 0;
         }
 
+        // Step 1.3: Prefetch
         // tt.GlobalTT.prefetch(pos.hash);
 
+        // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
             return hce.evaluate(pos);
         }
 
         var in_check = pos.in_check(color);
 
-        // Stand Pat pruning
-        var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
-        if (!in_check) {
-            best_score = hce.evaluate(pos);
+        // >> Step 2: Prunings
 
+        var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
+        var static_eval = hce.evaluate(pos);
+        if (!in_check) {
+            best_score = static_eval;
+
+            // Step 2.1: Delta pruning
             if (best_score + 1000 <= alpha) {
                 return best_score;
             }
 
+            // Step 2.2: Stand Pat pruning
             if (best_score >= beta) {
                 return beta;
             }
@@ -521,7 +544,12 @@ pub const Searcher = struct {
             }
         }
 
-        // TT Probe
+        if (static_eval >= beta) {
+            return beta;
+        }
+        alpha = @maximum(alpha, static_eval);
+
+        // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
         var entry = tt.GlobalTT.get(pos.hash, 0);
 
@@ -529,26 +557,25 @@ pub const Searcher = struct {
             hashmove = entry.?.bestmove;
         }
 
+        // >> Step 4: QSearch
+
+        // Step 4.1: Q Move Generation
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 2) catch unreachable;
         defer movelist.deinit();
         pos.generate_q_moves(color, &movelist);
         var move_size = movelist.items.len;
 
-        var eval = hce.evaluate(pos);
-
-        if (eval >= beta) {
-            return beta;
-        }
-        alpha = @maximum(alpha, eval);
-
+        // Step 4.2: Q Move Ordering
         var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
+        // Step 4.3: Q Move Iteration
         var index: usize = 0;
 
         while (index < move_size) : (index += 1) {
             var move = movepick.getNextBest(&movelist, &evallist, index);
 
+            // Step 4.4: SEE Pruning
             if (evallist.items[index] < 0) {
                 break;
             }
@@ -563,6 +590,7 @@ pub const Searcher = struct {
                 return 0;
             }
 
+            // Step 4.5: Alpha-Beta Pruning
             if (score > best_score) {
                 best_score = score;
                 if (score > alpha) {
