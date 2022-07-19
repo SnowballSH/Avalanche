@@ -320,16 +320,16 @@ pub const Searcher = struct {
         if (!in_check and !on_pv) {
             const has_non_pawns = pos.has_non_pawns();
             // Step 3.1: Reverse Futility Pruning
-            if (!is_null and depth <= 7 and has_non_pawns) {
-                if (static_eval - 100 * @intCast(hce.Score, depth) >= beta) {
+            if (!is_null and depth <= 6 and has_non_pawns) {
+                if (static_eval - 75 * @intCast(hce.Score, depth) >= beta) {
                     return beta;
                 }
             }
 
             // Step 3.2: Null move pruning
-            if (!is_null and depth >= 5 and static_eval >= beta and has_non_pawns) {
+            if (!is_null and depth >= 4 and static_eval >= beta and has_non_pawns) {
                 // var r: usize = 3;
-                var r = 2 + depth / 8;
+                var r = 2 + depth / 4;
 
                 if (r >= depth - 1) {
                     r = depth - 2;
@@ -500,7 +500,6 @@ pub const Searcher = struct {
             if (score > alpha) {
                 raised_alpha = true;
                 alpha = score;
-                tt_flag = tt.Bound.Exact;
 
                 if (is_root) {
                     self.best_move = move;
@@ -508,7 +507,6 @@ pub const Searcher = struct {
             }
 
             if (alpha >= beta) {
-                tt_flag = tt.Bound.Lower;
                 if (!is_capture) {
                     var temp = self.killer[self.ply][0];
                     self.killer[self.ply][0] = move;
@@ -532,6 +530,16 @@ pub const Searcher = struct {
 
         // >> Step 7: Transposition Table Update
         if (!skip_quiet) {
+            if (alpha > beta) {
+                tt_flag = tt.Bound.Lower;
+            } else if (!raised_alpha) {
+                tt_flag = tt.Bound.Upper;
+            } else if (alpha == beta and (index != move_size or hce.is_near_mate(best_score))) {
+                tt_flag = tt.Bound.Lower;
+            } else {
+                tt_flag = tt.Bound.Exact;
+            }
+
             tt.GlobalTT.set(tt.Item{
                 .eval = best_score,
                 .bestmove = best_move,
