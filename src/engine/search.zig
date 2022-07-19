@@ -250,6 +250,11 @@ pub const Searcher = struct {
 
         var in_check = pos.in_check(color);
 
+        // Step 4.1: Check Extension (moved up)
+        if (in_check) {
+            depth += 1;
+        }
+
         // Step 1.5: Go to Quiescence Search at Horizon
         if (depth == 0) {
             return self.quiescence_search(pos, color, alpha, beta);
@@ -340,11 +345,6 @@ pub const Searcher = struct {
         }
 
         // >> Step 4: Extensions
-
-        // Step 4.1: Check Extension
-        if (in_check) {
-            depth += 1;
-        }
 
         // >> Step 5: Search
         var tt_flag = tt.Bound.Upper;
