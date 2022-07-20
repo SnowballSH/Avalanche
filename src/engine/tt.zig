@@ -8,9 +8,9 @@ pub const KB: usize = 1 << 10;
 
 pub const Bound = enum(u2) {
     None,
-    Exact,
-    Lower,
-    Upper,
+    Exact, // PV Nodes
+    Lower, // Cut Nodes
+    Upper, // All Nodes
 };
 
 pub const Item = packed struct {

@@ -33,6 +33,8 @@ pub const Searcher = struct {
     stop: bool = false,
     is_searching: bool = false,
 
+    exclude_move: [MAX_PLY]types.Move = undefined,
+
     hash_history: std.ArrayList(u64) = undefined,
     eval_history: [MAX_PLY]hce.Score = undefined,
 
@@ -58,6 +60,8 @@ pub const Searcher = struct {
             while (i < MAX_PLY) : (i += 1) {
                 self.killer[i][0] = types.Move.empty();
                 self.killer[i][1] = types.Move.empty();
+
+                self.exclude_move[i] = types.Move.empty();
             }
         }
 
@@ -116,7 +120,7 @@ pub const Searcher = struct {
         while (depth <= bound) {
             self.ply = 0;
 
-            var val = self.negamax(pos, color, depth, alpha, beta, false);
+            var val = self.negamax(pos, color, depth, alpha, beta, false, tt.Bound.Exact);
 
             if (self.time_stop or self.should_stop()) {
                 break;
@@ -210,7 +214,7 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool) hce.Score {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool, expected_bound: tt.Bound) hce.Score {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -314,24 +318,25 @@ pub const Searcher = struct {
 
         // >> Step 3: Prunings
         if (!in_check and !on_pv) {
+            const has_non_pawns = pos.has_non_pawns();
             // Step 3.1: Reverse Futility Pruning
-            if (depth <= 6 and !hce.is_near_mate(beta)) {
-                if (static_eval - 50 * @intCast(hce.Score, depth) >= beta) {
-                    return static_eval;
+            if (!is_null and depth <= 6 and has_non_pawns) {
+                if (static_eval - 75 * @intCast(hce.Score, depth) >= beta) {
+                    return beta;
                 }
             }
 
             // Step 3.2: Null move pruning
-            if (!is_null and depth >= 2 and static_eval >= beta and pos.has_non_pawns()) {
+            if (!is_null and depth >= 4 and static_eval >= beta and has_non_pawns) {
                 // var r: usize = 3;
-                var r = 4 + depth / 4;
+                var r = 2 + depth / 4;
 
                 if (r >= depth - 1) {
                     r = depth - 2;
                 }
 
                 pos.play_null_move();
-                var null_score = -self.negamax(pos, opp_color, depth - r - 1, -beta, -beta + 1, true);
+                var null_score = -self.negamax(pos, opp_color, depth - r - 1, -beta, -beta + 1, true, tt.Bound.Upper);
                 pos.undo_null_move();
 
                 if (self.time_stop) {
@@ -345,6 +350,35 @@ pub const Searcher = struct {
         }
 
         // >> Step 4: Extensions
+        var extend_hint = false;
+
+        // Step 4.2: Singular extension
+        // zig fmt: off
+        if (self.ply > 0 
+            and depth >= 9 
+            and expected_bound != tt.Bound.Upper 
+            and !in_check 
+            and tthit 
+            and hashmove.to_u16() != 0 
+            and entry.?.depth >= depth - 2 
+            and (
+                entry.?.flag == tt.Bound.Exact 
+                or entry.?.flag == tt.Bound.Lower
+            )
+        ) {
+        // zig fmt: on
+            var margin = 4 * (@intCast(i32, depth) - 3);
+            self.exclude_move[self.ply] = hashmove;
+            var singular_score = self.negamax(pos, color, depth / 2, entry.?.eval - margin - 1, entry.?.eval - margin, false, expected_bound);
+            self.exclude_move[self.ply] = types.Move.empty();
+            if (singular_score >= entry.?.eval - margin) {
+                if (entry.?.eval - margin >= beta) {
+                    return entry.?.eval - margin;
+                }
+            } else {
+                extend_hint = true;
+            }
+        }
 
         // >> Step 5: Search
         var tt_flag = tt.Bound.Upper;
@@ -368,6 +402,14 @@ pub const Searcher = struct {
             }
         }
 
+        var expected_child = switch (expected_bound) {
+            .None => tt.Bound.None,
+            .Upper => tt.Bound.Lower,
+            .Lower => tt.Bound.Upper,
+            .Exact => tt.Bound.Exact,
+        };
+        var raised_alpha = false;
+
         // Step 5.2: Move Ordering
         var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
@@ -381,6 +423,9 @@ pub const Searcher = struct {
         var index: usize = 0;
         while (index < move_size) : (index += 1) {
             var move = movepick.getNextBest(&movelist, &evallist, index);
+            if (move.to_u16() == self.exclude_move[self.ply].to_u16()) {
+                continue;
+            }
 
             var is_capture = move.is_capture();
 
@@ -392,11 +437,15 @@ pub const Searcher = struct {
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
 
+            if (expected_bound == tt.Bound.Exact and raised_alpha) {
+                expected_child = tt.Bound.Lower;
+            }
+
             var new_depth = depth - 1;
 
             var score: hce.Score = 0;
             if (index == 0) {
-                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false);
+                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, expected_child);
             } else {
                 // Step 5.4: Late-Move Reduction
                 var reduction: i32 = 0;
@@ -420,13 +469,13 @@ pub const Searcher = struct {
                 }
 
                 // Step 5.5: Principal-Variation-Search (PVS)
-                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false);
+                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false, expected_child);
 
                 if (score > alpha and reduction > 0) {
-                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false);
+                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, expected_child);
                 }
                 if (score > alpha and score < beta) {
-                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false);
+                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, expected_child);
                 }
             }
 
@@ -442,44 +491,55 @@ pub const Searcher = struct {
             if (score > best_score) {
                 best_score = score;
                 best_move = move;
-                if (score > alpha) {
-                    alpha = score;
-                    tt_flag = tt.Bound.Exact;
 
-                    self.pv[self.ply][0] = move;
-                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+                self.pv[self.ply][0] = move;
+                std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+            }
 
-                    if (is_root) {
-                        self.best_move = move;
-                    }
-                    if (alpha >= beta) {
-                        tt_flag = tt.Bound.Lower;
-                        if (!is_capture) {
-                            var temp = self.killer[self.ply][0];
-                            self.killer[self.ply][0] = move;
-                            self.killer[self.ply][1] = temp;
+            if (score > alpha) {
+                raised_alpha = true;
+                alpha = score;
 
-                            self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
+                if (is_root) {
+                    self.best_move = move;
+                }
+            }
 
-                            if (self.history[@enumToInt(color)][move.from][move.to] >= 30000) {
-                                for (self.history) |*a| {
-                                    for (a) |*b| {
-                                        for (b) |*c| {
-                                            c.* = @divFloor(c.*, 2);
-                                        }
-                                    }
+            if (alpha >= beta) {
+                if (!is_capture) {
+                    var temp = self.killer[self.ply][0];
+                    self.killer[self.ply][0] = move;
+                    self.killer[self.ply][1] = temp;
+
+                    self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
+
+                    if (self.history[@enumToInt(color)][move.from][move.to] >= 30000) {
+                        for (self.history) |*a| {
+                            for (a) |*b| {
+                                for (b) |*c| {
+                                    c.* = @divFloor(c.*, 2);
                                 }
                             }
                         }
-                        break;
                     }
                 }
+                break;
             }
         }
 
         // >> Step 7: Transposition Table Update
         if (!skip_quiet) {
+            if (alpha > beta) {
+                tt_flag = tt.Bound.Lower;
+            } else if (!raised_alpha) {
+                tt_flag = tt.Bound.Upper;
+            } else if (alpha == beta and (index != move_size or hce.is_near_mate(best_score))) {
+                tt_flag = tt.Bound.Lower;
+            } else {
+                tt_flag = tt.Bound.Exact;
+            }
+
             tt.GlobalTT.set(tt.Item{
                 .eval = best_score,
                 .bestmove = best_move,
