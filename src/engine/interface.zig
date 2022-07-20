@@ -8,6 +8,12 @@ const nnue = @import("./nnue.zig");
 const tt = @import("./tt.zig");
 const search = @import("./search.zig");
 
+fn guess_ply_left(pos: *position.Position) f32 {
+    var plies = @intToFloat(f32, pos.game_ply);
+    var count = @intToFloat(f32, types.popcount(pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black))) - 2.0;
+    return 35.0 - plies * 0.25 + count * 2.2;
+}
+
 pub const UciInterface = struct {
     position: position.Position,
     search_thread: ?std.Thread,
@@ -262,34 +268,23 @@ pub const UciInterface = struct {
 
                 if (movetime != null) {
                     if (mytime != null) {
-                        if (myinc != null) {
-                            if (mytime.? > myinc.? + 500) {
-                                movetime.? += myinc.?;
-                            }
-                        }
-
-                        var t = mytime.?;
-                        t = @maximum(t - 100, 100);
-                        if (movestogo != null and movestogo.? <= 30 and movestogo.? >= 1) {
-                            t /= movestogo.? + 1;
+                        var mtg: f32 = 0;
+                        if (movestogo != null and movestogo.? >= 2) {
+                            mtg = @intToFloat(f32, movestogo.?);
                         } else {
-                            var phase = self.position.phase();
-
-                            if (phase >= 21) {
-                                // Opening
-                                t /= 36;
-                            } else if (phase >= 15) {
-                                // Middle game
-                                t /= 20;
-                            } else if (phase >= 6) {
-                                // Middle-end game
-                                t /= 24;
-                            } else {
-                                // Endgame
-                                t /= 34;
-                            }
+                            var g: f32 = if (myinc == null) 8.0 else 24.0;
+                            mtg = @maximum(guess_ply_left(&self.position) * 0.5, g);
                         }
-                        movetime.? += t;
+
+                        var base: f32 = 0;
+
+                        if (myinc == null) {
+                            base = @intToFloat(f32, mytime.?) / mtg;
+                        } else {
+                            base = @intToFloat(f32, mytime.? - myinc.?) / mtg + @intToFloat(f32, myinc.?);
+                        }
+
+                        movetime = @floatToInt(usize, @maximum(5, @minimum(base, @intToFloat(f32, mytime.?) / 3.0)));
                     }
 
                     if (movetime.? > 50) {

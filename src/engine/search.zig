@@ -321,15 +321,15 @@ pub const Searcher = struct {
             const has_non_pawns = pos.has_non_pawns();
             // Step 3.1: Reverse Futility Pruning
             if (!is_null and depth <= 6 and has_non_pawns) {
-                if (static_eval - 75 * @intCast(hce.Score, depth) >= beta) {
+                if (static_eval - 50 * @intCast(hce.Score, depth) >= beta) {
                     return beta;
                 }
             }
 
             // Step 3.2: Null move pruning
-            if (!is_null and depth >= 4 and static_eval >= beta and has_non_pawns) {
+            if (!is_null and depth >= 2 and static_eval >= beta and has_non_pawns) {
                 // var r: usize = 3;
-                var r = 2 + depth / 4;
+                var r = 4 + depth / 4;
 
                 if (r >= depth - 1) {
                     r = depth - 2;
