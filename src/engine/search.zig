@@ -316,22 +316,27 @@ pub const Searcher = struct {
 
         self.eval_history[self.ply] = static_eval;
 
+        var low_estimate: hce.Score = -hce.MateScore - 1;
+
         // >> Step 3: Prunings
         if (!in_check and !on_pv) {
+            low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
+            var high_estimate = if (!tthit or entry.?.flag == tt.Bound.Upper) static_eval else entry.?.eval;
+
             // Step 3.1: Razoring
-            if (depth <= 1 and static_eval + 250 < alpha) {
+            if (depth <= 1 and high_estimate + 250 < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
             // Step 3.2: Reverse Futility Pruning
-            if (depth <= 7) {
-                if (static_eval - 100 * @intCast(hce.Score, depth) >= beta) {
+            if (depth <= 8) {
+                if (high_estimate - 90 * @intCast(hce.Score, depth) >= beta) {
                     return beta;
                 }
             }
 
             // Step 3.3: Null move pruning
-            if (!is_null and depth >= 2 and static_eval >= beta and (!tthit or entry.?.flag != tt.Bound.Lower or entry.?.eval >= beta) and pos.has_non_pawns()) {
+            if (!is_null and depth >= 2 and high_estimate >= beta and (!tthit or entry.?.flag != tt.Bound.Upper or entry.?.eval >= beta) and pos.has_non_pawns()) {
                 // var r: usize = 3;
                 var r = 4 + depth / 4;
 
@@ -353,36 +358,7 @@ pub const Searcher = struct {
             }
         }
 
-        // >> Step 4: Extensions
-        var extend_hint = false;
-
-        // Step 4.2: Singular extension
-        // zig fmt: off
-        if (self.ply > 0 
-            and depth >= 9 
-            and expected_bound != tt.Bound.Upper 
-            and !in_check 
-            and tthit 
-            and hashmove.to_u16() != 0 
-            and entry.?.depth >= depth - 2 
-            and (
-                entry.?.flag == tt.Bound.Exact 
-                or entry.?.flag == tt.Bound.Lower
-            )
-        ) {
-        // zig fmt: on
-            var margin = 4 * (@intCast(i32, depth) - 3);
-            self.exclude_move[self.ply] = hashmove;
-            var singular_score = self.negamax(pos, color, depth / 2, entry.?.eval - margin - 1, entry.?.eval - margin, false, expected_bound);
-            self.exclude_move[self.ply] = types.Move.empty();
-            if (singular_score >= entry.?.eval - margin) {
-                if (entry.?.eval - margin >= beta) {
-                    return entry.?.eval - margin;
-                }
-            } else {
-                extend_hint = true;
-            }
-        }
+        // >> Step 4: Extensions (moved to other places)
 
         // >> Step 5: Search
         var tt_flag = tt.Bound.Upper;
@@ -437,6 +413,43 @@ pub const Searcher = struct {
                 continue;
             }
 
+            // Step 5.4: Futility Pruning
+            if (!on_pv and expected_bound != tt.Bound.Exact and index > 0 and depth <= 7 and !is_capture and alpha > -hce.MateScore and low_estimate != -hce.MateScore - 1 and low_estimate + @intCast(i32, depth) * 100 < alpha) {
+                skip_quiet = true;
+                continue;
+            }
+
+            var new_depth = depth - 1;
+
+            // Step 4.2: Singular extension
+            // zig fmt: off
+            if (self.ply > 0
+                and depth >= 8
+                and expected_bound != tt.Bound.Upper
+                and !in_check
+                and tthit
+                and !hce.is_near_mate(entry.?.eval)
+                and hashmove.to_u16() == move.to_u16()
+                and entry.?.depth >= depth - 3
+                and (
+                    entry.?.flag == tt.Bound.Exact
+                    or entry.?.flag == tt.Bound.Lower
+                )
+            ) {
+            // zig fmt: on
+                var margin = @intCast(i32, depth);
+                self.exclude_move[self.ply] = hashmove;
+                var singular_score = self.negamax(pos, color, depth / 2, entry.?.eval - margin - 1, entry.?.eval - margin, false, expected_bound);
+                self.exclude_move[self.ply] = types.Move.empty();
+                if (singular_score >= entry.?.eval - margin) {
+                    if (entry.?.eval - margin >= beta) {
+                        return entry.?.eval - margin;
+                    }
+                } else {
+                    new_depth += 1;
+                }
+            }
+
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
@@ -445,13 +458,11 @@ pub const Searcher = struct {
                 expected_child = tt.Bound.Lower;
             }
 
-            var new_depth = depth - 1;
-
             var score: hce.Score = 0;
             if (index == 0) {
                 score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, expected_child);
             } else {
-                // Step 5.4: Late-Move Reduction
+                // Step 5.5: Late-Move Reduction
                 var reduction: i32 = 0;
 
                 if (depth >= 2 and !is_capture and index >= 2 * @intCast(usize, @boolToInt(is_root))) {
@@ -472,7 +483,7 @@ pub const Searcher = struct {
                     }
                 }
 
-                // Step 5.5: Principal-Variation-Search (PVS)
+                // Step 5.6: Principal-Variation-Search (PVS)
                 score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false, expected_child);
 
                 if (score > alpha and reduction > 0) {
@@ -491,7 +502,7 @@ pub const Searcher = struct {
                 return 0;
             }
 
-            // Step 5.6: Alpha-Beta Pruning
+            // Step 5.7: Alpha-Beta Pruning
             if (score > best_score) {
                 best_score = score;
                 best_move = move;
