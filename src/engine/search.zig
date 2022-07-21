@@ -318,25 +318,29 @@ pub const Searcher = struct {
 
         // >> Step 3: Prunings
         if (!in_check and !on_pv) {
-            const has_non_pawns = pos.has_non_pawns();
-            // Step 3.1: Reverse Futility Pruning
-            if (!is_null and depth <= 6 and has_non_pawns) {
-                if (static_eval - 75 * @intCast(hce.Score, depth) >= beta) {
+            // Step 3.1: Razoring
+            if (depth <= 1 and static_eval + 250 < alpha) {
+                return self.quiescence_search(pos, color, alpha, beta);
+            }
+
+            // Step 3.2: Reverse Futility Pruning
+            if (depth <= 7) {
+                if (static_eval - 100 * @intCast(hce.Score, depth) >= beta) {
                     return beta;
                 }
             }
 
-            // Step 3.2: Null move pruning
-            if (!is_null and depth >= 4 and static_eval >= beta and has_non_pawns) {
+            // Step 3.3: Null move pruning
+            if (!is_null and depth >= 2 and static_eval >= beta and (!tthit or entry.?.flag != tt.Bound.Lower or entry.?.eval >= beta) and pos.has_non_pawns()) {
                 // var r: usize = 3;
-                var r = 2 + depth / 4;
+                var r = 4 + depth / 4;
 
-                if (r >= depth - 1) {
-                    r = depth - 2;
+                if (r >= depth) {
+                    r = depth - 1;
                 }
 
                 pos.play_null_move();
-                var null_score = -self.negamax(pos, opp_color, depth - r - 1, -beta, -beta + 1, true, tt.Bound.Upper);
+                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, tt.Bound.Upper);
                 pos.undo_null_move();
 
                 if (self.time_stop) {
