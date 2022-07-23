@@ -184,8 +184,6 @@ pub const Searcher = struct {
 
         self.is_searching = false;
 
-        tt.GlobalTT.clear();
-
         return score;
     }
 

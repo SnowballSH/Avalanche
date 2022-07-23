@@ -94,6 +94,7 @@ pub const UciInterface = struct {
                 }
             } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
                 self.searcher = search.Searcher.new();
+                tt.GlobalTT.clear();
                 self.position.set_fen(types.DEFAULT_FEN[0..]);
             } else if (std.mem.eql(u8, token.?, "isready")) {
                 std.time.sleep(100);
