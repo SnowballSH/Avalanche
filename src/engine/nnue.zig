@@ -15,14 +15,12 @@ pub inline fn normalize(val: i32) i16 {
 const UseResidual = true;
 
 pub const NNUE = struct {
-    activations: [2][weights.INPUT_SIZE]bool,
     accumulator: [2][weights.HIDDEN_SIZE]i16,
     result: [weights.OUTPUT_SIZE]i32,
     residual: [2][weights.OUTPUT_SIZE]i32,
 
     pub fn new() NNUE {
         return NNUE{
-            .activations = undefined,
             .accumulator = undefined,
             .result = undefined,
             .residual = undefined,
@@ -30,14 +28,6 @@ pub const NNUE = struct {
     }
 
     pub fn refresh_accumulator(self: *NNUE, pos: *position.Position) void {
-        // Reset activations
-        for (self.activations[0]) |*ptr| {
-            ptr.* = false;
-        }
-        for (self.activations[1]) |*ptr| {
-            ptr.* = false;
-        }
-
         if (UseResidual) {
             // Reset psqt
             for (self.residual) |*m| {
@@ -63,9 +53,6 @@ pub const NNUE = struct {
             var wi = pc.pure_index() * 64 + index;
             var bi = ((pc.pure_index() + 6) % 12) * 64 + (index ^ 56);
 
-            self.activations[0][wi] = true;
-            self.activations[1][bi] = true;
-
             for (self.accumulator[0]) |*ptr, l_index| {
                 ptr.* += weights.LAYER_1[wi][l_index];
             }
@@ -88,9 +75,6 @@ pub const NNUE = struct {
         var wi = pc.pure_index() * 64 + index;
         var bi = ((pc.pure_index() + 6) % 12) * 64 + (index ^ 56);
 
-        self.activations[0][wi] = false;
-        self.activations[1][bi] = false;
-
         for (self.accumulator[0]) |*ptr, l_index| {
             ptr.* -= weights.LAYER_1[wi][l_index];
         }
@@ -111,9 +95,6 @@ pub const NNUE = struct {
     pub fn activate(self: *NNUE, pc: types.Piece, index: usize) void {
         var wi = pc.pure_index() * 64 + index;
         var bi = ((pc.pure_index() + 6) % 12) * 64 + (index ^ 56);
-
-        self.activations[0][wi] = true;
-        self.activations[1][bi] = true;
 
         for (self.accumulator[0]) |*ptr, l_index| {
             ptr.* += weights.LAYER_1[wi][l_index];
