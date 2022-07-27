@@ -72,8 +72,9 @@ pub const NNUE = struct {
     }
 
     pub fn deactivate(self: *NNUE, pc: types.Piece, index: usize) void {
-        var wi = pc.pure_index() * 64 + index;
-        var bi = ((pc.pure_index() + 6) % 12) * 64 + (index ^ 56);
+        var i = pc.pure_index();
+        var wi = i * 64 + index;
+        var bi = ((i + 6) % 12) * 64 + (index ^ 56);
 
         for (self.accumulator[0]) |*ptr, l_index| {
             ptr.* -= weights.LAYER_1[wi][l_index];
@@ -93,8 +94,9 @@ pub const NNUE = struct {
     }
 
     pub fn activate(self: *NNUE, pc: types.Piece, index: usize) void {
-        var wi = pc.pure_index() * 64 + index;
-        var bi = ((pc.pure_index() + 6) % 12) * 64 + (index ^ 56);
+        var i = pc.pure_index();
+        var wi = i * 64 + index;
+        var bi = ((i + 6) % 12) * 64 + (index ^ 56);
 
         for (self.accumulator[0]) |*ptr, l_index| {
             ptr.* += weights.LAYER_1[wi][l_index];
@@ -127,24 +129,26 @@ pub const NNUE = struct {
 
         for (self.result) |*ptr, idx| {
             if (UseResidual) {
-                ptr.* = normalize(ptr.*) + @divFloor(self.residual[@enumToInt(pos.turn)][idx], 64);
+                ptr.* = normalize(ptr.*) + @divTrunc(self.residual[@enumToInt(pos.turn)][idx], 64);
             } else {
                 ptr.* = normalize(ptr.*);
             }
         }
     }
 
-    pub fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) void {
-        self.result[bucket] = weights.BIAS_2[bucket];
+    pub fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
+        var res = @intCast(i32, weights.BIAS_2[bucket]);
 
         for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
-            self.result[bucket] += weights.LAYER_2[l_index][bucket] * clipped_relu_one(val);
+            res += @intCast(i32, weights.LAYER_2[l_index][bucket]) * @intCast(i32, clipped_relu_one(val));
         }
 
         if (UseResidual) {
-            self.result[bucket] = normalize(self.result[bucket]) + @divFloor(self.residual[@enumToInt(turn)][bucket], 64);
+            res = normalize(res) + @divTrunc(self.residual[@enumToInt(turn)][bucket], 64);
         } else {
-            self.result[bucket] = normalize(self.result[bucket]);
+            res = normalize(res);
         }
+
+        return res;
     }
 };
