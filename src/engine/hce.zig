@@ -346,9 +346,11 @@ pub fn evaluate(pos: *position.Position) Score {
 }
 
 pub inline fn evaluate_nnue(pos: *position.Position) Score {
-    var bucket = @minimum(@divFloor(pos.phase() * nnue.weights.OUTPUT_SIZE, 24), nnue.weights.OUTPUT_SIZE - 1);
-    pos.evaluator.nnue_evaluator.evaluate(pos.turn, bucket);
-    return pos.evaluator.nnue_evaluator.result[bucket];
+    var bucket: usize = 0;
+    if (nnue.weights.OUTPUT_SIZE != 1) {
+        bucket = @minimum(@divFloor(pos.phase() * nnue.weights.OUTPUT_SIZE, 24), nnue.weights.OUTPUT_SIZE - 1);
+    }
+    return pos.evaluator.nnue_evaluator.evaluate(pos.turn, bucket);
 }
 
 pub fn is_material_draw(pos: *position.Position) bool {
