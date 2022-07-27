@@ -312,14 +312,17 @@ pub const Searcher = struct {
         var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
         var best_score: hce.Score = static_eval;
 
-        self.eval_history[self.ply] = static_eval;
+        var high_estimate = if (!tthit or entry.?.flag == tt.Bound.Upper) static_eval else entry.?.eval;
 
         var low_estimate: hce.Score = -hce.MateScore - 1;
+
+        self.eval_history[self.ply] = high_estimate;
+
+        var improving = (!(self.ply <= 1 or in_check) and high_estimate > self.eval_history[self.ply - 2]);
 
         // >> Step 3: Prunings
         if (!in_check and !on_pv) {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
-            var high_estimate = if (!tthit or entry.?.flag == tt.Bound.Upper) static_eval else entry.?.eval;
 
             // Step 3.1: Razoring
             if (depth <= 1 and high_estimate + 250 < alpha) {
@@ -327,8 +330,12 @@ pub const Searcher = struct {
             }
 
             // Step 3.2: Reverse Futility Pruning
-            if (depth <= 8) {
-                if (high_estimate - 90 * @intCast(hce.Score, depth) >= beta) {
+            if (depth <= 6) {
+                var n = @intCast(hce.Score, depth);
+                if (depth >= 2 and improving) {
+                    n -= 1;
+                }
+                if (high_estimate - 50 * n >= beta) {
                     return beta;
                 }
             }
