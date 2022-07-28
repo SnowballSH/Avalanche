@@ -2,6 +2,8 @@
 
 The first UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
+**Estimated CCRL ELO (v1.1.0): ~2855**
+
 **CCRL ELO (v1.0.0): 2743**
 
 [Avalanche's CCRL Profile for v1.0.0](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.0.0%2064-bit#Avalanche_1_0_0_64-bit)
@@ -23,7 +25,7 @@ Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6:
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
-- https://github.com/dsekercioglu/blackmarlin for NNUE ideas (Structure is identical that any BM normal net can be used with Avalanche!)
+- https://github.com/dsekercioglu/blackmarlin for NNUE structure, data generation ideas, and trainer
 
 ## Originality Status
 
@@ -34,7 +36,7 @@ Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6:
 - Search
     - Avalanche has a fairy simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually. I hope to add more sophisticated prunings and extensions in the future.
 - Evaluation
-    - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is removed from Avalanche's main evaluation**.
+    - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
     - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow and the data is generated through self-play games. I hope to make it public in the future.
 - UCI Interface/Communication code
     - 100% original
@@ -42,6 +44,11 @@ Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6:
     - SPRT Testing of new features is ran on a local instance of https://github.com/AndyGrant/OpenBench.
 
 ## Changelog
+
+- ### v1.1.0 (+~112 ELO) ~2855 CCRL ELO
+    - NNUE Optimizations
+    - Singular Extension / MultiCut
+    - More Aggressive Prunings
 
 - ### v1.0.0 (+113 ELO) 2743 CCRL ELO
     - Faster Movegen: heavily inspired by Surge
