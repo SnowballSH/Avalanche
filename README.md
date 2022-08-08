@@ -16,7 +16,7 @@ Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
 
 Feel free to challenge it!
 
-Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6: https://lichess.org/study/1UVjx7eE/vY896gMZ#0
+Brilliant win against Weiawaga 5.0.0 (2848) in CCRL Amateur tournament Division 6: https://lichess.org/study/1UVjx7eE/ariuxOkQ#0
 
 ## Credits
 
