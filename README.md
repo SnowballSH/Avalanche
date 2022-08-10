@@ -6,7 +6,7 @@ The first UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
 **CCRL ELO (v1.0.0): 2743**
 
-[Avalanche's CCRL Profile for v1.0.0](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.0.0%2064-bit#Avalanche_1_0_0_64-bit)
+[Avalanche's CCRL Profile for v1.1.0](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit)
 
 ## Compile
 
@@ -16,7 +16,7 @@ Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
 
 Feel free to challenge it!
 
-Brilliant win against Inanis 1.0.1 (2675) in CCRL Amateur tournament Division 6: https://lichess.org/study/1UVjx7eE/vY896gMZ#0
+Brilliant win against Weiawaga 5.0.0 (2848) in CCRL Amateur tournament Division 6: https://lichess.org/study/1UVjx7eE/ariuxOkQ#0
 
 ## Credits
 
