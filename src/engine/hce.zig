@@ -170,22 +170,24 @@ pub const DynamicEvaluator = struct {
     score_eg_non_mat: Score = 0,
     score_eg_material: Score = 0,
     nnue_evaluator: nnue.NNUE = nnue.NNUE.new(),
+    need_hce: bool = false,
 
     pub fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
         if (UseNNUE) {
             self.nnue_evaluator.activate(pc, sq.index());
-        }
-        const i = pc.piece_type().index();
-        if (pc.color() == types.Color.White) {
-            self.score_mg += Mateiral[i][0];
-            self.score_mg += PSQT[i][0][sq.index() ^ 56];
-            self.score_eg_material += Mateiral[i][1];
-            self.score_eg_non_mat += PSQT[i][1][sq.index() ^ 56];
-        } else {
-            self.score_mg -= Mateiral[i][0];
-            self.score_mg -= PSQT[i][0][sq.index()];
-            self.score_eg_material -= Mateiral[i][1];
-            self.score_eg_non_mat -= PSQT[i][1][sq.index()];
+        } else if (self.need_hce) {
+            const i = pc.piece_type().index();
+            if (pc.color() == types.Color.White) {
+                self.score_mg += Mateiral[i][0];
+                self.score_mg += PSQT[i][0][sq.index() ^ 56];
+                self.score_eg_material += Mateiral[i][1];
+                self.score_eg_non_mat += PSQT[i][1][sq.index() ^ 56];
+            } else {
+                self.score_mg -= Mateiral[i][0];
+                self.score_mg -= PSQT[i][0][sq.index()];
+                self.score_eg_material -= Mateiral[i][1];
+                self.score_eg_non_mat -= PSQT[i][1][sq.index()];
+            }
         }
     }
 
@@ -195,18 +197,19 @@ pub const DynamicEvaluator = struct {
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
                 self.nnue_evaluator.deactivate(pc, sq.index());
-            }
-            const i = pc.piece_type().index();
-            if (pc.color() == types.Color.White) {
-                self.score_mg -= Mateiral[i][0];
-                self.score_mg -= PSQT[i][0][sq.index() ^ 56];
-                self.score_eg_material -= Mateiral[i][1];
-                self.score_eg_non_mat -= PSQT[i][1][sq.index() ^ 56];
-            } else {
-                self.score_mg += Mateiral[i][0];
-                self.score_mg += PSQT[i][0][sq.index()];
-                self.score_eg_material += Mateiral[i][1];
-                self.score_eg_non_mat += PSQT[i][1][sq.index()];
+            } else if (self.need_hce) {
+                const i = pc.piece_type().index();
+                if (pc.color() == types.Color.White) {
+                    self.score_mg -= Mateiral[i][0];
+                    self.score_mg -= PSQT[i][0][sq.index() ^ 56];
+                    self.score_eg_material -= Mateiral[i][1];
+                    self.score_eg_non_mat -= PSQT[i][1][sq.index() ^ 56];
+                } else {
+                    self.score_mg += Mateiral[i][0];
+                    self.score_mg += PSQT[i][0][sq.index()];
+                    self.score_eg_material += Mateiral[i][1];
+                    self.score_eg_non_mat += PSQT[i][1][sq.index()];
+                }
             }
         }
     }
@@ -222,18 +225,19 @@ pub const DynamicEvaluator = struct {
             if (UseNNUE) {
                 self.nnue_evaluator.deactivate(pc, from.index());
                 self.nnue_evaluator.activate(pc, to.index());
-            }
-            const i = pc.piece_type().index();
-            if (pc.color() == types.Color.White) {
-                self.score_mg -= PSQT[i][0][from.index() ^ 56];
-                self.score_mg += PSQT[i][0][to.index() ^ 56];
-                self.score_eg_non_mat -= PSQT[i][1][from.index() ^ 56];
-                self.score_eg_non_mat += PSQT[i][1][to.index() ^ 56];
-            } else {
-                self.score_mg += PSQT[i][0][from.index()];
-                self.score_mg -= PSQT[i][0][to.index()];
-                self.score_eg_non_mat += PSQT[i][1][from.index()];
-                self.score_eg_non_mat -= PSQT[i][1][to.index()];
+            } else if (self.need_hce) {
+                const i = pc.piece_type().index();
+                if (pc.color() == types.Color.White) {
+                    self.score_mg -= PSQT[i][0][from.index() ^ 56];
+                    self.score_mg += PSQT[i][0][to.index() ^ 56];
+                    self.score_eg_non_mat -= PSQT[i][1][from.index() ^ 56];
+                    self.score_eg_non_mat += PSQT[i][1][to.index() ^ 56];
+                } else {
+                    self.score_mg += PSQT[i][0][from.index()];
+                    self.score_mg -= PSQT[i][0][to.index()];
+                    self.score_eg_non_mat += PSQT[i][1][from.index()];
+                    self.score_eg_non_mat -= PSQT[i][1][to.index()];
+                }
             }
         }
     }
@@ -242,6 +246,10 @@ pub const DynamicEvaluator = struct {
         if (UseNNUE) {
             self.nnue_evaluator.refresh_accumulator(pos);
         }
+        self.refresh_hce(pos);
+    }
+
+    pub fn refresh_hce(self: *DynamicEvaluator, pos: *position.Position) void {
         var mg: Score = 0;
         var eg_material: Score = 0;
         var eg_non_mat: Score = 0;
@@ -294,9 +302,13 @@ pub fn distance_eval(pos: *position.Position, comptime white_winning: bool) Scor
 
 pub fn evaluate(pos: *position.Position) Score {
     var phase = pos.phase();
-    if (UseNNUE and (phase >= 5 or pos.has_pawns())) {
+    if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
         return evaluate_nnue(pos);
     } else {
+        if (!pos.evaluator.need_hce) {
+            pos.evaluator.need_hce = true;
+            pos.evaluator.refresh_hce(pos);
+        }
         // Tapered eval
 
         var mg_phase: Score = 0;
