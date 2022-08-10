@@ -13,7 +13,8 @@ pub const QuietLMR: [64][64]i32 = init: {
     while (depth < 64) : (depth += 1) {
         var moves = 1;
         while (moves < 64) : (moves += 1) {
-            reductions[depth][moves] = @floatToInt(i32, @floor(0.75 + std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) / 2.25));
+            const a = 7.39 * std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) + 18;
+            reductions[depth][moves] = @floatToInt(i32, @floor(a / 16.1));
         }
     }
     break :init reductions;
@@ -470,7 +471,7 @@ pub const Searcher = struct {
                 // Step 5.5: Late-Move Reduction
                 var reduction: i32 = 0;
 
-                if (depth >= 2 and !is_capture and index >= 2 * @intCast(usize, @boolToInt(is_root))) {
+                if (depth >= 2 and !is_capture and index >= 2 + 2 * @intCast(usize, @boolToInt(is_root))) {
                     reduction = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
 
                     if (on_pv) {
