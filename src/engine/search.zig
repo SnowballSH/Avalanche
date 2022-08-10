@@ -43,7 +43,7 @@ pub const Searcher = struct {
     pv: [MAX_PLY][MAX_PLY]types.Move = undefined,
     pv_size: [MAX_PLY]usize = undefined,
 
-    killer: [MAX_PLY][2]types.Move = undefined,
+    killer: [MAX_PLY][3]types.Move = undefined,
     history: [2][64][64]u32 = undefined,
 
     pub fn new() Searcher {
@@ -61,6 +61,7 @@ pub const Searcher = struct {
             while (i < MAX_PLY) : (i += 1) {
                 self.killer[i][0] = types.Move.empty();
                 self.killer[i][1] = types.Move.empty();
+                self.killer[i][2] = types.Move.empty();
 
                 self.exclude_move[i] = types.Move.empty();
             }
@@ -377,6 +378,7 @@ pub const Searcher = struct {
 
         self.killer[self.ply + 1][0] = types.Move.empty();
         self.killer[self.ply + 1][1] = types.Move.empty();
+        self.killer[self.ply + 1][2] = types.Move.empty();
 
         if (move_size == 0) {
             if (pos.in_check(color)) {
@@ -478,7 +480,7 @@ pub const Searcher = struct {
                         reduction -= 1;
                     }
 
-                    if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16()) {
+                    if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16() or move.to_u16() == self.killer[self.ply][2].to_u16()) {
                         reduction -= 1;
                     }
 
@@ -530,8 +532,10 @@ pub const Searcher = struct {
             if (alpha >= beta) {
                 if (!is_capture) {
                     var temp = self.killer[self.ply][0];
+                    var temp1 = self.killer[self.ply][1];
                     self.killer[self.ply][0] = move;
                     self.killer[self.ply][1] = temp;
+                    self.killer[self.ply][2] = temp1;
 
                     self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
 

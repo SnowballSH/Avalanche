@@ -8,10 +8,10 @@ const see = @import("./see.zig");
 
 pub const SortScore = i32;
 
-pub const SortHash: SortScore = 15000;
-pub const SortWinningCapture: SortScore = 8000;
+pub const SortHash: SortScore = 20000;
+pub const SortWinningCapture: SortScore = 10000;
 pub const SortLosingCapture: SortScore = -35000;
-pub const SortKiller: SortScore = 4000;
+pub const SortKiller: SortScore = 5000;
 
 pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
@@ -35,10 +35,14 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                     score += SortLosingCapture + see_value;
                 }
             }
-        } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16() or searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
+        } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
+            score += SortKiller + 2000;
+        } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
+            score += SortKiller + 500;
+        } else if (searcher.killer[searcher.ply][2].to_u16() == move.to_u16()) {
             score += SortKiller;
         } else {
-            score += -30000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
+            score += -31000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
         }
 
         if (move.is_promotion()) {
