@@ -327,7 +327,7 @@ pub const Searcher = struct {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
 
             // Step 3.1: Razoring
-            if (depth <= 1 and high_estimate + 250 < alpha) {
+            if (depth <= 1 and high_estimate + 300 < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
@@ -532,10 +532,12 @@ pub const Searcher = struct {
             if (alpha >= beta) {
                 if (!is_capture) {
                     var temp = self.killer[self.ply][0];
-                    var temp1 = self.killer[self.ply][1];
-                    self.killer[self.ply][0] = move;
-                    self.killer[self.ply][1] = temp;
-                    self.killer[self.ply][2] = temp1;
+                    if (temp.to_u16() != move.to_u16()) {
+                        var temp1 = self.killer[self.ply][1];
+                        self.killer[self.ply][0] = move;
+                        self.killer[self.ply][1] = temp;
+                        self.killer[self.ply][2] = temp1;
+                    }
 
                     self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
 
