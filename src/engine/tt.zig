@@ -67,9 +67,9 @@ pub const TranspositionTable = struct {
         });
     }
 
-    pub fn get(self: *TranspositionTable, hash: u64, depth: usize) ?Item {
+    pub fn get(self: *TranspositionTable, hash: u64) ?Item {
         var entry = self.data.items[hash % self.size];
-        if (entry.flag != Bound.None and entry.hash == hash and @intCast(usize, entry.depth) >= depth) {
+        if (entry.flag != Bound.None and entry.hash == hash) {
             return entry;
         }
         return null;

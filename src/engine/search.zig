@@ -271,13 +271,13 @@ pub const Searcher = struct {
             return 0;
         }
 
-        var on_pv: bool = beta - alpha > 1;
+        var on_pv: bool = beta - 1 != alpha;
 
         // >> Step 2: TT Probe
         var hashmove = types.Move.empty();
         var tthit = false;
         var tt_eval: hce.Score = 0;
-        var entry = tt.GlobalTT.get(pos.hash, depth);
+        var entry = tt.GlobalTT.get(pos.hash);
 
         if (entry != null and !in_check) {
             tthit = true;
@@ -292,21 +292,23 @@ pub const Searcher = struct {
                 self.best_move = hashmove;
             }
 
-            if (pos.history[pos.game_ply].fifty < 90 and (depth == 0 or !on_pv)) {
-                switch (entry.?.flag) {
-                    .Exact => {
+            if (entry.?.depth >= depth) {
+                if (pos.history[pos.game_ply].fifty < 90 and (depth == 0 or !on_pv)) {
+                    switch (entry.?.flag) {
+                        .Exact => {
+                            return tt_eval;
+                        },
+                        .Lower => {
+                            alpha = @maximum(alpha, tt_eval);
+                        },
+                        .Upper => {
+                            beta = @minimum(beta, tt_eval);
+                        },
+                        else => {},
+                    }
+                    if (alpha >= beta) {
                         return tt_eval;
-                    },
-                    .Lower => {
-                        alpha = @maximum(alpha, tt_eval);
-                    },
-                    .Upper => {
-                        beta = @minimum(beta, tt_eval);
-                    },
-                    else => {},
-                }
-                if (alpha >= beta) {
-                    return tt_eval;
+                    }
                 }
             }
         }
@@ -365,7 +367,12 @@ pub const Searcher = struct {
             }
         }
 
-        // >> Step 4: Extensions (moved to other places)
+        // >> Step 4: Extensions/Reductions
+        // Step 4.1: Reduce depth for non-tthits
+        // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
+        if (on_pv and depth >= 6 and !tthit) {
+            depth -= 1;
+        }
 
         // >> Step 5: Search
         var tt_flag = tt.Bound.Upper;
@@ -429,7 +436,7 @@ pub const Searcher = struct {
 
             var new_depth = depth - 1;
 
-            // Step 4.2: Singular extension
+            // Step 4.3: Singular extension
             // zig fmt: off
             if (self.ply > 0
                 and depth >= 8
@@ -638,7 +645,7 @@ pub const Searcher = struct {
 
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
-        var entry = tt.GlobalTT.get(pos.hash, 0);
+        var entry = tt.GlobalTT.get(pos.hash);
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
