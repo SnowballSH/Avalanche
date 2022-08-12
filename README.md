@@ -2,6 +2,8 @@
 
 The first UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
+**Estimated Development ELO (v2.0.0): 2900+**
+
 **Estimated CCRL ELO (v1.1.0): ~2855**
 
 **CCRL ELO (v1.0.0): 2743**
