@@ -370,9 +370,9 @@ pub const Searcher = struct {
         // >> Step 4: Extensions/Reductions
         // Step 4.1: Reduce depth for non-tthits
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        var min_irr_depth: usize = if (improving) 6 else 5;
+        var min_irr_depth: usize = if (improving) 6 else 4;
         if (on_pv and depth >= min_irr_depth and !tthit) {
-            depth -= 2;
+            depth -= 1;
         }
 
         // >> Step 5: Search
