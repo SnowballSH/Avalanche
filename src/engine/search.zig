@@ -20,6 +20,9 @@ pub const QuietLMR: [64][64]i32 = init: {
     break :init reductions;
 };
 
+// Weights from https://github.com/bobsquared/Mr_Bob_Chess
+pub const LateMoveMargin: [2][9]i32 = .{ .{ 0, 4, 6, 9, 15, 21, 27, 33, 40 }, .{ 0, 6, 9, 15, 23, 32, 42, 52, 62 } };
+
 pub const MAX_PLY = 128;
 pub const MAX_GAMEPLY = 1024;
 
@@ -416,6 +419,8 @@ pub const Searcher = struct {
         var skip_quiet = false;
 
         var index: usize = 0;
+        var quiet_searched: usize = 0;
+        var noisy_searched: usize = 0;
         while (index < move_size) : (index += 1) {
             var move = movepick.getNextBest(&movelist, &evallist, index);
             if (move.to_u16() == self.exclude_move[self.ply].to_u16()) {
@@ -428,10 +433,18 @@ pub const Searcher = struct {
                 continue;
             }
 
-            // Step 5.4: Futility Pruning
-            if (!on_pv and expected_bound != tt.Bound.Exact and index > 0 and depth <= 7 and !is_capture and alpha > -hce.MateScore and low_estimate != -hce.MateScore - 1 and low_estimate + @intCast(i32, depth) * 100 < alpha) {
-                skip_quiet = true;
-                continue;
+            if (index > 0 and !is_capture) {
+                // Step 5.4a: Futility Pruning
+                if (!on_pv and depth <= 7 and expected_bound != tt.Bound.Exact and alpha > -hce.MateScore and low_estimate != -hce.MateScore - 1 and low_estimate + @intCast(i32, depth) * 105 < alpha) {
+                    skip_quiet = true;
+                    continue;
+                }
+
+                // Step 5.4b: Late Move Pruning
+                //if (depth <= 8 and quiet_searched > LateMoveMargin[@boolToInt(improving)][depth]) {
+                //    skip_quiet = true;
+                //    continue;
+                //}
             }
 
             var new_depth = depth - 1;
@@ -483,13 +496,17 @@ pub const Searcher = struct {
                 if (depth >= 2 and !is_capture and index >= 2 + 2 * @intCast(usize, @boolToInt(is_root))) {
                     reduction = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
 
-                    if (on_pv) {
+                    if (on_pv or improving) {
                         reduction -= 1;
                     }
 
                     if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16() or move.to_u16() == self.killer[self.ply][2].to_u16()) {
                         reduction -= 1;
                     }
+
+                    //if (!is_capture and quiet_searched > LateMoveMargin[@boolToInt(improving)][8]) {
+                    //    reduction += 1;
+                    //}
 
                     if (reduction >= new_depth) {
                         reduction = @intCast(i32, new_depth - 1);
@@ -559,6 +576,12 @@ pub const Searcher = struct {
                     }
                 }
                 break;
+            }
+
+            if (!is_capture) {
+                quiet_searched += 1;
+            } else {
+                noisy_searched += 1;
             }
         }
 
