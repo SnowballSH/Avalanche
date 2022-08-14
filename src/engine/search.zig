@@ -334,13 +334,13 @@ pub const Searcher = struct {
             }
 
             // Step 3.2: Reverse Futility Pruning
-            if (depth <= 6) {
-                var n = @intCast(hce.Score, depth);
+            if (depth <= 8) {
+                var n = @intCast(hce.Score, depth) * 55;
                 if (depth >= 2 and improving) {
-                    n -= 1;
+                    n -= 50;
                 }
-                if (high_estimate - 50 * n >= beta) {
-                    return beta;
+                if (high_estimate - n >= beta) {
+                    return high_estimate;
                 }
             }
 
