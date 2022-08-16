@@ -44,7 +44,7 @@ pub const TranspositionTable = struct {
         tt.data.ensureTotalCapacity(tt.size) catch {};
         tt.data.expandToCapacity();
 
-        std.debug.print("Allocated {} KB, {} items for TT\n", .{ tt.size * @sizeOf(Item) / KB, tt.size });
+        // std.debug.print("Allocated {} KB, {} items for TT\n", .{ tt.size * @sizeOf(Item) / KB, tt.size });
 
         self.* = tt;
     }

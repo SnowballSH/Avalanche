@@ -7,6 +7,7 @@ const hce = @import("./hce.zig");
 const nnue = @import("./nnue.zig");
 const tt = @import("./tt.zig");
 const search = @import("./search.zig");
+const build_options = @import("build_options");
 
 pub const UciInterface = struct {
     position: position.Position,
@@ -60,7 +61,9 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche 2.0.0\n");
+                _ = try stdout.write("id name Avalanche ");
+                _ = try stdout.write(build_options.version);
+                _ = try stdout.writeByte('\n');
                 _ = try stdout.write("id author Yinuo Huang\n\n");
                 _ = try stdout.write("option name Hash type spin default 16 min 1 max 4096\n");
                 _ = try stdout.writeAll("uciok\n");

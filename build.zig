@@ -1,5 +1,52 @@
 const std = @import("std");
 
+// Simple DateTime lib
+// https://gist.github.com/WoodyAtHome/3ef50b17f0fa2860ac52b97af12f8d15
+// Translated from German to English
+pub const DateTime = struct { day: u8, month: u8, year: u16, hour: u8, minute: u8, second: u8 };
+
+pub fn timestamp2DateTime(timestamp: i64) DateTime {
+    const unixtime = @intCast(u64, timestamp);
+    const SECONDS_PER_DAY = 86400;
+    const DAYS_IN_COMMON_YEAR = 365;
+    const DAYS_IN_4_YEARS = 1461;
+    const DAYS_IN_100_YEARS = 36524;
+    const DAYS_IN_400_YEARS = 146097;
+    const DAYS_ON_1970_01_01 = 719468;
+
+    var dayN: u64 = DAYS_ON_1970_01_01 + unixtime / SECONDS_PER_DAY;
+    var seconds_since_midnight: u64 = unixtime % SECONDS_PER_DAY;
+    var temp: u64 = 0;
+
+    temp = 4 * (dayN + DAYS_IN_100_YEARS + 1) / DAYS_IN_400_YEARS - 1;
+    var year = @intCast(u16, 100 * temp);
+    dayN -= DAYS_IN_100_YEARS * temp + temp / 4;
+
+    temp = 4 * (dayN + DAYS_IN_COMMON_YEAR + 1) / DAYS_IN_4_YEARS - 1;
+    year += @intCast(u16, temp);
+    dayN -= DAYS_IN_COMMON_YEAR * temp + temp / 4;
+
+    var month = @intCast(u8, (5 * dayN + 2) / 153);
+    var day = @intCast(u8, dayN - (@intCast(u64, month) * 153 + 2) / 5 + 1);
+
+    month += 3;
+    if (month > 12) {
+        month -= 12;
+        year += 1;
+    }
+
+    var hour = @intCast(u8, seconds_since_midnight / 3600);
+    var minute = @intCast(u8, seconds_since_midnight % 3600 / 60);
+    var second = @intCast(u8, seconds_since_midnight % 60);
+
+    return DateTime{ .day = day, .month = month, .year = year, .hour = hour, .minute = minute, .second = second };
+}
+// End of Simple DateTime lib
+
+fn dtToString(dt: DateTime, buf: []u8) []const u8 {
+    return std.fmt.bufPrint(buf, "Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2}", .{ dt.year, dt.month, dt.day, dt.hour, dt.minute }) catch unreachable;
+}
+
 var NNUE_SOURCE: [12]u8 = undefined;
 
 fn le_to_u32(idx: usize) u32 {
@@ -53,6 +100,9 @@ pub fn build(b: *std.build.Builder) void {
         build_options.addOption(usize, "HIDDEN_SIZE", @intCast(usize, hidden_size));
         build_options.addOption(usize, "OUTPUT_SIZE", @intCast(usize, output_size));
     }
+
+    var buf: [64]u8 = undefined;
+    build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
 
     exe.linkLibC();
     exe.install();
