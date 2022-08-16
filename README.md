@@ -20,7 +20,7 @@ Avalanche uses the new **NNUE** (Efficiently Updatable Neural Network) technolog
 The current architecture is 768x512x1, proven to be strong enough by BlackMarlin 5.0.
 Without NNUE (pure PeSTO's PSQT eval), Avalanche only plays at around 2300 ELO.
 
-My goal for Avalanche is for it to reach 3000 elo on CCRL and getting into the top 100 list. Currently it is ranked #120. After that, I will put more time on Competitive Programming and Neural Networks.
+My goal for Avalanche reaching 3000 elo on CCRL and getting into the top 100 list. Currently it is ranked #120. After that, I will put more time on Competitive Programming and Neural Networks.
 
 This project isn't possible without the help of the Zig community, since this is the first and only Zig code I've ever written. Thank you!
 
