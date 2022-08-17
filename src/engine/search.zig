@@ -518,9 +518,11 @@ pub const Searcher = struct {
                     self.best_move = move;
                 }
 
-                self.pv[self.ply][0] = move;
-                std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+                if (!is_null) {
+                    self.pv[self.ply][0] = move;
+                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+                }
 
                 if (score > alpha) {
                     alpha = score;
