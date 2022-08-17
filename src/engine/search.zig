@@ -525,40 +525,40 @@ pub const Searcher = struct {
                 self.pv[self.ply][0] = move;
                 std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
                 self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
-            }
 
-            if (score > alpha) {
-                raised_alpha = true;
-                alpha = score;
+                if (score > alpha) {
+                    raised_alpha = true;
+                    alpha = score;
 
-                if (is_root) {
-                    self.best_move = move;
-                }
-            }
-
-            if (alpha >= beta) {
-                if (!is_capture) {
-                    var temp = self.killer[self.ply][0];
-                    if (temp.to_u16() != move.to_u16()) {
-                        var temp1 = self.killer[self.ply][1];
-                        self.killer[self.ply][0] = move;
-                        self.killer[self.ply][1] = temp;
-                        self.killer[self.ply][2] = temp1;
+                    if (is_root) {
+                        self.best_move = move;
                     }
 
-                    self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
+                    if (alpha >= beta) {
+                        if (!is_capture) {
+                            var temp = self.killer[self.ply][0];
+                            if (temp.to_u16() != move.to_u16()) {
+                                var temp1 = self.killer[self.ply][1];
+                                self.killer[self.ply][0] = move;
+                                self.killer[self.ply][1] = temp;
+                                self.killer[self.ply][2] = temp1;
+                            }
 
-                    if (self.history[@enumToInt(color)][move.from][move.to] >= 30000) {
-                        for (self.history) |*a| {
-                            for (a) |*b| {
-                                for (b) |*c| {
-                                    c.* = @divFloor(c.*, 2);
+                            self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
+
+                            if (self.history[@enumToInt(color)][move.from][move.to] >= 30000) {
+                                for (self.history) |*a| {
+                                    for (a) |*b| {
+                                        for (b) |*c| {
+                                            c.* = @divFloor(c.*, 2);
+                                        }
+                                    }
                                 }
                             }
                         }
+                        break;
                     }
                 }
-                break;
             }
         }
 
@@ -583,7 +583,7 @@ pub const Searcher = struct {
             });
         }
 
-        return alpha;
+        return best_score;
     }
 
     pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, alpha_: hce.Score, beta_: hce.Score) hce.Score {
@@ -688,9 +688,9 @@ pub const Searcher = struct {
             if (score > best_score) {
                 best_score = score;
                 if (score > alpha) {
-                    self.pv[self.ply][0] = move;
-                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+                    //self.pv[self.ply][0] = move;
+                    //std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    //self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
                     if (score >= beta) {
                         return beta;
@@ -701,6 +701,6 @@ pub const Searcher = struct {
             }
         }
 
-        return alpha;
+        return best_score;
     }
 };
