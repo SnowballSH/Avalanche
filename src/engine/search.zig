@@ -49,7 +49,7 @@ pub const Searcher = struct {
     pv: [MAX_PLY][MAX_PLY]types.Move = undefined,
     pv_size: [MAX_PLY]usize = undefined,
 
-    killer: [MAX_PLY][3]types.Move = undefined,
+    killer: [MAX_PLY][2]types.Move = undefined,
     history: [2][64][64]u32 = undefined,
 
     pub fn new() Searcher {
@@ -67,7 +67,6 @@ pub const Searcher = struct {
             while (i < MAX_PLY) : (i += 1) {
                 self.killer[i][0] = types.Move.empty();
                 self.killer[i][1] = types.Move.empty();
-                self.killer[i][2] = types.Move.empty();
 
                 self.exclude_move[i] = types.Move.empty();
             }
@@ -380,14 +379,13 @@ pub const Searcher = struct {
         // >> Step 5: Search
 
         // Step 5.1: Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
         var move_size = movelist.items.len;
 
         self.killer[self.ply + 1][0] = types.Move.empty();
         self.killer[self.ply + 1][1] = types.Move.empty();
-        self.killer[self.ply + 1][2] = types.Move.empty();
 
         if (move_size == 0) {
             if (in_check) {
@@ -531,10 +529,8 @@ pub const Searcher = struct {
                         if (!is_capture) {
                             var temp = self.killer[self.ply][0];
                             if (temp.to_u16() != move.to_u16()) {
-                                var temp1 = self.killer[self.ply][1];
                                 self.killer[self.ply][0] = move;
                                 self.killer[self.ply][1] = temp;
-                                self.killer[self.ply][2] = temp1;
                             }
 
                             self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);

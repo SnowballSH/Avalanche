@@ -36,10 +36,8 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                 }
             }
         } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
-            score += SortKiller + 2000;
+            score += SortKiller + 1000;
         } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
-            score += SortKiller + 500;
-        } else if (searcher.killer[searcher.ply][2].to_u16() == move.to_u16()) {
             score += SortKiller;
         } else {
             score += -31000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
