@@ -226,6 +226,8 @@ pub const Searcher = struct {
         var depth = depth_;
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
+        self.pv_size[self.ply] = 0;
+
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
@@ -236,8 +238,6 @@ pub const Searcher = struct {
 
         var is_root = node == NodeType.Root;
         var on_pv: bool = node != NodeType.NonPV;
-
-        self.pv_size[self.ply] = 0;
 
         // Step 1.2: Prefetch
         if (depth != 0) {
@@ -447,7 +447,7 @@ pub const Searcher = struct {
             // zig fmt: on
                 var margin = @intCast(i32, depth) * 2;
                 self.exclude_move[self.ply] = hashmove;
-                var singular_score = self.negamax(pos, color, depth / 2, entry.?.eval - margin - 1, entry.?.eval - margin, true, NodeType.NonPV);
+                var singular_score = self.negamax(pos, color, depth / 2 - 1, entry.?.eval - margin - 1, entry.?.eval - margin, true, NodeType.NonPV);
                 self.exclude_move[self.ply] = types.Move.empty();
                 if (singular_score >= entry.?.eval - margin) {
                     if (entry.?.eval - margin >= beta) {
@@ -465,35 +465,25 @@ pub const Searcher = struct {
             var score: hce.Score = 0;
             if (index == 0) {
                 score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
-            } else if (depth >= 3) {
+            } else if (depth >= 3 and !is_capture and index >= 1) {
                 // Step 5.5: Late-Move Reduction
-                var reduction: i32 = 0;
+                var reduction: i32 = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
 
-                if (depth >= 2 and !is_capture and index >= 2 + 2 * @intCast(usize, @boolToInt(is_root))) {
-                    reduction = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
-
-                    if (on_pv) {
-                        reduction -= 1;
-                    }
-
-                    if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16() or move.to_u16() == self.killer[self.ply][2].to_u16()) {
-                        reduction -= 1;
-                    }
-
-                    if (reduction >= new_depth) {
-                        reduction = @intCast(i32, new_depth - 1);
-                    } else if (reduction < 0) {
-                        reduction = 0;
-                    }
+                if (on_pv) {
+                    reduction -= 1;
                 }
 
-                // Step 5.6: Principal-Variation-Search (PVS)
-                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false, NodeType.NonPV);
+                if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16()) {
+                    reduction -= 1;
+                }
 
-                if (score > alpha and reduction > 0) {
-                    if (reduction > 0) {
-                        score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
-                    }
+                var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
+
+                // Step 5.6: Principal-Variation-Search (PVS)
+                score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV);
+
+                if (score > alpha and rd < new_depth) {
+                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
 
                     if (score > alpha and score < beta) {
                         score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
@@ -528,12 +518,12 @@ pub const Searcher = struct {
                     self.best_move = move;
                 }
 
+                self.pv[self.ply][0] = move;
+                std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
+
                 if (score > alpha) {
                     alpha = score;
-
-                    self.pv[self.ply][0] = move;
-                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
                     if (alpha >= beta) {
                         if (!is_capture) {
@@ -593,7 +583,7 @@ pub const Searcher = struct {
         }
 
         self.nodes += 1;
-        // self.pv_size[self.ply] = 0;
+        self.pv_size[self.ply] = 0;
 
         // Step 1.2: Material Draw Check
         if (hce.is_material_draw(pos)) {
