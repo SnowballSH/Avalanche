@@ -23,6 +23,12 @@ pub const QuietLMR: [64][64]i32 = init: {
 pub const MAX_PLY = 128;
 pub const MAX_GAMEPLY = 1024;
 
+pub const NodeType = enum {
+    Root,
+    PV,
+    NonPV,
+};
+
 pub const Searcher = struct {
     max_millis: u64 = 0,
     timer: std.time.Timer = undefined,
@@ -122,7 +128,7 @@ pub const Searcher = struct {
         while (depth <= bound) {
             self.ply = 0;
 
-            var val = self.negamax(pos, color, depth, alpha, beta, false, tt.Bound.Exact);
+            var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
 
             if (self.time_stop or self.should_stop()) {
                 break;
@@ -214,7 +220,7 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool, expected_bound: tt.Bound) hce.Score {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool, comptime node: NodeType) hce.Score {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -228,7 +234,8 @@ pub const Searcher = struct {
             return 0;
         }
 
-        var is_root = self.ply == 0;
+        var is_root = node == NodeType.Root;
+        var on_pv: bool = node != NodeType.NonPV;
 
         self.pv_size[self.ply] = 0;
 
@@ -271,20 +278,18 @@ pub const Searcher = struct {
             return 0;
         }
 
-        var on_pv: bool = beta - 1 != alpha;
-
         // >> Step 2: TT Probe
         var hashmove = types.Move.empty();
         var tthit = false;
         var tt_eval: hce.Score = 0;
         var entry = tt.GlobalTT.get(pos.hash);
 
-        if (entry != null and !in_check) {
+        if (entry != null) {
             tthit = true;
             tt_eval = entry.?.eval;
-            if (tt_eval > hce.MateScore - 50 and tt_eval <= hce.MateScore) {
+            if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
                 tt_eval -= @intCast(hce.Score, self.ply);
-            } else if (tt_eval < -hce.MateScore + 50 and tt_eval >= -hce.MateScore) {
+            } else if (tt_eval < -hce.MateScore + hce.MaxMate and tt_eval >= -hce.MateScore) {
                 tt_eval += @intCast(hce.Score, self.ply);
             }
             hashmove = entry.?.bestmove;
@@ -292,7 +297,7 @@ pub const Searcher = struct {
                 self.best_move = hashmove;
             }
 
-            if (entry.?.depth >= depth) {
+            if (!is_null and !on_pv and !is_root and entry.?.depth >= depth) {
                 if (pos.history[pos.game_ply].fifty < 90 and (depth == 0 or !on_pv)) {
                     switch (entry.?.flag) {
                         .Exact => {
@@ -313,48 +318,43 @@ pub const Searcher = struct {
             }
         }
 
-        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
+        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
         var best_score: hce.Score = static_eval;
-
-        var high_estimate = if (!tthit or entry.?.flag == tt.Bound.Upper) static_eval else entry.?.eval;
 
         var low_estimate: hce.Score = -hce.MateScore - 1;
 
-        self.eval_history[self.ply] = high_estimate;
+        self.eval_history[self.ply] = static_eval;
 
-        var improving = (!(self.ply <= 1 or in_check) and high_estimate > self.eval_history[self.ply - 2]);
+        var improving = !(self.ply <= 1 or in_check) and static_eval > self.eval_history[self.ply - 2];
 
         // >> Step 3: Prunings
-        if (!in_check and !on_pv) {
+        if (!in_check and !is_root) {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
 
             // Step 3.1: Razoring
-            if (depth <= 1 and high_estimate + 320 < alpha) {
+            if (depth <= 1 and static_eval + 320 < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
             // Step 3.2: Reverse Futility Pruning
-            if (depth <= 6) {
-                var n = @intCast(hce.Score, depth) * 50;
+            if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 5) {
+                var n = @intCast(hce.Score, depth) * 60;
                 if (depth >= 2 and improving) {
-                    n -= 50;
+                    n -= 70;
                 }
-                if (high_estimate - n >= beta) {
+                if (static_eval - n >= beta) {
                     return beta;
                 }
             }
 
             // Step 3.3: Null move pruning
-            if (!is_null and depth >= 2 and high_estimate >= beta and (!tthit or entry.?.flag != tt.Bound.Upper or entry.?.eval >= beta) and pos.has_non_pawns()) {
-                // var r: usize = 3;
-                var r = 4 + depth / 4;
+            if (!is_null and depth >= 3 and static_eval >= beta and pos.has_non_pawns()) {
+                var r = 5 + depth / 5 + @minimum(3, @intCast(usize, static_eval - beta) / 214);
 
-                if (r >= depth) {
-                    r = depth - 1;
-                }
+                r = @minimum(r, depth);
 
                 pos.play_null_move();
-                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, tt.Bound.Upper);
+                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV);
                 pos.undo_null_move();
 
                 if (self.time_stop) {
@@ -362,6 +362,9 @@ pub const Searcher = struct {
                 }
 
                 if (null_score >= beta) {
+                    if (null_score >= hce.MateScore - hce.MaxMate) {
+                        null_score = beta;
+                    }
                     return null_score;
                 }
             }
@@ -370,12 +373,11 @@ pub const Searcher = struct {
         // >> Step 4: Extensions/Reductions
         // Step 4.1: Reduce depth for non-tthits
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (on_pv and depth >= 6 and !tthit) {
+        if (!is_root and on_pv and depth >= 6 and !tthit) {
             depth -= 1;
         }
 
         // >> Step 5: Search
-        var tt_flag = tt.Bound.Upper;
 
         // Step 5.1: Move Generation
         var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
@@ -388,7 +390,7 @@ pub const Searcher = struct {
         self.killer[self.ply + 1][2] = types.Move.empty();
 
         if (move_size == 0) {
-            if (pos.in_check(color)) {
+            if (in_check) {
                 // Checkmate
                 return -hce.MateScore + @intCast(hce.Score, self.ply);
             } else {
@@ -396,14 +398,6 @@ pub const Searcher = struct {
                 return 0;
             }
         }
-
-        var expected_child = switch (expected_bound) {
-            .None => tt.Bound.None,
-            .Upper => tt.Bound.Lower,
-            .Lower => tt.Bound.Upper,
-            .Exact => tt.Bound.Exact,
-        };
-        var raised_alpha = false;
 
         // Step 5.2: Move Ordering
         var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
@@ -414,6 +408,8 @@ pub const Searcher = struct {
         best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
 
         var skip_quiet = false;
+
+        var quiet_count: usize = 0;
 
         var index: usize = 0;
         while (index < move_size) : (index += 1) {
@@ -428,11 +424,13 @@ pub const Searcher = struct {
                 continue;
             }
 
-            // Step 5.4: Futility Pruning
-            if (!on_pv and expected_bound != tt.Bound.Exact and index > 0 and depth <= 7 and !is_capture and alpha > -hce.MateScore and low_estimate != -hce.MateScore - 1 and low_estimate + @intCast(i32, depth) * 100 < alpha) {
-                skip_quiet = true;
-                continue;
-            }
+            //if (!is_root and index > 0 and !is_capture) {
+            // Step 5.4a: Futility Pruning
+            //if (depth <= 8 and static_eval + 135 * @intCast(hce.Score, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
+            //    skip_quiet = true;
+            //    continue;
+            //}
+            //}
 
             var new_depth = depth - 1;
 
@@ -440,21 +438,16 @@ pub const Searcher = struct {
             // zig fmt: off
             if (self.ply > 0
                 and depth >= 8
-                and expected_bound != tt.Bound.Upper
-                and !in_check
                 and tthit
+                and entry.?.flag != tt.Bound.Upper
                 and !hce.is_near_mate(entry.?.eval)
                 and hashmove.to_u16() == move.to_u16()
                 and entry.?.depth >= depth - 3
-                and (
-                    entry.?.flag == tt.Bound.Exact
-                    or entry.?.flag == tt.Bound.Lower
-                )
             ) {
             // zig fmt: on
-                var margin = @intCast(i32, depth);
+                var margin = @intCast(i32, depth) * 2;
                 self.exclude_move[self.ply] = hashmove;
-                var singular_score = self.negamax(pos, color, depth / 2, entry.?.eval - margin - 1, entry.?.eval - margin, false, expected_bound);
+                var singular_score = self.negamax(pos, color, depth / 2, entry.?.eval - margin - 1, entry.?.eval - margin, true, NodeType.NonPV);
                 self.exclude_move[self.ply] = types.Move.empty();
                 if (singular_score >= entry.?.eval - margin) {
                     if (entry.?.eval - margin >= beta) {
@@ -469,14 +462,10 @@ pub const Searcher = struct {
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
 
-            if (expected_bound == tt.Bound.Exact and raised_alpha) {
-                expected_child = tt.Bound.Lower;
-            }
-
             var score: hce.Score = 0;
             if (index == 0) {
-                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, expected_child);
-            } else {
+                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
+            } else if (depth >= 3) {
                 // Step 5.5: Late-Move Reduction
                 var reduction: i32 = 0;
 
@@ -499,13 +488,22 @@ pub const Searcher = struct {
                 }
 
                 // Step 5.6: Principal-Variation-Search (PVS)
-                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false, expected_child);
+                score = -self.negamax(pos, opp_color, new_depth - @intCast(usize, reduction), -alpha - 1, -alpha, false, NodeType.NonPV);
 
                 if (score > alpha and reduction > 0) {
-                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, expected_child);
+                    if (reduction > 0) {
+                        score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
+                    }
+
+                    if (score > alpha and score < beta) {
+                        score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
+                    }
                 }
+            } else {
+                // Null-window search
+                score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
                 if (score > alpha and score < beta) {
-                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, expected_child);
+                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
                 }
             }
 
@@ -517,22 +515,25 @@ pub const Searcher = struct {
                 return 0;
             }
 
+            if (!is_capture) {
+                quiet_count += 1;
+            }
+
             // Step 5.7: Alpha-Beta Pruning
             if (score > best_score) {
                 best_score = score;
                 best_move = move;
+
+                if (is_root) {
+                    self.best_move = move;
+                }
 
                 self.pv[self.ply][0] = move;
                 std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
                 self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
                 if (score > alpha) {
-                    raised_alpha = true;
                     alpha = score;
-
-                    if (is_root) {
-                        self.best_move = move;
-                    }
 
                     if (alpha >= beta) {
                         if (!is_capture) {
@@ -563,16 +564,8 @@ pub const Searcher = struct {
         }
 
         // >> Step 7: Transposition Table Update
-        if (!skip_quiet) {
-            if (alpha > beta) {
-                tt_flag = tt.Bound.Lower;
-            } else if (!raised_alpha) {
-                tt_flag = tt.Bound.Upper;
-            } else if (alpha == beta and (index != move_size or hce.is_near_mate(best_score))) {
-                tt_flag = tt.Bound.Lower;
-            } else {
-                tt_flag = tt.Bound.Exact;
-            }
+        if (!skip_quiet and self.exclude_move[self.ply].to_u16() == 0) {
+            var tt_flag = if (best_score >= beta) tt.Bound.Lower else if (alpha != alpha_) tt.Bound.Exact else tt.Bound.Upper;
 
             tt.GlobalTT.set(tt.Item{
                 .eval = best_score,
@@ -620,16 +613,11 @@ pub const Searcher = struct {
         // >> Step 2: Prunings
 
         var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
-        var static_eval = hce.evaluate(pos);
         if (!in_check) {
+            var static_eval = hce.evaluate(pos);
             best_score = static_eval;
 
-            // Step 2.1: Delta pruning
-            if (best_score + 1000 <= alpha) {
-                return best_score;
-            }
-
-            // Step 2.2: Stand Pat pruning
+            // Step 2.1: Stand Pat pruning
             if (best_score >= beta) {
                 return beta;
             }
@@ -638,10 +626,7 @@ pub const Searcher = struct {
             }
         }
 
-        if (static_eval >= beta) {
-            return beta;
-        }
-        alpha = @maximum(alpha, static_eval);
+        // alpha = @maximum(alpha, static_eval);
 
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
@@ -649,14 +634,29 @@ pub const Searcher = struct {
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
+            if (entry.?.flag == tt.Bound.Exact) {
+                return entry.?.eval;
+            } else if (entry.?.flag == tt.Bound.Lower and entry.?.eval >= beta) {
+                return entry.?.eval;
+            } else if (entry.?.flag == tt.Bound.Upper and entry.?.eval <= alpha) {
+                return entry.?.eval;
+            }
         }
 
         // >> Step 4: QSearch
 
         // Step 4.1: Q Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 2) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         defer movelist.deinit();
-        pos.generate_q_moves(color, &movelist);
+        if (in_check) {
+            pos.generate_legal_moves(color, &movelist);
+            if (movelist.items.len == 0) {
+                // Checkmated
+                return -hce.MateScore + @intCast(hce.Score, self.ply);
+            }
+        } else {
+            pos.generate_q_moves(color, &movelist);
+        }
         var move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
@@ -668,10 +668,11 @@ pub const Searcher = struct {
 
         while (index < move_size) : (index += 1) {
             var move = movepick.getNextBest(&movelist, &evallist, index);
+            var is_capture = move.is_capture();
 
             // Step 4.4: SEE Pruning
-            if (evallist.items[index] < 0) {
-                break;
+            if (is_capture and evallist.items[index] < 0) {
+                continue;
             }
 
             self.ply += 1;
@@ -688,10 +689,6 @@ pub const Searcher = struct {
             if (score > best_score) {
                 best_score = score;
                 if (score > alpha) {
-                    //self.pv[self.ply][0] = move;
-                    //std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                    //self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
-
                     if (score >= beta) {
                         return beta;
                     }
