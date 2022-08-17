@@ -528,12 +528,12 @@ pub const Searcher = struct {
                     self.best_move = move;
                 }
 
-                self.pv[self.ply][0] = move;
-                std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
-                self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
-
                 if (score > alpha) {
                     alpha = score;
+
+                    self.pv[self.ply][0] = move;
+                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
 
                     if (alpha >= beta) {
                         if (!is_capture) {
@@ -593,7 +593,7 @@ pub const Searcher = struct {
         }
 
         self.nodes += 1;
-        self.pv_size[self.ply] = 0;
+        // self.pv_size[self.ply] = 0;
 
         // Step 1.2: Material Draw Check
         if (hce.is_material_draw(pos)) {
