@@ -1,10 +1,13 @@
 const std = @import("std");
+
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const hce = @import("./hce.zig");
 const tt = @import("./tt.zig");
 const movepick = @import("./movepick.zig");
+
+const parameters = @import("./parameters.zig");
 
 pub const QuietLMR: [64][64]i32 = init: {
     @setEvalBranchQuota(64 * 64 * 6);
@@ -337,9 +340,9 @@ pub const Searcher = struct {
 
             // Step 3.2: Reverse Futility Pruning
             if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 5) {
-                var n = @intCast(hce.Score, depth) * 60;
+                var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
                 if (depth >= 2 and improving) {
-                    n -= 70;
+                    n -= parameters.RFPImprovingDeduction;
                 }
                 if (static_eval - n >= beta) {
                     return beta;
@@ -348,8 +351,8 @@ pub const Searcher = struct {
 
             // Step 3.3: Null move pruning
             if (!is_null and depth >= 3 and static_eval >= beta and pos.has_non_pawns()) {
-                var r = 5 + depth / 5 + @minimum(3, @intCast(usize, static_eval - beta) / 214);
-
+                var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
+                r += @minimum(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
                 r = @minimum(r, depth);
 
                 pos.play_null_move();
