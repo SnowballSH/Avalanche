@@ -334,7 +334,7 @@ pub const Searcher = struct {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
 
             // Step 3.1: Razoring
-            if (depth <= 1 and static_eval + 340 < alpha) {
+            if (depth <= 1 and static_eval + 320 < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
@@ -375,14 +375,14 @@ pub const Searcher = struct {
         // >> Step 4: Extensions/Reductions
         // Step 4.1: Reduce depth for non-tthits
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (!is_root and depth >= 5 and !tthit) {
+        if (!is_root and on_pv and depth >= 6 and !tthit) {
             depth -= 1;
         }
 
         // >> Step 5: Search
 
         // Step 5.1: Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
         var move_size = movelist.items.len;
@@ -637,7 +637,7 @@ pub const Searcher = struct {
         // >> Step 4: QSearch
 
         // Step 4.1: Q Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         defer movelist.deinit();
         if (in_check) {
             pos.generate_legal_moves(color, &movelist);
