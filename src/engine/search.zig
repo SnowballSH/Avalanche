@@ -342,7 +342,7 @@ pub const Searcher = struct {
             if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 5) {
                 var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
                 if (depth >= 2 and improving) {
-                    n -= parameters.RFPMultiplier;
+                    n -= parameters.RFPImprovingDeduction;
                 }
                 if (static_eval - n >= beta) {
                     return beta;
@@ -351,10 +351,8 @@ pub const Searcher = struct {
 
             // Step 3.3: Null move pruning
             if (!is_null and depth >= 3 and static_eval >= beta and pos.has_non_pawns()) {
-                var r = parameters.NMPBase + @minimum(3, depth / parameters.NMPDepthDivisor);
-                if (static_eval - beta >= 100) {
-                    r += 1;
-                }
+                var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
+                r += @minimum(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
                 r = @minimum(r, depth);
 
                 pos.play_null_move();
