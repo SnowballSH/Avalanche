@@ -31,11 +31,17 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 `zig build -Drelease-fast`
 
+Avalanche is only tested against master branch of Zig until zig 0.10 is stable.
+
 Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
 
 Feel free to challenge it!
 
 Brilliant win against Weiawaga 5.0.0 (2848) in 95th CCRL Amateur Tournament Division 6: https://lichess.org/study/1UVjx7eE/ariuxOkQ#0
+
+## Tuning
+
+Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/storming_tune) script.
 
 ## Credits
 
