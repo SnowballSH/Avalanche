@@ -1,4 +1,4 @@
-pub const RFPMultiplier = 60;
+pub const RFPMultiplier = 62;
 pub const RFPImprovingDeduction = 70;
 
 pub const NMPBase = 5;
