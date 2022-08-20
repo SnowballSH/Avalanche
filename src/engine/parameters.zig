@@ -1,6 +1,4 @@
 pub const RFPMultiplier = 60;
-pub const RFPImprovingDeduction = 70;
-
-pub const NMPBase = 5;
-pub const NMPDepthDivisor = 5;
-pub const NMPBetaDivisor = 214;
+pub const NMPBase = 4;
+pub const NMPDepthDivisor = 4;
+pub const NMPBetaDivisor = 220;

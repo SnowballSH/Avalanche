@@ -342,7 +342,7 @@ pub const Searcher = struct {
             if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 5) {
                 var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
                 if (depth >= 2 and improving) {
-                    n -= parameters.RFPImprovingDeduction;
+                    n -= parameters.RFPMultiplier;
                 }
                 if (static_eval - n >= beta) {
                     return beta;
