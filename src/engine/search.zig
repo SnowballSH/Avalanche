@@ -339,13 +339,13 @@ pub const Searcher = struct {
             }
 
             // Step 3.2: Reverse Futility Pruning
-            if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 7) {
+            if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 5) {
                 var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
                 if (depth >= 2 and improving) {
                     n -= parameters.RFPMultiplier;
                 }
                 if (static_eval - n >= beta) {
-                    return static_eval - n;
+                    return beta;
                 }
             }
 
