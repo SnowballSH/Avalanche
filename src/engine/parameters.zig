@@ -1,5 +1,5 @@
-pub const LMRWeight = 0.4615362112;
-pub const LMRBias = 1.1243184;
+pub const LMRWeight = 0.647173874704215;
+pub const LMRBias = 1.301347679383754;
 
 pub const RFPMultiplier = 62;
 pub const RFPImprovingDeduction = 70;
