@@ -16,8 +16,8 @@ pub const QuietLMR: [64][64]i32 = init: {
     while (depth < 64) : (depth += 1) {
         var moves = 1;
         while (moves < 64) : (moves += 1) {
-            const a = 7.39 * std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) + 18;
-            reductions[depth][moves] = @floatToInt(i32, @floor(a / 16.1));
+            const a = parameters.LMRWeight * std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) + parameters.LMRBias;
+            reductions[depth][moves] = @floatToInt(i32, @floor(a));
         }
     }
     break :init reductions;
