@@ -291,10 +291,10 @@ pub fn distance_eval(pos: *position.Position, comptime white_winning: bool) Scor
 
     if (white_winning) {
         score -= m_dist * 5;
-        score += CenterManhattanDistance[k2.index()] * 10;
+        score += CenterManhattanDistance[k2.index()] * 12;
     } else {
         score += m_dist * 5;
-        score -= CenterManhattanDistance[k1.index()] * 10;
+        score -= CenterManhattanDistance[k1.index()] * 12;
     }
 
     return score;
@@ -392,7 +392,7 @@ pub fn is_material_draw(pos: *position.Position) bool {
     return false;
 }
 
-pub const MaxMate: i32 = 200;
+pub const MaxMate: i32 = 256;
 
 pub fn is_near_mate(score: Score) bool {
     return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;

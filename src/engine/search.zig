@@ -382,7 +382,7 @@ pub const Searcher = struct {
         // >> Step 5: Search
 
         // Step 5.1: Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
         var move_size = movelist.items.len;
