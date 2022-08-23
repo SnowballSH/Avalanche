@@ -291,10 +291,10 @@ pub fn distance_eval(pos: *position.Position, comptime white_winning: bool) Scor
 
     if (white_winning) {
         score -= m_dist * 5;
-        score += CenterManhattanDistance[k2.index()] * 12;
+        score += CenterManhattanDistance[k2.index()] * 10;
     } else {
         score += m_dist * 5;
-        score -= CenterManhattanDistance[k1.index()] * 12;
+        score -= CenterManhattanDistance[k1.index()] * 10;
     }
 
     return score;
@@ -302,8 +302,9 @@ pub fn distance_eval(pos: *position.Position, comptime white_winning: bool) Scor
 
 pub fn evaluate(pos: *position.Position) Score {
     var phase = pos.phase();
+    var result: Score = 0;
     if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
-        return evaluate_nnue(pos);
+        result = evaluate_nnue(pos);
     } else {
         if (!pos.evaluator.need_hce) {
             pos.evaluator.need_hce = true;
@@ -350,11 +351,18 @@ pub fn evaluate(pos: *position.Position) Score {
 
         var score = @divFloor(mg_score * mg_phase + eg_score * eg_phase, 24);
         if (pos.turn == types.Color.White) {
-            return score;
+            result = score;
         } else {
-            return -score;
+            result = -score;
         }
     }
+
+    if (phase <= 5 and std.math.absInt(result) catch 0 >= 16 and is_material_drawish(pos)) {
+        const drawish_factor: Score = 8;
+        result = @divTrunc(result, drawish_factor);
+    }
+
+    return result;
 }
 
 pub inline fn evaluate_nnue(pos: *position.Position) Score {
@@ -373,19 +381,98 @@ pub fn is_material_draw(pos: *position.Position) bool {
         return true;
     }
 
-    if (types.popcount(pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()]) == 1 and pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | kings == all) {
+    var wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
+    var bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
+    var wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
+    var bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
+
+    var wbc = types.popcount(wb);
+    var bbc = types.popcount(bb);
+    var wnc = types.popcount(wn);
+    var bnc = types.popcount(bn);
+
+    // KB vs K
+    if (wbc == 1 and wb | kings == all) {
         return true;
     }
 
-    if (types.popcount(pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()]) == 1 and pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | kings == all) {
+    if (bbc == 1 and bb | kings == all) {
         return true;
     }
 
-    if (types.popcount(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()]) <= 2 and pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | kings == all) {
+    // KN vs K
+    if (wnc == 1 and wn | kings == all) {
         return true;
     }
 
-    if (types.popcount(pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()]) <= 2 and pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | kings == all) {
+    if (bnc == 1 and bn | kings == all) {
+        return true;
+    }
+
+    return false;
+}
+
+pub fn is_material_drawish(pos: *position.Position) bool {
+    var all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    var kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
+
+    if (kings == all) {
+        return true;
+    }
+
+    var wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
+    var bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
+    var wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
+    var bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
+
+    var wbc = types.popcount(wb);
+    var bbc = types.popcount(bb);
+    var wnc = types.popcount(wn);
+    var bnc = types.popcount(bn);
+
+    // KN vs K or KNN vs K
+    if (wnc <= 2 and wn | kings == all) {
+        return true;
+    }
+
+    if (bnc <= 2 and bn | kings == all) {
+        return true;
+    }
+
+    // KN vs KN
+    if (wnc == 1 and bnc == 1 and wn | bn | kings == all) {
+        return true;
+    }
+
+    // KB vs KB
+    if (wbc == 1 and bbc == 1 and wb | bb | kings == all) {
+        return true;
+    }
+
+    // KB vs KN
+    if (wbc == 1 and bnc == 1 and wb | bn | kings == all) {
+        return true;
+    }
+
+    if (bbc == 1 and wnc == 1 and bb | wn | kings == all) {
+        return true;
+    }
+
+    // KNN vs KB
+    if (wnc == 2 and bbc == 1 and wn | bb | kings == all) {
+        return true;
+    }
+
+    if (bnc == 2 and wbc == 1 and bn | wb | kings == all) {
+        return true;
+    }
+
+    // KBN vs KB
+    if (wbc == 1 and wnc == 1 and bbc == 1 and wb | wn | bb | kings == all) {
+        return true;
+    }
+
+    if (bbc == 1 and bnc == 1 and wbc == 1 and bb | bn | wb | kings == all) {
         return true;
     }
 
