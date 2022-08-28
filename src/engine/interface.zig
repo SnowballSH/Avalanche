@@ -52,6 +52,10 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "stop")) {
                 self.searcher.stop = true;
                 self.searcher.is_searching = false;
+                continue;
+            } else if (std.mem.eql(u8, token.?, "isready")) {
+                _ = try stdout.writeAll("readyok\n");
+                continue;
             }
 
             if (self.searcher.is_searching) {
@@ -99,9 +103,6 @@ pub const UciInterface = struct {
                 self.searcher = search.Searcher.new();
                 tt.GlobalTT.clear();
                 self.position.set_fen(types.DEFAULT_FEN[0..]);
-            } else if (std.mem.eql(u8, token.?, "isready")) {
-                std.time.sleep(100);
-                _ = try stdout.writeAll("readyok\n");
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.debug_print();
             } else if (std.mem.eql(u8, token.?, "export_net")) {
