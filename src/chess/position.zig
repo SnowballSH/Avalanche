@@ -530,7 +530,15 @@ pub const Position = struct {
                         // If checker is a knight, then we can only move or capture.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned;
                         while (b1 != 0) {
-                            list.append(types.Move.new_from_to_flag(types.pop_lsb(&b1), checker_sq, types.MoveFlags.CAPTURE)) catch {};
+                            var psq = types.pop_lsb(&b1);
+                            if (self.mailbox[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_QUEEN))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_ROOK))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_KNIGHT))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_BISHOP))) catch {};
+                            } else {
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.CAPTURE)) catch {};
+                            }
                         }
 
                         return;
