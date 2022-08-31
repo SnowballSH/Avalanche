@@ -421,17 +421,21 @@ pub const Searcher = struct {
 
             var is_capture = move.is_capture();
 
+            if (!is_capture) {
+                quiet_count += 1;
+            }
+
             if (skip_quiet and !is_capture) {
                 continue;
             }
 
-            //if (!is_root and index > 0 and !is_capture) {
-            // Step 5.4a: Futility Pruning
-            //if (depth <= 8 and static_eval + 135 * @intCast(hce.Score, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
-            //    skip_quiet = true;
-            //    continue;
-            //}
-            //}
+            if (!is_root and index > 0) {
+                // Step 5.4a: Late Move Pruning
+                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 4 and quiet_count > (4 + depth * depth)) {
+                    skip_quiet = true;
+                    continue;
+                }
+            }
 
             var new_depth = depth - 1;
 
@@ -504,10 +508,6 @@ pub const Searcher = struct {
 
             if (self.time_stop) {
                 return 0;
-            }
-
-            if (!is_capture) {
-                quiet_count += 1;
             }
 
             // Step 5.7: Alpha-Beta Pruning
