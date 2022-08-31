@@ -6,6 +6,7 @@ const position = @import("../chess/position.zig");
 const hce = @import("./hce.zig");
 const tt = @import("./tt.zig");
 const movepick = @import("./movepick.zig");
+const see = @import("./see.zig");
 
 const parameters = @import("./parameters.zig");
 
@@ -435,6 +436,11 @@ pub const Searcher = struct {
                     skip_quiet = true;
                     continue;
                 }
+
+                // Step 5.4b: SEE Pruning
+                if (depth < 4 and !see.see_threshold(pos, move, -(@intCast(i32, depth * (see.SeeWeight[0] - 1))))) {
+                    continue;
+                }
             }
 
             var new_depth = depth - 1;
@@ -662,7 +668,7 @@ pub const Searcher = struct {
             var is_capture = move.is_capture();
 
             // Step 4.4: SEE Pruning
-            if (is_capture and evallist.items[index] < 0) {
+            if (index > 0 and is_capture and evallist.items[index] < 0) {
                 continue;
             }
 

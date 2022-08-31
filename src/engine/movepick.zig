@@ -8,6 +8,8 @@ const see = @import("./see.zig");
 
 pub const SortScore = i32;
 
+pub const MVV_LVA = [6][6]SortScore{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
+
 pub const SortHash: SortScore = 20000;
 pub const SortWinningCapture: SortScore = 10000;
 pub const SortLosingCapture: SortScore = -35000;
@@ -27,12 +29,14 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
                 score += SortWinningCapture;
             } else {
-                var see_value = see.see(pos, move.*);
+                var see_value = see.see_threshold(pos, move.*, -100);
 
-                if (see_value >= 0) {
-                    score += SortWinningCapture + see_value;
+                score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
+
+                if (see_value) {
+                    score += SortWinningCapture;
                 } else {
-                    score += SortLosingCapture + see_value;
+                    score += SortLosingCapture;
                 }
             }
         } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
