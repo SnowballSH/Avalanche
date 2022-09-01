@@ -74,6 +74,9 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
     - Movegen Bug fixes
     - Tuned Search parameters
     - Search Rewrite
+    - Better SEE
+    - SEE Pruning
+    - New Neural Network featuring 8 buckets
 
 - ### v1.1.0 (+98 ELO) 2841 CCRL ELO
     - NNUE Optimizations
