@@ -70,13 +70,12 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.2.0 (+~69 ELO) ~2910 ELO
+- ### v1.2.0 (+~106 ELO) ~2947 ELO
     - Movegen Bug fixes
     - Tuned Search parameters
     - Search Rewrite
     - Better SEE
-    - SEE Pruning
-    - New Neural Network featuring 8 buckets
+    - Stronger Neural Network (depth 8, 500 epoch) featuring 8 buckets
 
 - ### v1.1.0 (+98 ELO) 2841 CCRL ELO
     - NNUE Optimizations

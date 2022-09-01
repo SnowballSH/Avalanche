@@ -438,9 +438,9 @@ pub const Searcher = struct {
                 }
 
                 // Step 5.4b: SEE Pruning
-                if (depth < 4 and !see.see_threshold(pos, move, -(@intCast(i32, depth * (see.SeeWeight[0] - 1))))) {
-                    continue;
-                }
+                // if (depth < 4 and !see.see_threshold(pos, move, -(@intCast(i32, depth * (see.SeeWeight[0] - 1))))) {
+                //    continue;
+                // }
             }
 
             var new_depth = depth - 1;
