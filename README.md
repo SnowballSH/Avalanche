@@ -58,7 +58,8 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
-- https://github.com/dsekercioglu/blackmarlin for NNUE structure, data generation ideas, and trainer
+- https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton
+- https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status
 
