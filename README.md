@@ -1,9 +1,16 @@
 # Avalanche
 
+<br/>
+
+<p align="center">
+<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "500" height = "500"/>
+</p>
+
+<br/>
+
 The first UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
-**Estimated Development ELO (v1.2.0): ~2910**
-
+**Estimated Dev ELO (v1.2.0): ~2947~
 **CCRL ELO (v1.1.0): 2841**
 
 [Avalanche's CCRL Profile for v1.1.0](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit)
