@@ -8,15 +8,15 @@
 
 <br/>
 
-The first and strongest UCI Chess Engine written in [Zig](https://ziglang.org/), featuring Magic Bitboards and NNUE (Efficiently Updatable Neural Network).
+### Avalanche is the first and strongest UCI Chess Engine written in [Zig](https://ziglang.org/)
 
-**Estimated development ELO (v2.0.0): ~2960
+## Strength
 
-**Estimated latest ELO (v1.2.0): ~2947
+Estimated development ELO (v2.0.0): ~2960
 
-**Official CCRL ELO (v1.1.0): 2841**
+**Estimated latest ELO (v1.2.0): ~2947**
 
-[Avalanche's CCRL Profile for v1.1.0](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit)
+**Official [CCRL ELO (v1.1.0)](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit): 2841**
 
 ## About
 
