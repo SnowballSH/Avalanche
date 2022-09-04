@@ -18,36 +18,35 @@ Estimated development ELO (v2.0.0): ~2960
 
 **Official [CCRL ELO (v1.1.0)](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit): 2841**
 
+Example games by Avalanche:
+- [v1.2.0](https://lichess.org/study/1UVjx7eE/7HIitGXr)
+- [v1.1.0](https://lichess.org/study/1UVjx7eE/ariuxOkQ)
+- [v1.0.0](https://lichess.org/study/1UVjx7eE/vY896gMZ)
+
 ## About
 
-Avalanche is the **first chess engine** written in the [Zig programming language](https://ziglang.org/), marking a milestone of Zig's growth and proves that Zig's ability to succeed in real-world applications.
+Avalanche is the **first chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
 
-This is my second attempt at computer chess, after dropping development of my MiniShogi engine. Avalanche experienced a major v1.0.0 rewrite, which made full use of Zig's optimizations and features, and became a lot faster.
+This is my second attempt at computer chess, after dropping development of my MiniShogi (五将棋) engine.
 
-Avalanche v1.1.0 is the **sole winner** of the 95th CCRL Amateur Series Tournament (Division 6), having a score of **30.0/44**, **4.5 points higher** than the second place. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14438&sid=f5417da1d80faac3b3d6f1530a3b41cc).
+Avalanche v1.1.0 was the **sole winner** of the 95th CCRL Amateur Series Tournament (Division 6), having a score of **30.0/44**, **4.5 points higher** than the second place. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14438&sid=f5417da1d80faac3b3d6f1530a3b41cc).
 
 Avalanche uses the new **NNUE** (Efficiently Updatable Neural Network) technology for its evaluation.
-The current architecture is 768x512x1, proven to be strong enough by BlackMarlin 5.0.
-Without NNUE (pure PeSTO's PSQT eval), Avalanche only plays at around 2300 ELO.
 
 My goal for Avalanche reaching 3000 elo on CCRL and getting into the top 100 list. Currently it is ranked #120. After that, I will put more time on Competitive Programming and Neural Networks.
 
 This project isn't possible without the help of the Zig community, since this is the first and only Zig code I've ever written. Thank you!
 
 ## License
-Good Old MIT License. In short, feel free to use this program anywhere, but please put a link to this repository somewhere in your project :)
+Good Old MIT License. In short, feel free to use this program anywhere, but please credit this repository somewhere in your project :)
 
 ## Compile
 
 `zig build -Drelease-fast`
 
-Avalanche is only tested against master branch of Zig until zig 0.10 is stable.
+Avalanche is only guaranteed to compile using master branch of Zig.
 
-Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
-
-Feel free to challenge it!
-
-Brilliant win against Weiawaga 5.0.0 (2848) in 95th CCRL Amateur Tournament Division 6: https://lichess.org/study/1UVjx7eE/ariuxOkQ#0
+Avalanche also has a (currently inactive) lichess account: https://lichess.org/@/IceBurnEngine
 
 ## Tuning
 
