@@ -1,8 +1,16 @@
 # Avalanche
 
+<br/>
+
+<p align="center">
+<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "500" height = "500"/>
+</p>
+
+<br/>
+
 The first UCI Chess Engine written in Zig, using Bitboards and NNUE.
 
-**Estimated Development ELO (v1.2.0): ~2910**
+**Estimated Dev ELO (v1.2.0): ~2947
 
 **CCRL ELO (v1.1.0): 2841**
 
@@ -50,7 +58,8 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
-- https://github.com/dsekercioglu/blackmarlin for NNUE structure, data generation ideas, and trainer
+- https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton
+- https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status
 
