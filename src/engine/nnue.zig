@@ -12,7 +12,7 @@ pub inline fn normalize(val: i32) i16 {
     // return @floatToInt(i16, @intToFloat(f32, val) * 170.0 / 4096.0);
 }
 
-const UseResidual = true;
+const UseResidual = weights.UseResidual;
 
 pub const NNUE = struct {
     accumulator: [2][weights.HIDDEN_SIZE]i16,

@@ -3,6 +3,8 @@ const arch = @import("build_options");
 
 const NNUE_SOURCE = @embedFile("../../nets/default.nnue");
 
+pub const UseResidual = true;
+
 pub var LAYER_1: [arch.INPUT_SIZE][arch.HIDDEN_SIZE]i8 = undefined;
 pub var BIAS_1: [arch.HIDDEN_SIZE]i8 = undefined;
 pub var LAYER_2: [arch.HIDDEN_SIZE][arch.OUTPUT_SIZE]i8 = undefined;
@@ -102,7 +104,9 @@ pub fn do_nnue() void {
 
     BIAS_2 = next_bias(&index, output_size);
 
-    PSQT = next_dense_32(&index, input_size, output_size);
+    if (UseResidual) {
+        PSQT = next_dense_32(&index, input_size, output_size);
+    }
 
     std.debug.assert(index == std.mem.len(NNUE_SOURCE));
 }
