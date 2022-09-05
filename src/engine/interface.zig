@@ -34,6 +34,8 @@ pub const UciInterface = struct {
 
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
+        try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)\n", .{build_options.version});
+
         out: while (true) {
             // The command will probably be less than 8192 characters
             var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 8192);
