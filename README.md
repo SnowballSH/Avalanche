@@ -18,11 +18,6 @@ Estimated development ELO (v2.0.0): ~2960
 
 **Official [CCRL ELO (v1.1.0)](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit): 2841**
 
-Example games by Avalanche:
-- [v1.2.0](https://lichess.org/study/1UVjx7eE/7HIitGXr)
-- [v1.1.0](https://lichess.org/study/1UVjx7eE/ariuxOkQ)
-- [v1.0.0](https://lichess.org/study/1UVjx7eE/vY896gMZ)
-
 ## About
 
 Avalanche is the **first chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
