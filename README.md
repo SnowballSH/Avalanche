@@ -12,9 +12,9 @@
 
 ## Strength
 
-Estimated development ELO (v2.0.0): ~2960
+Estimated development ELO (v2.0.0): ~3010
 
-**Estimated latest ELO (v1.2.0): ~2947**
+**Estimated latest ELO (v1.2.0): ~2990**
 
 **Official [CCRL ELO (v1.1.0)](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit): 2841**
 
@@ -41,7 +41,7 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 Avalanche is only guaranteed to compile using master branch of Zig.
 
-Avalanche also has a (currently inactive) lichess account: https://lichess.org/@/IceBurnEngine
+Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
 
 ## Tuning
 
@@ -75,7 +75,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.2.0 (+~106 ELO) ~2947 ELO
+- ### v1.2.0 (+~149 ELO) ~2990 ELO
     - Movegen Bug fixes
     - Tuned Search parameters
     - Search Rewrite
