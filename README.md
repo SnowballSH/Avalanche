@@ -3,7 +3,7 @@
 <br/>
 
 <p align="center">
-<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "500" height = "500"/>
+<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "400" height = "400"/>
 </p>
 
 <br/>
@@ -12,11 +12,9 @@
 
 ## Strength
 
-Estimated development ELO (v2.0.0): ~3010
+Estimated development ELO (v2.0.0): ~3050
 
-**Estimated latest ELO (v1.2.0): ~2990**
-
-**Official [CCRL ELO (v1.1.0)](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit): 2841**
+**Official [CCRL ELO (v1.2.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%201.2.0%2064-bit#Avalanche_1_2_0_64-bit): 3048**
 
 ## About
 
@@ -75,7 +73,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.2.0 (+~149 ELO) ~2990 ELO
+- ### v1.2.0 (+207 ELO) 3048 CCRL ELO
     - Movegen Bug fixes
     - Tuned Search parameters
     - Search Rewrite
