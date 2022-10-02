@@ -60,7 +60,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - Move Generator
     - Algorithm is inspired by Surge, but code is 100% hand-written in Zig.
 - Search
-    - Avalanche has a fairy simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually. I hope to add more sophisticated prunings and extensions in the future.
+    - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
     - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
     - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow and the data is generated through self-play games. I hope to make it public in the future.
