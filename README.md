@@ -22,11 +22,9 @@ Avalanche is the **first chess engine** written in the [Zig programming language
 
 This is my second attempt at computer chess, after dropping development of my MiniShogi (五将棋) engine.
 
-Avalanche v1.1.0 was the **sole winner** of the 95th CCRL Amateur Series Tournament (Division 6), having a score of **30.0/44**, **4.5 points higher** than the second place. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14438&sid=f5417da1d80faac3b3d6f1530a3b41cc).
+Avalanche v1.2.0 was the **sole winner** of the 96th CCRL Amateur Series Tournament (Division 5), having a score of **27.0/44**. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14568&sid=a66f54aae9c1aa4cd03a6ed5f95035af).
 
 Avalanche uses the new **NNUE** (Efficiently Updatable Neural Network) technology for its evaluation.
-
-My goal for Avalanche reaching 3000 elo on CCRL and getting into the top 100 list. Currently it is ranked #120. After that, I will put more time on Competitive Programming and Neural Networks.
 
 This project isn't possible without the help of the Zig community, since this is the first and only Zig code I've ever written. Thank you!
 
