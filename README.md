@@ -3,7 +3,7 @@
 <br/>
 
 <p align="center">
-<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "500" height = "500"/>
+<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "400" height = "400"/>
 </p>
 
 <br/>
@@ -12,16 +12,9 @@
 
 ## Strength
 
-Estimated development ELO (v2.0.0): ~2960
+Estimated development ELO (v2.0.0): ~3050
 
-**Estimated latest ELO (v1.2.0): ~2947**
-
-**Official [CCRL ELO (v1.1.0)](https://www.computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.1.0%2064-bit#Avalanche_1_1_0_64-bit): 2841**
-
-Example games by Avalanche:
-- [v1.2.0](https://lichess.org/study/1UVjx7eE/7HIitGXr)
-- [v1.1.0](https://lichess.org/study/1UVjx7eE/ariuxOkQ)
-- [v1.0.0](https://lichess.org/study/1UVjx7eE/vY896gMZ)
+**Official [CCRL ELO (v1.2.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%201.2.0%2064-bit#Avalanche_1_2_0_64-bit): 3048**
 
 ## About
 
@@ -29,11 +22,9 @@ Avalanche is the **first chess engine** written in the [Zig programming language
 
 This is my second attempt at computer chess, after dropping development of my MiniShogi (五将棋) engine.
 
-Avalanche v1.1.0 was the **sole winner** of the 95th CCRL Amateur Series Tournament (Division 6), having a score of **30.0/44**, **4.5 points higher** than the second place. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14438&sid=f5417da1d80faac3b3d6f1530a3b41cc).
+Avalanche v1.2.0 was the **sole winner** of the 96th CCRL Amateur Series Tournament (Division 5), having a score of **27.0/44**. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14568&sid=a66f54aae9c1aa4cd03a6ed5f95035af).
 
 Avalanche uses the new **NNUE** (Efficiently Updatable Neural Network) technology for its evaluation.
-
-My goal for Avalanche reaching 3000 elo on CCRL and getting into the top 100 list. Currently it is ranked #120. After that, I will put more time on Competitive Programming and Neural Networks.
 
 This project isn't possible without the help of the Zig community, since this is the first and only Zig code I've ever written. Thank you!
 
@@ -46,7 +37,7 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 Avalanche is only guaranteed to compile using master branch of Zig.
 
-Avalanche also has a (currently inactive) lichess account: https://lichess.org/@/IceBurnEngine
+Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
 
 ## Tuning
 
@@ -69,7 +60,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - Move Generator
     - Algorithm is inspired by Surge, but code is 100% hand-written in Zig.
 - Search
-    - Avalanche has a fairy simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually. I hope to add more sophisticated prunings and extensions in the future.
+    - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
     - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
     - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow and the data is generated through self-play games. I hope to make it public in the future.
@@ -80,7 +71,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.2.0 (+~106 ELO) ~2947 ELO
+- ### v1.2.0 (+207 ELO) 3048 CCRL ELO
     - Movegen Bug fixes
     - Tuned Search parameters
     - Search Rewrite
