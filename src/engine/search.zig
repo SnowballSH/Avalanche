@@ -550,7 +550,7 @@ pub const Searcher = struct {
 
                             self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
 
-                            if (self.history[@enumToInt(color)][move.from][move.to] >= 30000) {
+                            if (self.history[@enumToInt(color)][move.from][move.to] >= 500000000) {
                                 for (self.history) |*a| {
                                     for (a) |*b| {
                                         for (b) |*c| {
