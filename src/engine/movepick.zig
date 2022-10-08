@@ -10,12 +10,13 @@ pub const SortScore = i32;
 
 pub const MVV_LVA = [6][6]SortScore{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
 
-pub const SortHash: SortScore = 20000;
-pub const SortWinningCapture: SortScore = 10000;
+pub const SortHash: SortScore = 50000;
+pub const SortWinningCapture: SortScore = 20000;
 pub const SortLosingCapture: SortScore = -35000;
-pub const SortKiller: SortScore = 5000;
+pub const SortKiller: SortScore = 6000;
+pub const SortCounterMove: SortScore = 4000;
 
-pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
+pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, is_null: bool) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
 
     var hm = hashmove.to_u16();
@@ -39,12 +40,17 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                     score += SortLosingCapture;
                 }
             }
-        } else if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
-            score += SortKiller + 1000;
-        } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
-            score += SortKiller;
         } else {
-            score += -31000 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
+            var last = searcher.move_history[searcher.ply - 1];
+            if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
+                score += SortKiller + 1000;
+            } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
+                score += SortKiller;
+            } else if (searcher.ply >= 1 and !is_null and searcher.counter_moves[last.from][last.to].to_u16() == move.to_u16()) {
+                score += SortCounterMove;
+            } else {
+                score += -30001 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
+            }
         }
 
         if (move.is_promotion()) {

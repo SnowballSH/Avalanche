@@ -48,6 +48,7 @@ pub const Searcher = struct {
 
     hash_history: std.ArrayList(u64) = undefined,
     eval_history: [MAX_PLY]hce.Score = undefined,
+    move_history: [MAX_PLY]types.Move = undefined,
 
     best_move: types.Move = undefined,
     pv: [MAX_PLY][MAX_PLY]types.Move = undefined,
@@ -55,6 +56,8 @@ pub const Searcher = struct {
 
     killer: [MAX_PLY][2]types.Move = undefined,
     history: [2][64][64]u32 = undefined,
+
+    counter_moves: [64][64]types.Move = undefined,
 
     pub fn new() Searcher {
         var s = Searcher{};
@@ -77,14 +80,15 @@ pub const Searcher = struct {
         }
 
         {
-            var i: usize = 0;
-            while (i < 2) : (i += 1) {
-                var j: usize = 0;
-                while (j < 64) : (j += 1) {
-                    var k: usize = 0;
-                    while (k < 64) : (k += 1) {
+            var j: usize = 0;
+            while (j < 64) : (j += 1) {
+                var k: usize = 0;
+                while (k < 64) : (k += 1) {
+                    var i: usize = 0;
+                    while (i < 2) : (i += 1) {
                         self.history[i][j][k] = 0;
                     }
+                    self.counter_moves[j][k] = types.Move.empty();
                 }
             }
         }
@@ -98,6 +102,7 @@ pub const Searcher = struct {
                 }
                 self.pv_size[j] = 0;
                 self.eval_history[j] = 0;
+                self.move_history[j] = types.Move.empty();
             }
         }
     }
@@ -402,7 +407,7 @@ pub const Searcher = struct {
         }
 
         // Step 5.2: Move Ordering
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, is_null);
         defer evallist.deinit();
 
         // Step 5.3: Move Iteration
@@ -469,6 +474,7 @@ pub const Searcher = struct {
                 }
             }
 
+            self.move_history[self.ply] = move;
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
@@ -552,6 +558,11 @@ pub const Searcher = struct {
                                         }
                                     }
                                 }
+                            }
+
+                            if (!is_null and self.ply >= 1) {
+                                var last = self.move_history[self.ply - 1];
+                                self.counter_moves[last.from][last.to] = move;
                             }
                         }
                         break;
@@ -657,7 +668,7 @@ pub const Searcher = struct {
         var move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, false);
         defer evallist.deinit();
 
         // Step 4.3: Q Move Iteration
