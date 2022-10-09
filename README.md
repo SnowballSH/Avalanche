@@ -72,7 +72,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### WIP: v2.0.0 (+40 ELO) ~3088 ELO
+- ### WIP: v2.0.0 (+46 ELO) ~3088 ELO
 
   - Stronger Neural Network trained on 2GB of data
   - Countermove Heuristics
