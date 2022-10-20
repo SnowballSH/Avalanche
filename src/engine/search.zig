@@ -259,8 +259,8 @@ pub const Searcher = struct {
 
         // Step 1.4: Mate-distance pruning
         if (!is_root) {
-            var r_alpha = @maximum(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
-            var r_beta = @minimum(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
+            var r_alpha = @max(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
+            var r_beta = @min(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
 
             if (r_alpha >= r_beta) {
                 return r_alpha;
@@ -312,10 +312,10 @@ pub const Searcher = struct {
                             return tt_eval;
                         },
                         .Lower => {
-                            alpha = @maximum(alpha, tt_eval);
+                            alpha = @max(alpha, tt_eval);
                         },
                         .Upper => {
-                            beta = @minimum(beta, tt_eval);
+                            beta = @min(beta, tt_eval);
                         },
                         else => {},
                     }
@@ -358,8 +358,8 @@ pub const Searcher = struct {
             // Step 3.3: Null move pruning
             if (!is_null and depth >= 3 and static_eval >= beta and pos.has_non_pawns()) {
                 var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
-                r += @minimum(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
-                r = @minimum(r, depth);
+                r += @min(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
+                r = @min(r, depth);
 
                 pos.play_null_move();
                 var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV);
@@ -484,7 +484,7 @@ pub const Searcher = struct {
                 score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
             } else if (depth >= 3 and !is_capture and index >= 1) {
                 // Step 5.5: Late-Move Reduction
-                var reduction: i32 = QuietLMR[@minimum(depth, 63)][@minimum(index, 63)];
+                var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
                 if (on_pv) {
                     reduction -= 1;

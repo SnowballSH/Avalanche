@@ -47,7 +47,7 @@ pub fn see_score(pos: *position.Position, move: types.Move) movepick.SortScore {
 
     depth = max_depth - 1;
     while (depth >= 1) : (depth -= 1) {
-        gains[depth - 1] = -@maximum(-gains[depth - 1], gains[depth]);
+        gains[depth - 1] = -@max(-gains[depth - 1], gains[depth]);
     }
 
     return gains[0];

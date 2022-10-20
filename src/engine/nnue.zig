@@ -4,7 +4,7 @@ const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 
 pub inline fn clipped_relu_one(input: i16) i16 {
-    return @minimum(64, @maximum(0, input));
+    return @min(64, @max(0, input));
 }
 
 pub inline fn normalize(val: i32) i16 {

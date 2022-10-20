@@ -333,13 +333,13 @@ pub fn evaluate(pos: *position.Position) Score {
                     // White is winning
                     eg_score += distance_eval(pos, true);
                     eg_score += @divFloor(pos.evaluator.score_eg_non_mat, 2);
-                    eg_score = @maximum(100, eg_score - @intCast(Score, pos.history[pos.game_ply].fifty));
+                    eg_score = @max(100, eg_score - @intCast(Score, pos.history[pos.game_ply].fifty));
                     break;
                 } else if (pos.piece_bitboards[types.Piece.WHITE_KING.index()] == pos.all_pieces(types.Color.White)) {
                     // Black is winning
                     eg_score += distance_eval(pos, false);
                     eg_score += @divFloor(pos.evaluator.score_eg_non_mat, 2);
-                    eg_score = @minimum(-100, eg_score + @intCast(Score, pos.history[pos.game_ply].fifty));
+                    eg_score = @min(-100, eg_score + @intCast(Score, pos.history[pos.game_ply].fifty));
                     break;
                 }
             }
@@ -368,7 +368,7 @@ pub fn evaluate(pos: *position.Position) Score {
 pub inline fn evaluate_nnue(pos: *position.Position) Score {
     var bucket: usize = 0;
     if (nnue.weights.OUTPUT_SIZE != 1) {
-        bucket = @minimum(@divFloor(pos.phase() * nnue.weights.OUTPUT_SIZE, 24), nnue.weights.OUTPUT_SIZE - 1);
+        bucket = @min(@divFloor(pos.phase() * nnue.weights.OUTPUT_SIZE, 24), nnue.weights.OUTPUT_SIZE - 1);
     }
     return pos.evaluator.nnue_evaluator.evaluate(pos.turn, bucket);
 }
