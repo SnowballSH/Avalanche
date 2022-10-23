@@ -175,7 +175,8 @@ pub const DynamicEvaluator = struct {
     pub fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
         if (UseNNUE) {
             self.nnue_evaluator.activate(pc, sq.index());
-        } else if (self.need_hce) {
+        }
+        if (self.need_hce) {
             const i = pc.piece_type().index();
             if (pc.color() == types.Color.White) {
                 self.score_mg += Mateiral[i][0];
@@ -197,7 +198,8 @@ pub const DynamicEvaluator = struct {
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
                 self.nnue_evaluator.deactivate(pc, sq.index());
-            } else if (self.need_hce) {
+            }
+            if (self.need_hce) {
                 const i = pc.piece_type().index();
                 if (pc.color() == types.Color.White) {
                     self.score_mg -= Mateiral[i][0];
@@ -225,7 +227,8 @@ pub const DynamicEvaluator = struct {
             if (UseNNUE) {
                 self.nnue_evaluator.deactivate(pc, from.index());
                 self.nnue_evaluator.activate(pc, to.index());
-            } else if (self.need_hce) {
+            }
+            if (self.need_hce) {
                 const i = pc.piece_type().index();
                 if (pc.color() == types.Color.White) {
                     self.score_mg -= PSQT[i][0][from.index() ^ 56];

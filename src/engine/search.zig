@@ -340,12 +340,12 @@ pub const Searcher = struct {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
 
             // Step 3.1: Razoring
-            if (depth <= 1 and static_eval + 320 < alpha) {
+            if (depth <= 1 and static_eval + parameters.RazoringMargin < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
             // Step 3.2: Reverse Futility Pruning
-            if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= 5) {
+            if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= parameters.RFPDepth) {
                 var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
                 if (depth >= 2 and improving) {
                     n -= parameters.RFPImprovingDeduction;
