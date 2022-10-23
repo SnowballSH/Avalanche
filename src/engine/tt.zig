@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
-const hce = @import("./hce.zig");
+const hce = @import("hce.zig");
 
 pub const MB: usize = 1 << 20;
 pub const KB: usize = 1 << 10;

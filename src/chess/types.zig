@@ -1,5 +1,5 @@
 const std = @import("std");
-const position = @import("./position.zig");
+const position = @import("position.zig");
 
 pub const N_COLORS: usize = 2;
 pub const Color = enum(u8) {

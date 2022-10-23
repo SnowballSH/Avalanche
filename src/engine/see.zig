@@ -2,8 +2,8 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
-const hce = @import("./hce.zig");
-const movepick = @import("./movepick.zig");
+const hce = @import("hce.zig");
+const movepick = @import("movepick.zig");
 
 pub const SeeWeight = [_]movepick.SortScore{ 98, 337, 365, 477, 1025, 10000 };
 

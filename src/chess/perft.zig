@@ -1,8 +1,8 @@
 const std = @import("std");
-const types = @import("./types.zig");
-const tables = @import("./tables.zig");
-const zobrist = @import("./zobrist.zig");
-const position = @import("./position.zig");
+const types = @import("types.zig");
+const tables = @import("tables.zig");
+const zobrist = @import("zobrist.zig");
+const position = @import("position.zig");
 
 pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) usize {
     if (depth == 0) {

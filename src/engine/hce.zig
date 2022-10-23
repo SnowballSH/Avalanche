@@ -1,7 +1,7 @@
 const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
-const nnue = @import("./nnue.zig");
+const nnue = @import("nnue.zig");
 
 pub const Score = i32;
 

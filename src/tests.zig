@@ -1,9 +1,9 @@
 const std = @import("std");
-const types = @import("./chess/types.zig");
-const tables = @import("./chess/tables.zig");
-const position = @import("./chess/position.zig");
-const zobrist = @import("./chess/zobrist.zig");
-const hce = @import("./engine/hce.zig");
+const types = @import("chess/types.zig");
+const tables = @import("chess/tables.zig");
+const position = @import("chess/position.zig");
+const zobrist = @import("chess/zobrist.zig");
+const hce = @import("engine/hce.zig");
 const expect = std.testing.expect;
 
 test "Basic Piece and Color" {

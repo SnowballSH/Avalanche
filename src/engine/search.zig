@@ -3,12 +3,12 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
-const hce = @import("./hce.zig");
-const tt = @import("./tt.zig");
-const movepick = @import("./movepick.zig");
-const see = @import("./see.zig");
+const hce = @import("hce.zig");
+const tt = @import("tt.zig");
+const movepick = @import("movepick.zig");
+const see = @import("see.zig");
 
-const parameters = @import("./parameters.zig");
+const parameters = @import("parameters.zig");
 
 pub const QuietLMR: [64][64]i32 = init: {
     @setEvalBranchQuota(64 * 64 * 6);

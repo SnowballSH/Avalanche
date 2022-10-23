@@ -3,10 +3,10 @@ const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const perft = @import("../chess/perft.zig");
-const hce = @import("./hce.zig");
-const nnue = @import("./nnue.zig");
-const tt = @import("./tt.zig");
-const search = @import("./search.zig");
+const hce = @import("hce.zig");
+const nnue = @import("nnue.zig");
+const tt = @import("tt.zig");
+const search = @import("search.zig");
 const build_options = @import("build_options");
 
 pub const UciInterface = struct {

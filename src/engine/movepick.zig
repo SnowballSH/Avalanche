@@ -2,9 +2,9 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
-const hce = @import("./hce.zig");
-const search = @import("./search.zig");
-const see = @import("./see.zig");
+const hce = @import("hce.zig");
+const search = @import("search.zig");
+const see = @import("see.zig");
 
 pub const SortScore = i32;
 

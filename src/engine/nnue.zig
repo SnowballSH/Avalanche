@@ -1,5 +1,5 @@
 const std = @import("std");
-pub const weights = @import("./weights.zig");
+pub const weights = @import("weights.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 

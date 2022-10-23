@@ -1,5 +1,5 @@
 const std = @import("std");
-const types = @import("./types.zig");
+const types = @import("types.zig");
 
 pub const KingAttacks = [64]types.Bitboard{
     0x302,              0x705,              0xe0a,              0x1c14,

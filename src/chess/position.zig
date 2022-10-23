@@ -1,8 +1,8 @@
 const std = @import("std");
-const types = @import("./types.zig");
-const tables = @import("./tables.zig");
-const zobrist = @import("./zobrist.zig");
-const utils = @import("./utils.zig");
+const types = @import("types.zig");
+const tables = @import("tables.zig");
+const zobrist = @import("zobrist.zig");
+const utils = @import("utils.zig");
 const hce = @import("../engine/hce.zig");
 
 // Stores information for undoing a move.

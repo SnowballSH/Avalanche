@@ -1,6 +1,6 @@
 const std = @import("std");
-const types = @import("./types.zig");
-const utils = @import("./utils.zig");
+const types = @import("types.zig");
+const utils = @import("utils.zig");
 
 pub var ZobristTable: [types.N_PIECES][types.N_SQUARES]u64 = std.mem.zeroes([types.N_PIECES][types.N_SQUARES]u64);
 pub var TurnHash: u64 = 0;
