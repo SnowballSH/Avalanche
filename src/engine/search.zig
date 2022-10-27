@@ -41,6 +41,7 @@ pub const Searcher = struct {
 
     nodes: u64 = 0,
     ply: u32 = 0,
+    seldepth: u32 = 0,
     stop: bool = false,
     is_searching: bool = false,
 
@@ -135,6 +136,7 @@ pub const Searcher = struct {
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
         while (depth <= bound) {
             self.ply = 0;
+            self.seldepth = 0;
 
             var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
 
@@ -151,8 +153,9 @@ pub const Searcher = struct {
             } else {
                 bm = self.best_move;
 
-                outW.print("info depth {} nodes {} time {} score ", .{
+                outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
                     depth,
+                    self.seldepth,
                     self.nodes,
                     self.timer.read() / std.time.ns_per_ms,
                 }) catch {};
@@ -243,6 +246,8 @@ pub const Searcher = struct {
             self.time_stop = true;
             return 0;
         }
+
+        self.seldepth = @max(self.seldepth, self.ply);
 
         var is_root = node == NodeType.Root;
         var on_pv: bool = node != NodeType.NonPV;
