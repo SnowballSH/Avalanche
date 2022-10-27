@@ -10,3 +10,6 @@ pub const NMPDepthDivisor = 5;
 pub const NMPBetaDivisor = 214;
 
 pub const RazoringMargin = 318;
+
+pub const AspirationWindow = 20;
+pub const AspirationWindowBonus = 2;

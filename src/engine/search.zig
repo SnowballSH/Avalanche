@@ -113,7 +113,7 @@ pub const Searcher = struct {
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
-        const aspiration_window: hce.Score = 25;
+        var aspiration_window: hce.Score = parameters.AspirationWindow;
 
         var out = std.io.bufferedWriter(std.io.getStdOut().writer());
         var outW = out.writer();
@@ -187,8 +187,15 @@ pub const Searcher = struct {
                 outW.writeByte('\n') catch {};
                 out.flush() catch {};
 
-                alpha = score - aspiration_window;
-                beta = score + aspiration_window;
+                if (depth >= 2) {
+                    alpha = score - aspiration_window;
+                    beta = score + aspiration_window;
+
+                    if (depth >= 4) {
+                        aspiration_window += parameters.AspirationWindowBonus;
+                        aspiration_window = @min(50, aspiration_window);
+                    }
+                }
 
                 depth += 1;
             }
