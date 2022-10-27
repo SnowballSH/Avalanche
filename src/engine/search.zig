@@ -621,8 +621,9 @@ pub const Searcher = struct {
         // >> Step 2: Prunings
 
         var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
+        var static_eval = best_score;
         if (!in_check) {
-            var static_eval = hce.evaluate(pos);
+            static_eval = hce.evaluate(pos);
             best_score = static_eval;
 
             // Step 2.1: Stand Pat pruning
@@ -654,7 +655,7 @@ pub const Searcher = struct {
         // >> Step 4: QSearch
 
         // Step 4.1: Q Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
         defer movelist.deinit();
         if (in_check) {
             pos.generate_legal_moves(color, &movelist);
@@ -679,8 +680,12 @@ pub const Searcher = struct {
             var is_capture = move.is_capture();
 
             // Step 4.4: SEE Pruning
-            if (index > 0 and is_capture and evallist.items[index] < 0) {
-                continue;
+            if (is_capture and index > 0) {
+                var see_score = evallist.items[index];
+
+                if (see_score < 0) {
+                    continue;
+                }
             }
 
             self.ply += 1;
