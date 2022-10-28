@@ -172,6 +172,7 @@ pub const Searcher = struct {
 
                 aspiration_window *= parameters.AspirationWindowBonus;
 
+                // Credit: Mr Bob Chess
                 if (score <= alpha) {
                     aspiration_window += 5;
                 } else {
