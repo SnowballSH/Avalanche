@@ -12,13 +12,13 @@
 
 ## Strength
 
-Estimated development ELO (v2.0.0): ~3128
+Estimated development ELO (v2.0.0): ~3088
 
 **Official [CCRL ELO (v1.2.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%201.2.0%2064-bit#Avalanche_1_2_0_64-bit): 3042**
 
 ## About
 
-Avalanche is the **first chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
+Avalanche is the **first and strongest chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
 
 This is my second attempt at computer chess, after dropping development of my MiniShogi (五将棋) engine.
 
@@ -61,14 +61,12 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - Move Generator
   - Algorithm is inspired by Surge, but code is 100% hand-written in Zig.
 - Search
-  - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. However many ideas and parameters are tuned manually and automatically using my own scripts.
+  - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. Some ideas are borrowed from other chess engines as in comments. However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
   - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
   - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow and the data is generated through self-play games. I hope to make it public in the future.
 - UCI Interface/Communication code
   - 100% original
-- Testing
-  - SPRT Testing of new features is ran on a local instance of https://github.com/AndyGrant/OpenBench.
 
 ## Changelog
 
