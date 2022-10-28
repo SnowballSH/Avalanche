@@ -141,6 +141,9 @@ pub const Searcher = struct {
             if (depth >= 4) {
                 alpha = score - @floatToInt(hce.Score, aspiration_window);
                 beta = score + @floatToInt(hce.Score, aspiration_window);
+            } else {
+                alpha = -hce.MateScore;
+                beta = hce.MateScore;
             }
 
             while (true) {
@@ -168,6 +171,12 @@ pub const Searcher = struct {
                 }
 
                 aspiration_window *= parameters.AspirationWindowBonus;
+
+                if (score <= alpha) {
+                    aspiration_window += 5;
+                } else {
+                    aspiration_window += 3;
+                }
             }
 
             bm = self.best_move;
