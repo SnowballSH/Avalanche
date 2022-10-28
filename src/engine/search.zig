@@ -113,8 +113,6 @@ pub const Searcher = struct {
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
-        var aspiration_window: hce.Score = parameters.AspirationWindow;
-
         var out = std.io.bufferedWriter(std.io.getStdOut().writer());
         var outW = out.writer();
         self.stop = false;
@@ -134,71 +132,81 @@ pub const Searcher = struct {
 
         var depth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
-        while (depth <= bound) {
+        outer: while (depth <= bound) {
+            var aspiration_window: f32 = @intToFloat(f32, parameters.AspirationWindow);
+
             self.ply = 0;
             self.seldepth = 0;
 
-            var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
-
-            if (self.time_stop or self.should_stop()) {
-                break;
+            if (depth >= 4) {
+                alpha = score - @floatToInt(hce.Score, aspiration_window);
+                beta = score + @floatToInt(hce.Score, aspiration_window);
             }
 
-            score = val;
+            while (true) {
+                if (alpha < -3400) {
+                    alpha = -hce.MateScore;
+                } else if (beta > 3400) {
+                    beta = hce.MateScore;
+                }
 
-            if (score <= alpha) {
-                alpha = -hce.MateScore;
-            } else if (score >= beta) {
-                beta = hce.MateScore;
-            } else {
-                bm = self.best_move;
+                var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
 
-                outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
-                    depth,
-                    self.seldepth,
-                    self.nodes,
-                    self.timer.read() / std.time.ns_per_ms,
+                if (self.time_stop or self.should_stop()) {
+                    break :outer;
+                }
+
+                score = val;
+
+                if (score <= alpha) {
+                    beta = @divFloor(alpha + beta, 2);
+                    alpha = @max(alpha - @floatToInt(hce.Score, aspiration_window), -hce.MateScore);
+                } else if (score >= beta) {
+                    beta = @min(beta + @floatToInt(hce.Score, aspiration_window), hce.MateScore);
+                } else {
+                    break;
+                }
+
+                aspiration_window *= parameters.AspirationWindowBonus;
+            }
+
+            bm = self.best_move;
+
+            outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
+                depth,
+                self.seldepth,
+                self.nodes,
+                self.timer.read() / std.time.ns_per_ms,
+            }) catch {};
+
+            if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
+                outW.print("mate {} pv", .{
+                    (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
                 }) catch {};
-
-                if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
-                    outW.print("mate {} pv", .{
-                        (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
-                    }) catch {};
-                    if (bound == MAX_PLY - 1) {
-                        bound = depth + 2;
-                    }
-                } else {
-                    outW.print("cp {} pv", .{
-                        score,
-                    }) catch {};
+                if (bound == MAX_PLY - 1) {
+                    bound = depth + 2;
                 }
-
-                if (self.pv_size[0] > 0) {
-                    var i: usize = 0;
-                    while (i < self.pv_size[0]) : (i += 1) {
-                        outW.writeByte(' ') catch {};
-                        self.pv[0][i].uci_print(outW);
-                    }
-                } else {
-                    outW.writeByte(' ') catch {};
-                    bm.uci_print(outW);
-                }
-
-                outW.writeByte('\n') catch {};
-                out.flush() catch {};
-
-                if (depth >= 2) {
-                    alpha = score - aspiration_window;
-                    beta = score + aspiration_window;
-
-                    if (depth >= 4) {
-                        aspiration_window += parameters.AspirationWindowBonus;
-                        aspiration_window = @min(50, aspiration_window);
-                    }
-                }
-
-                depth += 1;
+            } else {
+                outW.print("cp {} pv", .{
+                    score,
+                }) catch {};
             }
+
+            if (self.pv_size[0] > 0) {
+                var i: usize = 0;
+                while (i < self.pv_size[0]) : (i += 1) {
+                    outW.writeByte(' ') catch {};
+                    self.pv[0][i].uci_print(outW);
+                }
+            } else {
+                outW.writeByte(' ') catch {};
+                bm.uci_print(outW);
+            }
+
+            outW.writeByte('\n') catch {};
+            out.flush() catch {};
+
+            depth += 1;
         }
 
         self.best_move = bm;
