@@ -377,7 +377,7 @@ pub const Searcher = struct {
             // Step 3.2: Reverse Futility Pruning
             if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= parameters.RFPDepth) {
                 var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
-                if (depth >= 2 and improving) {
+                if (improving) {
                     n -= parameters.RFPImprovingDeduction;
                 }
                 if (static_eval - n >= beta) {
@@ -411,7 +411,7 @@ pub const Searcher = struct {
         // >> Step 4: Extensions/Reductions
         // Step 4.1: Reduce depth for non-tthits
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (!is_root and on_pv and depth >= 6 and !tthit) {
+        if (!is_root and on_pv and depth >= 6 - 2 * @intCast(usize, @boolToInt(improving)) and !tthit) {
             depth -= 1;
         }
 
