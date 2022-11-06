@@ -3,12 +3,12 @@ mkdir -p "artifacts/"
 for target in "${targets[@]}"; do
     mkdir -p artifacts/$target
     echo "Building target ${target}..."
-    zig build -Dtarget=${target} -Drelease-fast --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-1.2.0"
+    zig build -Dtarget=${target} -Drelease-fast --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-2.0.0dev"
     
     if [[ "${target}" != "aarch64-macos" ]]; then
-        zig build -Dtarget=${target} -Drelease-fast -Dcpu=haswell --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-haswell-1.2.0"
+        zig build -Dtarget=${target} -Drelease-fast -Dcpu=haswell --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-haswell-2.0.0dev"
     else
-        zig build -Dtarget=${target} -Drelease-fast -Dcpu=apple_m1 --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-m1-1.2.0"
+        zig build -Dtarget=${target} -Drelease-fast -Dcpu=apple_m1 --prefix artifacts/${target}/ -Dtarget-name="Avalanche-${target}-m1-2.0.0dev"
     fi
     cat README.md > artifacts/${target}/README.md
     cp LICENSE artifacts/${target}/
