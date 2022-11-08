@@ -11,10 +11,11 @@ pub const SortScore = i32;
 pub const MVV_LVA = [6][6]SortScore{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
 
 pub const SortHash: SortScore = 6000000;
-pub const SortWinningCapture: SortScore = 200000;
-pub const SortLosingCapture: SortScore = -800000000;
-pub const SortKiller: SortScore = 10000;
-pub const SortCounterMove: SortScore = 3000;
+pub const SortWinningCapture: SortScore = 1000000;
+pub const SortLosingCapture: SortScore = -50000000;
+pub const SortKiller1: SortScore = 900000;
+pub const SortKiller2: SortScore = 800000;
+pub const SortCounterMove: SortScore = 700000;
 
 pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, is_null: bool) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
@@ -26,11 +27,17 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
         var score: SortScore = 0;
         if (hm == move.to_u16()) {
             score += SortHash;
+        } else if (move.is_promotion()) {
+            if (move.get_flags().promote_type() == types.PieceType.Queen) {
+                score += 1000000;
+            } else if (move.get_flags().promote_type() == types.PieceType.Knight) {
+                score += 650000;
+            }
         } else if (move.is_capture()) {
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
-                score += SortWinningCapture;
+                score += SortWinningCapture + 1;
             } else {
-                var see_value = see.see_threshold(pos, move.*, -100);
+                var see_value = see.see_threshold(pos, move.*, -99);
 
                 score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
 
@@ -43,20 +50,14 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
         } else {
             var last = searcher.move_history[searcher.ply - 1];
             if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
-                score += SortKiller + 1000;
+                score += SortKiller1;
             } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
-                score += SortKiller;
-            } else {
-                score += -500000001 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
-            }
-
-            if (searcher.ply >= 1 and !is_null and searcher.counter_moves[last.from][last.to].to_u16() == move.to_u16()) {
+                score += SortKiller2;
+            } else if (searcher.ply >= 1 and !is_null and searcher.counter_moves[last.from][last.to].to_u16() == move.to_u16()) {
                 score += SortCounterMove;
+            } else {
+                score += -5000001 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
             }
-        }
-
-        if (move.is_promotion()) {
-            score += see.SeeWeight[move.get_flags().promote_type().index()];
         }
 
         res.appendAssumeCapacity(score);

@@ -24,6 +24,8 @@ pub const QuietLMR: [64][64]i32 = init: {
     break :init reductions;
 };
 
+pub const LateMoveMargin: [2][9]i32 = .{ .{ 0, 4, 6, 9, 15, 21, 27, 33, 40 }, .{ 0, 6, 9, 15, 23, 32, 42, 52, 62 } };
+
 pub const MAX_PLY = 128;
 pub const MAX_GAMEPLY = 1024;
 
@@ -467,15 +469,9 @@ pub const Searcher = struct {
 
             if (!is_root and index > 0) {
                 // Step 5.4a: Late Move Pruning
-                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 4 and quiet_count > (4 + depth * depth)) {
-                    skip_quiet = true;
-                    continue;
+                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 8 and quiet_count > 4 + depth * depth) {
+                    break;
                 }
-
-                // Step 5.4b: SEE Pruning
-                // if (depth < 4 and !see.see_threshold(pos, move, -(@intCast(i32, depth * (see.SeeWeight[0] - 1))))) {
-                //    continue;
-                // }
             }
 
             var new_depth = depth - 1;
@@ -580,7 +576,7 @@ pub const Searcher = struct {
 
                             self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
 
-                            if (self.history[@enumToInt(color)][move.from][move.to] >= 500000000) {
+                            if (self.history[@enumToInt(color)][move.from][move.to] >= 5000000) {
                                 for (self.history) |*a| {
                                     for (a) |*b| {
                                         for (b) |*c| {

@@ -5,7 +5,7 @@ const position = @import("../chess/position.zig");
 const hce = @import("hce.zig");
 const movepick = @import("movepick.zig");
 
-pub const SeeWeight = [_]movepick.SortScore{ 98, 337, 365, 477, 1025, 10000 };
+pub const SeeWeight = [_]movepick.SortScore{ 96, 323, 323, 551, 864, 20000 };
 
 pub fn see_score(pos: *position.Position, move: types.Move) movepick.SortScore {
     var max_depth: usize = 0;
