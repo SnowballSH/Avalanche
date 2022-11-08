@@ -17,7 +17,7 @@ pub const SortKiller1: SortScore = 900000;
 pub const SortKiller2: SortScore = 800000;
 pub const SortCounterMove: SortScore = 700000;
 
-pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, is_null: bool) std.ArrayList(SortScore) {
+pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
 
     var hm = hashmove.to_u16();
@@ -53,7 +53,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                 score += SortKiller1;
             } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
                 score += SortKiller2;
-            } else if (searcher.ply >= 1 and !is_null and searcher.counter_moves[last.from][last.to].to_u16() == move.to_u16()) {
+            } else if (searcher.ply >= 1 and searcher.counter_moves[@enumToInt(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
                 score += SortCounterMove;
             } else {
                 score += -5000001 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);

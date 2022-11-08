@@ -60,7 +60,8 @@ pub const Searcher = struct {
     killer: [MAX_PLY][2]types.Move = undefined,
     history: [2][64][64]u32 = undefined,
 
-    counter_moves: [64][64]types.Move = undefined,
+    counter_moves: [2][64][64]types.Move = undefined,
+    counter_history: [2][6][64][6][64]i32 = undefined,
 
     pub fn new() Searcher {
         var s = Searcher{};
@@ -90,8 +91,8 @@ pub const Searcher = struct {
                     var i: usize = 0;
                     while (i < 2) : (i += 1) {
                         self.history[i][j][k] = 0;
+                        self.counter_moves[i][j][k] = types.Move.empty();
                     }
-                    self.counter_moves[j][k] = types.Move.empty();
                 }
             }
         }
@@ -108,6 +109,8 @@ pub const Searcher = struct {
                 self.move_history[j] = types.Move.empty();
             }
         }
+
+        self.counter_history = std.mem.zeroes([2][6][64][6][64]i32);
     }
 
     pub fn should_stop(self: *Searcher) bool {
@@ -439,7 +442,7 @@ pub const Searcher = struct {
         }
 
         // Step 5.2: Move Ordering
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, is_null);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
         // Step 5.3: Move Iteration
@@ -588,7 +591,7 @@ pub const Searcher = struct {
 
                             if (!is_null and self.ply >= 1) {
                                 var last = self.move_history[self.ply - 1];
-                                self.counter_moves[last.from][last.to] = move;
+                                self.counter_moves[@enumToInt(color)][last.from][last.to] = move;
                             }
                         }
                         break;
@@ -695,7 +698,7 @@ pub const Searcher = struct {
         var move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, false);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
         defer evallist.deinit();
 
         // Step 4.3: Q Move Iteration
