@@ -35,9 +35,9 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             }
         } else if (move.is_capture()) {
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
-                score += SortWinningCapture + 1;
+                score += SortWinningCapture + MVV_LVA[0][0];
             } else {
-                var see_value = see.see_threshold(pos, move.*, -99);
+                var see_value = see.see_threshold(pos, move.*, -106);
 
                 score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
 

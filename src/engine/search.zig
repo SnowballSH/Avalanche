@@ -24,8 +24,6 @@ pub const QuietLMR: [64][64]i32 = init: {
     break :init reductions;
 };
 
-pub const LateMoveMargin: [2][9]i32 = .{ .{ 0, 4, 6, 9, 15, 21, 27, 33, 40 }, .{ 0, 6, 9, 15, 23, 32, 42, 52, 62 } };
-
 pub const MAX_PLY = 128;
 pub const MAX_GAMEPLY = 1024;
 
@@ -416,7 +414,7 @@ pub const Searcher = struct {
         // >> Step 4: Extensions/Reductions
         // Step 4.1: Reduce depth for non-tthits
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (!is_root and on_pv and depth >= 6 - 2 * @intCast(usize, @boolToInt(improving)) and !tthit) {
+        if (!is_root and depth >= 6 - 2 * @intCast(usize, @boolToInt(improving)) and !tthit) {
             depth -= 1;
         }
 
@@ -473,11 +471,12 @@ pub const Searcher = struct {
             if (!is_root and index > 0) {
                 // Step 5.4a: Late Move Pruning
                 if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 8 and quiet_count > 4 + depth * depth) {
-                    break;
+                    skip_quiet = true;
+                    continue;
                 }
             }
 
-            var new_depth = depth - 1;
+            var extension: i32 = 0;
 
             // Step 4.3: Singular extension
             // zig fmt: off
@@ -491,17 +490,21 @@ pub const Searcher = struct {
             ) {
             // zig fmt: on
                 var margin = @intCast(i32, depth) * 2;
+                var singular_beta = tt_eval - margin;
+
                 self.exclude_move[self.ply] = hashmove;
-                var singular_score = self.negamax(pos, color, depth / 2 - 1, entry.?.eval - margin - 1, entry.?.eval - margin, true, NodeType.NonPV);
+                var singular_score = self.negamax(pos, color, depth / 2 - 1, singular_beta - 1, singular_beta, true, NodeType.NonPV);
                 self.exclude_move[self.ply] = types.Move.empty();
-                if (singular_score >= entry.?.eval - margin) {
-                    if (entry.?.eval - margin >= beta) {
-                        return entry.?.eval - margin;
+                if (singular_score >= singular_beta) {
+                    if (singular_beta >= beta) {
+                        return singular_beta;
                     }
                 } else {
-                    new_depth += 1;
+                    extension = 1;
                 }
             }
+
+            var new_depth = @intCast(usize, @intCast(i32, depth) + extension - 1);
 
             self.move_history[self.ply] = move;
             self.ply += 1;
