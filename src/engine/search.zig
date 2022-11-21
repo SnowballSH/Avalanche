@@ -133,29 +133,17 @@ pub const Searcher = struct {
         var alpha = -hce.MateScore;
         var beta = hce.MateScore;
 
+        var alpha_window: hce.Score = -parameters.AspirationWindow;
+        var beta_window: hce.Score = parameters.AspirationWindow;
+        var resize_counter: usize = 0;
+
         var depth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
         outer: while (depth <= bound) {
-            var aspiration_window: f32 = @intToFloat(f32, parameters.AspirationWindow);
-
             self.ply = 0;
             self.seldepth = 0;
 
-            if (depth >= 4) {
-                alpha = score - @floatToInt(hce.Score, aspiration_window);
-                beta = score + @floatToInt(hce.Score, aspiration_window);
-            } else {
-                alpha = -hce.MateScore;
-                beta = hce.MateScore;
-            }
-
             while (true) {
-                if (alpha < -3400) {
-                    alpha = -hce.MateScore;
-                } else if (beta > 3400) {
-                    beta = hce.MateScore;
-                }
-
                 var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
 
                 if (self.time_stop or self.should_stop()) {
@@ -165,22 +153,28 @@ pub const Searcher = struct {
                 score = val;
 
                 if (score <= alpha) {
+                    if (resize_counter > 5) {
+                        alpha = -hce.MateScore;
+                    }
                     beta = @divFloor(alpha + beta, 2);
-                    alpha = @max(alpha - @floatToInt(hce.Score, aspiration_window), -hce.MateScore);
+                    alpha_window = @divFloor(alpha_window * 6, 5);
+                    alpha += alpha_window + 1;
+                    resize_counter += 1;
                 } else if (score >= beta) {
-                    beta = @min(beta + @floatToInt(hce.Score, aspiration_window), hce.MateScore);
+                    if (resize_counter > 5) {
+                        beta = hce.MateScore;
+                    }
+                    beta_window = @divFloor(beta_window * 6, 5);
+                    beta += beta_window + 1;
+                    resize_counter += 1;
                 } else {
                     break;
                 }
+            }
 
-                aspiration_window *= parameters.AspirationWindowBonus;
-
-                // Credit: Mr Bob Chess
-                if (score <= alpha) {
-                    aspiration_window += 5;
-                } else {
-                    aspiration_window += 3;
-                }
+            if (depth >= 4) {
+                alpha = score + alpha_window;
+                beta = score + beta_window;
             }
 
             bm = self.best_move;
