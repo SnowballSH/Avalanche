@@ -405,7 +405,7 @@ pub const Searcher = struct {
         // >> Step 4: Extensions/Reductions
         // Step 4.1: Reduce depth for non-tthits
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (!is_root and depth >= 6 - 2 * @intCast(usize, @boolToInt(improving)) and !tthit) {
+        if (!is_root and depth >= 4 and !tthit and self.exclude_move[self.ply].to_u16() == 0) {
             depth -= 1;
         }
 
@@ -461,7 +461,8 @@ pub const Searcher = struct {
 
             if (!is_root and index > 0) {
                 // Step 5.4a: Late Move Pruning
-                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 8 and quiet_count > 4 + depth * depth) {
+                var late = 3 + depth * depth;
+                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 6 and quiet_count > late) {
                     skip_quiet = true;
                     continue;
                 }
