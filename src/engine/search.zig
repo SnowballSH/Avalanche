@@ -59,7 +59,6 @@ pub const Searcher = struct {
     history: [2][64][64]u32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
-    counter_history: [2][6][64][6][64]i32 = undefined,
 
     pub fn new() Searcher {
         var s = Searcher{};
@@ -107,8 +106,6 @@ pub const Searcher = struct {
                 self.move_history[j] = types.Move.empty();
             }
         }
-
-        self.counter_history = std.mem.zeroes([2][6][64][6][64]i32);
     }
 
     pub fn should_stop(self: *Searcher) bool {
