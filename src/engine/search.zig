@@ -154,14 +154,14 @@ pub const Searcher = struct {
                         alpha = -hce.MateScore;
                     }
                     beta = @divFloor(alpha + beta, 2);
-                    alpha_window = @divFloor(alpha_window * 6, 5);
+                    alpha_window = @divFloor(alpha_window * 13, 10);
                     alpha += alpha_window + 1;
                     resize_counter += 1;
                 } else if (score >= beta) {
                     if (resize_counter > 5) {
                         beta = hce.MateScore;
                     }
-                    beta_window = @divFloor(beta_window * 6, 5);
+                    beta_window = @divFloor(beta_window * 13, 10);
                     beta += beta_window + 1;
                     resize_counter += 1;
                 } else {
@@ -462,7 +462,7 @@ pub const Searcher = struct {
             if (!is_root and index > 0) {
                 // Step 5.4a: Late Move Pruning
                 var late = 3 + depth * depth;
-                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 6 and quiet_count > late) {
+                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 8 and quiet_count > late) {
                     skip_quiet = true;
                     continue;
                 }

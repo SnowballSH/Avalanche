@@ -11,4 +11,4 @@ pub const NMPBetaDivisor = 214;
 
 pub const RazoringMargin = 350;
 
-pub const AspirationWindow = 17;
+pub const AspirationWindow = 15;
