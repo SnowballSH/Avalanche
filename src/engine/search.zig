@@ -453,22 +453,38 @@ pub const Searcher = struct {
             }
 
             var is_capture = move.is_capture();
+            var is_killer = move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16();
 
             if (!is_capture) {
                 quiet_moves.append(move) catch unreachable;
                 quiet_count += 1;
             }
 
-            if (skip_quiet and !is_capture) {
+            if (skip_quiet and !is_capture and !is_killer) {
                 continue;
             }
 
-            if (!is_root and index > 0) {
-                // Step 5.4a: Late Move Pruning
-                var late = 3 + depth * depth;
-                if (!is_capture and !in_check and !on_pv and !move.is_promotion() and depth <= 8 and quiet_count > late) {
-                    skip_quiet = true;
-                    continue;
+            if (!is_root and index > 1) {
+                if (!is_capture and !is_killer and !in_check and !on_pv and !move.is_promotion() and depth <= 8) {
+                    // Step 5.4a: Late Move Pruning
+                    var late = 3 + depth * depth - depth / 4;
+                    if (improving) {
+                        late += 1 + depth / 2;
+                    }
+                    if (on_pv) {
+                        late += 1;
+                    }
+
+                    if (quiet_count > late) {
+                        skip_quiet = true;
+                        continue;
+                    }
+
+                    // Step 5.4b: Futility Pruning
+                    //if (static_eval + 135 * @intCast(i32, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
+                    //    skip_quiet = true;
+                    //    continue;
+                    //}
                 }
             }
 
