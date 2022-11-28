@@ -359,6 +359,8 @@ pub const Searcher = struct {
 
         var improving = !(self.ply <= 1 or in_check) and static_eval > self.eval_history[self.ply - 2];
 
+        var has_non_pawns = pos.has_non_pawns();
+
         // >> Step 3: Prunings
         if (!in_check and !is_root) {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
@@ -380,7 +382,7 @@ pub const Searcher = struct {
             }
 
             // Step 3.3: Null move pruning
-            if (!is_null and depth >= 3 and static_eval >= beta and pos.has_non_pawns()) {
+            if (!is_null and depth >= 3 and static_eval >= beta and has_non_pawns) {
                 var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
                 r += @min(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
                 r = @min(r, depth);
@@ -464,8 +466,8 @@ pub const Searcher = struct {
                 continue;
             }
 
-            if (!is_root and index > 1) {
-                if (!is_capture and !is_killer and !in_check and !on_pv and !move.is_promotion() and depth <= 8) {
+            if (!is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
+                if (!is_killer and !is_capture and !move.is_promotion() and depth <= 8) {
                     // Step 5.4a: Late Move Pruning
                     var late = 3 + depth * depth - depth / 4;
                     if (improving) {
@@ -481,10 +483,10 @@ pub const Searcher = struct {
                     }
 
                     // Step 5.4b: Futility Pruning
-                    //if (static_eval + 135 * @intCast(i32, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
-                    //    skip_quiet = true;
-                    //    continue;
-                    //}
+                    if (static_eval + 135 * @intCast(i32, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
+                        skip_quiet = true;
+                        continue;
+                    }
                 }
             }
 
