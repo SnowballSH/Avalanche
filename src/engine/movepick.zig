@@ -12,7 +12,8 @@ pub const MVV_LVA = [6][6]SortScore{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 
 
 pub const SortHash: SortScore = 6000000;
 pub const SortWinningCapture: SortScore = 1000000;
-pub const SortLosingCapture: SortScore = -50000000;
+pub const SortLosingCapture: SortScore = 0;
+pub const SortQuiet: SortScore = 0;
 pub const SortKiller1: SortScore = 900000;
 pub const SortKiller2: SortScore = 800000;
 pub const SortCounterMove: SortScore = 700000;
@@ -25,14 +26,15 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
     for (list.items) |move_| {
         var move: *const types.Move = &move_;
         var score: SortScore = 0;
-        if (hm == move.to_u16()) {
-            score += SortHash;
-        } else if (move.is_promotion()) {
+        if (move.is_promotion()) {
             if (move.get_flags().promote_type() == types.PieceType.Queen) {
                 score += 1000000;
             } else if (move.get_flags().promote_type() == types.PieceType.Knight) {
                 score += 650000;
             }
+        }
+        if (hm == move.to_u16()) {
+            score += SortHash;
         } else if (move.is_capture()) {
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
                 score += SortWinningCapture + MVV_LVA[0][0];
@@ -56,7 +58,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             } else if (searcher.ply >= 1 and searcher.counter_moves[@enumToInt(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
                 score += SortCounterMove;
             } else {
-                score += -5000001 + @intCast(i32, searcher.history[@enumToInt(pos.turn)][move.from][move.to]);
+                score += SortQuiet + searcher.history[@enumToInt(pos.turn)][move.from][move.to];
             }
         }
 

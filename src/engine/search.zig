@@ -56,7 +56,7 @@ pub const Searcher = struct {
     pv_size: [MAX_PLY]usize = undefined,
 
     killer: [MAX_PLY][2]types.Move = undefined,
-    history: [2][64][64]u32 = undefined,
+    history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
 
@@ -417,6 +417,9 @@ pub const Searcher = struct {
         pos.generate_legal_moves(color, &movelist);
         var move_size = movelist.items.len;
 
+        var quiet_moves = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
+        defer quiet_moves.deinit();
+
         self.killer[self.ply + 1][0] = types.Move.empty();
         self.killer[self.ply + 1][1] = types.Move.empty();
 
@@ -452,6 +455,7 @@ pub const Searcher = struct {
             var is_capture = move.is_capture();
 
             if (!is_capture) {
+                quiet_moves.append(move) catch unreachable;
                 quiet_count += 1;
             }
 
@@ -565,32 +569,33 @@ pub const Searcher = struct {
                     alpha = score;
 
                     if (alpha >= beta) {
-                        if (!is_capture) {
-                            var temp = self.killer[self.ply][0];
-                            if (temp.to_u16() != move.to_u16()) {
-                                self.killer[self.ply][0] = move;
-                                self.killer[self.ply][1] = temp;
-                            }
-
-                            self.history[@enumToInt(color)][move.from][move.to] += @intCast(u32, depth * depth);
-
-                            if (self.history[@enumToInt(color)][move.from][move.to] >= 5000000) {
-                                for (self.history) |*a| {
-                                    for (a) |*b| {
-                                        for (b) |*c| {
-                                            c.* = @divFloor(c.*, 2);
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (!is_null and self.ply >= 1) {
-                                var last = self.move_history[self.ply - 1];
-                                self.counter_moves[@enumToInt(color)][last.from][last.to] = move;
-                            }
-                        }
                         break;
                     }
+                }
+            }
+        }
+
+        if (alpha >= beta and !best_move.is_capture() and !best_move.is_promotion()) {
+            var temp = self.killer[self.ply][0];
+            if (temp.to_u16() != best_move.to_u16()) {
+                self.killer[self.ply][0] = best_move;
+                self.killer[self.ply][1] = temp;
+            }
+
+            const bonus: i32 = @intCast(i32, @min(depth * depth, 512));
+            const max: i32 = 32 * bonus;
+
+            if (!is_null and self.ply >= 1) {
+                var last = self.move_history[self.ply - 1];
+                self.counter_moves[@enumToInt(color)][last.from][last.to] = best_move;
+            }
+
+            for (quiet_moves.items) |m| {
+                var hist = @divFloor(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
+                if (m.to_u16() == best_move.to_u16()) {
+                    self.history[@enumToInt(color)][m.from][m.to] += max - hist;
+                } else {
+                    self.history[@enumToInt(color)][m.from][m.to] += -max - hist;
                 }
             }
         }
@@ -707,7 +712,7 @@ pub const Searcher = struct {
             if (is_capture and index > 0) {
                 var see_score = evallist.items[index];
 
-                if (see_score < 0) {
+                if (see_score < movepick.SortLosingCapture + 200) {
                     continue;
                 }
             }
