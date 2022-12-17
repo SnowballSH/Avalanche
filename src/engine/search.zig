@@ -483,10 +483,10 @@ pub const Searcher = struct {
                     }
 
                     // Step 5.4b: Futility Pruning
-                    if (static_eval + 135 * @intCast(i32, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
-                        skip_quiet = true;
-                        continue;
-                    }
+                    //if (static_eval + 135 * @intCast(i32, depth) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
+                    //    skip_quiet = true;
+                    //    continue;
+                    //}
                 }
             }
 
@@ -531,6 +531,10 @@ pub const Searcher = struct {
             } else if (depth >= 3 and !is_capture and index >= 1) {
                 // Step 5.5: Late-Move Reduction
                 var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
+
+                if (!improving) {
+                    reduction += 1;
+                }
 
                 if (on_pv) {
                     reduction -= 1;
