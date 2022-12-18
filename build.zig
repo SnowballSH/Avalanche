@@ -101,7 +101,7 @@ pub fn build(b: *std.build.Builder) void {
         build_options.addOption(usize, "OUTPUT_SIZE", @intCast(usize, output_size));
     }
 
-    var buf: [64]u8 = undefined;
+    // var buf: [64]u8 = undefined;
     // build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
     build_options.addOption([]const u8, "version", "1.3.1");
 
