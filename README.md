@@ -36,9 +36,9 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 `zig build -Drelease-fast`
 
-Avalanche is only guaranteed to compile using master branch of Zig.
+Avalanche is only guaranteed to compile using Zig v0.10.0. Newer versions will not work as Avalanche still uses Stage1.
 
-Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
+Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
 ## Tuning
 
