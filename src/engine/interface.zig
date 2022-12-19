@@ -277,8 +277,8 @@ pub const UciInterface = struct {
 
                         var t = mytime.?;
                         t = @max(t - 100, 100);
-                        if (movestogo != null and movestogo.? <= 30 and movestogo.? >= 1) {
-                            t /= movestogo.?;
+                        if (movestogo != null and movestogo.? >= 1) {
+                            t /= movestogo.? + 1;
                         } else {
                             var phase = self.position.phase();
 
