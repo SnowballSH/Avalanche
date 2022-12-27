@@ -13,3 +13,5 @@ lichess-bot
 zig/
 .vscode
 old_binaries
+
+weather-factory/**/*

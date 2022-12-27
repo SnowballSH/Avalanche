@@ -19,6 +19,7 @@ pub fn main() anyerror!void {
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);
     weights.do_nnue();
+    search.init_lmr();
 
     var inter = interface.UciInterface.new();
     return inter.main_loop();

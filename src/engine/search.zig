@@ -10,19 +10,18 @@ const see = @import("see.zig");
 
 const parameters = @import("parameters.zig");
 
-pub const QuietLMR: [64][64]i32 = init: {
-    @setEvalBranchQuota(64 * 64 * 6);
-    var reductions: [64][64]i32 = undefined;
-    var depth = 1;
+pub var QuietLMR: [64][64]i32 = undefined;
+
+pub fn init_lmr() void {
+    var depth: usize = 1;
     while (depth < 64) : (depth += 1) {
-        var moves = 1;
+        var moves: usize = 1;
         while (moves < 64) : (moves += 1) {
             const a = parameters.LMRWeight * std.math.ln(@intToFloat(f32, depth)) * std.math.ln(@intToFloat(f32, moves)) + parameters.LMRBias;
-            reductions[depth][moves] = @floatToInt(i32, @floor(a));
+            QuietLMR[depth][moves] = @floatToInt(i32, @floor(a));
         }
     }
-    break :init reductions;
-};
+}
 
 pub const MAX_PLY = 128;
 pub const MAX_GAMEPLY = 1024;

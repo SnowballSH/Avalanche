@@ -7,6 +7,7 @@ const hce = @import("hce.zig");
 const nnue = @import("nnue.zig");
 const tt = @import("tt.zig");
 const search = @import("search.zig");
+const parameters = @import("parameters.zig");
 const build_options = @import("build_options");
 
 pub const UciInterface = struct {
@@ -72,6 +73,9 @@ pub const UciInterface = struct {
                 _ = try stdout.writeByte('\n');
                 _ = try stdout.write("id author Yinuo Huang\n\n");
                 _ = try stdout.write("option name Hash type spin default 16 min 1 max 4096\n");
+                _ = try stdout.write("option name AspirationWindow type spin default 15 min 0 max 64\n");
+                _ = try stdout.write("option name LMRWeight type spin default 600 min 1 max 999\n");
+                _ = try stdout.write("option name LMRBias type spin default 1300 min 100 max 3000\n");
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "setoption")) {
                 while (true) {
@@ -97,6 +101,47 @@ pub const UciInterface = struct {
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
                         tt.GlobalTT.reset(value);
+                    } else if (std.mem.eql(u8, token.?, "AspirationWindow")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        const value = std.fmt.parseUnsigned(i32, token.?, 10) catch parameters.AspirationWindow;
+                        parameters.AspirationWindow = value;
+                    } else if (std.mem.eql(u8, token.?, "LMRWeight")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        const value = std.fmt.parseFloat(f64, token.?) catch parameters.LMRWeight;
+                        parameters.LMRWeight = value / 1000.0;
+                        search.init_lmr();
+                    } else if (std.mem.eql(u8, token.?, "LMRBias")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        const value = std.fmt.parseFloat(f64, token.?) catch parameters.LMRBias;
+                        parameters.LMRBias = value / 1000.0;
+                        search.init_lmr();
                     }
 
                     break;
