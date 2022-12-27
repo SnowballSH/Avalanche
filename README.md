@@ -36,9 +36,9 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 `zig build -Drelease-fast`
 
-Avalanche is only guaranteed to compile using master branch of Zig.
+Avalanche is only guaranteed to compile using Zig v0.10.0. Newer versions will not work as Avalanche still uses Stage1.
 
-Avalanche also has a lichess account: https://lichess.org/@/IceBurnEngine
+Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
 ## Tuning
 
@@ -70,7 +70,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.3.1 (+12 ELO) ~3082 ELO
+- ### v1.3.1 (+42 ELO) ~3082 ELO
 
   - Search Improvements
   - Countermove heuristic fix
@@ -83,7 +83,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
   - Higher bounds for History Heuristics
   - Improved Aspiration Window
 
-- ### v1.2.0 (+203 ELO) 3043 CCRL ELO
+- ### v1.2.0 (+206 ELO) 3046 CCRL ELO
 
   - Movegen Bug fixes
   - Tuned Search parameters
