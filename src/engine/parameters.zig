@@ -1,5 +1,5 @@
-pub var LMRWeight: f64 = 0.6;
-pub var LMRBias: f64 = 1.3;
+pub var LMRWeight: f64 = 0.65;
+pub var LMRBias: f64 = 1.35;
 
 pub var RFPDepth: i32 = 5;
 pub var RFPMultiplier: i32 = 61;
