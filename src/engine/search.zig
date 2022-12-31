@@ -421,6 +421,9 @@ pub const Searcher = struct {
         var quiet_moves = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
         defer quiet_moves.deinit();
 
+        self.killer[self.ply + 1][0] = types.Move.empty();
+        self.killer[self.ply + 1][1] = types.Move.empty();
+
         if (move_size == 0) {
             if (in_check) {
                 // Checkmate
@@ -536,7 +539,7 @@ pub const Searcher = struct {
                     reduction -= 1;
                 }
 
-                if (move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16()) {
+                if (is_killer) {
                     reduction -= 1;
                 }
 

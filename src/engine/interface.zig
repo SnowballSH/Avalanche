@@ -435,9 +435,23 @@ pub const UciInterface = struct {
 
 fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: usize, max_depth: ?u8) void {
     searcher.max_millis = movetime;
+    var depth = max_depth;
+
+    var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+    defer movelist.deinit();
     if (pos.turn == types.Color.White) {
-        _ = searcher.iterative_deepening(pos, types.Color.White, max_depth);
+        pos.generate_legal_moves(types.Color.White, &movelist);
     } else {
-        _ = searcher.iterative_deepening(pos, types.Color.Black, max_depth);
+        pos.generate_legal_moves(types.Color.Black, &movelist);
+    }
+    var move_size = movelist.items.len;
+    if (move_size == 1) {
+        depth = 1;
+    }
+
+    if (pos.turn == types.Color.White) {
+        _ = searcher.iterative_deepening(pos, types.Color.White, depth);
+    } else {
+        _ = searcher.iterative_deepening(pos, types.Color.Black, depth);
     }
 }

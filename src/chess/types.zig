@@ -377,7 +377,7 @@ pub const Move = packed struct {
     to: u6,
 
     pub inline fn to_u16(self: Move) u16 {
-        return (@intCast(u16, self.flags) << 12) | (@intCast(u16, self.from) << 6) | @intCast(u16, self.to);
+        return @bitCast(u16, self);
     }
 
     pub inline fn get_flags(self: Move) MoveFlags {
