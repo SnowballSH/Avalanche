@@ -68,20 +68,20 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.3.1 (+35 ELO) ~3075 ELO
+- ### v1.3.1 (+42 ELO) 3075 ELO
 
   - Search Improvements
   - Countermove heuristic fix
   - Tuning
 
-- ### v1.3.0 (-6 ELO) ~3037 ELO
+- ### v1.3.0 (-15 ELO) 3033 ELO
 
   - Stronger Neural Network trained on 2GB of data
   - Countermove Heuristics
   - Higher bounds for History Heuristics
   - Improved Aspiration Window
 
-- ### v1.2.0 (+206 ELO) 3046 CCRL ELO
+- ### v1.2.0 (+210 ELO) 3048 CCRL ELO
 
   - Movegen Bug fixes
   - Tuned Search parameters
@@ -89,7 +89,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
   - Better SEE
   - Stronger Neural Network (depth 8, 500 epoch) featuring 8 buckets
 
-- ### v1.1.0 (+98 ELO) 2841 CCRL ELO
+- ### v1.1.0 (+95 ELO) 2838 CCRL ELO
 
   - NNUE Optimizations
   - Singular Extension / MultiCut
