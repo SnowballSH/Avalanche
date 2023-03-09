@@ -12,7 +12,7 @@
 
 ## Strength
 
-**Official [CCRL ELO (v1.3.1)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=0&eng=Avalanche%201.3.1%2064-bit#Avalanche_1_3_1_64-bit): 3077**
+**Official [CCRL ELO (v1.3.1)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=0&eng=Avalanche%201.3.1%2064-bit#Avalanche_1_3_1_64-bit): 3080**
 
 ## About
 
@@ -68,13 +68,13 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.3.1 (+44 ELO) 3077 ELO
+- ### v1.3.1 (+48 ELO) 3080 ELO
 
   - Search Improvements
   - Countermove heuristic fix
   - Tuning
 
-- ### v1.3.0 (-15 ELO) 3033 ELO
+- ### v1.3.0 (-16 ELO) 3032 ELO
 
   - Stronger Neural Network trained on 2GB of data
   - Countermove Heuristics
