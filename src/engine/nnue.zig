@@ -8,8 +8,11 @@ pub inline fn clipped_relu_one(input: i16) i16 {
 }
 
 pub inline fn normalize(val: i32) i16 {
-    return @intCast(i16, @divTrunc(val * 85, 2048)); // * 170.0 / 64.0 / 64.0
-    // return @floatToInt(i16, @intToFloat(f32, val) * 170.0 / 4096.0);
+    return @intCast(i16, (val * 85) >> 11); // * 170.0 / 64.0 / 64.0
+}
+
+pub inline fn normalize1(val: i32) i32 {
+    return (val * 85) >> 11;
 }
 
 const UseResidual = weights.UseResidual;
@@ -128,10 +131,9 @@ pub const NNUE = struct {
         }
 
         for (self.result) |*ptr, idx| {
+            ptr.* = normalize(ptr.*);
             if (UseResidual) {
-                ptr.* = normalize(ptr.*) + @divTrunc(self.residual[@enumToInt(pos.turn)][idx], 64);
-            } else {
-                ptr.* = normalize(ptr.*);
+                ptr.* += @divTrunc(self.residual[@enumToInt(pos.turn)][idx], 64);
             }
         }
     }
@@ -143,10 +145,10 @@ pub const NNUE = struct {
             res += @intCast(i32, weights.LAYER_2[l_index][bucket]) * @intCast(i32, clipped_relu_one(val));
         }
 
+        res = normalize1(res);
+
         if (UseResidual) {
-            res = normalize(res) + @divTrunc(self.residual[@enumToInt(turn)][bucket], 64);
-        } else {
-            res = normalize(res);
+            return res + (self.residual[@enumToInt(turn)][bucket] >> 6);
         }
 
         return res;

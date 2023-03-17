@@ -461,19 +461,18 @@ pub const Searcher = struct {
                 quiet_count += 1;
             }
 
-            if (skip_quiet and !is_capture and !is_killer) {
+            var is_important = is_killer or move.is_promotion();
+
+            if (skip_quiet and !is_capture and !is_important) {
                 continue;
             }
 
             if (!is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
-                if (!is_killer and !is_capture and !move.is_promotion() and depth <= 8) {
+                if (!on_pv and !is_important and !is_capture and depth <= 5) {
                     // Step 5.4a: Late Move Pruning
-                    var late = 3 + depth * depth - depth / 4;
+                    var late = 4 + depth * depth;
                     if (improving) {
                         late += 1 + depth / 2;
-                    }
-                    if (on_pv) {
-                        late += 1;
                     }
 
                     if (quiet_count > late) {
@@ -525,13 +524,13 @@ pub const Searcher = struct {
             self.hash_history.append(pos.hash) catch {};
 
             var score: hce.Score = 0;
-            if (index == 0) {
-                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
-            } else if (depth >= 3 and !is_capture and index >= 1) {
+            var min_lmr_move: usize = if (on_pv) 5 else 3;
+            var do_full_search = false;
+            if (!in_check and depth >= 3 and index >= min_lmr_move) {
                 // Step 5.5: Late-Move Reduction
                 var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
-                if (!improving) {
+                if (improving) {
                     reduction += 1;
                 }
 
@@ -539,7 +538,7 @@ pub const Searcher = struct {
                     reduction -= 1;
                 }
 
-                if (is_killer) {
+                if (is_capture) {
                     reduction -= 1;
                 }
 
@@ -548,19 +547,17 @@ pub const Searcher = struct {
                 // Step 5.6: Principal-Variation-Search (PVS)
                 score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV);
 
-                if (score > alpha and rd < new_depth) {
-                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
-
-                    if (score > alpha and score < beta) {
-                        score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
-                    }
-                }
+                do_full_search = score > alpha and rd < new_depth;
             } else {
-                // Null-window search
+                do_full_search = !on_pv or index > 0;
+            }
+
+            if (do_full_search) {
                 score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
-                if (score > alpha and score < beta) {
-                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
-                }
+            }
+
+            if (on_pv and ((score > alpha and score < beta) or index == 0)) {
+                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
             }
 
             self.ply -= 1;
@@ -611,11 +608,18 @@ pub const Searcher = struct {
                 self.counter_moves[@enumToInt(color)][last.from][last.to] = best_move;
             }
 
-            for (quiet_moves.items) |m| {
+            const b = best_move.to_u16();
+            for (quiet_moves.items) |m, i| {
                 var hist = @divFloor(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
-                if (m.to_u16() == best_move.to_u16()) {
+                if (m.to_u16() == b) {
+                    if (i > 6) {
+                        hist = @divFloor(hist, 2);
+                    }
                     self.history[@enumToInt(color)][m.from][m.to] += max - hist;
                 } else {
+                    if (i < 2) {
+                        hist *= 2;
+                    }
                     self.history[@enumToInt(color)][m.from][m.to] += -max - hist;
                 }
             }

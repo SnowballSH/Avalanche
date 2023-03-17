@@ -438,7 +438,6 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
     var depth = max_depth;
 
     var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
-    defer movelist.deinit();
     if (pos.turn == types.Color.White) {
         pos.generate_legal_moves(types.Color.White, &movelist);
     } else {
@@ -448,6 +447,7 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
     if (move_size == 1) {
         depth = 1;
     }
+    movelist.deinit();
 
     if (pos.turn == types.Color.White) {
         _ = searcher.iterative_deepening(pos, types.Color.White, depth);

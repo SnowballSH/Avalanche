@@ -34,7 +34,7 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 `zig build -Drelease-fast`
 
-Avalanche is only guaranteed to compile using Zig v0.10.0. Newer versions will not work as Avalanche still uses Stage1.
+Avalanche is only guaranteed to compile using Zig v0.10.x. Newer versions will not work as Avalanche still uses Stage1.
 
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
@@ -44,12 +44,13 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Credits
 
-- [Dan Ellis Echavarria](https://github.com/Deecellar) for writing the github action CI :D
+- [Dan Ellis Echavarria](https://github.com/Deecellar) for writing the github action CI and helping me with Zig questions
 
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
 - https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton
+- https://github.com/Disservin/Smallbrain for search ideas
 - https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status
@@ -62,13 +63,19 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
   - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. Some ideas are borrowed from other chess engines as in comments. However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
   - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
-  - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow and the data is generated through self-play games. I hope to make it public in the future.
+  - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow. The data is generated through self-play games and the default net is trained over the BM 4.0 net. The secondary net in the nets/ folder is smaller, faster, and trained purely on Avalanche 1.3.1 self-play games.
 - UCI Interface/Communication code
   - 100% original
 
 ## Changelog
 
-- ### v1.3.1 (+48 ELO) 3080 ELO
+- ### (WIP) v1.4.0 (+~60 ELO) ~3141 ELO
+
+  - Search Improvements
+  - Manual Tuning
+  - (WIP) Parallel Search
+
+- ### v1.3.1 (+49 ELO) 3081 ELO
 
   - Search Improvements
   - Countermove heuristic fix
