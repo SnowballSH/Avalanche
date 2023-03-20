@@ -3,7 +3,7 @@
 <br/>
 
 <p align="center">
-<img src="https://user-images.githubusercontent.com/66022611/226020771-aaaf3345-3834-4485-8f6e-29371a497a9e.png" alt="Logo" width = "400" height = "400"/>
+<img src="https://user-images.githubusercontent.com/66022611/188289840-33991f45-5afe-4ed1-bfbd-ead91c5a7993.png" alt="Logo" width = "400" height = "400"/>
 </p>
 
 <br/>
@@ -12,7 +12,7 @@
 
 ## Strength
 
-**Official [CCRL ELO (v1.3.1)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=0&eng=Avalanche%201.3.1%2064-bit#Avalanche_1_3_1_64-bit): 3081**
+**Official [CCRL ELO (v1.3.1)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=0&eng=Avalanche%201.3.1%2064-bit#Avalanche_1_3_1_64-bit): 3080**
 
 ## About
 
@@ -73,7 +73,6 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
   - Search Improvements
   - Manual Tuning
-  - NNUE Optimizations
   - (WIP) Parallel Search
 
 - ### v1.3.1 (+49 ELO) 3081 ELO
