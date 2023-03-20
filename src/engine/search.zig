@@ -360,16 +360,18 @@ pub const Searcher = struct {
 
         var has_non_pawns = pos.has_non_pawns();
 
-        // >> Step 3: Prunings
-        if (!in_check and !is_root) {
+        // >> Step 3: Extensions/Reductions
+        // Step 3.1: IIR
+        // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
+        if (depth >= 4 and !tthit and self.exclude_move[self.ply].to_u16() == 0) {
+            depth -= 1;
+        }
+
+        // >> Step 4: Prunings
+        if (!in_check and !on_pv and self.exclude_move[self.ply].to_u16() == 0) {
             low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
 
-            // Step 3.1: Razoring
-            if (depth <= 1 and static_eval + parameters.RazoringMargin < alpha) {
-                return self.quiescence_search(pos, color, alpha, beta);
-            }
-
-            // Step 3.2: Reverse Futility Pruning
+            // Step 4.1: Reverse Futility Pruning
             if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= parameters.RFPDepth) {
                 var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
                 if (improving) {
@@ -380,7 +382,7 @@ pub const Searcher = struct {
                 }
             }
 
-            // Step 3.3: Null move pruning
+            // Step 4.2: Null move pruning
             if (!is_null and depth >= 3 and static_eval >= beta and has_non_pawns) {
                 var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
                 r += @min(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
@@ -401,13 +403,11 @@ pub const Searcher = struct {
                     return null_score;
                 }
             }
-        }
 
-        // >> Step 4: Extensions/Reductions
-        // Step 4.1: Reduce depth for non-tthits
-        // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (!is_root and depth >= 4 and !tthit and self.exclude_move[self.ply].to_u16() == 0) {
-            depth -= 1;
+            // Step 4.3: Razoring
+            if (depth <= 3 and static_eval - parameters.RazoringBase + parameters.RazoringMargin * @intCast(i32, depth) < alpha) {
+                return self.quiescence_search(pos, color, alpha, beta);
+            }
         }
 
         // >> Step 5: Search
