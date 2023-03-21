@@ -51,6 +51,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
 - https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton
 - https://github.com/Disservin/Smallbrain for search ideas
+- https://github.com/SzilBalazs/BlackCore for time management ideas
 - https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status
@@ -74,6 +75,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
   - Search Improvements
   - Manual Tuning
   - NNUE Optimizations
+  - Time Management
   - (WIP) Parallel Search
 
 - ### v1.3.1 (+49 ELO) 3081 ELO

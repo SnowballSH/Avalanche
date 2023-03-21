@@ -313,43 +313,22 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
+                    const overhead = 25;
                     if (mytime != null) {
+                        var inc: u64 = 0;
                         if (myinc != null) {
-                            if (mytime.? > myinc.? + 500) {
-                                movetime.? += myinc.?;
-                            }
+                            inc = myinc.?;
                         }
 
-                        var t = mytime.?;
-                        t = @max(t - 100, 100);
-                        if (movestogo != null and movestogo.? >= 1) {
-                            t /= movestogo.? + 1;
+                        if (movestogo == null) {
+                            self.searcher.ideal_time = inc + (mytime.? - overhead) / 28;
+                            movetime = 2 * inc + (mytime.? - overhead) / 16;
                         } else {
-                            var phase = self.position.phase();
-
-                            if (phase >= 21) {
-                                // Opening
-                                t /= 46;
-                            } else if (phase >= 15) {
-                                // Middle game
-                                t /= 25;
-                            } else if (phase >= 6) {
-                                // Middle-end game
-                                t /= 28;
-                            } else {
-                                // Endgame
-                                t /= 30;
-                            }
+                            self.searcher.ideal_time = inc + (2 * (mytime.? - overhead)) / (2 * movestogo.? + 1);
+                            movetime = 2 * self.searcher.ideal_time;
                         }
-                        movetime.? += t;
-                    }
-
-                    if (movetime.? > 50) {
-                        movetime.? -= 10;
-                    } else if (movetime.? > 10) {
-                        movetime.? -= 3;
-                    } else {
-                        movetime = 5;
+                        self.searcher.ideal_time = @min(self.searcher.ideal_time, mytime.? - overhead);
+                        movetime = @min(movetime.?, mytime.? - overhead);
                     }
                 } else {
                     movetime = 1000000;

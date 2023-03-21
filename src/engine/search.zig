@@ -34,6 +34,7 @@ pub const NodeType = enum {
 
 pub const Searcher = struct {
     max_millis: u64 = 0,
+    ideal_time: u64 = 0,
     timer: std.time.Timer = undefined,
 
     time_stop: bool = false,
@@ -108,7 +109,11 @@ pub const Searcher = struct {
     }
 
     pub fn should_stop(self: *Searcher) bool {
-        return self.stop or self.timer.read() / std.time.ns_per_ms > self.max_millis + 3;
+        return self.stop or self.timer.read() / std.time.ns_per_ms >= self.max_millis;
+    }
+
+    pub fn should_not_continue(self: *Searcher, factor: f32) bool {
+        return self.stop or self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor)));
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
@@ -123,6 +128,7 @@ pub const Searcher = struct {
 
         self.timer = std.time.Timer.start() catch unreachable;
 
+        var prev_score = -hce.MateScore;
         var score = -hce.MateScore;
         var bm = types.Move.empty();
 
@@ -132,6 +138,8 @@ pub const Searcher = struct {
         var alpha_window: hce.Score = -parameters.AspirationWindow;
         var beta_window: hce.Score = parameters.AspirationWindow;
         var resize_counter: usize = 0;
+
+        var stability: usize = 0;
 
         var depth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
@@ -173,6 +181,12 @@ pub const Searcher = struct {
                 beta = score + beta_window;
             }
 
+            if (self.best_move.to_u16() != bm.to_u16()) {
+                stability = 0;
+            } else {
+                stability += 1;
+            }
+
             bm = self.best_move;
 
             outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
@@ -208,6 +222,21 @@ pub const Searcher = struct {
 
             outW.writeByte('\n') catch {};
             out.flush() catch {};
+
+            // Time Management algorithm by BlackCore
+            // https://github.com/SzilBalazs/BlackCore/blob/master/src/timeman.cpp
+
+            var factor: f32 = @max(0.5, 1.1 - 0.03 * @intToFloat(f32, stability));
+
+            if (score - prev_score > parameters.AspirationWindow) {
+                factor *= 1.1;
+            }
+
+            prev_score = score;
+
+            if (self.should_not_continue(factor)) {
+                break;
+            }
 
             depth += 1;
         }
