@@ -320,15 +320,21 @@ pub const UciInterface = struct {
                             inc = myinc.?;
                         }
 
-                        if (movestogo == null) {
-                            self.searcher.ideal_time = inc + (mytime.? - overhead) / 28;
-                            movetime = 2 * inc + (mytime.? - overhead) / 16;
+                        if (mytime.? <= overhead) {
+                            self.searcher.ideal_time = overhead - 5;
+                            movetime = overhead - 5;
                         } else {
-                            self.searcher.ideal_time = inc + (2 * (mytime.? - overhead)) / (2 * movestogo.? + 1);
-                            movetime = 2 * self.searcher.ideal_time;
+                            if (movestogo == null) {
+                                self.searcher.ideal_time = inc + (mytime.? - overhead) / 28;
+                                movetime = 2 * inc + (mytime.? - overhead) / 16;
+                            } else {
+                                self.searcher.ideal_time = inc + (2 * (mytime.? - overhead)) / (2 * movestogo.? + 1);
+                                movetime = 2 * self.searcher.ideal_time;
+                                movetime = @min(movetime.?, mytime.? - @min(mytime.? - overhead, overhead * @min(movestogo.?, 5)));
+                            }
+                            self.searcher.ideal_time = @min(self.searcher.ideal_time, mytime.? - overhead);
+                            movetime = @min(movetime.?, mytime.? - overhead);
                         }
-                        self.searcher.ideal_time = @min(self.searcher.ideal_time, mytime.? - overhead);
-                        movetime = @min(movetime.?, mytime.? - overhead);
                     }
                 } else {
                     movetime = 1000000;

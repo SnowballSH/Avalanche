@@ -70,13 +70,12 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### (WIP) v1.4.0 (+~60 ELO) ~3141 ELO
+- ### v1.4.0 (+~50 ELO) ~3131 ELO
 
   - Search Improvements
   - Manual Tuning
   - NNUE Optimizations
   - Time Management
-  - (WIP) Parallel Search
 
 - ### v1.3.1 (+49 ELO) 3081 ELO
 
