@@ -14,9 +14,7 @@ Note: `go depth` and `go time` are broken in v1.4.0. This will be fixed in the n
 
 ## Strength
 
-**Provisional [CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3167**
-
-**Official [CCRL ELO (v1.3.1)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=0&eng=Avalanche%201.3.1%2064-bit#Avalanche_1_3_1_64-bit): 3081**
+**Official [CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3146**
 
 ## About
 
@@ -74,7 +72,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.4.0 (+~83 ELO) ~3167 ELO
+- ### v1.4.0 (+62 ELO) 3146 ELO
 
   - Search Improvements
   - Manual Tuning
