@@ -35,6 +35,7 @@ pub const NodeType = enum {
 pub const Searcher = struct {
     max_millis: u64 = 0,
     ideal_time: u64 = 0,
+    force_thinking: bool = false,
     timer: std.time.Timer = undefined,
 
     time_stop: bool = false,
@@ -113,7 +114,8 @@ pub const Searcher = struct {
     }
 
     pub fn should_not_continue(self: *Searcher, factor: f32) bool {
-        return self.stop or self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor)));
+        return self.stop or (!self.force_thinking and
+            self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))));
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {

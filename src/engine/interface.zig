@@ -224,6 +224,9 @@ pub const UciInterface = struct {
                             break;
                         }
                         max_depth = std.fmt.parseUnsigned(u8, token.?, 10) catch null;
+                        movetime = 1 << 60;
+                        self.searcher.ideal_time = movetime.?;
+                        self.searcher.force_thinking = true;
                         break;
                     }
                     if (std.mem.eql(u8, token.?, "movetime")) {
@@ -234,6 +237,8 @@ pub const UciInterface = struct {
 
                         movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
                         movetime = std.math.max(movetime.? - 10, 10);
+                        self.searcher.ideal_time = movetime.?;
+                        self.searcher.force_thinking = true;
 
                         break;
                     }
