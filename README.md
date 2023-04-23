@@ -10,9 +10,13 @@
 
 ### Avalanche is the first and strongest UCI Chess Engine written in [Zig](https://ziglang.org/)
 
+Note: `go depth` and `go time` are broken in v1.4.0. This will be fixed in the next release.
+
 ## Strength
 
-**Official [CCRL ELO (v1.3.1)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?print=Details&each_game=0&eng=Avalanche%201.3.1%2064-bit#Avalanche_1_3_1_64-bit): 3081**
+**Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3148**
+
+**Official [Blitz CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3213**
 
 ## About
 
@@ -70,14 +74,14 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.4.0 (+~50 ELO) ~3131 ELO
+- ### v1.4.0 (+64 ELO) 3148 ELO
 
   - Search Improvements
   - Manual Tuning
   - NNUE Optimizations
   - Time Management
 
-- ### v1.3.1 (+49 ELO) 3081 ELO
+- ### v1.3.1 (+52 ELO) 3084 ELO
 
   - Search Improvements
   - Countermove heuristic fix
