@@ -391,6 +391,9 @@ pub const Searcher = struct {
 
         var has_non_pawns = pos.has_non_pawns();
 
+        var last_move = if (self.ply > 0) self.move_history[self.ply - 1] else types.Move.empty();
+        var last_last_last_move = if (self.ply > 2) self.move_history[self.ply - 3] else types.Move.empty();
+
         // >> Step 3: Extensions/Reductions
         // Step 3.1: IIR
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
@@ -521,10 +524,12 @@ pub const Searcher = struct {
 
             var extension: i32 = 0;
 
-            // Step 4.3: Singular extension
+            // Step 5.5: Singular extension
             // zig fmt: off
             if (self.ply > 0
-                and depth >= 8
+                and !is_root
+                and self.ply < depth * 2
+                and depth >= 7
                 and tthit
                 and entry.?.flag != tt.Bound.Upper
                 and !hce.is_near_mate(entry.?.eval)
@@ -532,17 +537,24 @@ pub const Searcher = struct {
                 and entry.?.depth >= depth - 3
             ) {
             // zig fmt: on
-                var margin = @intCast(i32, depth) * 2;
-                var singular_beta = tt_eval - margin;
+                var margin = @intCast(i32, depth) * 1;
+                var singular_beta = @max(tt_eval - margin, -hce.MateScore + hce.MaxMate);
 
                 self.exclude_move[self.ply] = hashmove;
-                var singular_score = self.negamax(pos, color, depth / 2 - 1, singular_beta - 1, singular_beta, true, NodeType.NonPV);
+                var singular_score = self.negamax(pos, color, (depth - 1) / 2, singular_beta - 1, singular_beta, true, NodeType.NonPV);
                 self.exclude_move[self.ply] = types.Move.empty();
-                if (singular_score >= singular_beta) {
-                    if (singular_beta >= beta) {
-                        return singular_beta;
-                    }
-                } else {
+                if (singular_score < singular_beta) {
+                    extension = 1;
+                } else if (singular_beta >= beta) {
+                    return singular_beta;
+                } else if (tt_eval >= beta) {
+                    extension = -1;
+                } else if (tt_eval <= alpha) {
+                    extension = -1;
+                }
+            } else if (on_pv and !is_root and self.ply < depth * 2) {
+                // Recapture Extension
+                if (is_capture and ((last_move.is_capture() and move.to == last_move.to) or (last_last_last_move.is_capture() and move.to == last_last_last_move.to))) {
                     extension = 1;
                 }
             }
@@ -558,7 +570,7 @@ pub const Searcher = struct {
             var min_lmr_move: usize = if (on_pv) 5 else 3;
             var do_full_search = false;
             if (!in_check and depth >= 3 and index >= min_lmr_move) {
-                // Step 5.5: Late-Move Reduction
+                // Step 5.6: Late-Move Reduction
                 var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
                 if (improving) {
@@ -575,7 +587,7 @@ pub const Searcher = struct {
 
                 var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
 
-                // Step 5.6: Principal-Variation-Search (PVS)
+                // Step 5.7: Principal-Variation-Search (PVS)
                 score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV);
 
                 do_full_search = score > alpha and rd < new_depth;
@@ -599,7 +611,7 @@ pub const Searcher = struct {
                 return 0;
             }
 
-            // Step 5.7: Alpha-Beta Pruning
+            // Step 5.8: Alpha-Beta Pruning
             if (score > best_score) {
                 best_score = score;
                 best_move = move;

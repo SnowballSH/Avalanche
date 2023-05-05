@@ -208,6 +208,7 @@ pub const UciInterface = struct {
                 var mytime: ?u64 = null;
                 var myinc: ?u64 = null;
                 var movestogo: ?u64 = null;
+                self.searcher.force_thinking = true;
                 while (true) {
                     token = tokens.next();
                     if (token == null) {
@@ -244,6 +245,7 @@ pub const UciInterface = struct {
                     }
 
                     if (std.mem.eql(u8, token.?, "wtime")) {
+                        self.searcher.force_thinking = false;
                         token = tokens.next();
                         if (token == null) {
                             break;
@@ -263,6 +265,7 @@ pub const UciInterface = struct {
                             mytime = t;
                         }
                     } else if (std.mem.eql(u8, token.?, "btime")) {
+                        self.searcher.force_thinking = false;
                         token = tokens.next();
                         if (token == null) {
                             break;
@@ -282,6 +285,7 @@ pub const UciInterface = struct {
                             mytime = t;
                         }
                     } else if (std.mem.eql(u8, token.?, "winc")) {
+                        self.searcher.force_thinking = false;
                         token = tokens.next();
                         if (token == null) {
                             break;
@@ -294,6 +298,7 @@ pub const UciInterface = struct {
                             myinc = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
                         }
                     } else if (std.mem.eql(u8, token.?, "binc")) {
+                        self.searcher.force_thinking = false;
                         token = tokens.next();
                         if (token == null) {
                             break;
@@ -306,6 +311,7 @@ pub const UciInterface = struct {
                             myinc = std.fmt.parseUnsigned(u64, token.?, 10) catch 0;
                         }
                     } else if (std.mem.eql(u8, token.?, "movestogo")) {
+                        self.searcher.force_thinking = false;
                         token = tokens.next();
                         if (token == null) {
                             break;
