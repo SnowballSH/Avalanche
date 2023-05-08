@@ -3,10 +3,10 @@ pub const PRNG = struct {
     seed: u64,
 
     pub fn rand64(self: *PRNG) u64 {
-        self.seed ^= self.seed >> 12;
-        self.seed ^= self.seed << 25;
-        self.seed ^= self.seed >> 27;
-        return self.seed *% 2685821657736338717;
+        self.seed ^= self.seed << 13;
+        self.seed ^= self.seed >> 7;
+        self.seed ^= self.seed << 17;
+        return self.seed;
     }
 
     // Less bits
