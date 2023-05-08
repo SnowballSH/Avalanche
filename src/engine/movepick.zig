@@ -10,13 +10,13 @@ pub const SortScore = i32;
 
 pub const MVV_LVA = [6][6]SortScore{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
 
-pub const SortHash: SortScore = 6000000;
-pub const SortWinningCapture: SortScore = 1000000;
+pub const SortHash: SortScore = 6_000_000;
+pub const SortWinningCapture: SortScore = 1_000_000;
 pub const SortLosingCapture: SortScore = 0;
 pub const SortQuiet: SortScore = 0;
-pub const SortKiller1: SortScore = 900000;
-pub const SortKiller2: SortScore = 800000;
-pub const SortCounterMove: SortScore = 700000;
+pub const SortKiller1: SortScore = 900_000;
+pub const SortKiller2: SortScore = 800_000;
+pub const SortCounterMove: SortScore = 700_000;
 
 pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
@@ -28,9 +28,9 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
         var score: SortScore = 0;
         if (move.is_promotion()) {
             if (move.get_flags().promote_type() == types.PieceType.Queen) {
-                score += 1000000;
+                score += 1_000_000;
             } else if (move.get_flags().promote_type() == types.PieceType.Knight) {
-                score += 650000;
+                score += 650_000;
             }
         }
         if (hm == move.to_u16()) {
@@ -45,12 +45,21 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
 
                 if (see_value) {
                     score += SortWinningCapture;
+                    // recapture
+                    // var last = if (searcher.ply > 0) searcher.move_history[searcher.ply - 1] else types.Move.empty();
+                    // var last_last_last = if (searcher.ply > 2) searcher.move_history[searcher.ply - 3] else types.Move.empty();
+                    // if (last.to == move.to) {
+                    //     score += 30;
+                    // }
+                    // if (last_last_last.to == move.to) {
+                    //     score += 10;
+                    // }
                 } else {
                     score += SortLosingCapture;
                 }
             }
         } else {
-            var last = searcher.move_history[searcher.ply - 1];
+            var last = if (searcher.ply > 0) searcher.move_history[searcher.ply - 1] else types.Move.empty();
             if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
                 score += SortKiller1;
             } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {

@@ -36,6 +36,7 @@ pub const UciInterface = struct {
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
         try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)\n", .{build_options.version});
+        try stdout.print("Using NNUE {s}, architecture {}x{}x{}\n", .{ build_options.nnue, build_options.INPUT_SIZE, build_options.HIDDEN_SIZE, build_options.OUTPUT_SIZE });
 
         out: while (true) {
             // The command will probably be less than 8192 characters
