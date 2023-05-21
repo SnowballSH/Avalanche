@@ -284,10 +284,10 @@ pub var PseudoLegalAttacks: [types.N_PT][64]types.Bitboard = std.mem.zeroes([typ
 pub var PawnAttacks: [types.N_COLORS][64]types.Bitboard = std.mem.zeroes([types.N_COLORS][64]types.Bitboard);
 
 pub fn init_pseudo_legal() void {
-    std.mem.copy(types.Bitboard, PawnAttacks[0][0..64], WhitePawnAttacks[0..64]);
-    std.mem.copy(types.Bitboard, PawnAttacks[1][0..64], BlackPawnAttacks[0..64]);
-    std.mem.copy(types.Bitboard, PseudoLegalAttacks[@enumToInt(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
-    std.mem.copy(types.Bitboard, PseudoLegalAttacks[@enumToInt(types.PieceType.King)][0..64], KingAttacks[0..64]);
+    @memcpy(PawnAttacks[0][0..64], WhitePawnAttacks[0..64]);
+    @memcpy(PawnAttacks[1][0..64], BlackPawnAttacks[0..64]);
+    @memcpy(PseudoLegalAttacks[@enumToInt(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
+    @memcpy(PseudoLegalAttacks[@enumToInt(types.PieceType.King)][0..64], KingAttacks[0..64]);
     var sq: usize = @enumToInt(types.Square.a1);
 
     while (sq <= @enumToInt(types.Square.h8)) : (sq += 1) {

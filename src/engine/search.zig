@@ -585,7 +585,7 @@ pub const Searcher = struct {
                     reduction -= 1;
                 }
 
-                var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
+                var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, @intCast(i32, new_depth + 1)));
 
                 // Step 5.7: Principal-Variation-Search (PVS)
                 score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV);
@@ -622,7 +622,7 @@ pub const Searcher = struct {
 
                 if (!is_null) {
                     self.pv[self.ply][0] = move;
-                    std.mem.copy(types.Move, self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    @memcpy(self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
                     self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
                 }
 
@@ -652,7 +652,7 @@ pub const Searcher = struct {
             }
 
             const b = best_move.to_u16();
-            for (quiet_moves.items) |m, i| {
+            for (quiet_moves.items, 0..) |m, i| {
                 var hist = @divFloor(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
                 if (m.to_u16() == b) {
                     if (i > 6) {

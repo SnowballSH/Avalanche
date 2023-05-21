@@ -1,7 +1,7 @@
 const std = @import("std");
 const arch = @import("build_options");
 
-const NNUE_SOURCE = @embedFile("../../nets/default.nnue");
+const NNUE_SOURCE = @embedFile("../nets/default.nnue");
 
 pub const UseResidual = true;
 
@@ -108,5 +108,5 @@ pub fn do_nnue() void {
         PSQT = next_dense_32(&index, input_size, output_size);
     }
 
-    std.debug.assert(index == std.mem.len(NNUE_SOURCE));
+    std.debug.assert(index == NNUE_SOURCE.len);
 }

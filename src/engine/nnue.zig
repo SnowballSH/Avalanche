@@ -33,7 +33,7 @@ pub const NNUE = struct {
     pub fn refresh_accumulator(self: *NNUE, pos: *position.Position) void {
         if (UseResidual) {
             // Reset psqt
-            for (self.residual) |*m| {
+            for (&self.residual) |*m| {
                 for (m) |*ptr| {
                     ptr.* = 0;
                 }
@@ -41,14 +41,14 @@ pub const NNUE = struct {
         }
 
         // Reset bias
-        for (self.accumulator[0]) |*ptr, index| {
+        for (&self.accumulator[0], 0..) |*ptr, index| {
             ptr.* = weights.BIAS_1[index];
         }
-        for (self.accumulator[1]) |*ptr, index| {
+        for (&self.accumulator[1], 0..) |*ptr, index| {
             ptr.* = weights.BIAS_1[index];
         }
 
-        for (pos.mailbox) |pc, index| {
+        for (pos.mailbox, 0..) |pc, index| {
             if (pc == types.Piece.NO_PIECE) {
                 continue;
             }
@@ -56,18 +56,18 @@ pub const NNUE = struct {
             var wi = pc.pure_index() * 64 + index;
             var bi = ((pc.pure_index() + 6) % 12) * 64 + (index ^ 56);
 
-            for (self.accumulator[0]) |*ptr, l_index| {
+            for (&self.accumulator[0], 0..) |*ptr, l_index| {
                 ptr.* += weights.LAYER_1[wi][l_index];
             }
-            for (self.accumulator[1]) |*ptr, l_index| {
+            for (&self.accumulator[1], 0..) |*ptr, l_index| {
                 ptr.* += weights.LAYER_1[bi][l_index];
             }
 
             if (UseResidual) {
-                for (self.residual[0]) |*ptr, res_index| {
+                for (&self.residual[0], 0..) |*ptr, res_index| {
                     ptr.* += weights.PSQT[wi][res_index];
                 }
-                for (self.residual[1]) |*ptr, res_index| {
+                for (&self.residual[1], 0..) |*ptr, res_index| {
                     ptr.* += weights.PSQT[bi][res_index];
                 }
             }
@@ -79,18 +79,18 @@ pub const NNUE = struct {
         var wi = i * 64 + index;
         var bi = ((i + 6) % 12) * 64 + (index ^ 56);
 
-        for (self.accumulator[0]) |*ptr, l_index| {
+        for (&self.accumulator[0], 0..) |*ptr, l_index| {
             ptr.* -= weights.LAYER_1[wi][l_index];
         }
-        for (self.accumulator[1]) |*ptr, l_index| {
+        for (&self.accumulator[1], 0..) |*ptr, l_index| {
             ptr.* -= weights.LAYER_1[bi][l_index];
         }
 
         if (UseResidual) {
-            for (self.residual[0]) |*ptr, res_index| {
+            for (&self.residual[0], 0..) |*ptr, res_index| {
                 ptr.* -= weights.PSQT[wi][res_index];
             }
-            for (self.residual[1]) |*ptr, res_index| {
+            for (&self.residual[1], 0..) |*ptr, res_index| {
                 ptr.* -= weights.PSQT[bi][res_index];
             }
         }
@@ -101,18 +101,18 @@ pub const NNUE = struct {
         var wi = i * 64 + index;
         var bi = ((i + 6) % 12) * 64 + (index ^ 56);
 
-        for (self.accumulator[0]) |*ptr, l_index| {
+        for (&self.accumulator[0], 0..) |*ptr, l_index| {
             ptr.* += weights.LAYER_1[wi][l_index];
         }
-        for (self.accumulator[1]) |*ptr, l_index| {
+        for (&self.accumulator[1], 0..) |*ptr, l_index| {
             ptr.* += weights.LAYER_1[bi][l_index];
         }
 
         if (UseResidual) {
-            for (self.residual[0]) |*ptr, res_index| {
+            for (&self.residual[0], 0..) |*ptr, res_index| {
                 ptr.* += weights.PSQT[wi][res_index];
             }
-            for (self.residual[1]) |*ptr, res_index| {
+            for (&self.residual[1], 0..) |*ptr, res_index| {
                 ptr.* += weights.PSQT[bi][res_index];
             }
         }
@@ -120,17 +120,17 @@ pub const NNUE = struct {
 
     pub fn re_evaluate(self: *NNUE, pos: *position.Position) void {
         self.refresh_accumulator(pos);
-        for (self.result) |*ptr, i| {
+        for (&self.result, 0..) |*ptr, i| {
             ptr.* = weights.BIAS_2[i];
         }
 
-        for (self.accumulator[@enumToInt(pos.turn)]) |val, l_index| {
-            for (self.result) |*ptr, r_index| {
+        for (self.accumulator[@enumToInt(pos.turn)], 0..) |val, l_index| {
+            for (self.result, 0..) |*ptr, r_index| {
                 ptr.* += weights.LAYER_2[l_index][r_index] * clipped_relu_one(val);
             }
         }
 
-        for (self.result) |*ptr, idx| {
+        for (self.result, 0..) |*ptr, idx| {
             ptr.* = normalize(ptr.*);
             if (UseResidual) {
                 ptr.* += @divTrunc(self.residual[@enumToInt(pos.turn)][idx], 64);
@@ -141,7 +141,7 @@ pub const NNUE = struct {
     pub fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
         var res = @intCast(i32, weights.BIAS_2[bucket]);
 
-        for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
+        for (self.accumulator[@enumToInt(turn)], 0..) |val, l_index| {
             res += @intCast(i32, weights.LAYER_2[l_index][bucket]) * @intCast(i32, clipped_relu_one(val));
         }
 

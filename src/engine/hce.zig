@@ -256,7 +256,7 @@ pub const DynamicEvaluator = struct {
         var mg: Score = 0;
         var eg_material: Score = 0;
         var eg_non_mat: Score = 0;
-        for (pos.mailbox) |piece, index| {
+        for (pos.mailbox, 0..) |piece, index| {
             if (piece == types.Piece.NO_PIECE) {
                 continue;
             }

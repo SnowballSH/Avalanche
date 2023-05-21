@@ -66,7 +66,7 @@ pub const Position = struct {
     pub fn new() Position {
         var pos = Position{};
 
-        std.mem.set(types.Piece, pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
+        @memset(pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         pos.history[0] = UndoInfo.new();
         pos.evaluator = hce.DynamicEvaluator{};
 

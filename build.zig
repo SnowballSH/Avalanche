@@ -69,18 +69,21 @@ pub fn build(b: *std.build.Builder) void {
 
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const mode = b.standardReleaseOptions();
+    const mode = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(targetName, "src/main.zig");
-    exe.setTarget(target);
-    exe.setBuildMode(mode);
+    const exe = b.addExecutable(.{
+        .name = targetName,
+        .root_source_file = .{ .path = "src/main.zig" },
+        .target = target,
+        .optimize = mode,
+    });
 
     const build_options = b.addOptions();
     exe.addOptions("build_options", build_options);
 
     {
         const nnue_file = std.fs.cwd().openFile(
-            "nets/default.nnue",
+            "src/nets/default.nnue",
             .{},
         ) catch {
             std.debug.panic("Unable to open nets/default.nnue", .{});
@@ -107,24 +110,8 @@ pub fn build(b: *std.build.Builder) void {
     build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
     // build_options.addOption([]const u8, "version", "1.5.0");
 
-    exe.use_stage1 = true;
+    // exe.use_stage1 = true;
 
     exe.linkLibC();
-    exe.install();
-
-    const run_cmd = exe.run();
-    run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
-
-    const run_step = b.step("run", "Run the app");
-    run_step.dependOn(&run_cmd.step);
-
-    const exe_tests = b.addTest("src/tests.zig");
-    exe_tests.setTarget(target);
-    exe_tests.setBuildMode(mode);
-
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&exe_tests.step);
+    b.installArtifact(exe);
 }

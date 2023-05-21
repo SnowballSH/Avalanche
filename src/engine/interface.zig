@@ -325,7 +325,7 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
-                    const overhead = 25;
+                    const overhead: u64 = 25;
                     if (mytime != null) {
                         var inc: u64 = 0;
                         if (myinc != null) {
