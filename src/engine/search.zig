@@ -585,7 +585,7 @@ pub const Searcher = struct {
                     reduction -= 1;
                 }
 
-                var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
+                var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, @intCast(i32, new_depth + 1)));
 
                 // Step 5.7: Principal-Variation-Search (PVS)
                 score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV);

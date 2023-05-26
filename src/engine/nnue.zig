@@ -19,13 +19,11 @@ const UseResidual = weights.UseResidual;
 
 pub const NNUE = struct {
     accumulator: [2][weights.HIDDEN_SIZE]i16,
-    result: [weights.OUTPUT_SIZE]i32,
     residual: [2][weights.OUTPUT_SIZE]i32,
 
     pub fn new() NNUE {
         return NNUE{
             .accumulator = undefined,
-            .result = undefined,
             .residual = undefined,
         };
     }
@@ -101,6 +99,10 @@ pub const NNUE = struct {
         var wi = i * 64 + index;
         var bi = ((i + 6) % 12) * 64 + (index ^ 56);
 
+        //const vec1: @Vector(weights.HIDDEN_SIZE, i16) = self.accumulator[0];
+        //const vec2: @Vector(weights.HIDDEN_SIZE, i16) = weights.LAYER_1[wi];
+        //self.accumulator[0] = vec1 + vec2;
+        
         for (self.accumulator[0]) |*ptr, l_index| {
             ptr.* += weights.LAYER_1[wi][l_index];
         }
@@ -120,35 +122,23 @@ pub const NNUE = struct {
 
     pub fn re_evaluate(self: *NNUE, pos: *position.Position) void {
         self.refresh_accumulator(pos);
-        for (self.result) |*ptr, i| {
-            ptr.* = weights.BIAS_2[i];
-        }
-
-        for (self.accumulator[@enumToInt(pos.turn)]) |val, l_index| {
-            for (self.result) |*ptr, r_index| {
-                ptr.* += weights.LAYER_2[l_index][r_index] * clipped_relu_one(val);
-            }
-        }
-
-        for (self.result) |*ptr, idx| {
-            ptr.* = normalize(ptr.*);
-            if (UseResidual) {
-                ptr.* += @divTrunc(self.residual[@enumToInt(pos.turn)][idx], 64);
-            }
-        }
     }
 
     pub fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
-        var res = @intCast(i32, weights.BIAS_2[bucket]);
+        var res = weights.BIAS_2[bucket];
+        const t = @enumToInt(turn);
 
-        for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
-            res += @intCast(i32, weights.LAYER_2[l_index][bucket]) * @intCast(i32, clipped_relu_one(val));
+        //const vec1: @Vector(weights.HIDDEN_SIZE, i16) = self.accumulator[t];
+        //vec1 = @min(64, @max(0, vec1));
+
+        for (self.accumulator[t]) |val, l_index| {
+            res += weights.LAYER_2[l_index][bucket] * @intCast(i32, clipped_relu_one(val));
         }
 
         res = normalize1(res);
 
         if (UseResidual) {
-            return res + (self.residual[@enumToInt(turn)][bucket] >> 6);
+            return res + (self.residual[t][bucket] >> 6);
         }
 
         return res;

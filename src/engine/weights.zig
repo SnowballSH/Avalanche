@@ -5,10 +5,10 @@ const NNUE_SOURCE = @embedFile("../../nets/default.nnue");
 
 pub const UseResidual = true;
 
-pub var LAYER_1: [arch.INPUT_SIZE][arch.HIDDEN_SIZE]i8 = undefined;
-pub var BIAS_1: [arch.HIDDEN_SIZE]i8 = undefined;
-pub var LAYER_2: [arch.HIDDEN_SIZE][arch.OUTPUT_SIZE]i8 = undefined;
-pub var BIAS_2: [arch.OUTPUT_SIZE]i8 = undefined;
+pub var LAYER_1: [arch.INPUT_SIZE][arch.HIDDEN_SIZE]i16 = undefined;
+pub var BIAS_1: [arch.HIDDEN_SIZE]i16 = undefined;
+pub var LAYER_2: [arch.HIDDEN_SIZE][arch.OUTPUT_SIZE]i32 = undefined;
+pub var BIAS_2: [arch.OUTPUT_SIZE]i32 = undefined;
 pub var PSQT: [arch.INPUT_SIZE][arch.OUTPUT_SIZE]i32 = undefined;
 
 pub const INPUT_SIZE = arch.INPUT_SIZE;
@@ -19,8 +19,8 @@ fn le_to_u32(idx: usize) u32 {
     return @as(u32, NNUE_SOURCE[idx + 0]) | (@as(u32, NNUE_SOURCE[idx + 1]) << 8) | (@as(u32, NNUE_SOURCE[idx + 2]) << 16) | (@as(u32, NNUE_SOURCE[idx + 3]) << 24);
 }
 
-fn le_to_i8(idx: usize) i8 {
-    var k = @intCast(i8, NNUE_SOURCE[idx] & 0b0111_1111);
+fn le_to_i16(idx: usize) i16 {
+    var k = @intCast(i16, NNUE_SOURCE[idx] & 0b0111_1111);
     if (NNUE_SOURCE[idx] & 0b1000_0000 != 0) {
         k = ~(127 - k);
     }
@@ -44,13 +44,13 @@ fn next_u32(idx: *usize) u32 {
     return v;
 }
 
-fn next_dense(idx: *usize, comptime input: u32, comptime output: u32) [input][output]i8 {
-    var arr: [input][output]i8 = undefined;
+fn next_dense(idx: *usize, comptime input: u32, comptime output: u32) [input][output]i16 {
+    var arr: [input][output]i16 = undefined;
     var i: usize = 0;
     while (i < input) {
         var j: usize = 0;
         while (j < output) {
-            arr[i][j] = le_to_i8(idx.*);
+            arr[i][j] = le_to_i16(idx.*);
             idx.* += 1;
             j += 1;
         }
@@ -74,11 +74,37 @@ fn next_dense_32(idx: *usize, comptime input: u32, comptime output: u32) [input]
     return arr;
 }
 
-fn next_bias(idx: *usize, comptime output: u32) [output]i8 {
-    var arr: [output]i8 = undefined;
+fn next_dense_16_32(idx: *usize, comptime input: u32, comptime output: u32) [input][output]i32 {
+    var arr: [input][output]i32 = undefined;
+    var i: usize = 0;
+    while (i < input) {
+        var j: usize = 0;
+        while (j < output) {
+            arr[i][j] = @intCast(i32, le_to_i16(idx.*));
+            idx.* += 1;
+            j += 1;
+        }
+        i += 1;
+    }
+    return arr;
+}
+
+fn next_bias(idx: *usize, comptime output: u32) [output]i16 {
+    var arr: [output]i16 = undefined;
     var j: usize = 0;
     while (j < output) {
-        arr[j] = le_to_i8(idx.*);
+        arr[j] = le_to_i16(idx.*);
+        idx.* += 1;
+        j += 1;
+    }
+    return arr;
+}
+
+fn next_bias_16_32(idx: *usize, comptime output: u32) [output]i32 {
+    var arr: [output]i32 = undefined;
+    var j: usize = 0;
+    while (j < output) {
+        arr[j] = @intCast(i32, le_to_i16(idx.*));
         idx.* += 1;
         j += 1;
     }
@@ -100,9 +126,9 @@ pub fn do_nnue() void {
 
     BIAS_1 = next_bias(&index, hidden_size);
 
-    LAYER_2 = next_dense(&index, hidden_size, output_size);
+    LAYER_2 = next_dense_16_32(&index, hidden_size, output_size);
 
-    BIAS_2 = next_bias(&index, output_size);
+    BIAS_2 = next_bias_16_32(&index, output_size);
 
     if (UseResidual) {
         PSQT = next_dense_32(&index, input_size, output_size);
