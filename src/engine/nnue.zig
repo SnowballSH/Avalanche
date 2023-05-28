@@ -138,7 +138,7 @@ pub const NNUE = struct {
         }
     }
 
-    pub fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
+    pub inline fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
         var res = @intCast(i32, weights.BIAS_2[bucket]);
 
         for (self.accumulator[@enumToInt(turn)]) |val, l_index| {
