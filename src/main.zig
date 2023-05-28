@@ -12,8 +12,7 @@ const weights = @import("engine/weights.zig");
 
 const arch = @import("build_options");
 
-pub fn main() anyerror!void {
-    tables.init_all();
+pub fn main() anyerror!void {tables.init_all();
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);
     weights.do_nnue();
