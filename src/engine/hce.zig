@@ -172,7 +172,7 @@ pub const DynamicEvaluator = struct {
     nnue_evaluator: nnue.NNUE = nnue.NNUE.new(),
     need_hce: bool = false,
 
-    pub fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
+    pub inline fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
         if (UseNNUE) {
             self.nnue_evaluator.activate(pc, sq.index());
         }
@@ -192,7 +192,7 @@ pub const DynamicEvaluator = struct {
         }
     }
 
-    pub fn remove_piece(self: *DynamicEvaluator, sq: types.Square, pos: *position.Position) void {
+    pub inline fn remove_piece(self: *DynamicEvaluator, sq: types.Square, pos: *position.Position) void {
         const pc = pos.mailbox[sq.index()];
 
         if (pc != types.Piece.NO_PIECE) {
@@ -216,12 +216,12 @@ pub const DynamicEvaluator = struct {
         }
     }
 
-    pub fn move_piece(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
+    pub inline fn move_piece(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
         self.remove_piece(to, pos);
         self.move_piece_quiet(from, to, pos);
     }
 
-    pub fn move_piece_quiet(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
+    pub inline fn move_piece_quiet(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
         const pc = pos.mailbox[from.index()];
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
@@ -280,7 +280,7 @@ pub const DynamicEvaluator = struct {
     }
 };
 
-pub fn distance_eval(pos: *position.Position, comptime white_winning: bool) Score {
+pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) Score {
     var k1 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()]));
     var k2 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()]));
 
@@ -376,7 +376,7 @@ pub inline fn evaluate_nnue(pos: *position.Position) Score {
     return pos.evaluator.nnue_evaluator.evaluate(pos.turn, bucket);
 }
 
-pub fn is_material_draw(pos: *position.Position) bool {
+pub inline fn is_material_draw(pos: *position.Position) bool {
     var all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
     var kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
 
@@ -415,7 +415,7 @@ pub fn is_material_draw(pos: *position.Position) bool {
     return false;
 }
 
-pub fn is_material_drawish(pos: *position.Position) bool {
+pub inline fn is_material_drawish(pos: *position.Position) bool {
     var all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
     var kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
 
@@ -484,6 +484,6 @@ pub fn is_material_drawish(pos: *position.Position) bool {
 
 pub const MaxMate: i32 = 256;
 
-pub fn is_near_mate(score: Score) bool {
+pub inline fn is_near_mate(score: Score) bool {
     return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;
 }

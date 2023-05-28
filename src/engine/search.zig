@@ -109,11 +109,11 @@ pub const Searcher = struct {
         }
     }
 
-    pub fn should_stop(self: *Searcher) bool {
+    pub inline fn should_stop(self: *Searcher) bool {
         return self.stop or self.timer.read() / std.time.ns_per_ms >= self.max_millis;
     }
 
-    pub fn should_not_continue(self: *Searcher, factor: f32) bool {
+    pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
         return self.stop or (!self.force_thinking and
             self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))));
     }
@@ -255,7 +255,7 @@ pub const Searcher = struct {
         return score;
     }
 
-    pub fn is_draw(self: *Searcher, pos: *position.Position) bool {
+    pub inline fn is_draw(self: *Searcher, pos: *position.Position) bool {
         if (pos.history[pos.game_ply].fifty >= 100) {
             return true;
         }

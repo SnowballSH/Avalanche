@@ -77,7 +77,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
     return res;
 }
 
-pub fn getNextBest(list: *std.ArrayList(types.Move), evals: *std.ArrayList(SortScore), i: usize) types.Move {
+pub inline fn getNextBest(list: *std.ArrayList(types.Move), evals: *std.ArrayList(SortScore), i: usize) types.Move {
     var move_size = list.items.len;
     var j = i + 1;
     while (j < move_size) : (j += 1) {
