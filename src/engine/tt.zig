@@ -49,7 +49,7 @@ pub const TranspositionTable = struct {
         self.* = tt;
     }
 
-    pub inline fn clear(self: *TranspositionTable) void {
+    pub fn clear(self: *TranspositionTable) void {
         for (self.data.items) |*ptr| {
             ptr.* = std.mem.zeroes(Item);
         }
@@ -59,7 +59,7 @@ pub const TranspositionTable = struct {
         self.data.items[entry.hash % self.size] = entry;
     }
 
-    pub inline fn prefetch(self: *TranspositionTable, hash: u64) void {
+    pub fn prefetch(self: *TranspositionTable, hash: u64) void {
         @prefetch(&self.data.items[hash % self.size], .{
             .rw = .read,
             .locality = 1,
@@ -67,7 +67,7 @@ pub const TranspositionTable = struct {
         });
     }
 
-    pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
+    pub fn get(self: *TranspositionTable, hash: u64) ?Item {
         var entry = self.data.items[hash % self.size];
         if (entry.flag != Bound.None and entry.hash == hash) {
             return entry;

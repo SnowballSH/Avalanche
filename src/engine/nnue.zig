@@ -7,7 +7,11 @@ pub inline fn clipped_relu_one(input: i16) i16 {
     return @min(64, @max(0, input));
 }
 
-pub inline fn normalize(val: i32) i32 {
+pub inline fn normalize(val: i32) i16 {
+    return @intCast(i16, (val * 85) >> 11); // * 170.0 / 64.0 / 64.0
+}
+
+pub inline fn normalize1(val: i32) i32 {
     return (val * 85) >> 11;
 }
 
@@ -68,7 +72,7 @@ pub const NNUE = struct {
         }
     }
 
-    pub inline fn deactivate(self: *NNUE, pc: types.Piece, index: usize) void {
+    pub fn deactivate(self: *NNUE, pc: types.Piece, index: usize) void {
         var i = pc.pure_index();
         var wi = i * 64 + index;
         var bi = ((i + 6) % 12) * 64 + (index ^ 56);
@@ -90,11 +94,15 @@ pub const NNUE = struct {
         }
     }
 
-    pub inline fn activate(self: *NNUE, pc: types.Piece, index: usize) void {
+    pub fn activate(self: *NNUE, pc: types.Piece, index: usize) void {
         var i = pc.pure_index();
         var wi = i * 64 + index;
         var bi = ((i + 6) % 12) * 64 + (index ^ 56);
 
+        //const vec1: @Vector(weights.HIDDEN_SIZE, i16) = self.accumulator[0];
+        //const vec2: @Vector(weights.HIDDEN_SIZE, i16) = weights.LAYER_1[wi];
+        //self.accumulator[0] = vec1 + vec2;
+        
         for (self.accumulator[0]) |*ptr, l_index| {
             ptr.* += weights.LAYER_1[wi][l_index];
         }
@@ -112,19 +120,22 @@ pub const NNUE = struct {
         }
     }
 
-    pub inline fn re_evaluate(self: *NNUE, pos: *position.Position) void {
+    pub fn re_evaluate(self: *NNUE, pos: *position.Position) void {
         self.refresh_accumulator(pos);
     }
 
-    pub inline fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
+    pub fn evaluate(self: *NNUE, turn: types.Color, bucket: usize) i32 {
         var res = weights.BIAS_2[bucket];
         const t = @enumToInt(turn);
+
+        //const vec1: @Vector(weights.HIDDEN_SIZE, i16) = self.accumulator[t];
+        //vec1 = @min(64, @max(0, vec1));
 
         for (self.accumulator[t]) |val, l_index| {
             res += weights.LAYER_2[l_index][bucket] * @intCast(i32, clipped_relu_one(val));
         }
 
-        res = normalize(res);
+        res = normalize1(res);
 
         if (UseResidual) {
             return res + (self.residual[t][bucket] >> 6);

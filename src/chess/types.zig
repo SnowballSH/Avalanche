@@ -438,7 +438,7 @@ pub const Move = packed struct {
         };
     }
 
-    pub inline fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *std.ArrayList(Move)) void {
+    pub fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *std.ArrayList(Move)) void {
         var to_t = to;
         while (to_t != 0) {
             list.append(Move.new_from_to_flag(from, pop_lsb(&to_t), flag)) catch {};
