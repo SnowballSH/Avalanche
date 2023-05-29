@@ -74,9 +74,12 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 
 ## Changelog
 
-- ### v1.5.0
+- ### v1.5.0 (+~24 ELO)
 
   - Optimizations
+  - Stronger Neural Network
+    - Trained on over 12 Million depth 7 positions from lichess elite database
+    - Trained on 1.5 Million depth 10 endgame positions
 
 - ### v1.4.0 (+59 ELO) 3143 ELO
 
