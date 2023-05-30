@@ -80,7 +80,7 @@ pub fn build(b: *std.build.Builder) void {
 
     {
         const nnue_file = std.fs.cwd().openFile(
-            "nets/net_lichess.nnue",
+            "nets/default.nnue",
             .{},
         ) catch {
             std.debug.panic("Unable to open nets/default.nnue", .{});

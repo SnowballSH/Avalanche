@@ -1,7 +1,7 @@
 const std = @import("std");
 const arch = @import("build_options");
 
-const NNUE_SOURCE = @embedFile("../../nets/net_lichess.nnue");
+const NNUE_SOURCE = @embedFile("../../nets/default.nnue");
 
 pub const UseResidual = true;
 
