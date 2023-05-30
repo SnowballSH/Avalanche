@@ -291,7 +291,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 1023 == 0 and self.should_stop()) {
+        if (self.nodes & 255 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
@@ -692,7 +692,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparation
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 1023 == 0 and self.should_stop()) {
+        if (self.nodes & 255 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
