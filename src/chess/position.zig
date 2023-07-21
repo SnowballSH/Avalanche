@@ -73,22 +73,6 @@ pub const Position = struct {
         return pos;
     }
 
-    pub fn clone(self: *Position) Position {
-        var pos = Position{};
-
-        std.mem.copy(types.Bitboard, pos.piece_bitboards[0..types.N_PIECES], self.piece_bitboards[0..types.N_PIECES]);
-        std.mem.copy(types.Piece, pos.mailbox[0..types.N_SQUARES], self.mailbox[0..types.N_SQUARES]);
-        pos.turn = self.turn;
-        pos.game_ply = self.game_ply;
-        pos.hash = self.hash;
-        std.mem.copy(UndoInfo, pos.history[0..2048], self.history[0..2048]);
-        pos.checkers = self.checkers;
-        pos.pinned = self.pinned;
-        pos.evaluator = hce.DynamicEvaluator{};
-
-        return pos;
-    }
-
     pub fn debug_print(self: Position) void {
         const line = "   +---+---+---+---+---+---+---+---+\n";
         const letters = "     A   B   C   D   E   F   G   H\n";
