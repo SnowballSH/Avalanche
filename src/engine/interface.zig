@@ -74,6 +74,7 @@ pub const UciInterface = struct {
                 _ = try stdout.writeByte('\n');
                 _ = try stdout.write("id author Yinuo Huang\n\n");
                 _ = try stdout.write("option name Hash type spin default 16 min 1 max 4096\n");
+                _ = try stdout.write("option name Threads type spin default 1 min 1 max 16\n");
                 _ = try stdout.write("option name AspirationWindow type spin default 15 min 0 max 64\n");
                 _ = try stdout.write("option name LMRWeight type spin default 600 min 1 max 999\n");
                 _ = try stdout.write("option name LMRBias type spin default 1300 min 100 max 3000\n");
@@ -102,6 +103,19 @@ pub const UciInterface = struct {
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
                         tt.GlobalTT.reset(value);
+                    } else if (std.mem.eql(u8, token.?, "Threads")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
+                        search.NUM_THREADS = value - 1;
                     } else if (std.mem.eql(u8, token.?, "AspirationWindow")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {
@@ -359,7 +373,7 @@ pub const UciInterface = struct {
                     startSearch,
                     .{ &self.searcher, &self.position, movetime.?, max_depth },
                 ) catch |e| {
-                    std.debug.panic("Oh no, error on thread spawn!\n{}", .{e});
+                    std.debug.panic("Could not spawn main thread!\n{}", .{e});
                     unreachable;
                 };
                 self.search_thread.?.detach();
