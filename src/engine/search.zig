@@ -32,6 +32,12 @@ pub const NodeType = enum {
     NonPV,
 };
 
+pub const MAX_THREADS = 16;
+pub var NUM_THREADS: usize = 0;
+
+pub var helper_searchers: [MAX_THREADS]Searcher = undefined;
+pub var threads: [MAX_THREADS]?std.Thread = undefined;
+
 pub const Searcher = struct {
     max_millis: u64 = 0,
     ideal_time: u64 = 0,
@@ -60,6 +66,9 @@ pub const Searcher = struct {
     history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
+
+    root_board: position.Position = undefined,
+    thread_id: usize = 0,
 
     pub fn new() Searcher {
         var s = Searcher{};
@@ -110,12 +119,12 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.stop or self.timer.read() / std.time.ns_per_ms >= self.max_millis;
+        return self.stop or (self.thread_id == 0 and self.timer.read() / std.time.ns_per_ms >= self.max_millis);
     }
 
     pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
-        return self.stop or (!self.force_thinking and
-            self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))));
+        return self.stop or (self.thread_id == 0 and (!self.force_thinking and
+            self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor)))));
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
@@ -143,6 +152,11 @@ pub const Searcher = struct {
 
         var stability: usize = 0;
 
+        var ti: usize = 0;
+        while (ti < NUM_THREADS) : (ti += 1) {
+            helper_searchers[ti] = Searcher.new();
+        }
+
         var depth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
         outer: while (depth <= bound) {
@@ -150,7 +164,15 @@ pub const Searcher = struct {
             self.seldepth = 0;
 
             while (true) {
+                if (depth > 1) {
+                    self.helpers(pos, color, depth, alpha, beta);
+                }
+
                 var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
+
+                if (depth > 1) {
+                    self.stop_helpers();
+                }
 
                 if (self.time_stop or self.should_stop()) {
                     break :outer;
@@ -191,10 +213,25 @@ pub const Searcher = struct {
 
             bm = self.best_move;
 
+            var total_nodes: usize = self.nodes;
+
+            if (depth > 1) {
+                // outW.print("info string thread 0 nodes {}\n", .{
+                //     self.nodes,
+                // }) catch {};
+                var thread_index: usize = 0;
+                while (thread_index < NUM_THREADS) : (thread_index += 1) {
+                    // outW.print("info string thread {} nodes {}\n", .{
+                    //     thread_index + 1, helper_searchers[thread_index].nodes,
+                    // }) catch {};
+                    total_nodes += helper_searchers[thread_index].nodes;
+                }
+            }
+
             outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
                 depth,
                 self.seldepth,
-                self.nodes,
+                total_nodes,
                 self.timer.read() / std.time.ns_per_ms,
             }) catch {};
 
@@ -278,6 +315,59 @@ pub const Searcher = struct {
         }
 
         return false;
+    }
+
+    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score) void {
+        var i: usize = 0;
+        while (i < NUM_THREADS) : (i += 1) {
+            var id: usize = i + 1;
+            if (threads[i] != null) {
+                threads[i].?.join();
+            }
+            var depth: usize = depth_;
+            if (id % 2 == 1) {
+                depth += 1;
+            }
+            helper_searchers[i].max_millis = self.max_millis;
+            helper_searchers[i].thread_id = id;
+            helper_searchers[i].root_board = pos.*;
+            threads[i] = std.Thread.spawn(
+                .{ .stack_size = 64 * 1024 * 1024 },
+                Searcher.start_helper,
+                .{ &helper_searchers[i], color, depth, alpha_, beta_ },
+            ) catch |e| {
+                std.debug.panic("Could not spawn helper thread {}!\n{}", .{ i, e });
+                unreachable;
+            };
+        }
+    }
+
+    pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score) void {
+        self.stop = false;
+        self.is_searching = true;
+        self.time_stop = false;
+        self.nodes = 0;
+        self.best_move = types.Move.empty();
+        self.timer = std.time.Timer.start() catch unreachable;
+        self.force_thinking = true;
+        self.ply = 0;
+        self.seldepth = 0;
+        if (color == types.Color.White) {
+            _ = self.negamax(&self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root);
+        } else {
+            _ = self.negamax(&self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root);
+        }
+    }
+
+    pub fn stop_helpers(self: *Searcher) void {
+        _ = self;
+        var i: usize = 0;
+        while (i < NUM_THREADS) : (i += 1) {
+            helper_searchers[i].stop = true;
+        }
+        while (i < NUM_THREADS) : (i += 1) {
+            threads[i].?.join();
+        }
     }
 
     pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool, comptime node: NodeType) hce.Score {
