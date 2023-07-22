@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
+const search = @import("search.zig");
 const hce = @import("hce.zig");
 
 pub const MB: usize = 1 << 20;
@@ -61,8 +62,10 @@ pub const TranspositionTable = struct {
     }
 
     pub inline fn set(self: *TranspositionTable, entry: Item) void {
-        self.data.items[entry.hash % self.size].lock.lock();
-        defer self.data.items[entry.hash % self.size].lock.unlock();
+        if (search.NUM_THREADS != 1) {
+            self.data.items[entry.hash % self.size].lock.lock();
+            defer self.data.items[entry.hash % self.size].lock.unlock();
+        }
         self.data.items[entry.hash % self.size].item = entry;
     }
 
