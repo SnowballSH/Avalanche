@@ -487,7 +487,7 @@ pub const Searcher = struct {
         // >> Step 3: Extensions/Reductions
         // Step 3.1: IIR
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (depth >= 4 and !tthit and self.exclude_move[self.ply].to_u16() == 0) {
+        if (depth >= 3 and !tthit and self.exclude_move[self.ply].to_u16() == 0) {
             depth -= 1;
         }
 
