@@ -216,14 +216,14 @@ pub const Searcher = struct {
             var total_nodes: usize = self.nodes;
 
             if (depth > 1) {
-                outW.print("info string thread 0 nodes {}\n", .{
-                    self.nodes,
-                }) catch {};
+                // outW.print("info string thread 0 nodes {}\n", .{
+                //     self.nodes,
+                // }) catch {};
                 var thread_index: usize = 0;
                 while (thread_index < NUM_THREADS) : (thread_index += 1) {
-                    outW.print("info string thread {} nodes {}\n", .{
-                        thread_index + 1, helper_searchers[thread_index].nodes,
-                    }) catch {};
+                    // outW.print("info string thread {} nodes {}\n", .{
+                    //     thread_index + 1, helper_searchers[thread_index].nodes,
+                    // }) catch {};
                     total_nodes += helper_searchers[thread_index].nodes;
                 }
             }

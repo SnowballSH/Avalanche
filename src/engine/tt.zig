@@ -75,8 +75,8 @@ pub const TranspositionTable = struct {
     }
 
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
-        self.data.items[hash % self.size].lock.lock();
-        defer self.data.items[hash % self.size].lock.unlock();
+        // self.data.items[hash % self.size].lock.lock();
+        // defer self.data.items[hash % self.size].lock.unlock();
         var entry = self.data.items[hash % self.size].item;
         if (entry.flag != Bound.None and entry.hash == hash) {
             return entry;

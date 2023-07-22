@@ -16,3 +16,6 @@ old_binaries
 
 weather-factory/**/*
 weather-factory
+
+testing/
+cutechess-cli
