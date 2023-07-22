@@ -663,6 +663,10 @@ pub const Searcher = struct {
                 // Step 5.6: Late-Move Reduction
                 var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
+                if (self.thread_id % 2 == 1) {
+                    reduction -= 1;
+                }
+
                 if (improving) {
                     reduction += 1;
                 }
