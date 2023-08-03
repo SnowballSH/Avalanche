@@ -12,7 +12,7 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3146**
+**Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3148**
 
 **Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3250**
 
@@ -22,7 +22,7 @@ Avalanche is the **first and strongest chess engine** written in the [Zig progra
 
 This is my second attempt at computer chess, after dropping development of my MiniShogi (五将棋) engine.
 
-Avalanche v1.2.0 was the **sole winner** of the 96th CCRL Amateur Series Tournament (Division 5), having a score of **27.0/44**. See [Tournament Page](http://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=14568&sid=a66f54aae9c1aa4cd03a6ed5f95035af).
+Avalanche v1.4.0 was the **sole winner** of the 102nd CCRL Amateur Series Tournament (Division 5), having a score of **29.5/44**. See [Tournament Page](https://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=15613&sid=8ada67b5589f716aaf477dd1befe051b).
 
 Avalanche uses the new **NNUE** (Efficiently Updatable Neural Network) technology for its evaluation.
 
