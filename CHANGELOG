@@ -6,8 +6,15 @@
 
 STC 14.0+0.10 | 1000 games
 ```
-Score of New_16 vs Master_16: 181 - 173 - 646  [0.504] 1000
+181 - 173 - 646  [0.504] 1000
 Elo difference: 2.8 +/- 12.8, LOS: 66.5 %, DrawRatio: 64.6 %
+```
+
+LTC 50.0+0.50 | 1000 games
+```
+[0.510] 1000
+Elo difference: 7.0
+DrawRatio: 76.52 %
 ```
 
 
