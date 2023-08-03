@@ -14,7 +14,7 @@
 
 **Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3146**
 
-**Official [Blitz CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3209**
+**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3250**
 
 ## About
 
@@ -40,6 +40,21 @@ Avalanche is only guaranteed to compile using Zig v0.10.x. Newer versions will n
 
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
+## Strength
+
+| Version | CCRL 40/15 | CCRL Blitz |
+|---------|------------|------------|
+| v1.5.0  | N/A        | 3250       |
+| v1.4.0  | 3148       | 3210       |
+| v1.3.1  | 3081       | N/A        |
+| v1.3.0  | 3038       | 3090       |
+| v1.2.0  | 3046       | 3028       |
+| v1.1.0  | 2835       | 2921       |
+| v1.0.0  | 2743       | N/A        |
+| v0.2.2  | 2626       | 2584       |
+| v0.2.1  | 2563       | N/A        |
+| v0.2.0  | 2424       | 2484       |
+
 ## Tuning
 
 Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/storming_tune) script.
@@ -52,7 +67,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
 - https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton
-- https://github.com/Disservin/Smallbrain for search ideas
+- https://github.com/Disservin/Smallbrain and https://github.com/cosmobobak/viridithas for search ideas
 - https://github.com/SzilBalazs/BlackCore for time management ideas
 - https://openai.com/dall-e-2/ for generating the beautiful logo image
 
@@ -69,99 +84,3 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
   - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow. The data is generated through self-play games and the default net is trained over the BM 4.0 net. The secondary net in the nets/ folder is smaller, faster, and trained purely on Avalanche 1.3.1 self-play games.
 - UCI Interface/Communication code
   - 100% original
-
-## Changelog
-
-- ### v1.5.0 (+~72 ELO) ~3218 ELO
-
-  - Optimizations
-  - Search Tuning
-  - Stronger Neural Network
-    - Trained on over 25 Million depth 8 positions from lichess elite database
-    - Trained on 1.5 Million depth 10 endgame positions
-  - LazySMP Implementation
-
-- ### v1.4.0 (+59 ELO) 3146 ELO
-
-  - Search Improvements
-  - Manual Tuning
-  - NNUE Optimizations
-  - Time Management
-
-- ### v1.3.1 (+52 ELO) 3084 ELO
-
-  - Search Improvements
-  - Countermove heuristic fix
-  - Tuning
-
-- ### v1.3.0 (-16 ELO) 3032 ELO
-
-  - Stronger Neural Network trained on 2GB of data
-  - Countermove Heuristics
-  - Higher bounds for History Heuristics
-  - Improved Aspiration Window
-
-- ### v1.2.0 (+210 ELO) 3048 CCRL ELO
-
-  - Movegen Bug fixes
-  - Tuned Search parameters
-  - Search Rewrite
-  - Better SEE
-  - Stronger Neural Network (depth 8, 500 epoch) featuring 8 buckets
-
-- ### v1.1.0 (+95 ELO) 2838 CCRL ELO
-
-  - NNUE Optimizations
-  - Singular Extension / MultiCut
-  - More Aggressive Prunings
-
-- ### v1.0.0 (+113 ELO) 2743 CCRL ELO
-
-  - Faster Movegen: heavily inspired by Surge
-  - Complete Core Rewrite
-  - 512-neuron NNUE trained on 50 million positions on depth 4
-
-- ### v0.2.2 (+63 ELO), 2629 CCRL ELO
-
-  - Bug fixes
-  - LMR tuning
-  - New SEE algorithm
-  - Aspiration Windows
-
-- ### v0.2.1 (+145 ELO), 2566 CCRL ELO
-
-  - Bug fixes
-  - UCI options
-  - Improvements on Search
-
-- ### v0.2: Search (+721 ELO), 2421 CCRL ELO
-
-  - History heuristics, killer heuristics
-  - Better LMR
-  - Reversed Futility Pruning
-  - Null Move Pruning
-  - Razoring
-  - Time management
-  - Better Transposition Table
-  - Static Exchange Evaluation
-  - Stronger NNUE network: Flake 2
-    - Trained on human games on https://database.lichess.org/ and more engine games.
-    - Trained on one million endgame positions
-    - 728 -> dense -> 512 -> clipped_relu -> 512 -> dense -> 1 + PSQT
-
-- ### v0.1: NNUE (+275-375 ELO), ~1700 ELO
-
-  - Efficiently Updatable Neural Network trained on top-level engine tournaments
-    - Current model: 728 -> dense -> 128 -> clipped_relu -> 128 -> dense -> 5 + PSQT
-  - Forward Pass
-  - Tuned LMR
-  - Bishop pair, doubled pawns, etc.
-
-- ### v0.0: Base, ~1400 ELO
-  - Bitboard board representation
-  - Magic bitboards
-  - Negamax Search with Alpha-Beta pruning
-  - Quiescence Search with stand-pat pruning
-  - MVV_LVA
-  - LMR
-  - HCE PSQT Evaluation

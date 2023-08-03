@@ -1,0 +1,107 @@
+# v1.6.0
+
+## 8/3/2023
+
+- New LMR parameters from Viridithas
+
+STC 14.0+0.10 | 1000 games
+```
+Score of New_16 vs Master_16: 181 - 173 - 646  [0.504] 1000
+Elo difference: 2.8 +/- 12.8, LOS: 66.5 %, DrawRatio: 64.6 %
+```
+
+
+## v1.5.0
+
+- Optimizations
+- Search Tuning
+- Stronger Neural Network
+- Trained on over 25 Million depth 8 positions from lichess elite database
+- Trained on 1.5 Million depth 10 endgame positions
+- LazySMP Implementation
+
+## v1.4.0
+
+- Search Improvements
+- Manual Tuning
+- NNUE Optimizations
+- Time Management
+
+## v1.3.1
+
+- Search Improvements
+- Countermove heuristic fix
+- Tuning
+
+## v1.3.0
+
+- Stronger Neural Network trained on 2GB of data
+- Countermove Heuristics
+- Higher bounds for History Heuristics
+- Improved Aspiration Window
+
+## v1.2.0
+
+- Movegen Bug fixes
+- Tuned Search parameters
+- Search Rewrite
+- Better SEE
+- Stronger Neural Network (depth 8, 500 epoch) featuring 8 buckets
+
+## v1.1.0
+
+- NNUE Optimizations
+- Singular Extension / MultiCut
+- More Aggressive Prunings
+
+## v1.0.0
+
+- Faster Movegen: heavily inspired by Surge
+- Complete Core Rewrite
+- 512-neuron NNUE trained on 50 million positions on depth 4
+
+## v0.2.2
+
+- Bug fixes
+- LMR tuning
+- New SEE algorithm
+- Aspiration Windows
+
+## v0.2.1
+
+- Bug fixes
+- UCI options
+- Improvements on Search
+
+## v0.2: Search
+
+- History heuristics, killer heuristics
+- Better LMR
+- Reversed Futility Pruning
+- Null Move Pruning
+- Razoring
+- Time management
+- Better Transposition Table
+- Static Exchange Evaluation
+- Stronger NNUE network: Flake 2
+- Trained on human games on https://database.lichess.org/ and more engine games.
+- Trained on one million endgame positions
+- 728 -> dense -> 512 -> clipped_relu -> 512 -> dense -> 1 + PSQT
+
+## v0.1: NNUE, ~1700 ELO
+
+- Efficiently Updatable Neural Network trained on top-level engine tournaments
+- Current model: 728 -> dense -> 128 -> clipped_relu -> 128 -> dense -> 5 + PSQT
+- Forward Pass
+- Tuned LMR
+- Bishop pair, doubled pawns, etc.
+
+## v0.0: Base, ~1400 ELO
+
+- Bitboard board representation
+- Magic bitboards
+- Negamax Search with Alpha-Beta pruning
+- Quiescence Search with stand-pat pruning
+- MVV_LVA
+- LMR
+- HCE PSQT Evaluation
