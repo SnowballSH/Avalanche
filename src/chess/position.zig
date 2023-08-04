@@ -144,7 +144,7 @@ pub const Position = struct {
             for (types.SquareToString) |sq_str, i| {
                 if (std.mem.eql(u8, ep, sq_str)) {
                     self.history[self.game_ply].ep_sq = @intToEnum(types.Square, i);
-                    self.hash ^= zobrist.EnPassantHash[i];
+                    self.hash ^= zobrist.EnPassantHash[types.file_plain(i)];
                     break;
                 }
             }

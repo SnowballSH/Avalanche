@@ -44,7 +44,7 @@ jobs:
           ./build_all.sh
       - name: Upload artifacts
         if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: builds
           path: artifacts/*.zip

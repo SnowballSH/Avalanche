@@ -8,7 +8,7 @@ pub var RFPImprovingDeduction: i32 = 57;
 pub var NMPImprovingMargin: i32 = 76;
 pub var NMPBase: usize = 3;
 pub var NMPDepthDivisor: usize = 3;
-pub var NMPBetaDivisor: usize = 200;
+pub var NMPBetaDivisor: i32 = 200;
 
 pub var RazoringBase: i32 = 63;
 pub var RazoringMargin: i32 = 182;

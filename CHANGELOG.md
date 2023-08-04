@@ -2,9 +2,16 @@
 
 ## 8/5/2023
 
+- Fix NMP bug
+
+STC 20.0+0.10 | 1000 games | 8moves_v3
+```
+pending
+```
+
 - Do more NMP when position is improving
 
-STC 15.0+0.10 | 1000 games | noob_4moves
+STC 30.0+0.20 | 1000 games | noob_4moves
 ```
 Score of New vs Master: 140 - 121 - 739  [0.509] 1000
 Elo difference: 6.6 +/- 11.0, LOS: 88.0 %, DrawRatio: 73.9 %

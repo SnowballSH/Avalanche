@@ -482,7 +482,7 @@ pub const Searcher = struct {
 
         self.eval_history[self.ply] = static_eval;
 
-        var improving = !(self.ply <= 1 or in_check) and static_eval > self.eval_history[self.ply - 2];
+        var improving = !in_check and self.ply >= 2 and static_eval > self.eval_history[self.ply - 2];
 
         var has_non_pawns = pos.has_non_pawns();
 
@@ -519,11 +519,13 @@ pub const Searcher = struct {
             // Step 4.2: Null move pruning
             if (!is_null and depth >= 3 and nmp_static_eval >= beta and has_non_pawns) {
                 var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
-                r += @min(4, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
+                r += @intCast(usize, @min(4, @divTrunc((static_eval - beta), parameters.NMPBetaDivisor)));
                 r = @min(r, depth);
 
+                self.ply += 1;
                 pos.play_null_move();
                 var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV);
+                self.ply -= 1;
                 pos.undo_null_move();
 
                 if (self.time_stop) {
