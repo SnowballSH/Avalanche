@@ -1,5 +1,21 @@
 # v1.6.0
 
+## 8/4/2023
+
+- New RFP parameters from Viridithas
+
+STC 15.0+0.10 | 2000 games
+```
+Score of New_16 vs Master_16: 357 - 337 - 1306  [0.505] 2000
+Elo difference: 3.5 +/- 9.0, LOS: 77.6 %, DrawRatio: 65.3 %
+```
+
+LTC 60.0+0.60 | 1000 games
+```
+Score of New vs Master: 143 - 127 - 730  [0.508] 1000
+Elo difference: 5.6 +/- 11.2, LOS: 83.5 %, DrawRatio: 73.0 %
+```
+
 ## 8/3/2023
 
 - New LMR parameters from Viridithas
