@@ -1,3 +1,5 @@
+const std = @import("std");
+
 // Pseudo-random Number Generator
 pub const PRNG = struct {
     seed: u64,

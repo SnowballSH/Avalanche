@@ -1,14 +1,12 @@
 const std = @import("std");
-const types = @import("chess/types.zig");
 const tables = @import("chess/tables.zig");
 const zobrist = @import("chess/zobrist.zig");
 const position = @import("chess/position.zig");
-const perft = @import("chess/perft.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
-const hce = @import("engine/hce.zig");
 const interface = @import("engine/interface.zig");
 const weights = @import("engine/weights.zig");
+const bench = @import("engine/bench.zig");
 
 const arch = @import("build_options");
 
@@ -18,6 +16,15 @@ pub fn main() anyerror!void {
     tt.GlobalTT.reset(16);
     weights.do_nnue();
     search.init_lmr();
+
+    var args = try std.process.argsWithAllocator(std.heap.page_allocator);
+
+    _ = args.next();
+    var second = args.next();
+    if (second != null and std.mem.eql(u8, second.?, "bench")) {
+        try bench.bench();
+        return;
+    }
 
     var inter = interface.UciInterface.new();
     return inter.main_loop();

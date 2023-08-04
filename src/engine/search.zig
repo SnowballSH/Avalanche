@@ -69,6 +69,7 @@ pub const Searcher = struct {
 
     root_board: position.Position = undefined,
     thread_id: usize = 0,
+    silent_output: bool = false,
 
     pub fn new() Searcher {
         var s = Searcher{};
@@ -119,7 +120,7 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.stop or (self.thread_id == 0 and self.timer.read() / std.time.ns_per_ms >= self.max_millis);
+        return self.stop or (self.thread_id == 0 and (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis));
     }
 
     pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
@@ -228,39 +229,41 @@ pub const Searcher = struct {
                 }
             }
 
-            outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
-                depth,
-                self.seldepth,
-                total_nodes,
-                self.timer.read() / std.time.ns_per_ms,
-            }) catch {};
-
-            if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
-                outW.print("mate {} pv", .{
-                    (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+            if (!self.silent_output) {
+                outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
+                    depth,
+                    self.seldepth,
+                    total_nodes,
+                    self.timer.read() / std.time.ns_per_ms,
                 }) catch {};
-                if (bound == MAX_PLY - 1) {
-                    bound = depth + 2;
+
+                if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
+                    outW.print("mate {} pv", .{
+                        (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+                    }) catch {};
+                    if (bound == MAX_PLY - 1) {
+                        bound = depth + 2;
+                    }
+                } else {
+                    outW.print("cp {} pv", .{
+                        score,
+                    }) catch {};
                 }
-            } else {
-                outW.print("cp {} pv", .{
-                    score,
-                }) catch {};
-            }
 
-            if (self.pv_size[0] > 0) {
-                var i: usize = 0;
-                while (i < self.pv_size[0]) : (i += 1) {
+                if (self.pv_size[0] > 0) {
+                    var i: usize = 0;
+                    while (i < self.pv_size[0]) : (i += 1) {
+                        outW.writeByte(' ') catch {};
+                        self.pv[0][i].uci_print(outW);
+                    }
+                } else {
                     outW.writeByte(' ') catch {};
-                    self.pv[0][i].uci_print(outW);
+                    bm.uci_print(outW);
                 }
-            } else {
-                outW.writeByte(' ') catch {};
-                bm.uci_print(outW);
-            }
 
-            outW.writeByte('\n') catch {};
-            out.flush() catch {};
+                outW.writeByte('\n') catch {};
+                out.flush() catch {};
+            }
 
             // Time Management algorithm by BlackCore
             // https://github.com/SzilBalazs/BlackCore/blob/master/src/timeman.cpp
@@ -282,10 +285,12 @@ pub const Searcher = struct {
 
         self.best_move = bm;
 
-        outW.writeAll("bestmove ") catch {};
-        bm.uci_print(outW);
-        outW.writeByte('\n') catch {};
-        out.flush() catch {};
+        if (!self.silent_output) {
+            outW.writeAll("bestmove ") catch {};
+            bm.uci_print(outW);
+            outW.writeByte('\n') catch {};
+            out.flush() catch {};
+        }
 
         self.is_searching = false;
 

@@ -76,8 +76,8 @@ pub const UciInterface = struct {
                 _ = try stdout.write("option name Hash type spin default 16 min 1 max 4096\n");
                 _ = try stdout.write("option name Threads type spin default 1 min 1 max 16\n");
                 _ = try stdout.write("option name AspirationWindow type spin default 15 min 0 max 64\n");
-                _ = try stdout.write("option name LMRWeight type spin default 600 min 1 max 999\n");
-                _ = try stdout.write("option name LMRBias type spin default 1300 min 100 max 3000\n");
+                _ = try stdout.write("option name LMRWeight type spin default 423 min 1 max 999\n");
+                _ = try stdout.write("option name LMRBias type spin default 770 min 100 max 3000\n");
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "setoption")) {
                 while (true) {
@@ -232,6 +232,7 @@ pub const UciInterface = struct {
                     if (std.mem.eql(u8, token.?, "infinite")) {
                         movetime = 1 << 63;
                         movetime.? /= std.time.ns_per_ms;
+                        self.searcher.force_thinking = true;
                         break;
                     }
                     if (std.mem.eql(u8, token.?, "depth")) {
@@ -253,8 +254,8 @@ pub const UciInterface = struct {
 
                         movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
                         movetime = std.math.max(movetime.? - 10, 10);
-                        self.searcher.ideal_time = movetime.?;
-                        self.searcher.force_thinking = true;
+                        self.searcher.ideal_time = 1 << 60;
+                        self.searcher.force_thinking = false;
 
                         break;
                     }

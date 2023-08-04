@@ -139,6 +139,17 @@ pub const Position = struct {
             }
         }
 
+        var ep = tokens.next().?;
+        if (ep.len == 2) {
+            for (types.SquareToString) |sq_str, i| {
+                if (std.mem.eql(u8, ep, sq_str)) {
+                    self.history[self.game_ply].ep_sq = @intToEnum(types.Square, i);
+                    self.hash ^= zobrist.EnPassantHash[i];
+                    break;
+                }
+            }
+        }
+
         self.evaluator.full_refresh(self);
     }
 
