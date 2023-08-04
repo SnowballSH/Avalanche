@@ -5,6 +5,7 @@ pub var RFPDepth: i32 = 8;
 pub var RFPMultiplier: i32 = 70;
 pub var RFPImprovingDeduction: i32 = 57;
 
+pub var NMPImprovingMargin: i32 = 76;
 pub var NMPBase: usize = 3;
 pub var NMPDepthDivisor: usize = 3;
 pub var NMPBetaDivisor: usize = 200;

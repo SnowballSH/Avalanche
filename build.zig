@@ -104,9 +104,8 @@ pub fn build(b: *std.build.Builder) void {
     build_options.addOption([]const u8, "nnue", "A050823A");
 
     var buf: [64]u8 = undefined;
-    _ = buf;
-    // build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
-    build_options.addOption([]const u8, "version", "1.5.0");
+    build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
+    // build_options.addOption([]const u8, "version", "1.6.0");
 
     exe.use_stage1 = true;
 

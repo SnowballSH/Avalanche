@@ -506,10 +506,15 @@ pub const Searcher = struct {
                 }
             }
 
+            var nmp_static_eval = static_eval;
+            if (improving) {
+                nmp_static_eval += parameters.NMPImprovingMargin;
+            }
+
             // Step 4.2: Null move pruning
-            if (!is_null and depth >= 3 and static_eval >= beta and has_non_pawns) {
+            if (!is_null and depth >= 3 and nmp_static_eval >= beta and has_non_pawns) {
                 var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
-                r += @min(3, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
+                r += @min(4, @intCast(usize, static_eval - beta) / parameters.NMPBetaDivisor);
                 r = @min(r, depth);
 
                 pos.play_null_move();

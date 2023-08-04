@@ -1,16 +1,31 @@
 # v1.6.0
 
+## 8/5/2023
+
+- Do more NMP when position is improving
+
+STC 15.0+0.10 | 1000 games | noob_4moves
+```
+Score of New vs Master: 140 - 121 - 739  [0.509] 1000
+Elo difference: 6.6 +/- 11.0, LOS: 88.0 %, DrawRatio: 73.9 %
+```
+
+LTC 60.0 + 0.60 | 1000 games | UHO (+100-110)
+```
+pending
+```
+
 ## 8/4/2023
 
 - New RFP parameters from Viridithas
 
-STC 15.0+0.10 | 2000 games
+STC 15.0+0.10 | 2000 games | 8moves_v3
 ```
-Score of New_16 vs Master_16: 357 - 337 - 1306  [0.505] 2000
+Score of New vs Master: 357 - 337 - 1306  [0.505] 2000
 Elo difference: 3.5 +/- 9.0, LOS: 77.6 %, DrawRatio: 65.3 %
 ```
 
-LTC 60.0+0.60 | 1000 games
+LTC 60.0+0.60 | 1000 games | 8moves_v3
 ```
 Score of New vs Master: 143 - 127 - 730  [0.508] 1000
 Elo difference: 5.6 +/- 11.2, LOS: 83.5 %, DrawRatio: 73.0 %
@@ -20,13 +35,13 @@ Elo difference: 5.6 +/- 11.2, LOS: 83.5 %, DrawRatio: 73.0 %
 
 - New LMR parameters from Viridithas
 
-STC 14.0+0.10 | 1000 games
+STC 14.0+0.10 | 1000 games | 8moves_v3
 ```
 181 - 173 - 646  [0.504] 1000
 Elo difference: 2.8 +/- 12.8, LOS: 66.5 %, DrawRatio: 64.6 %
 ```
 
-LTC 50.0+0.50 | 1000 games
+LTC 50.0+0.50 | 1000 games | 8moves_v3
 ```
 [0.510] 1000
 Elo difference: 7.0
