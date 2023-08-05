@@ -6,7 +6,14 @@
 
 STC 20.0+0.10 | 1000 games | 8moves_v3
 ```
-pending
+Score of New vs Master: 170 - 127 - 703  [0.521] 1000
+Elo difference: 14.9 +/- 11.7, LOS: 99.4 %, DrawRatio: 70.3 %
+```
+
+LTC 60.0+0.60 | 1000 games | 8moves_v3
+```
+Score of New vs Master: 134 - 144 - 722  [0.495]                         
+Elo difference: -3.5 +/- 11.3, LOS: 27.4 %, DrawRatio: 72.2 %
 ```
 
 - Do more NMP when position is improving
@@ -15,11 +22,6 @@ STC 30.0+0.20 | 1000 games | noob_4moves
 ```
 Score of New vs Master: 140 - 121 - 739  [0.509] 1000
 Elo difference: 6.6 +/- 11.0, LOS: 88.0 %, DrawRatio: 73.9 %
-```
-
-LTC 60.0 + 0.60 | 1000 games | UHO (+100-110)
-```
-pending
 ```
 
 ## 8/4/2023

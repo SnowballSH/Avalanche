@@ -14,7 +14,7 @@
 
 **Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3148**
 
-**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3250**
+**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3247**
 
 ## About
 
@@ -44,7 +44,7 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 | Version | CCRL 40/15 | CCRL Blitz |
 |---------|------------|------------|
-| v1.5.0  | N/A        | 3250       |
+| v1.5.0  | 3156?      | 3247       |
 | v1.4.0  | 3148       | 3210       |
 | v1.3.1  | 3081       | N/A        |
 | v1.3.0  | 3038       | 3090       |
