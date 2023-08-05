@@ -14,6 +14,7 @@ pub fn main() anyerror!void {
     tables.init_all();
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);
+    defer tt.GlobalTT.data.deinit();
     weights.do_nnue();
     search.init_lmr();
 

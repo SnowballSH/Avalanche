@@ -8,7 +8,7 @@ pub var EnPassantHash: [8]u64 = std.mem.zeroes([8]u64);
 pub var DepthHash: [64]u64 = std.mem.zeroes([64]u64);
 
 pub fn init_zobrist() void {
-    var prng = utils.PRNG.new(52013145201314);
+    var prng = utils.PRNG.new(0x246C_CB2D_3B40_2853_9918_0A6D_BC3A_F444);
     var i: usize = 0;
     while (i < types.N_PIECES - 1) : (i += 1) {
         var j: usize = 0;

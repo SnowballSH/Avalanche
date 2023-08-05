@@ -2,13 +2,17 @@ const std = @import("std");
 
 // Pseudo-random Number Generator
 pub const PRNG = struct {
-    seed: u64,
+    seed: u128,
 
     pub fn rand64(self: *PRNG) u64 {
-        self.seed ^= self.seed << 13;
-        self.seed ^= self.seed >> 7;
-        self.seed ^= self.seed << 17;
-        return self.seed;
+        var x = self.seed;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.seed = x;
+        var r = @truncate(u64, x);
+        r = r ^ @truncate(u64, x >> 64);
+        return r;
     }
 
     // Less bits
@@ -16,7 +20,7 @@ pub const PRNG = struct {
         return self.rand64() & self.rand64() & self.rand64();
     }
 
-    pub fn new(seed: u64) PRNG {
+    pub fn new(seed: u128) PRNG {
         return PRNG{ .seed = seed };
     }
 };
