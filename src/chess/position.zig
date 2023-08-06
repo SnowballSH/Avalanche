@@ -93,6 +93,8 @@ pub const Position = struct {
 
         std.debug.print("{s} to move\n", .{s});
         std.debug.print("Hash: 0x{x}\n", .{self.hash});
+
+        std.debug.print("{s}\n", .{self.basic_fen()});
     }
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
@@ -151,6 +153,79 @@ pub const Position = struct {
         }
 
         self.evaluator.full_refresh(self);
+    }
+
+    // IGNORES castling and en passant etc.
+    pub fn basic_fen(self: Position) []u8 {
+        var fen: []u8 = std.heap.c_allocator.alloc(u8, 90) catch unreachable;
+        var index: usize = 0;
+
+        var i: i32 = 56;
+        while (i >= 0) : (i -= 8) {
+            var empty_count: u8 = 0;
+            var j: i32 = 0;
+            while (j < 8) : (j += 1) {
+                const idx = @intCast(usize, i + j);
+
+                if (self.mailbox[idx] == types.Piece.NO_PIECE) {
+                    empty_count += 1;
+                } else {
+                    const pieceChar = types.PieceString[self.mailbox[idx].index()];
+                    if (empty_count > 0) {
+                        fen[index] = empty_count + '0';
+                        index += 1;
+                        empty_count = 0;
+                    }
+                    fen[index] = pieceChar;
+                    index += 1;
+                }
+            }
+            if (empty_count > 0) {
+                fen[index] = empty_count + '0';
+                index += 1;
+            }
+            if (i > 0) {
+                fen[index] = '/';
+                index += 1;
+            }
+        }
+
+        fen[index] = ' ';
+        index += 1;
+
+        if (self.turn == types.Color.White) {
+            fen[index] = 'w';
+        } else {
+            fen[index] = 'b';
+        }
+        index += 1;
+
+        fen[index] = ' ';
+        index += 1;
+
+        fen[index] = '-';
+        index += 1;
+
+        fen[index] = ' ';
+        index += 1;
+
+        fen[index] = '-';
+        index += 1;
+
+        fen[index] = ' ';
+        index += 1;
+
+        fen[index] = '0';
+        index += 1;
+
+        fen[index] = ' ';
+        index += 1;
+
+        fen[index] = '1';
+        index += 1;
+
+        // Return only the portion of the array that contains the FEN
+        return fen[0..index];
     }
 
     pub inline fn phase(self: *Position) usize {

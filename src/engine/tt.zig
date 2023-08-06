@@ -7,6 +7,8 @@ const hce = @import("hce.zig");
 pub const MB: usize = 1 << 20;
 pub const KB: usize = 1 << 10;
 
+pub var LOCK_GLOBAL_TT = false;
+
 pub const Bound = enum(u2) {
     None,
     Exact, // PV Nodes
@@ -62,7 +64,7 @@ pub const TranspositionTable = struct {
     }
 
     pub inline fn set(self: *TranspositionTable, entry: Item) void {
-        if (search.NUM_THREADS != 1) {
+        if (LOCK_GLOBAL_TT or search.NUM_THREADS != 1) {
             self.data.items[entry.hash % self.size].lock.lock();
             defer self.data.items[entry.hash % self.size].lock.unlock();
         }

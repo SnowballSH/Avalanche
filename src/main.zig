@@ -1,4 +1,5 @@
 const std = @import("std");
+const types = @import("chess/types.zig");
 const tables = @import("chess/tables.zig");
 const zobrist = @import("chess/zobrist.zig");
 const position = @import("chess/position.zig");
@@ -7,6 +8,7 @@ const tt = @import("engine/tt.zig");
 const interface = @import("engine/interface.zig");
 const weights = @import("engine/weights.zig");
 const bench = @import("engine/bench.zig");
+const datagen = @import("engine/datagen.zig");
 
 const arch = @import("build_options");
 
@@ -22,9 +24,22 @@ pub fn main() anyerror!void {
 
     _ = args.next();
     var second = args.next();
-    if (second != null and std.mem.eql(u8, second.?, "bench")) {
-        try bench.bench();
-        return;
+    if (second != null) {
+        if (std.mem.eql(u8, second.?, "bench")) {
+            try bench.bench();
+            return;
+        }
+        if (std.mem.eql(u8, second.?, "datagen")) {
+            var gen = datagen.Datagen.new();
+            defer gen.deinit();
+
+            var pos = position.Position.new();
+            pos.set_fen(types.DEFAULT_FEN);
+            tt.LOCK_GLOBAL_TT = true;
+            tt.GlobalTT.reset(512);
+            try gen.start(8);
+            return;
+        }
     }
 
     var inter = interface.UciInterface.new();
