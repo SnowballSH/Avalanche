@@ -12,8 +12,14 @@ Elo difference: 14.9 +/- 11.7, LOS: 99.4 %, DrawRatio: 70.3 %
 
 LTC 60.0+0.60 | 1000 games | 8moves_v3
 ```
-Score of New vs Master: 134 - 144 - 722  [0.495]                         
+Score of New vs Master: 134 - 144 - 722  [0.495] 1000
 Elo difference: -3.5 +/- 11.3, LOS: 27.4 %, DrawRatio: 72.2 %
+```
+
+30.0+0.30 VS 1.5.0:
+```
+Score of Master vs 1.5.0: 328 - 258 - 1414  [0.517] 2000
+Elo difference: 12.2 +/- 8.2, LOS: 99.8 %, DrawRatio: 70.7 %
 ```
 
 - Do more NMP when position is improving

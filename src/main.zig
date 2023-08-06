@@ -37,7 +37,7 @@ pub fn main() anyerror!void {
             pos.set_fen(types.DEFAULT_FEN);
             tt.LOCK_GLOBAL_TT = true;
             tt.GlobalTT.reset(2048);
-            try gen.start(12);
+            try gen.start(7);
             return;
         }
     }
