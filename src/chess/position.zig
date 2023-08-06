@@ -93,8 +93,6 @@ pub const Position = struct {
 
         std.debug.print("{s} to move\n", .{s});
         std.debug.print("Hash: 0x{x}\n", .{self.hash});
-
-        std.debug.print("{s}\n", .{self.basic_fen()});
     }
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
@@ -156,8 +154,8 @@ pub const Position = struct {
     }
 
     // IGNORES castling and en passant etc.
-    pub fn basic_fen(self: Position) []u8 {
-        var fen: []u8 = std.heap.c_allocator.alloc(u8, 90) catch unreachable;
+    pub fn basic_fen(self: Position, allocator: std.mem.Allocator) []u8 {
+        var fen: []u8 = allocator.alloc(u8, 90) catch unreachable;
         var index: usize = 0;
 
         var i: i32 = 56;

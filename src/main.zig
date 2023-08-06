@@ -36,7 +36,7 @@ pub fn main() anyerror!void {
             var pos = position.Position.new();
             pos.set_fen(types.DEFAULT_FEN);
             tt.LOCK_GLOBAL_TT = true;
-            tt.GlobalTT.reset(2048);
+            tt.GlobalTT.reset(512);
             try gen.start(7);
             return;
         }

@@ -43,8 +43,11 @@ pub const DatagenSingle = struct {
         self.searcher.stop = false;
         self.searcher.force_thinking = false;
 
-        var fens = std.ArrayList([]u8).init(std.heap.c_allocator);
-        var evals = std.ArrayList(hce.Score).init(std.heap.c_allocator);
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+
+        var fens = std.ArrayList([]u8).init(arena.allocator());
+        var evals = std.ArrayList(hce.Score).init(arena.allocator());
         defer fens.deinit();
         defer evals.deinit();
 
@@ -56,8 +59,7 @@ pub const DatagenSingle = struct {
                 result = 0.5;
                 break;
             }
-            var movelist = try std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32);
-            defer movelist.deinit();
+            var movelist = try std.ArrayList(types.Move).initCapacity(arena.allocator(), 32);
             if (pos.turn == types.Color.White) {
                 pos.generate_legal_moves(types.Color.White, &movelist);
             } else {
@@ -92,6 +94,7 @@ pub const DatagenSingle = struct {
                 }
                 continue;
             }
+            movelist.deinit();
 
             var res: hce.Score = if (pos.turn == types.Color.White)
                 self.searcher.iterative_deepening(pos, types.Color.White, null)
@@ -100,7 +103,7 @@ pub const DatagenSingle = struct {
 
             var best_move = self.searcher.best_move;
 
-            var fen = pos.basic_fen();
+            var fen = pos.basic_fen(arena.allocator());
             var in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
             if (pos.turn == types.Color.White) {
