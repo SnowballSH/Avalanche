@@ -36,8 +36,8 @@ pub fn main() anyerror!void {
             var pos = position.Position.new();
             pos.set_fen(types.DEFAULT_FEN);
             tt.LOCK_GLOBAL_TT = true;
-            tt.GlobalTT.reset(512);
-            try gen.start(8);
+            tt.GlobalTT.reset(2048);
+            try gen.start(12);
             return;
         }
     }
