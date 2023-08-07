@@ -19,3 +19,5 @@ weather-factory
 
 testing/
 cutechess-cli
+
+*.json

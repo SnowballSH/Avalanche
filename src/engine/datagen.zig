@@ -10,6 +10,8 @@ pub const FileLock = struct {
     lock: std.Thread.Mutex,
 };
 
+const MAX_DEPTH: usize = 8;
+
 pub const DatagenSingle = struct {
     data: std.ArrayList(u8),
     searcher: search.Searcher,
@@ -18,8 +20,8 @@ pub const DatagenSingle = struct {
 
     pub fn new(lock: *FileLock, prng: *utils.PRNG) DatagenSingle {
         var searcher = search.Searcher.new();
-        searcher.max_millis = 100;
-        searcher.ideal_time = 75;
+        searcher.max_millis = 500;
+        searcher.ideal_time = 500;
         searcher.silent_output = true;
         return DatagenSingle{
             .data = std.ArrayList(u8).init(std.heap.c_allocator),
@@ -97,9 +99,9 @@ pub const DatagenSingle = struct {
             movelist.deinit();
 
             var res: hce.Score = if (pos.turn == types.Color.White)
-                self.searcher.iterative_deepening(pos, types.Color.White, null)
+                self.searcher.iterative_deepening(pos, types.Color.White, MAX_DEPTH)
             else
-                -self.searcher.iterative_deepening(pos, types.Color.Black, null);
+                -self.searcher.iterative_deepening(pos, types.Color.Black, MAX_DEPTH);
 
             var best_move = self.searcher.best_move;
 
@@ -164,9 +166,15 @@ pub const Datagen = struct {
     datagens: std.ArrayList(DatagenSingle),
 
     pub fn new() Datagen {
+        var prng = std.rand.DefaultPrng.init(blk: {
+            var seed: u64 = undefined;
+            std.os.getrandom(std.mem.asBytes(&seed)) catch unreachable;
+            break :blk seed;
+        });
+        const rand = prng.random();
         return Datagen{
             .fileLock = undefined,
-            .prng = utils.PRNG.new(0x246C_CB2D_3B40_2853_9918_0A6D_BC3A_F444),
+            .prng = utils.PRNG.new(rand.int(u128)),
             .datagens = std.ArrayList(DatagenSingle).init(std.heap.c_allocator),
         };
     }
