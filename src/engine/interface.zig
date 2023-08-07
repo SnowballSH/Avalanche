@@ -36,7 +36,6 @@ pub const UciInterface = struct {
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
         try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)\n", .{build_options.version});
-        try stdout.print("Using NNUE {s}, architecture {}x{}x{}\n", .{ build_options.nnue, build_options.INPUT_SIZE, build_options.HIDDEN_SIZE, build_options.OUTPUT_SIZE });
 
         out: while (true) {
             // The command will probably be less than 8192 characters
@@ -167,32 +166,6 @@ pub const UciInterface = struct {
                 self.position.set_fen(types.DEFAULT_FEN[0..]);
             } else if (std.mem.eql(u8, token.?, "d")) {
                 self.position.debug_print();
-            } else if (std.mem.eql(u8, token.?, "export_net")) {
-                token = tokens.next();
-                if (token != null) {
-                    const file = std.fs.cwd().createFile(
-                        token.?,
-                        .{ .read = true },
-                    ) catch {
-                        std.debug.panic("Unable to open {s}", .{token.?});
-                    };
-                    defer file.close();
-
-                    var writer = file.writer();
-                    writer.writeByte('[') catch {};
-                    std.json.stringify(nnue.weights.LAYER_1, std.json.StringifyOptions{}, writer) catch {};
-                    writer.writeByte(',') catch {};
-                    std.json.stringify(nnue.weights.BIAS_1, std.json.StringifyOptions{}, writer) catch {};
-                    writer.writeByte(',') catch {};
-                    std.json.stringify(nnue.weights.LAYER_2, std.json.StringifyOptions{}, writer) catch {};
-                    writer.writeByte(',') catch {};
-                    std.json.stringify(nnue.weights.BIAS_2, std.json.StringifyOptions{}, writer) catch {};
-                    writer.writeByte(',') catch {};
-                    std.json.stringify(nnue.weights.PSQT, std.json.StringifyOptions{}, writer) catch {};
-                    writer.writeByte(']') catch {};
-
-                    stdout.print("Done. Exported to {s}.\n", .{token.?}) catch {};
-                }
             } else if (std.mem.eql(u8, token.?, "perft")) {
                 var depth: u32 = 1;
                 token = tokens.next();
