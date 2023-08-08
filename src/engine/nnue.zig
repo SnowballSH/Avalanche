@@ -29,8 +29,12 @@ pub fn nnue_index(piece: types.Piece, sq: types.Square) WhiteBlackPair {
 }
 
 pub inline fn clipped_relu_squared(input: i16) i32 {
-    const k = @intCast(i32, @min(255, @max(0, input)));
+    const k = clipped_relu(input);
     return k * k;
+}
+
+pub inline fn clipped_relu(input: i16) i32 {
+    return @intCast(i32, @min(255, @max(0, input)));
 }
 
 pub const Accumulator = packed struct {
@@ -117,11 +121,11 @@ pub const NNUE = struct {
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += 1) {
             if (turn == types.Color.White) {
-                res += clipped_relu_squared(acc.white[i]) * weights.MODEL.layer_2[i];
-                res += clipped_relu_squared(acc.black[i]) * weights.MODEL.layer_2[i + weights.HIDDEN_SIZE];
+                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[i];
+                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[i + weights.HIDDEN_SIZE];
             } else {
-                res += clipped_relu_squared(acc.black[i]) * weights.MODEL.layer_2[i];
-                res += clipped_relu_squared(acc.white[i]) * weights.MODEL.layer_2[i + weights.HIDDEN_SIZE];
+                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[i];
+                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[i + weights.HIDDEN_SIZE];
             }
         }
 
