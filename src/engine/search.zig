@@ -44,6 +44,9 @@ pub const Searcher = struct {
     force_thinking: bool = false,
     timer: std.time.Timer = undefined,
 
+    soft_max_nodes: ?u64 = null,
+    max_nodes: ?u64 = null,
+
     time_stop: bool = false,
 
     nodes: u64 = 0,
@@ -120,11 +123,11 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.stop or (self.thread_id == 0 and (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis));
+        return self.stop or (self.max_nodes != null and self.nodes >= self.max_nodes.?) or (self.thread_id == 0 and (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis));
     }
 
     pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
-        return self.stop or (self.thread_id == 0 and (!self.force_thinking and
+        return self.stop or (self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (self.thread_id == 0 and (!self.force_thinking and
             self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor)))));
     }
 
