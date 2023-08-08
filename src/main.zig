@@ -33,11 +33,19 @@ pub fn main() anyerror!void {
             var gen = datagen.Datagen.new();
             defer gen.deinit();
 
-            var pos = position.Position.new();
-            pos.set_fen(types.DEFAULT_FEN);
             tt.LOCK_GLOBAL_TT = true;
             tt.GlobalTT.reset(512);
             try gen.start(7);
+            return;
+        }
+
+        if (std.mem.eql(u8, second.?, "datagen_single")) {
+            var gen = datagen.Datagen.new();
+            defer gen.deinit();
+
+            tt.LOCK_GLOBAL_TT = true;
+            tt.GlobalTT.reset(256);
+            try gen.startSingleThreaded();
             return;
         }
     }
