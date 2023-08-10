@@ -1,0 +1,4 @@
+| Name   | Train Info                                                                                | Result | Comments                                       |
+|--------|-------------------------------------------------------------------------------------------|--------|------------------------------------------------|
+| 1.5.0  | Ancient Arch                                                                              | base   | Network for v1.5.0, before the new Arch        |
+| net003 | 768->512x2->1<br>100 epochs<br>lr=0.01<br>lr_drop at 30<br>35M 5k-6k nodes self-play data | -82.2  | New arch<br>Ciekce says it's "giga-overfitted" |

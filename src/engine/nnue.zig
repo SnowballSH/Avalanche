@@ -10,6 +10,8 @@ const QAB: i32 = QA * QB;
 
 const SCALE: i32 = 400;
 
+const SQUARED_ACTIVATION: bool = true;
+
 pub const WhiteBlackPair = packed struct {
     white: usize,
     black: usize,
@@ -28,13 +30,13 @@ pub fn nnue_index(piece: types.Piece, sq: types.Square) WhiteBlackPair {
     };
 }
 
-pub inline fn clipped_relu_squared(input: i16) i32 {
-    const k = clipped_relu(input);
-    return k * k;
-}
-
 pub inline fn clipped_relu(input: i16) i32 {
-    return @intCast(i32, @min(255, @max(0, input)));
+    const k = @intCast(i32, @min(255, @max(0, input)));
+    if (SQUARED_ACTIVATION) {
+        return k * k;
+    } else {
+        return k;
+    }
 }
 
 pub const Accumulator = packed struct {
@@ -129,6 +131,10 @@ pub const NNUE = struct {
             }
         }
 
-        return @divTrunc(@divTrunc(res, QA) * SCALE, QAB);
+        if (SQUARED_ACTIVATION) {
+            return @divTrunc(@divTrunc(res, QA) * SCALE, QAB);
+        } else {
+            return @divTrunc(res * SCALE, QAB);
+        }
     }
 };
