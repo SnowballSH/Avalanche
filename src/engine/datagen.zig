@@ -12,7 +12,7 @@ pub const FileLock = struct {
 
 const MAX_DEPTH: ?u8 = null;
 const MAX_NODES: ?u64 = 20000;
-const SOFT_MAX_NODES: ?u64 = 5000;
+const SOFT_MAX_NODES: ?u64 = 5500;
 
 pub const DatagenSingle = struct {
     id: u64,
