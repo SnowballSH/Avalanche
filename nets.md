@@ -1,5 +1,0 @@
-| Name   	| Train Info                                                                                                      	| Result vs base 	| Comments                                       	|
-|--------	|-----------------------------------------------------------------------------------------------------------------	|----------------	|------------------------------------------------	|
-| 1.5.0  	| Ancient Arch                                                                                                    	| base           	| Network for v1.5.0, before the new Arch        	|
-| net003 	| 768->512x2->1<br>SCReLU<br>100 epochs<br>wdl=0.12<br>lr=0.01<br>lr_drop at 30<br>35M 5k-6k nodes self-play data 	| -82.2          	| New arch<br>Ciekce says it's "giga-overfitted" 	|
-| net004 	| Same as net003, but 75 epochs & wdl=0.15 & uses CReLU                                                           	| -74.4          	| There's hope if we have more data              	|

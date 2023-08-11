@@ -3,7 +3,7 @@ const std = @import("std");
 const NNUE_SOURCE = @embedFile("../../nets/new.nnue");
 
 pub const INPUT_SIZE: usize = 768;
-pub const HIDDEN_SIZE: usize = 512;
+pub const HIDDEN_SIZE: usize = 256;
 
 pub const NNUEWeights = struct {
     layer_1: [INPUT_SIZE * HIDDEN_SIZE]i16 align(64),
