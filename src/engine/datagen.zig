@@ -11,8 +11,8 @@ pub const FileLock = struct {
 };
 
 const MAX_DEPTH: ?u8 = null;
-const MAX_NODES: ?u64 = 70000;
-const SOFT_MAX_NODES: ?u64 = 6000;
+const MAX_NODES: ?u64 = 20000;
+const SOFT_MAX_NODES: ?u64 = 5500;
 
 pub const DatagenSingle = struct {
     id: u64,
@@ -65,7 +65,7 @@ pub const DatagenSingle = struct {
         var white_win_count: usize = 0;
         var black_win_count: usize = 0;
         var ply: usize = 0;
-        var random_plies: u64 = 4 + (self.prng.rand64() % 7);
+        var random_plies: u64 = 6 + (self.prng.rand64() % 7);
         while (true) : (ply += 1) {
             if (self.searcher.is_draw(pos)) {
                 result = 0.5;
@@ -128,7 +128,7 @@ pub const DatagenSingle = struct {
                 pos.play_move(types.Color.Black, best_move);
             }
 
-            const limit: i32 = if (pos.phase() >= 6) 750 else 450;
+            const limit: i32 = if (pos.phase() >= 6) 750 else 400;
 
             if (res > limit) {
                 white_win_count += 1;
