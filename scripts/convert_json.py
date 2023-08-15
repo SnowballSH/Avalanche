@@ -6,7 +6,7 @@ import json
 import struct
 
 FEATURES = 768
-HIDDEN = 256
+HIDDEN = 256 + 128
 QA = 255
 QB = 64
 QAB = QA * QB
