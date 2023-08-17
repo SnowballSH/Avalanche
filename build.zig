@@ -47,18 +47,6 @@ fn dtToString(dt: DateTime, buf: []u8) []const u8 {
     return std.fmt.bufPrint(buf, "Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2}", .{ dt.year, dt.month, dt.day, dt.hour, dt.minute }) catch unreachable;
 }
 
-var NNUE_SOURCE: [12]u8 = undefined;
-
-fn le_to_u32(idx: usize) u32 {
-    return @as(u32, NNUE_SOURCE[idx + 0]) | (@as(u32, NNUE_SOURCE[idx + 1]) << 8) | (@as(u32, NNUE_SOURCE[idx + 2]) << 16) | (@as(u32, NNUE_SOURCE[idx + 3]) << 24);
-}
-
-fn next_u32(idx: *usize) u32 {
-    var v = le_to_u32(idx.*);
-    idx.* += 4;
-    return v;
-}
-
 pub fn build(b: *std.build.Builder) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
@@ -77,31 +65,6 @@ pub fn build(b: *std.build.Builder) void {
 
     const build_options = b.addOptions();
     exe.addOptions("build_options", build_options);
-
-    {
-        const nnue_file = std.fs.cwd().openFile(
-            "nets/default.nnue",
-            .{},
-        ) catch {
-            std.debug.panic("Unable to open nets/default.nnue", .{});
-        };
-        defer nnue_file.close();
-        _ = nnue_file.read(NNUE_SOURCE[0..]) catch {
-            std.debug.panic("Unable to read nets/default.nnue", .{});
-        };
-
-        var index: usize = 0;
-
-        var input_size = next_u32(&index);
-        var hidden_size = next_u32(&index);
-        var output_size = next_u32(&index);
-
-        build_options.addOption(usize, "INPUT_SIZE", @intCast(usize, input_size));
-        build_options.addOption(usize, "HIDDEN_SIZE", @intCast(usize, hidden_size));
-        build_options.addOption(usize, "OUTPUT_SIZE", @intCast(usize, output_size));
-    }
-
-    build_options.addOption([]const u8, "nnue", "A050823A");
 
     var buf: [64]u8 = undefined;
     build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));

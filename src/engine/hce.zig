@@ -174,7 +174,7 @@ pub const DynamicEvaluator = struct {
 
     pub inline fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
         if (UseNNUE) {
-            self.nnue_evaluator.activate(pc, sq.index());
+            self.nnue_evaluator.toggle(true, pc, sq);
         }
         if (self.need_hce) {
             const i = pc.piece_type().index();
@@ -197,7 +197,7 @@ pub const DynamicEvaluator = struct {
 
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
-                self.nnue_evaluator.deactivate(pc, sq.index());
+                self.nnue_evaluator.toggle(false, pc, sq);
             }
             if (self.need_hce) {
                 const i = pc.piece_type().index();
@@ -225,8 +225,8 @@ pub const DynamicEvaluator = struct {
         const pc = pos.mailbox[from.index()];
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
-                self.nnue_evaluator.deactivate(pc, from.index());
-                self.nnue_evaluator.activate(pc, to.index());
+                self.nnue_evaluator.toggle(false, pc, from);
+                self.nnue_evaluator.toggle(true, pc, to);
             }
             if (self.need_hce) {
                 const i = pc.piece_type().index();
@@ -369,11 +369,7 @@ pub fn evaluate(pos: *position.Position) Score {
 }
 
 pub inline fn evaluate_nnue(pos: *position.Position) Score {
-    var bucket: usize = 0;
-    if (nnue.weights.OUTPUT_SIZE != 1) {
-        bucket = @min(@divFloor(pos.phase() * nnue.weights.OUTPUT_SIZE, 24), nnue.weights.OUTPUT_SIZE - 1);
-    }
-    return pos.evaluator.nnue_evaluator.evaluate(pos.turn, bucket);
+    return pos.evaluator.nnue_evaluator.evaluate(pos.turn);
 }
 
 pub inline fn is_material_draw(pos: *position.Position) bool {

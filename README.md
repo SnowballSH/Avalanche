@@ -12,7 +12,7 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3148**
+**Official [40/15 CCRL ELO (v1.4.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.4.0%2064-bit#Avalanche_1_4_0_64-bit): 3147**
 
 **Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3247**
 
@@ -42,18 +42,19 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 ## Strength
 
-| Version | CCRL 40/15 | CCRL Blitz |
-|---------|------------|------------|
-| v1.5.0  | 3156?      | 3247       |
-| v1.4.0  | 3148       | 3210       |
-| v1.3.1  | 3081       | N/A        |
-| v1.3.0  | 3038       | 3090       |
-| v1.2.0  | 3046       | 3028       |
-| v1.1.0  | 2835       | 2921       |
-| v1.0.0  | 2743       | N/A        |
-| v0.2.2  | 2626       | 2584       |
-| v0.2.1  | 2563       | N/A        |
-| v0.2.0  | 2424       | 2484       |
+| Version      | CCRL 40/15 | CCRL Blitz |
+|--------------|------------|------------|
+| v1.5.0 4CPU  | 3256?      | N/A        |
+| v1.5.0       | 3174?      | 3247       |
+| v1.4.0       | 3147       | 3211       |
+| v1.3.1       | 3080       | N/A        |
+| v1.3.0       | 3037       | 3091       |
+| v1.2.0       | 3046       | 3029       |
+| v1.1.0       | 2835       | 2923       |
+| v1.0.0       | 2742       | N/A        |
+| v0.2.2       | 2626       | 2587       |
+| v0.2.1       | 2563       | N/A        |
+| v0.2.0       | 2424       | 2487       |
 
 ## Tuning
 
@@ -62,6 +63,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 ## Credits
 
 - [Dan Ellis Echavarria](https://github.com/Deecellar) for writing the github action CI and helping me with Zig questions
+- [Ciekce](https://github.com/Ciekce) for guiding me with migrating to the new Marlinflow and answering my stupid questions related to NNUE
 
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
@@ -81,6 +83,7 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
   - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. Some ideas are borrowed from other chess engines as in comments. However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
   - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
-  - NNUE is trained with a private, significantly modified fork of https://github.com/dsekercioglu/marlinflow. The data is generated through self-play games and the default net is trained over the BM 4.0 net. The secondary net in the nets/ folder is smaller, faster, and trained purely on Avalanche 1.3.1 self-play games.
+  - NNUE after 1.5.0 is trained with Ciekce's [modified fork](https://github.com/Ciekce/marlinflow) of https://github.com/dsekercioglu/marlinflow.
+  - The NNUE data after 1.5.0 is purely generated from self-play games. Currently, the latest dev network is trained on 160 million self-play positions at 5k-6k nodes.
 - UCI Interface/Communication code
   - 100% original

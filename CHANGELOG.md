@@ -1,5 +1,24 @@
 # v1.6.0
 
+## 8/16/2023
+
+- Switch to new NNUE architecture
+- New net: net007b
+
+STC 20.0+0.10 | 1000 games | 8moves_v3
+```
+Score of New vs Master: 404 - 162 - 434  [0.621] 1000
+Elo difference: 85.8 +/- 16.3, LOS: 100.0 %, DrawRatio: 43.4 %
+Ordo: +86.9
+```
+
+LTC 40.0+0.40 | 300 games | Pohl
+```
+Score of New vs Master: 127 - 74 - 99  [0.588] 300
+Elo difference: 62.0 +/- 32.5, LOS: 100.0 %, DrawRatio: 33.0 %
+Ordo: +76.8
+```
+
 ## 8/5/2023
 
 - Fix NMP bug
