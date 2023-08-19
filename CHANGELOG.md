@@ -1,5 +1,16 @@
 # v1.6.0
 
+# 8/18/2023
+
+- New net: net008b
+
+STC 15.0+0.10 | 1000 games | 8moves_v3
+```
+Score of New vs Master: 284 - 174 - 542  [0.555] 1000
+Elo difference: 38.4 +/- 14.5, LOS: 100.0 %, DrawRatio: 54.2 %
+Ordo: +39.1
+```
+
 ## 8/16/2023
 
 - Switch to new NNUE architecture
