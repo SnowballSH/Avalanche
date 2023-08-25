@@ -42,6 +42,7 @@ pub const Searcher = struct {
     max_millis: u64 = 0,
     ideal_time: u64 = 0,
     force_thinking: bool = false,
+    iterative_deepening_depth: usize = 0,
     timer: std.time.Timer = undefined,
 
     soft_max_nodes: ?u64 = null,
@@ -123,12 +124,11 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.stop or (self.max_nodes != null and self.nodes >= self.max_nodes.?) or (self.thread_id == 0 and (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis));
+        return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > 1 and ((self.max_nodes != null and self.nodes >= self.max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis)));
     }
 
     pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
-        return self.stop or (self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (self.thread_id == 0 and (!self.force_thinking and
-            self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor)))));
+        return self.stop or (self.thread_id == 0 and ((self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))))));
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
@@ -168,6 +168,7 @@ pub const Searcher = struct {
             self.seldepth = 0;
 
             while (true) {
+                self.iterative_deepening_depth = depth;
                 if (depth > 1) {
                     self.helpers(pos, color, depth, alpha, beta);
                 }

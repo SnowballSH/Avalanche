@@ -197,6 +197,8 @@ pub const UciInterface = struct {
                 var myinc: ?u64 = null;
                 var movestogo: ?u64 = null;
                 self.searcher.force_thinking = true;
+                self.searcher.max_nodes = null;
+                self.searcher.soft_max_nodes = null;
                 while (true) {
                     token = tokens.next();
                     if (token == null) {
@@ -226,13 +228,22 @@ pub const UciInterface = struct {
                         }
 
                         movetime = std.fmt.parseUnsigned(u64, token.?, 10) catch 10 * std.time.ms_per_s;
-                        movetime = std.math.max(movetime.? - 10, 10);
                         self.searcher.ideal_time = 1 << 60;
                         self.searcher.force_thinking = false;
 
                         break;
                     }
+                    if (std.mem.eql(u8, token.?, "nodes")) {
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
 
+                        self.searcher.max_nodes = std.fmt.parseUnsigned(u64, token.?, 10) catch null;
+                        self.searcher.soft_max_nodes = self.searcher.max_nodes;
+
+                        break;
+                    }
                     if (std.mem.eql(u8, token.?, "wtime")) {
                         self.searcher.force_thinking = false;
                         token = tokens.next();
