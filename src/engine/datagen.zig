@@ -11,8 +11,8 @@ pub const FileLock = struct {
 };
 
 const MAX_DEPTH: ?u8 = null;
-const MAX_NODES: ?u64 = 20000;
-const SOFT_MAX_NODES: ?u64 = 5500;
+const MAX_NODES: ?u64 = 30000;
+const SOFT_MAX_NODES: ?u64 = 7000;
 
 pub const DatagenSingle = struct {
     id: u64,
@@ -96,7 +96,8 @@ pub const DatagenSingle = struct {
                 break;
             }
 
-            if (ply < random_plies) {
+            // play a random move if we're in the first few plies or with a 0.1% chance
+            if (ply < random_plies or self.prng.rand64() % 1000 == 0) {
                 var move = movelist.items[self.prng.rand64() % move_size];
                 if (pos.turn == types.Color.White) {
                     pos.play_move(types.Color.White, move);
