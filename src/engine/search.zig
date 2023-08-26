@@ -407,7 +407,7 @@ pub const Searcher = struct {
 
         // Step 1.3: Ply Overflow Check
         if (self.ply == MAX_PLY) {
-            return hce.evaluate(pos);
+            return hce.evaluate_comptime(pos, color);
         }
 
         // Step 1.4: Mate-distance pruning
@@ -479,7 +479,7 @@ pub const Searcher = struct {
             }
         }
 
-        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate(pos);
+        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate_comptime(pos, color);
         var best_score: hce.Score = static_eval;
 
         var low_estimate: hce.Score = -hce.MateScore - 1;
@@ -820,7 +820,7 @@ pub const Searcher = struct {
 
         // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
-            return hce.evaluate(pos);
+            return hce.evaluate_comptime(pos, color);
         }
 
         var in_check = pos.in_check(color);
@@ -830,7 +830,7 @@ pub const Searcher = struct {
         var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
         var static_eval = best_score;
         if (!in_check) {
-            static_eval = hce.evaluate(pos);
+            static_eval = hce.evaluate_comptime(pos, color);
             best_score = static_eval;
 
             // Step 2.1: Stand Pat pruning

@@ -303,11 +303,11 @@ pub inline fn distance_eval(pos: *position.Position, comptime white_winning: boo
     return score;
 }
 
-pub fn evaluate(pos: *position.Position) Score {
+pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) Score {
     var phase = pos.phase();
     var result: Score = 0;
     if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
-        result = evaluate_nnue(pos);
+        result = evaluate_nnue_comptime(pos, color);
     } else {
         if (!pos.evaluator.need_hce) {
             pos.evaluator.need_hce = true;
@@ -335,13 +335,13 @@ pub fn evaluate(pos: *position.Position) Score {
                 if (pos.piece_bitboards[types.Piece.BLACK_KING.index()] == pos.all_pieces(types.Color.Black)) {
                     // White is winning
                     eg_score += distance_eval(pos, true);
-                    eg_score += @divFloor(pos.evaluator.score_eg_non_mat, 2);
+                    eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
                     eg_score = @max(100, eg_score - @intCast(Score, pos.history[pos.game_ply].fifty));
                     break;
                 } else if (pos.piece_bitboards[types.Piece.WHITE_KING.index()] == pos.all_pieces(types.Color.White)) {
                     // Black is winning
                     eg_score += distance_eval(pos, false);
-                    eg_score += @divFloor(pos.evaluator.score_eg_non_mat, 2);
+                    eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
                     eg_score = @min(-100, eg_score + @intCast(Score, pos.history[pos.game_ply].fifty));
                     break;
                 }
@@ -353,7 +353,7 @@ pub fn evaluate(pos: *position.Position) Score {
         }
 
         var score = @divFloor(mg_score * mg_phase + eg_score * eg_phase, 24);
-        if (pos.turn == types.Color.White) {
+        if (color == types.Color.White) {
             result = score;
         } else {
             result = -score;
@@ -365,11 +365,17 @@ pub fn evaluate(pos: *position.Position) Score {
         result = @divTrunc(result, drawish_factor);
     }
 
+    result = @divTrunc(result * (200 - @intCast(Score, pos.history[pos.game_ply].fifty)), 200);
+
     return result;
 }
 
 pub inline fn evaluate_nnue(pos: *position.Position) Score {
     return pos.evaluator.nnue_evaluator.evaluate(pos.turn);
+}
+
+pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: types.Color) Score {
+    return pos.evaluator.nnue_evaluator.evaluate_comptime(color);
 }
 
 pub inline fn is_material_draw(pos: *position.Position) bool {

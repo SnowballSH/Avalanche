@@ -65,7 +65,7 @@ pub const DatagenSingle = struct {
         var white_win_count: usize = 0;
         var black_win_count: usize = 0;
         var ply: usize = 0;
-        var random_plies: u64 = 4 + (self.prng.rand64() % 9);
+        var random_plies: u64 = 6 + (self.prng.rand64() % 8);
         while (true) : (ply += 1) {
             if (self.searcher.is_draw(pos)) {
                 result = 0.5;
@@ -96,8 +96,8 @@ pub const DatagenSingle = struct {
                 break;
             }
 
-            // play a random move if we're in the first few plies or with a 0.1% chance
-            if (ply < random_plies or self.prng.rand64() % 1000 == 0) {
+            // play a random move if we're in the first few plies or with a 0.01% chance
+            if (ply < random_plies or self.prng.rand64() % 10000 == 0) {
                 var move = movelist.items[self.prng.rand64() % move_size];
                 if (pos.turn == types.Color.White) {
                     pos.play_move(types.Color.White, move);

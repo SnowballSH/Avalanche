@@ -1,5 +1,25 @@
 # v1.6.0
 
+# 8/25/2023
+
+- 50 move count scaling
+
+STC 10.0+0.10 | 8moves_v3
+```
+Score of New_ vs Master: 1152 - 1072 - 4332  [0.506] 6556
+Elo difference: 4.2 +/- 4.9, LOS: 95.5 %, DrawRatio: 66.1 %
+SPRT: llr 1.39 (47.3%), lbound -2.94, ubound 2.94
+Ordo: +4.3
+```
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 339 - 325 - 885  [0.505] 1549
+Elo difference: 3.1 +/- 11.3, LOS: 70.7 %, DrawRatio: 57.1 %
+SPRT: llr 0.0958 (3.3%), lbound -2.94, ubound 2.94
+Ordo: +3.6
+```
+
 # 8/18/2023
 
 - New net: net008b
