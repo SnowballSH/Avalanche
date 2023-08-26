@@ -4,6 +4,7 @@ const tables = @import("tables.zig");
 const zobrist = @import("zobrist.zig");
 const utils = @import("utils.zig");
 const hce = @import("../engine/hce.zig");
+const see = @import("../engine/see.zig");
 
 // Stores information for undoing a move.
 pub const UndoInfo = packed struct {
@@ -229,8 +230,17 @@ pub const Position = struct {
     pub inline fn phase(self: *Position) usize {
         var val: usize = 0;
         val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]);
-        val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]) * 2;
-        val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()]) * 4;
+        val += 2 * types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]);
+        val += 4 * types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()]);
+        return val;
+    }
+
+    pub inline fn phase_material(self: *Position) i32 {
+        var val: i32 = 0;
+        val += see.SeeWeight[1] * types.popcount(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()]);
+        val += see.SeeWeight[2] * types.popcount(self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]);
+        val += see.SeeWeight[3] * types.popcount(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]);
+        val += see.SeeWeight[4] * types.popcount(self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()]);
         return val;
     }
 
