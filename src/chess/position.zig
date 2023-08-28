@@ -80,12 +80,12 @@ pub const Position = struct {
         std.debug.print("{s}", .{letters});
         var i: i32 = 56;
         while (i >= 0) : (i -= 8) {
-            std.debug.print("{s} {} ", .{ line, @divFloor(i, 8) + 1 });
+            std.debug.print("{s} {} ", .{ line, @divTrunc(i, 8) + 1 });
             var j: i32 = 0;
             while (j < 8) : (j += 1) {
                 std.debug.print("| {c} ", .{types.PieceString[self.mailbox[@intCast(usize, i + j)].index()]});
             }
-            std.debug.print("| {}\n", .{@divFloor(i, 8) + 1});
+            std.debug.print("| {}\n", .{@divTrunc(i, 8) + 1});
         }
         std.debug.print("{s}", .{line});
         std.debug.print("{s}\n", .{letters});

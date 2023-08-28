@@ -308,11 +308,6 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) S
     var result: Score = 0;
     if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
         result = evaluate_nnue_comptime(pos, color);
-
-        // material scaling
-        // Value from viridithas
-        // Lost ELO as of last test
-        // result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32)), 1024);
     } else {
         if (!pos.evaluator.need_hce) {
             pos.evaluator.need_hce = true;
@@ -357,7 +352,7 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) S
             break;
         }
 
-        var score = @divFloor(mg_score * mg_phase + eg_score * eg_phase, 24);
+        var score = @divTrunc(mg_score * mg_phase + eg_score * eg_phase, 24);
         if (color == types.Color.White) {
             result = score;
         } else {
@@ -370,8 +365,8 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) S
         result = @divTrunc(result, drawish_factor);
     }
 
-    // Fifty move scaling
-    result = @divTrunc(result * (200 - @intCast(Score, pos.history[pos.game_ply].fifty)), 200);
+    // Scaling idea from Clover
+    result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - @intCast(Score, pos.history[pos.game_ply].fifty) * 5), 1024);
 
     return result;
 }

@@ -2,6 +2,22 @@
 
 ## 8/26/2023
 
+- Material Scaling
+
+STC 10.0+0.10 | 8moves_v3
+```
+Score of New vs Master: 178 - 163 - 659  [0.507] 1000
+Elo difference: 5.2 +/- 12.6, LOS: 79.2 %, DrawRatio: 65.9 %
+Ordo: +5.2
+```
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 161 - 143 - 361  [0.514] 665
+Cutechess output lost
+Ordo: +11.0
+```
+
 ## 8/25/2023
 
 - 50 move count scaling

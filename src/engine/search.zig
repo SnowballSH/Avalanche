@@ -189,15 +189,15 @@ pub const Searcher = struct {
                     if (resize_counter > 5) {
                         alpha = -hce.MateScore;
                     }
-                    beta = @divFloor(alpha + beta, 2);
-                    alpha_window = @divFloor(alpha_window * 13, 10);
+                    beta = @divTrunc(alpha + beta, 2);
+                    alpha_window = @divTrunc(alpha_window * 13, 10);
                     alpha += alpha_window + 1;
                     resize_counter += 1;
                 } else if (score >= beta) {
                     if (resize_counter > 5) {
                         beta = hce.MateScore;
                     }
-                    beta_window = @divFloor(beta_window * 13, 10);
+                    beta_window = @divTrunc(beta_window * 13, 10);
                     beta += beta_window + 1;
                     resize_counter += 1;
                 } else {
@@ -243,7 +243,7 @@ pub const Searcher = struct {
 
                 if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
                     outW.print("mate {} pv", .{
-                        (@divFloor(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+                        (@divTrunc(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
                     }) catch {};
                     if (bound == MAX_PLY - 1) {
                         bound = depth + 2;
@@ -763,10 +763,10 @@ pub const Searcher = struct {
 
             const b = best_move.to_u16();
             for (quiet_moves.items) |m, i| {
-                var hist = @divFloor(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
+                var hist = @divTrunc(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
                 if (m.to_u16() == b) {
                     if (i > 6) {
-                        hist = @divFloor(hist, 2);
+                        hist = @divTrunc(hist, 2);
                     }
                     self.history[@enumToInt(color)][m.from][m.to] += max - hist;
                 } else {

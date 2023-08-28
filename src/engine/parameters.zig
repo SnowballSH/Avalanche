@@ -13,4 +13,4 @@ pub var NMPBetaDivisor: i32 = 200;
 pub var RazoringBase: i32 = 63;
 pub var RazoringMargin: i32 = 182;
 
-pub var AspirationWindow: i32 = 15;
+pub var AspirationWindow: i32 = 13;
