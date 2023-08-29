@@ -17,41 +17,37 @@ pub const Bound = enum(u2) {
 };
 
 pub const Item = packed struct {
+    hash: u64,
     eval: hce.Score,
     bestmove: types.Move,
     flag: Bound,
     depth: u14,
-    hash: u64,
-};
-
-pub const TTItem = struct {
-    item: Item,
-    lock: std.Thread.Mutex,
 };
 
 pub var TTArena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
 
 pub const TranspositionTable = struct {
-    data: std.ArrayList(TTItem),
+    data: std.ArrayList(i128),
     size: usize,
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
-            .data = std.ArrayList(TTItem).init(TTArena.allocator()),
-            .size = 16 * MB / @sizeOf(TTItem),
+            .data = std.ArrayList(i128).init(TTArena.allocator()),
+            .size = 16 * MB / @sizeOf(Item),
         };
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
         self.data.deinit();
         var tt = TranspositionTable{
-            .data = std.ArrayList(TTItem).init(TTArena.allocator()),
-            .size = mb * MB / @sizeOf(TTItem),
+            .data = std.ArrayList(i128).init(TTArena.allocator()),
+            .size = mb * MB / @sizeOf(Item),
         };
 
         tt.data.ensureTotalCapacity(tt.size) catch {};
         tt.data.expandToCapacity();
 
+        // std.debug.print("{}\n", .{@sizeOf(Item)});
         // std.debug.print("Allocated {} KB, {} items for TT\n", .{ tt.size * @sizeOf(Item) / KB, tt.size });
 
         self.* = tt;
@@ -59,16 +55,12 @@ pub const TranspositionTable = struct {
 
     pub inline fn clear(self: *TranspositionTable) void {
         for (self.data.items) |*ptr| {
-            ptr.* = std.mem.zeroes(TTItem);
+            ptr.* = 0;
         }
     }
 
     pub inline fn set(self: *TranspositionTable, entry: Item) void {
-        if (LOCK_GLOBAL_TT or search.NUM_THREADS != 1) {
-            self.data.items[entry.hash % self.size].lock.lock();
-            defer self.data.items[entry.hash % self.size].lock.unlock();
-        }
-        self.data.items[entry.hash % self.size].item = entry;
+        _ = @atomicRmw(i128, &self.data.items[entry.hash % self.size], .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
     }
 
     pub inline fn prefetch(self: *TranspositionTable, hash: u64) void {
@@ -82,9 +74,9 @@ pub const TranspositionTable = struct {
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
         // self.data.items[hash % self.size].lock.lock();
         // defer self.data.items[hash % self.size].lock.unlock();
-        var entry = self.data.items[hash % self.size].item;
+        var entry = @ptrCast(*Item, &self.data.items[hash % self.size]);
         if (entry.flag != Bound.None and entry.hash == hash) {
-            return entry;
+            return entry.*;
         }
         return null;
     }

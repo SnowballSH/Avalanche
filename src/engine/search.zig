@@ -807,7 +807,7 @@ pub const Searcher = struct {
             return 0;
         }
 
-        self.nodes += 1;
+        // self.nodes += 1;
         self.pv_size[self.ply] = 0;
 
         // Step 1.2: Material Draw Check
