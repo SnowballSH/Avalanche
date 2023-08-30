@@ -298,6 +298,8 @@ pub const Searcher = struct {
 
         self.is_searching = false;
 
+        tt.GlobalTT.do_age();
+
         return score;
     }
 
@@ -786,8 +788,9 @@ pub const Searcher = struct {
                 .eval = best_score,
                 .bestmove = best_move,
                 .flag = tt_flag,
-                .depth = @intCast(u14, depth),
+                .depth = @intCast(u8, depth),
                 .hash = pos.hash,
+                .age = tt.GlobalTT.age,
             });
         }
 

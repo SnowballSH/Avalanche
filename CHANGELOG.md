@@ -1,5 +1,23 @@
 # v1.6.0
 
+## 8/29/2023
+
+- TT Aging
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 608 - 575 - 1304  [0.507] 2487
+Elo difference: 4.6 +/- 9.4, LOS: 83.1 %, DrawRatio: 52.4 %
+Pohl: +5.0
+```
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 42 - 34 - 82  [0.525] 158
+Elo difference: 17.6 +/- 37.7, LOS: 82.1 %, DrawRatio: 51.9 %
+Ordo: +21.3
+```
+
 ## 8/26/2023
 
 - Material Scaling

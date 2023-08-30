@@ -21,7 +21,8 @@ pub const Item = packed struct {
     eval: hce.Score,
     bestmove: types.Move,
     flag: Bound,
-    depth: u14,
+    depth: u8,
+    age: u6,
 };
 
 pub var TTArena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
@@ -29,11 +30,13 @@ pub var TTArena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
 pub const TranspositionTable = struct {
     data: std.ArrayList(i128),
     size: usize,
+    age: u6,
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
             .data = std.ArrayList(i128).init(TTArena.allocator()),
             .size = 16 * MB / @sizeOf(Item),
+            .age = 0,
         };
     }
 
@@ -42,6 +45,7 @@ pub const TranspositionTable = struct {
         var tt = TranspositionTable{
             .data = std.ArrayList(i128).init(TTArena.allocator()),
             .size = mb * MB / @sizeOf(Item),
+            .age = 0,
         };
 
         tt.data.ensureTotalCapacity(tt.size) catch {};
@@ -59,8 +63,22 @@ pub const TranspositionTable = struct {
         }
     }
 
+    pub inline fn do_age(self: *TranspositionTable) void {
+        self.age +%= 1;
+    }
+
     pub inline fn set(self: *TranspositionTable, entry: Item) void {
-        _ = @atomicRmw(i128, &self.data.items[entry.hash % self.size], .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
+        var p = &self.data.items[entry.hash % self.size];
+        var p_val: Item = @ptrCast(*Item, p).*;
+        // We overwrite entry if:
+        // 1. It's empty
+        // 2. New entry is exact
+        // 3. Previous entry is from older search
+        // 4. It is a different position
+        // 5. Previous entry is from same search but has lower depth
+        if (p.* == 0 or entry.flag == Bound.Exact or p_val.age != self.age or p_val.hash != entry.hash or p_val.depth <= entry.depth + 4) {
+            _ = @atomicRmw(i128, p, .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
+        }
     }
 
     pub inline fn prefetch(self: *TranspositionTable, hash: u64) void {
