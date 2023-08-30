@@ -77,7 +77,9 @@ pub const TranspositionTable = struct {
         // 4. It is a different position
         // 5. Previous entry is from same search but has lower depth
         if (p.* == 0 or entry.flag == Bound.Exact or p_val.age != self.age or p_val.hash != entry.hash or p_val.depth <= entry.depth + 4) {
-            _ = @atomicRmw(i128, p, .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
+            //_ = @atomicRmw(i128, p, .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
+            _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p)), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry)).*, .Acquire);
+            _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p)+8), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry)+8).*, .Acquire);
         }
     }
 

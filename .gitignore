@@ -8,7 +8,7 @@
 *.epd
 
 # Private for now
-nnue/**/*
+marlinflow/**/*
 lichess-bot
 zig/
 .vscode
