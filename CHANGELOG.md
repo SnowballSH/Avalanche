@@ -1,5 +1,25 @@
 # v1.6.0
 
+## 8/30/2023
+
+Regression Test vs 1.5.0
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs v1.5.0: 161 - 34 - 83  [0.728] 278
+Elo difference: 171.4 +/- 36.4, LOS: 100.0 %, DrawRatio: 29.9 %
+SPRT: llr 2.96 (100.4%), lbound -2.94, ubound 2.94 - H1 was accepted
+Ordo: +188.3
+```
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New_64 vs v1.5.0_64: 162 - 43 - 115  [0.686] 320
+Elo difference: 135.7 +/- 31.4, LOS: 100.0 %, DrawRatio: 35.9 %
+SPRT: llr 2.95 (100.1%), lbound -2.94, ubound 2.94 - H1 was accepted
+Ordo: +154.5
+```
+
 ## 8/29/2023
 
 - TT Aging
@@ -8,7 +28,7 @@ STC 8.0+0.08 | Pohl
 ```
 Score of New vs Master: 608 - 575 - 1304  [0.507] 2487
 Elo difference: 4.6 +/- 9.4, LOS: 83.1 %, DrawRatio: 52.4 %
-Pohl: +5.0
+Ordo: +5.0
 ```
 
 LTC 40.0+0.40 | Pohl
