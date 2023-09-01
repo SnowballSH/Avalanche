@@ -6,7 +6,7 @@ import json
 import struct
 
 FEATURES = 768
-HIDDEN = 256
+HIDDEN = 384
 QA = 255
 QB = 64
 QAB = QA * QB
@@ -63,7 +63,8 @@ feature_weights = convert_weight(
     data["perspective.weight"], HIDDEN, HIDDEN * FEATURES, QA, True
 )
 feature_biases = convert_bias(data["perspective.bias"], QA)
-output_weights = convert_weight(data["out.weight"], HIDDEN * 2, HIDDEN * 2, QB, False)
+output_weights = convert_weight(
+    data["out.weight"], HIDDEN * 2, HIDDEN * 2, QB, False)
 output_biases = convert_bias(data["out.bias"], QAB)
 
 # Clear the old net and write the new data (ordering is important!)
