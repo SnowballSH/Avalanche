@@ -1,8 +1,28 @@
 # v1.6.0
 
+## 9/2/2023
+
+- Age History instead of clearing it after each search
+    - Mostly STC gains because LTC recalculates histories
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 218 - 159 - 430  [0.537] 807
+Elo difference: 25.4 +/- 16.4, LOS: 99.9 %, DrawRatio: 53.3 %
+SPRT: llr 2.95 (100.1%), lbound -2.94, ubound 2.94 - H1 was accepted
+Ordo: +27.8
+```
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 69 - 65 - 226  [0.506] 360
+Elo difference: 3.9 +/- 21.9, LOS: 63.5 %, DrawRatio: 62.8 %
+Ordo: +4.2
+```
+
 ## 8/30/2023
 
-Regression Test vs 1.5.0
+- Regression Test vs 1.5.0
 
 STC 8.0+0.08 | Pohl
 ```

@@ -102,7 +102,7 @@ pub const Searcher = struct {
                 while (k < 64) : (k += 1) {
                     var i: usize = 0;
                     while (i < 2) : (i += 1) {
-                        self.history[i][j][k] = 0;
+                        self.history[i][j][k] = @divTrunc(self.history[i][j][k], 2);
                         self.counter_moves[i][j][k] = types.Move.empty();
                     }
                 }
