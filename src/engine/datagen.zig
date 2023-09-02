@@ -10,9 +10,9 @@ pub const FileLock = struct {
     lock: std.Thread.Mutex,
 };
 
-const MAX_DEPTH: ?u8 = null;
-const MAX_NODES: ?u64 = 30000;
-const SOFT_MAX_NODES: ?u64 = 7000;
+const MAX_DEPTH: ?u8 = 11;
+const MAX_NODES: ?u64 = 5000000;
+const SOFT_MAX_NODES: ?u64 = 5000;
 
 pub const DatagenSingle = struct {
     id: u64,
@@ -28,7 +28,7 @@ pub const DatagenSingle = struct {
         searcher.ideal_time = 500;
         searcher.max_nodes = MAX_NODES;
         searcher.soft_max_nodes = SOFT_MAX_NODES;
-        searcher.min_depth = 5;
+        searcher.min_depth = 2;
         searcher.silent_output = true;
         return DatagenSingle{
             .id = id,
