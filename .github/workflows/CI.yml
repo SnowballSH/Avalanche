@@ -40,8 +40,8 @@ jobs:
       - name: Build artifacts
         if: ${{ matrix.os == 'ubuntu-latest' }}
         run: |
-          chmod +x build_all.sh
-          ./build_all.sh
+          chmod +x build_all_v2.sh
+          ./build_all_v2.sh
       - name: Upload artifacts
         if: ${{ matrix.os == 'ubuntu-latest' }}
         uses: actions/upload-artifact@v3
