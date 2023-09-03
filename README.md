@@ -40,7 +40,7 @@ Avalanche is only guaranteed to compile using Zig v0.10.x. Newer versions will n
 
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
-## Strength
+## Past Versions
 
 | Version      | CCRL 40/15 | CCRL Blitz |
 |--------------|------------|------------|
@@ -55,6 +55,8 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 | v0.2.2       | 2626       | 2586       |
 | v0.2.1       | 2563       | N/A        |
 | v0.2.0       | 2424       | 2487       |
+
+<img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&amp;format=image" width=600/>
 
 ## Tuning
 
