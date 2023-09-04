@@ -764,18 +764,21 @@ pub const Searcher = struct {
             }
 
             const b = best_move.to_u16();
+            const max_history: i32 = 16384;
             for (quiet_moves.items) |m, i| {
                 var hist = @divTrunc(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
                 if (m.to_u16() == b) {
                     if (i > 6) {
                         hist = @divTrunc(hist, 2);
                     }
-                    self.history[@enumToInt(color)][m.from][m.to] += max - hist;
+                    const adj = max - hist;
+                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
                 } else {
                     if (i < 2) {
                         hist *= 2;
                     }
-                    self.history[@enumToInt(color)][m.from][m.to] += -max - hist;
+                    const adj = -max - hist;
+                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
                 }
             }
         }

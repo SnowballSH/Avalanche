@@ -1,5 +1,17 @@
 # v1.6.0
 
+## 9/4/2023
+
+- Scale history down ("Gravity")
+    - Suggested by Engine Programming Discord server
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 730 - 696 - 1705  [0.505] 3131
+Elo difference: 3.8 +/- 8.2, LOS: 81.6 %, DrawRatio: 54.5 %
+Ordo: +4.2
+```
+
 ## 9/2/2023
 
 - Age History instead of clearing it after each search
