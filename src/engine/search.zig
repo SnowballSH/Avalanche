@@ -822,7 +822,7 @@ pub const Searcher = struct {
         }
 
         // Step 1.3: Prefetch
-        // tt.GlobalTT.prefetch(pos.hash);
+        tt.GlobalTT.prefetch(pos.hash);
 
         // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
@@ -847,8 +847,6 @@ pub const Searcher = struct {
                 alpha = best_score;
             }
         }
-
-        // alpha = @maximum(alpha, static_eval);
 
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
