@@ -894,7 +894,7 @@ pub const Searcher = struct {
             if (is_capture and index > 0) {
                 var see_score = evallist.items[index];
 
-                if (see_score < movepick.SortLosingCapture + 200) {
+                if (see_score < movepick.SortWinningCapture - 200) {
                     continue;
                 }
             }
