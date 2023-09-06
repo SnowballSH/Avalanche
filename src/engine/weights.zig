@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const NNUE_SOURCE = @embedFile("../../nets/net013_36.nnue");
+const NNUE_SOURCE = @embedFile("../../nets/net013_48.nnue");
 
 pub const INPUT_SIZE: usize = 768;
 pub const HIDDEN_SIZE: usize = 256;
