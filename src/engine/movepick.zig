@@ -39,7 +39,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
                 score += SortWinningCapture + MVV_LVA[0][0];
             } else {
-                var see_value = see.see_threshold(pos, move.*, -106);
+                var see_value = see.see_threshold(pos, move.*, -90);
 
                 score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
 

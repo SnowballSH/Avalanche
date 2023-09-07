@@ -825,7 +825,7 @@ pub const Searcher = struct {
         }
 
         // Step 1.3: Prefetch
-        // tt.GlobalTT.prefetch(pos.hash);
+        tt.GlobalTT.prefetch(pos.hash);
 
         // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
@@ -850,8 +850,6 @@ pub const Searcher = struct {
                 alpha = best_score;
             }
         }
-
-        // alpha = @maximum(alpha, static_eval);
 
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
@@ -899,7 +897,7 @@ pub const Searcher = struct {
             if (is_capture and index > 0) {
                 var see_score = evallist.items[index];
 
-                if (see_score < movepick.SortLosingCapture + 200) {
+                if (see_score < movepick.SortWinningCapture - 200) {
                     continue;
                 }
             }
