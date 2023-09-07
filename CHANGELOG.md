@@ -1,5 +1,16 @@
 # v1.6.0
 
+## 9/5/2023
+
+- Fix SEE bug where threshold > pawn
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 305 - 205 - 617  [0.544] 1127
+Elo difference: 30.9 +/- 13.6, LOS: 100.0 %, DrawRatio: 54.7 %
+SPRT: llr 2.96 (100.7%), lbound -2.94, ubound 2.94 - H1 was accepted
+```
+
 ## 9/4/2023
 
 - Scale history down ("Gravity")
