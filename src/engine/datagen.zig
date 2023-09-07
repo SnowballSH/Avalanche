@@ -4,15 +4,16 @@ const utils = @import("../chess/utils.zig");
 const hce = @import("hce.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
+const tt = @import("tt.zig");
 
 pub const FileLock = struct {
     file: std.fs.File,
     lock: std.Thread.Mutex,
 };
 
-const MAX_DEPTH: ?u8 = null;
-const MAX_NODES: ?u64 = 30000;
-const SOFT_MAX_NODES: ?u64 = 7000;
+const MAX_DEPTH: ?u8 = 8;
+const MAX_NODES: ?u64 = null;
+const SOFT_MAX_NODES: ?u64 = null;
 
 pub const DatagenSingle = struct {
     id: u64,
@@ -47,6 +48,7 @@ pub const DatagenSingle = struct {
         self.searcher.root_board = position.Position.new();
         var pos = &self.searcher.root_board;
         pos.set_fen(types.DEFAULT_FEN);
+        tt.GlobalTT.reset(64);
 
         self.searcher.reset_heuristics();
         self.searcher.stop = false;
@@ -65,7 +67,7 @@ pub const DatagenSingle = struct {
         var white_win_count: usize = 0;
         var black_win_count: usize = 0;
         var ply: usize = 0;
-        var random_plies: u64 = 6 + (self.prng.rand64() % 8);
+        var random_plies: u64 = 9 + (self.prng.rand64() % 4);
         while (true) : (ply += 1) {
             if (self.searcher.is_draw(pos)) {
                 result = 0.5;
@@ -129,7 +131,7 @@ pub const DatagenSingle = struct {
                 pos.play_move(types.Color.Black, best_move);
             }
 
-            const limit: i32 = if (pos.phase() >= 6) 750 else 400;
+            const limit: i32 = if (pos.phase() >= 6) 850 else 500;
 
             if (res > limit) {
                 white_win_count += 1;
@@ -164,6 +166,10 @@ pub const DatagenSingle = struct {
             }
 
             if (res > 2000 or res < -2000) {
+                continue;
+            }
+
+            if (ply <= 16) {
                 continue;
             }
 
@@ -271,7 +277,7 @@ pub const Datagen = struct {
     }
 
     pub fn startSingleThreaded(self: *Datagen) !void {
-        var id: u64 = @intCast(u64, std.time.timestamp()) ^ (self.prng.rand64() >> 40);
+        var id: u64 = @intCast(u64, std.time.timestamp());
         const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.txt", .{id});
         const file = std.fs.cwd().createFile(
             path,
