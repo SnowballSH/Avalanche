@@ -677,7 +677,8 @@ pub const Searcher = struct {
             var score: hce.Score = 0;
             var min_lmr_move: usize = if (on_pv) 5 else 3;
             var do_full_search = false;
-            if (!in_check and depth >= 3 and index >= min_lmr_move) {
+            const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 100;
+            if (!in_check and depth >= 3 and index >= min_lmr_move and (!is_capture or !is_winning_capture)) {
                 // Step 5.6: Late-Move Reduction
                 var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
@@ -691,10 +692,6 @@ pub const Searcher = struct {
 
                 if (!on_pv) {
                     reduction += 1;
-                }
-
-                if (is_capture) {
-                    reduction -= 1;
                 }
 
                 var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
