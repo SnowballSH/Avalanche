@@ -689,8 +689,8 @@ pub const Searcher = struct {
                     reduction += 1;
                 }
 
-                if (on_pv) {
-                    reduction -= 1;
+                if (!on_pv) {
+                    reduction += 1;
                 }
 
                 if (is_capture) {

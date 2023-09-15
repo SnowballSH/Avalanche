@@ -1,5 +1,16 @@
 # v1.6.0
 
+## 9/14/2023
+
+- Flip LMR condition for pv
+
+STC 8.0+0.8 | Pohl
+```
+Score of New_16 vs Master_16: 331 - 291 - 748  [0.515] 1370
+Elo difference: 10.1 +/- 12.4, LOS: 94.6 %, DrawRatio: 54.6 %
+Ordo: +11.0
+```
+
 ## 9/5/2023
 
 - Fix SEE bug where threshold > pawn
