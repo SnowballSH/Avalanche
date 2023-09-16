@@ -1,9 +1,9 @@
 const std = @import("std");
 
-const NNUE_SOURCE = @embedFile("../../nets/net016_35.nnue");
+const NNUE_SOURCE = @embedFile("../../nets/net018_80.nnue");
 
 pub const INPUT_SIZE: usize = 768;
-pub const HIDDEN_SIZE: usize = 384;
+pub const HIDDEN_SIZE: usize = 256;
 
 pub const NNUEWeights = struct {
     layer_1: [INPUT_SIZE * HIDDEN_SIZE]i16 align(64),
