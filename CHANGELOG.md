@@ -1,5 +1,35 @@
 # v1.6.0
 
+## 9/15/2023
+
+- Simplify LMR logic for captures
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 1402 - 1353 - 3346  [0.504] 6101
+Elo difference: 2.8 +/- 5.9, LOS: 82.5 %, DrawRatio: 54.8 %
+SPRT: llr 2.96 (100.6%), lbound -2.94, ubound 2.94 - H1 was accepted
+Ordo: +3.2
+```
+
+LTC 40.0+0.4 | Pohl
+```
+Score of New vs Master: 128 - 124 - 296  [0.504] 548
+Elo difference: 2.5 +/- 19.7, LOS: 59.9 %, DrawRatio: 54.0 %
+Ordo: +2.4
+```
+
+## 9/14/2023
+
+- Flip LMR condition for pv
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 331 - 291 - 748  [0.515] 1370
+Elo difference: 10.1 +/- 12.4, LOS: 94.6 %, DrawRatio: 54.6 %
+Ordo: +11.0
+```
+
 ## 9/5/2023
 
 - Fix SEE bug where threshold > pawn
@@ -57,7 +87,7 @@ Ordo: +188.3
 
 LTC 40.0+0.40 | Pohl
 ```
-Score of New_64 vs v1.5.0_64: 162 - 43 - 115  [0.686] 320
+Score of New vs v1.5.0: 162 - 43 - 115  [0.686] 320
 Elo difference: 135.7 +/- 31.4, LOS: 100.0 %, DrawRatio: 35.9 %
 SPRT: llr 2.95 (100.1%), lbound -2.94, ubound 2.94 - H1 was accepted
 Ordo: +154.5
@@ -105,7 +135,7 @@ Ordo: +11.0
 
 STC 10.0+0.10 | 8moves_v3
 ```
-Score of New_ vs Master: 1152 - 1072 - 4332  [0.506] 6556
+Score of New vs Master: 1152 - 1072 - 4332  [0.506] 6556
 Elo difference: 4.2 +/- 4.9, LOS: 95.5 %, DrawRatio: 66.1 %
 SPRT: llr 1.39 (47.3%), lbound -2.94, ubound 2.94
 Ordo: +4.3
