@@ -1,5 +1,15 @@
 # v1.6.0
 
+## 9/16/2023
+
+- Consider History in LMR
+
+STC 8.0+0.08 | Pohl
+```
+Score of New_16 vs Master_16: 326 - 322 - 715  [0.501] 1363
+Elo difference: 1.0 +/- 12.7, LOS: 56.2 %, DrawRatio: 52.5 %
+```
+
 ## 9/15/2023
 
 - Simplify LMR logic for captures
