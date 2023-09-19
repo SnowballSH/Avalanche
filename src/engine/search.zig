@@ -697,6 +697,8 @@ pub const Searcher = struct {
                     reduction += 1;
                 }
 
+                reduction -= @divTrunc(self.history[@enumToInt(color)][move.from][move.to], 6144);
+
                 var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
 
                 // Step 5.7: Principal-Variation-Search (PVS)
