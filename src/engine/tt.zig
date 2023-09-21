@@ -67,8 +67,12 @@ pub const TranspositionTable = struct {
         self.age +%= 1;
     }
 
+    pub inline fn index(self: *TranspositionTable, hash: u64) u64 {
+        return @intCast(u64, @intCast(u128, hash) * @intCast(u128, self.size) >> 64);
+    }
+
     pub inline fn set(self: *TranspositionTable, entry: Item) void {
-        var p = &self.data.items[entry.hash % self.size];
+        var p = &self.data.items[self.index(entry.hash)];
         var p_val: Item = @ptrCast(*Item, p).*;
         // We overwrite entry if:
         // 1. It's empty
@@ -79,12 +83,12 @@ pub const TranspositionTable = struct {
         if (p.* == 0 or entry.flag == Bound.Exact or p_val.age != self.age or p_val.hash != entry.hash or p_val.depth <= entry.depth + 4) {
             //_ = @atomicRmw(i128, p, .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
             _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p)), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry)).*, .Acquire);
-            _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p)+8), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry)+8).*, .Acquire);
+            _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p) + 8), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry) + 8).*, .Acquire);
         }
     }
 
     pub inline fn prefetch(self: *TranspositionTable, hash: u64) void {
-        @prefetch(&self.data.items[hash % self.size], .{
+        @prefetch(&self.data.items[self.index(hash)], .{
             .rw = .read,
             .locality = 1,
             .cache = .data,
@@ -94,7 +98,7 @@ pub const TranspositionTable = struct {
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
         // self.data.items[hash % self.size].lock.lock();
         // defer self.data.items[hash % self.size].lock.unlock();
-        var entry = @ptrCast(*Item, &self.data.items[hash % self.size]);
+        var entry = @ptrCast(*Item, &self.data.items[self.index(hash)]);
         if (entry.flag != Bound.None and entry.hash == hash) {
             return entry.*;
         }
