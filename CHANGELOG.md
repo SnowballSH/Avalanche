@@ -1,5 +1,29 @@
 # v1.6.0
 
+## 9/20/2023
+
+- Progress Check/Regression
+
+LTC 40.0+0.40 | Pohl
+```
+Score of Dev vs v1.5.0: 274 - 40 - 186  [0.734] 500
+Elo difference: 176.3 +/- 25.0, LOS: 100.0 %, DrawRatio: 37.2 %
+Ordo: +215.2
+
+Score of Dev vs Defenchess 2.2: 222 - 139 - 139  [0.583] 500
+Elo difference: 58.2 +/- 26.1, LOS: 100.0 %, DrawRatio: 27.8 %
+Ordo: +67.8
+```
+
+SMP 4CPU 20.0+0.20 | Pohl
+```
+Score of Dev vs v1.5.0: 57 - 12 - 31  [0.725] 100
+Elo difference: 168.4 +/- 60.5, LOS: 100.0 %, DrawRatio: 31.0 %
+Ordo: +190.8
+```
+
+Estimate CCRL 3350 1CPU Blitz, 3350 4CPU 40/15, 3260 1CPU 40/15.
+
 ## 9/16/2023
 
 - Consider History in LMR
@@ -22,7 +46,7 @@ SPRT: llr 2.96 (100.6%), lbound -2.94, ubound 2.94 - H1 was accepted
 Ordo: +3.2
 ```
 
-LTC 40.0+0.4 | Pohl
+LTC 40.0+0.40 | Pohl
 ```
 Score of New vs Master: 128 - 124 - 296  [0.504] 548
 Elo difference: 2.5 +/- 19.7, LOS: 59.9 %, DrawRatio: 54.0 %
