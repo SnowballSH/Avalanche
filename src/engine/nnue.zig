@@ -31,7 +31,7 @@ pub fn nnue_index(piece: types.Piece, sq: types.Square) WhiteBlackPair {
 }
 
 pub inline fn clipped_relu(input: i16) i32 {
-    const k = @intCast(i32, @min(255, @max(0, input)));
+    const k = @as(i32, std.math.clamp(input, 0, 255));
     if (SQUARED_ACTIVATION) {
         return k * k;
     } else {
@@ -118,16 +118,16 @@ pub const NNUE = struct {
     pub inline fn evaluate_comptime(self: *NNUE, comptime turn: types.Color) i32 {
         const acc = &self.accumulator_stack[self.stack_index];
 
-        var res: i32 = @intCast(i32, weights.MODEL.layer_2_bias);
+        var res = @as(i32, weights.MODEL.layer_2_bias);
 
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += 1) {
             if (turn == types.Color.White) {
                 res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[i];
-                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[i + weights.HIDDEN_SIZE];
+                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[weights.HIDDEN_SIZE..][i];
             } else {
                 res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[i];
-                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[i + weights.HIDDEN_SIZE];
+                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[weights.HIDDEN_SIZE..][i];
             }
         }
 

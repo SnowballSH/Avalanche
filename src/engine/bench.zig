@@ -62,7 +62,7 @@ const FENS = [_][:0]const u8{
 pub fn bench() !void {
     var stdout = std.io.getStdOut().writer();
 
-    const depth = 14;
+    const depth = 15;
     var nodes: u64 = 0;
     var timer = try std.time.Timer.start();
     var searcher = search.Searcher.new();
