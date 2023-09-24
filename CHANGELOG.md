@@ -1,5 +1,21 @@
 # v1.6.0
 
+## 9/23/2023
+
+- New net: Xuebeng
+    - 512 hidden neurons
+    - Squared Clipped ReLU
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 616 - 497 - 1088  [0.527] 2201
+Elo difference: 18.8 +/- 10.3, LOS: 100.0 %, DrawRatio: 49.4 %
+SPRT: llr 2.95 (100.1%), lbound -2.94, ubound 2.94 - H1 was accepted
+Ordo: +21.6
+```
+
+~+2 in STC
+
 ## 9/20/2023
 
 - Progress Check/Regression

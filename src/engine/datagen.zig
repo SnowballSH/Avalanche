@@ -29,6 +29,7 @@ pub const DatagenSingle = struct {
         searcher.ideal_time = 500;
         searcher.max_nodes = MAX_NODES;
         searcher.soft_max_nodes = SOFT_MAX_NODES;
+        searcher.min_depth = 2;
         searcher.silent_output = true;
         return DatagenSingle{
             .id = id,

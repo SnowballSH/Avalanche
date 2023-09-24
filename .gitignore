@@ -9,6 +9,7 @@
 
 # Private for now
 marlinflow/**/*
+marlinflow
 lichess-bot
 zig/
 .vscode

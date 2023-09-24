@@ -10,6 +10,8 @@ const see = @import("see.zig");
 
 const parameters = @import("parameters.zig");
 
+const DATAGEN = false;
+
 pub var QuietLMR: [64][64]i32 = undefined;
 
 pub fn init_lmr() void {
@@ -39,6 +41,7 @@ pub var helper_searchers: [MAX_THREADS]Searcher = undefined;
 pub var threads: [MAX_THREADS]?std.Thread = undefined;
 
 pub const Searcher = struct {
+    min_depth: usize = 1,
     max_millis: u64 = 0,
     ideal_time: u64 = 0,
     force_thinking: bool = false,
@@ -124,11 +127,11 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > 1 and ((self.max_nodes != null and self.nodes >= self.max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis)));
+        return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.max_nodes != null and self.nodes >= self.max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis)));
     }
 
     pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
-        return self.stop or (self.thread_id == 0 and ((self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))))));
+        return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))))));
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
@@ -609,7 +612,7 @@ pub const Searcher = struct {
                 continue;
             }
 
-            if (!is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
+            if (!DATAGEN and !is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
                 if (!on_pv and !is_important and !is_capture and depth <= 5) {
                     // Step 5.4a: Late Move Pruning
                     var late = 4 + depth * depth;

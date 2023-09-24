@@ -10,7 +10,7 @@ const QAB: i32 = QA * QB;
 
 const SCALE: i32 = 400;
 
-const SQUARED_ACTIVATION: bool = false;
+const SQUARED_ACTIVATION: bool = true;
 
 pub const WhiteBlackPair = packed struct {
     white: usize,
