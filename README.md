@@ -12,9 +12,11 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v1.5.0 4CPU)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.5.0%2064-bit%204CPU#Avalanche_1_5_0_64-bit_4CPU): 3248**
+Latest v2.0.0: Estimated to be around 3350 for CCRL Blitz.
 
-**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3247**
+**Official [40/15 CCRL ELO (v1.5.0 4CPU)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.5.0%2064-bit%204CPU#Avalanche_1_5_0_64-bit_4CPU): 3246**
+
+**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3251**
 
 ## About
 
@@ -44,28 +46,26 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 | Version      | CCRL 40/15 | CCRL Blitz |
 |--------------|------------|------------|
-| v1.5.0 4CPU  | 3248       | N/A        |
-| v1.5.0       | 3188       | 3247       |
-| v1.4.0       | 3147       | 3211       |
+| v2.0.0       | N/A        | N/A        |
+| v1.5.0 4CPU  | 3246       | N/A        |
+| v1.5.0       | 3188       | 3251       |
+| v1.4.0       | 3147       | 3215       |
 | v1.3.1       | 3081       | N/A        |
-| v1.3.0       | 3038       | 3091       |
-| v1.2.0       | 3046       | 3029       |
-| v1.1.0       | 2835       | 2922       |
+| v1.3.0       | 3038       | 3095       |
+| v1.2.0       | 3046       | 3034       |
+| v1.1.0       | 2835       | 2926       |
 | v1.0.0       | 2743       | N/A        |
-| v0.2.2       | 2626       | 2586       |
-| v0.2.1       | 2563       | N/A        |
-| v0.2.0       | 2424       | 2487       |
+| v0.2.2       | 2626       | 2589       |
+| v0.2.1       | 2564       | N/A        |
+| v0.2.0       | 2424       | 2490       |
 
 <img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&amp;format=image" width=600/>
-
-## Tuning
-
-Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/storming_tune) script.
 
 ## Credits
 
 - [Dan Ellis Echavarria](https://github.com/Deecellar) for writing the github action CI and helping me with Zig questions
 - [Ciekce](https://github.com/Ciekce) for guiding me with migrating to the new Marlinflow and answering my stupid questions related to NNUE
+- Many other developers in the computer chess community for guiding me through new things like SPRT testing.
 
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
@@ -84,8 +84,8 @@ Parameter Tuning is done by my [Storming Tune](https://github.com/SnowballSH/sto
 - Search
   - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. Some ideas are borrowed from other chess engines as in comments. However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
-  - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function, **however it is no longer Avalanche's main evaluation**.
-  - NNUE after 1.5.0 is trained with Ciekce's [modified fork](https://github.com/Ciekce/marlinflow) of https://github.com/dsekercioglu/marlinflow.
-  - The NNUE data after 1.5.0 is purely generated from self-play games. Currently, the latest dev network is trained on 160 million self-play positions at 5k-6k nodes.
+  - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function with adaptation to endgames. The HCE is only activated at late endgames when finding checkmate against a lone king is needed.
+  - NNUE since 2.0.0 is trained with https://github.com/jw1912/bullet
+  - The NNUE data since 2.0.0 is purely generated from self-play games. Currently, the latest dev network is trained on 600 million self-play positions at depth 8.
 - UCI Interface/Communication code
   - 100% original
