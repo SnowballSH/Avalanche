@@ -66,9 +66,9 @@ pub fn build(b: *std.build.Builder) void {
     const build_options = b.addOptions();
     exe.addOptions("build_options", build_options);
 
-    // var buf: [64]u8 = undefined;
-    // build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
-    build_options.addOption([]const u8, "version", "2.0.0");
+    var buf: [64]u8 = undefined;
+    build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(std.time.timestamp()), &buf));
+    // build_options.addOption([]const u8, "version", "2.0.0");
 
     exe.use_stage1 = true;
 
