@@ -1,5 +1,20 @@
 # v2.1.0
 
+- Change to standard aspiration window algorithm
+
+STC 8.0+0.08 | Pohl
+```
+Score of New_16 vs Master_16: 388 - 326 - 795  [0.521] 1509
+Elo difference: 14.3 +/- 12.0, LOS: 99.0 %, DrawRatio: 52.7 %
+Ordo: +15.8
+```
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New_64 vs Master_64: 158 - 142 - 376  [0.512] 676
+Ordo: +9.6
+```
+
 # v2.0.0
 
 ## 9/23/2023

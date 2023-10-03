@@ -150,13 +150,6 @@ pub const Searcher = struct {
         var score = -hce.MateScore;
         var bm = types.Move.empty();
 
-        var alpha = -hce.MateScore;
-        var beta = hce.MateScore;
-
-        var alpha_window: hce.Score = -parameters.AspirationWindow;
-        var beta_window: hce.Score = parameters.AspirationWindow;
-        var resize_counter: usize = 0;
-
         var stability: usize = 0;
 
         var ti: usize = 0;
@@ -164,14 +157,26 @@ pub const Searcher = struct {
             helper_searchers[ti] = Searcher.new();
         }
 
-        var depth: usize = 1;
+        var tdepth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
-        outer: while (depth <= bound) {
+        outer: while (tdepth <= bound) {
             self.ply = 0;
             self.seldepth = 0;
 
+            var alpha = -hce.MateScore;
+            var beta = hce.MateScore;
+            var delta = hce.MateScore;
+
+            var depth = tdepth;
+
+            if (depth >= 6) {
+                alpha = @max(score - parameters.AspirationWindow, -hce.MateScore);
+                beta = @min(score + parameters.AspirationWindow, hce.MateScore);
+                delta = parameters.AspirationWindow;
+            }
+
             while (true) {
-                self.iterative_deepening_depth = depth;
+                self.iterative_deepening_depth = @max(self.iterative_deepening_depth, depth);
                 if (depth > 1) {
                     self.helpers(pos, color, depth, alpha, beta);
                 }
@@ -189,28 +194,18 @@ pub const Searcher = struct {
                 score = val;
 
                 if (score <= alpha) {
-                    if (resize_counter > 5) {
-                        alpha = -hce.MateScore;
-                    }
                     beta = @divTrunc(alpha + beta, 2);
-                    alpha_window = @divTrunc(alpha_window * 13, 10);
-                    alpha += alpha_window + 1;
-                    resize_counter += 1;
+                    alpha = @max(alpha - delta, -hce.MateScore);
                 } else if (score >= beta) {
-                    if (resize_counter > 5) {
-                        beta = hce.MateScore;
+                    beta = @min(beta + delta, hce.MateScore);
+                    if (depth > 1 and (tdepth < 4 or depth > tdepth - 4)) {
+                        depth -= 1;
                     }
-                    beta_window = @divTrunc(beta_window * 13, 10);
-                    beta += beta_window + 1;
-                    resize_counter += 1;
                 } else {
                     break;
                 }
-            }
 
-            if (depth >= 4) {
-                alpha = score + alpha_window;
-                beta = score + beta_window;
+                delta += @divTrunc(delta, 4);
             }
 
             if (self.best_move.to_u16() != bm.to_u16()) {
@@ -238,7 +233,7 @@ pub const Searcher = struct {
 
             if (!self.silent_output) {
                 outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
-                    depth,
+                    tdepth,
                     self.seldepth,
                     total_nodes,
                     self.timer.read() / std.time.ns_per_ms,
@@ -287,7 +282,7 @@ pub const Searcher = struct {
                 break;
             }
 
-            depth += 1;
+            tdepth += 1;
         }
 
         self.best_move = bm;
