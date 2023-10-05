@@ -81,7 +81,6 @@ pub fn bench() !void {
         }
         nodes += searcher.nodes;
     }
-    var secs = timer.read() / std.time.ns_per_s;
 
-    try stdout.print("{} nodes {} nps\n", .{ nodes, nodes / secs });
+    try stdout.print("{} nodes {} nps\n", .{ nodes, nodes * std.time.ns_per_s / timer.read() });
 }

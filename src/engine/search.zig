@@ -553,12 +553,12 @@ pub const Searcher = struct {
         // >> Step 5: Search
 
         // Step 5.1: Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 64) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
         var move_size = movelist.items.len;
 
-        var quiet_moves = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
+        var quiet_moves = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
         defer quiet_moves.deinit();
 
         self.killer[self.ply + 1][0] = types.Move.empty();
@@ -643,7 +643,7 @@ pub const Searcher = struct {
                 and entry.?.depth >= depth - 3
             ) {
             // zig fmt: on
-                var margin = @intCast(i32, depth) * 1;
+                var margin = @intCast(i32, depth);
                 var singular_beta = @max(tt_eval - margin, -hce.MateScore + hce.MaxMate);
 
                 self.exclude_move[self.ply] = hashmove;
@@ -863,7 +863,7 @@ pub const Searcher = struct {
         // >> Step 4: QSearch
 
         // Step 4.1: Q Move Generation
-        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 16) catch unreachable;
+        var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
         defer movelist.deinit();
         if (in_check) {
             pos.generate_legal_moves(color, &movelist);
@@ -891,7 +891,7 @@ pub const Searcher = struct {
             if (is_capture and index > 0) {
                 var see_score = evallist.items[index];
 
-                if (see_score < movepick.SortWinningCapture - 200) {
+                if (see_score < movepick.SortWinningCapture - 2048) {
                     continue;
                 }
             }
