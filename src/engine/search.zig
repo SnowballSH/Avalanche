@@ -390,7 +390,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 255 == 0 and self.should_stop()) {
+        if (self.nodes & 511 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
@@ -400,24 +400,9 @@ pub const Searcher = struct {
         var is_root = node == NodeType.Root;
         var on_pv: bool = node != NodeType.NonPV;
 
-        // Step 1.2: Prefetch
-        if (depth != 0) {
-            tt.GlobalTT.prefetch(pos.hash);
-        }
-
         // Step 1.3: Ply Overflow Check
         if (self.ply == MAX_PLY) {
             return hce.evaluate_comptime(pos, color);
-        }
-
-        // Step 1.4: Mate-distance pruning
-        if (!is_root) {
-            var r_alpha = @max(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
-            var r_beta = @min(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
-
-            if (r_alpha >= r_beta) {
-                return r_alpha;
-            }
         }
 
         var in_check = pos.in_check(color);
@@ -432,11 +417,21 @@ pub const Searcher = struct {
             return self.quiescence_search(pos, color, alpha, beta);
         }
 
+        // Step 1.4: Mate-distance pruning
+        if (!is_root) {
+            var r_alpha = @max(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
+            var r_beta = @min(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
+
+            if (r_alpha >= r_beta) {
+                return r_alpha;
+            }
+        }
+
         self.nodes += 1;
 
         // Step 1.6: Draw check
         if (!is_root and self.is_draw(pos)) {
-            return 0;
+            return 1 - @intCast(i32, self.nodes & 2);
         }
 
         // >> Step 2: TT Probe
@@ -479,7 +474,7 @@ pub const Searcher = struct {
             }
         }
 
-        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else hce.evaluate_comptime(pos, color);
+        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
         var best_score: hce.Score = static_eval;
 
         var low_estimate: hce.Score = -hce.MateScore - 1;
@@ -608,7 +603,7 @@ pub const Searcher = struct {
             }
 
             if (!DATAGEN and !is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
-                if (!on_pv and !is_important and !is_capture and depth <= 5) {
+                if (!is_important and !is_capture and depth <= 5) {
                     // Step 5.4a: Late Move Pruning
                     var late = 4 + depth * depth;
                     if (improving) {
@@ -617,7 +612,6 @@ pub const Searcher = struct {
 
                     if (quiet_count > late) {
                         skip_quiet = true;
-                        continue;
                     }
 
                     // Step 5.4b: Futility Pruning
@@ -671,6 +665,8 @@ pub const Searcher = struct {
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
+
+            tt.GlobalTT.prefetch(pos.hash);
 
             var score: hce.Score = 0;
             var min_lmr_move: usize = if (on_pv) 5 else 3;
@@ -805,7 +801,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparation
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 255 == 0 and self.should_stop()) {
+        if (self.nodes & 511 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
@@ -817,9 +813,6 @@ pub const Searcher = struct {
         if (hce.is_material_draw(pos)) {
             return 0;
         }
-
-        // Step 1.3: Prefetch
-        tt.GlobalTT.prefetch(pos.hash);
 
         // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
@@ -898,6 +891,7 @@ pub const Searcher = struct {
 
             self.ply += 1;
             pos.play_move(color, move);
+            tt.GlobalTT.prefetch(pos.hash);
             var score = -self.quiescence_search(pos, opp_color, -beta, -alpha);
             self.ply -= 1;
             pos.undo_move(color, move);
