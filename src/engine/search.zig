@@ -390,7 +390,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 511 == 0 and self.should_stop()) {
+        if (self.nodes & 1023 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
@@ -801,23 +801,24 @@ pub const Searcher = struct {
         // >> Step 1: Preparation
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 511 == 0 and self.should_stop()) {
+        if (self.nodes & 1023 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
 
-        // self.nodes += 1;
         self.pv_size[self.ply] = 0;
 
         // Step 1.2: Material Draw Check
         if (hce.is_material_draw(pos)) {
-            return 0;
+            return 1 - @intCast(i32, self.nodes & 2);
         }
 
         // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
             return hce.evaluate_comptime(pos, color);
         }
+
+        self.nodes += 1;
 
         var in_check = pos.in_check(color);
 
