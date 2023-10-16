@@ -3,7 +3,7 @@
 <br/>
 
 <p align="center">
-<img src="https://user-images.githubusercontent.com/66022611/226020771-aaaf3345-3834-4485-8f6e-29371a497a9e.png" alt="Logo" width = "400" height = "400"/>
+<img src="https://github.com/SnowballSH/Avalanche/assets/66022611/2026b61e-7558-4fb9-8549-da2f8492174f" alt="Logo" width=700 height=400/>
 </p>
 
 <br/>
@@ -12,11 +12,11 @@
 
 ## Strength
 
-Latest v2.0.0: Estimated to be around 3350 for CCRL Blitz.
+**Official [40/15 CCRL ELO (v2.0.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3273**
 
-**Official [40/15 CCRL ELO (v1.5.0 4CPU)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.5.0%2064-bit%204CPU#Avalanche_1_5_0_64-bit_4CPU): 3246**
+**Official [40/15 CCRL ELO (v1.5.0 4CPU)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.5.0%2064-bit%204CPU#Avalanche_1_5_0_64-bit_4CPU): 3247**
 
-**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3251**
+**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3245**
 
 ## About
 
@@ -46,18 +46,18 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 | Version      | CCRL 40/15 | CCRL Blitz |
 |--------------|------------|------------|
-| v2.0.0       | N/A        | N/A        |
-| v1.5.0 4CPU  | 3246       | N/A        |
-| v1.5.0       | 3188       | 3251       |
-| v1.4.0       | 3147       | 3215       |
-| v1.3.1       | 3081       | N/A        |
-| v1.3.0       | 3038       | 3095       |
-| v1.2.0       | 3046       | 3034       |
+| v2.0.0       | 3273       | N/A        |
+| v1.5.0 4CPU  | 3247       | N/A        |
+| v1.5.0       | 3188       | 3245       |
+| v1.4.0       | 3147       | 3214       |
+| v1.3.1       | 3080       | N/A        |
+| v1.3.0       | 3037       | 3094       |
+| v1.2.0       | 3046       | 3033       |
 | v1.1.0       | 2835       | 2926       |
-| v1.0.0       | 2743       | N/A        |
-| v0.2.2       | 2626       | 2589       |
-| v0.2.1       | 2564       | N/A        |
-| v0.2.0       | 2424       | 2490       |
+| v1.0.0       | 2742       | N/A        |
+| v0.2.2       | 2626       | 2588       |
+| v0.2.1       | 2563       | N/A        |
+| v0.2.0       | 2424       | 2489       |
 
 <img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&amp;format=image" width=600/>
 
@@ -89,3 +89,9 @@ Avalanche also has a lichess account (though not often played): https://lichess.
   - The NNUE data since 2.0.0 is purely generated from self-play games. Currently, the latest dev network is trained on 600 million self-play positions at depth 8.
 - UCI Interface/Communication code
   - 100% original
+
+## Alternative Square Logos
+<img src="https://github.com/SnowballSH/Avalanche/assets/66022611/cf099f87-91ad-4fd9-a2c3-177b790cd59e" alt="Logo 2" width=400 height=400/>
+<img src="https://github.com/SnowballSH/Avalanche/assets/66022611/6ece76d4-ce7c-43e7-8321-27e368b12760" alt="Logo 3" width=400 height=400/>
+<img src="https://github.com/SnowballSH/Avalanche/assets/66022611/ef77edf1-9f8d-45dc-867f-533a4c84d22f" alt="Logo 4" width=400 height=400/>
+
