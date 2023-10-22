@@ -70,7 +70,7 @@ pub const DatagenSingle = struct {
         var ply: usize = 0;
         var random_plies: u64 = 9 + (self.prng.rand64() % 4);
         while (true) : (ply += 1) {
-            if (self.searcher.is_draw(pos)) {
+            if (self.searcher.is_draw(pos, true)) {
                 result = 0.5;
                 break;
             }

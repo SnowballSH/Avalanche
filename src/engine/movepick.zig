@@ -16,9 +16,9 @@ pub const SortLosingCapture: SortScore = 0;
 pub const SortQuiet: SortScore = 0;
 pub const SortKiller1: SortScore = 900_000;
 pub const SortKiller2: SortScore = 800_000;
-pub const SortCounterMove: SortScore = 700_000;
+pub const SortCounterMove: SortScore = 600_000;
 
-pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move) std.ArrayList(SortScore) {
+pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, comptime is_null: bool) std.ArrayList(SortScore) {
     var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
 
     var hm = hashmove.to_u16();
@@ -67,7 +67,20 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             } else if (searcher.ply >= 1 and searcher.counter_moves[@enumToInt(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
                 score += SortCounterMove;
             } else {
-                score += SortQuiet + searcher.history[@enumToInt(pos.turn)][move.from][move.to];
+                score += SortQuiet;
+                score += searcher.history[@enumToInt(pos.turn)][move.from][move.to];
+                if (!is_null and searcher.ply >= 1) {
+                    const plies: [3]usize = .{ 0, 1, 3 };
+                    for (plies) |plies_ago| {
+                        const divider: i32 = 1;
+                        if (searcher.ply >= plies_ago + 1) {
+                            const prev = searcher.move_history[searcher.ply - plies_ago - 1];
+                            if (prev.to_u16() == 0) continue;
+
+                            score += @divTrunc(searcher.continuation[searcher.moved_piece_history[searcher.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[move.from].pure_index()][move.to], divider);
+                        }
+                    }
+                }
             }
         }
 

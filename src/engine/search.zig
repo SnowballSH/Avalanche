@@ -64,6 +64,7 @@ pub const Searcher = struct {
     hash_history: std.ArrayList(u64) = undefined,
     eval_history: [MAX_PLY]hce.Score = undefined,
     move_history: [MAX_PLY]types.Move = undefined,
+    moved_piece_history: [MAX_PLY]types.Piece = undefined,
 
     best_move: types.Move = undefined,
     pv: [MAX_PLY][MAX_PLY]types.Move = undefined,
@@ -73,6 +74,7 @@ pub const Searcher = struct {
     history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
+    continuation: [12][64][12][64]i32 = undefined,
 
     root_board: position.Position = undefined,
     thread_id: usize = 0,
@@ -108,6 +110,15 @@ pub const Searcher = struct {
                         self.history[i][j][k] = @divTrunc(self.history[i][j][k], 2);
                         self.counter_moves[i][j][k] = types.Move.empty();
                     }
+                    if (j < 12) {
+                        i = 0;
+                        while (i < 12) : (i += 1) {
+                            var o: usize = 0;
+                            while (o < 64) : (o += 1) {
+                                self.continuation[j][k][i][o] = 0;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -122,6 +133,7 @@ pub const Searcher = struct {
                 self.pv_size[j] = 0;
                 self.eval_history[j] = 0;
                 self.move_history[j] = types.Move.empty();
+                self.moved_piece_history[j] = types.Piece.NO_PIECE;
             }
         }
     }
@@ -301,7 +313,7 @@ pub const Searcher = struct {
         return score;
     }
 
-    pub fn is_draw(self: *Searcher, pos: *position.Position) bool {
+    pub fn is_draw(self: *Searcher, pos: *position.Position, threefold: bool) bool {
         if (pos.history[pos.game_ply].fifty >= 100) {
             return true;
         }
@@ -312,12 +324,15 @@ pub const Searcher = struct {
 
         if (self.hash_history.items.len > 1) {
             var index: i16 = @intCast(i16, self.hash_history.items.len) - 3;
-            var limit: i16 = index - @intCast(i16, pos.history[pos.game_ply].fifty) - 1;
+            const limit: i16 = index - @intCast(i16, pos.history[pos.game_ply].fifty) - 1;
             var count: u8 = 0;
+            const threshold: u8 = if (threefold) 2 else 1;
             while (index >= limit and index >= 0) {
                 if (self.hash_history.items[@intCast(usize, index)] == pos.hash) {
                     count += 1;
-                    return true;
+                    if (count >= threshold) {
+                        return true;
+                    }
                 }
                 index -= 2;
             }
@@ -430,8 +445,8 @@ pub const Searcher = struct {
         self.nodes += 1;
 
         // Step 1.6: Draw check
-        if (!is_root and self.is_draw(pos)) {
-            return 1 - @intCast(i32, self.nodes & 2);
+        if (!is_root and self.is_draw(pos, on_pv)) {
+            return 0;
         }
 
         // >> Step 2: TT Probe
@@ -570,7 +585,7 @@ pub const Searcher = struct {
         }
 
         // Step 5.2: Move Ordering
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, is_null);
         defer evallist.deinit();
 
         // Step 5.3: Move Iteration
@@ -662,6 +677,7 @@ pub const Searcher = struct {
             var new_depth = @intCast(usize, @intCast(i32, depth) + extension - 1);
 
             self.move_history[self.ply] = move;
+            self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
@@ -760,7 +776,8 @@ pub const Searcher = struct {
             const max_history: i32 = 16384;
             for (quiet_moves.items) |m, i| {
                 var hist = @divTrunc(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
-                if (m.to_u16() == b) {
+                const is_best = m.to_u16() == b;
+                if (is_best) {
                     if (i > 6) {
                         hist = @divTrunc(hist, 2);
                     }
@@ -772,6 +789,26 @@ pub const Searcher = struct {
                     }
                     const adj = -max - hist;
                     self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
+                }
+
+                // Continuation History
+                if (!is_null and self.ply >= 1) {
+                    const plies: [3]usize = .{ 0, 1, 3 };
+                    for (plies) |plies_ago| {
+                        if (self.ply >= plies_ago + 1) {
+                            const prev = self.move_history[self.ply - plies_ago - 1];
+                            if (prev.to_u16() == 0) continue;
+
+                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[m.from].pure_index()][m.to];
+                            if (is_best) {
+                                const adj = max;
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[m.from].pure_index()][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                            } else {
+                                const adj = -max;
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[m.from].pure_index()][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -810,7 +847,7 @@ pub const Searcher = struct {
 
         // Step 1.2: Material Draw Check
         if (hce.is_material_draw(pos)) {
-            return 1 - @intCast(i32, self.nodes & 2);
+            return 0;
         }
 
         // Step 1.4: Ply Overflow Check
@@ -871,7 +908,7 @@ pub const Searcher = struct {
         var move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove);
+        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, false);
         defer evallist.deinit();
 
         // Step 4.3: Q Move Iteration
@@ -890,6 +927,8 @@ pub const Searcher = struct {
                 }
             }
 
+            self.move_history[self.ply] = move;
+            self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
             tt.GlobalTT.prefetch(pos.hash);
