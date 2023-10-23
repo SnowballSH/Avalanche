@@ -66,6 +66,7 @@ pub fn bench() !void {
     var nodes: u64 = 0;
     var timer = try std.time.Timer.start();
     var searcher = search.Searcher.new();
+    defer searcher.deinit();
     searcher.force_thinking = true;
     searcher.silent_output = true;
 

@@ -11,6 +11,12 @@ Elo difference: 3.7 +/- 8.2, LOS: 81.4 %, DrawRatio: 49.9 %
 Ordo: +4.2
 ```
 
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 97 - 79 - 205  [0.524] 381
+Elo difference: 16.4 +/- 23.7
+```
+
 ## 10/2/2023
 
 - Change to standard aspiration window algorithm

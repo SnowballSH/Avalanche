@@ -31,6 +31,7 @@ pub const UciInterface = struct {
         var command_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
         defer command_arena.deinit();
 
+        self.searcher.deinit();
         self.searcher = search.Searcher.new();
 
         self.position.set_fen(types.DEFAULT_FEN[0..]);
@@ -161,6 +162,7 @@ pub const UciInterface = struct {
                     break;
                 }
             } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
+                self.searcher.deinit();
                 self.searcher = search.Searcher.new();
                 tt.GlobalTT.clear();
                 self.position.set_fen(types.DEFAULT_FEN[0..]);
@@ -426,6 +428,8 @@ pub const UciInterface = struct {
 
             command_arena.allocator().free(line.?);
         }
+
+        self.searcher.deinit();
     }
 };
 
