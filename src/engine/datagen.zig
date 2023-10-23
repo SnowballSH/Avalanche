@@ -25,6 +25,7 @@ pub const DatagenSingle = struct {
 
     pub fn new(lock: *FileLock, prng: *utils.PRNG, id: u64) DatagenSingle {
         var searcher = search.Searcher.new();
+        defer searcher.deinit();
         searcher.max_millis = 1000;
         searcher.ideal_time = 500;
         searcher.max_nodes = MAX_NODES;

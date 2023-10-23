@@ -74,19 +74,26 @@ pub const Searcher = struct {
     history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
-    continuation: [12][64][12][64]i32 = undefined,
+    continuation: *[12][64][64][64]i32,
 
     root_board: position.Position = undefined,
     thread_id: usize = 0,
     silent_output: bool = false,
 
     pub fn new() Searcher {
-        var s = Searcher{};
+        var s = Searcher{
+            .continuation = std.heap.c_allocator.create([12][64][64][64]i32) catch unreachable,
+        };
 
         s.hash_history = std.ArrayList(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
         s.reset_heuristics();
 
         return s;
+    }
+
+    pub fn deinit(self: *Searcher) void {
+        self.hash_history.deinit();
+        std.heap.c_allocator.destroy(self.continuation);
     }
 
     pub fn reset_heuristics(self: *Searcher) void {
@@ -112,7 +119,7 @@ pub const Searcher = struct {
                     }
                     if (j < 12) {
                         i = 0;
-                        while (i < 12) : (i += 1) {
+                        while (i < 64) : (i += 1) {
                             var o: usize = 0;
                             while (o < 64) : (o += 1) {
                                 self.continuation[j][k][i][o] = 0;
@@ -799,13 +806,13 @@ pub const Searcher = struct {
                             const prev = self.move_history[self.ply - plies_ago - 1];
                             if (prev.to_u16() == 0) continue;
 
-                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[m.from].pure_index()][m.to];
+                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to];
                             if (is_best) {
                                 const adj = max;
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[m.from].pure_index()][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist * max, max_history);
                             } else {
                                 const adj = -max;
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][pos.mailbox[m.from].pure_index()][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist * max, max_history);
                             }
                         }
                     }
