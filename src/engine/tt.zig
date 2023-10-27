@@ -18,7 +18,7 @@ pub const Bound = enum(u2) {
 
 pub const Item = packed struct {
     hash: u64,
-    eval: hce.Score,
+    eval: i32,
     bestmove: types.Move,
     flag: Bound,
     depth: u8,

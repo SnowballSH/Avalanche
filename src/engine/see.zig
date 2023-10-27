@@ -54,7 +54,7 @@ pub fn see_score(pos: *position.Position, move: types.Move) movepick.SortScore {
 }
 
 // Logic https://github.com/TerjeKir/weiss
-pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: hce.Score) bool {
+pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) bool {
     var from = move.from;
     var to = move.to;
     var attacker = pos.mailbox[from].piece_type().index();

@@ -3,13 +3,11 @@ const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const nnue = @import("nnue.zig");
 
-pub const Score = i32;
-
-pub const MateScore: Score = 888888;
+pub const MateScore: i32 = 888888;
 
 pub const UseNNUE = true;
 
-pub const Mateiral: [6][2]Score = .{
+pub const Mateiral: [6][2]i32 = .{
     .{ 82, 94 },
     .{ 337, 281 },
     .{ 365, 297 },
@@ -19,7 +17,7 @@ pub const Mateiral: [6][2]Score = .{
 };
 
 // PeSTO PSQT for testing purposes
-pub const PSQT: [6][2][64]Score = .{
+pub const PSQT: [6][2][64]i32 = .{
     .{
         .{
             0,   0,   0,   0,   0,   0,   0,  0,
@@ -154,7 +152,7 @@ pub const PSQT: [6][2][64]Score = .{
     },
 };
 
-const CenterManhattanDistance = [64]Score{
+const CenterManhattanDistance = [64]i32{
     6, 5, 4, 3, 3, 4, 5, 6,
     5, 4, 3, 2, 2, 3, 4, 5,
     4, 3, 2, 1, 1, 2, 3, 4,
@@ -166,9 +164,9 @@ const CenterManhattanDistance = [64]Score{
 };
 
 pub const DynamicEvaluator = struct {
-    score_mg: Score = 0,
-    score_eg_non_mat: Score = 0,
-    score_eg_material: Score = 0,
+    score_mg: i32 = 0,
+    score_eg_non_mat: i32 = 0,
+    score_eg_material: i32 = 0,
     nnue_evaluator: nnue.NNUE = nnue.NNUE.new(),
     need_hce: bool = false,
 
@@ -253,9 +251,9 @@ pub const DynamicEvaluator = struct {
     }
 
     pub fn refresh_hce(self: *DynamicEvaluator, pos: *position.Position) void {
-        var mg: Score = 0;
-        var eg_material: Score = 0;
-        var eg_non_mat: Score = 0;
+        var mg: i32 = 0;
+        var eg_material: i32 = 0;
+        var eg_non_mat: i32 = 0;
         for (pos.mailbox) |piece, index| {
             if (piece == types.Piece.NO_PIECE) {
                 continue;
@@ -280,17 +278,17 @@ pub const DynamicEvaluator = struct {
     }
 };
 
-pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) Score {
+pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) i32 {
     var k1 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()]));
     var k2 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()]));
 
-    var r1 = @intCast(Score, k1.rank().index());
-    var r2 = @intCast(Score, k2.rank().index());
-    var c1 = @intCast(Score, k1.file().index());
-    var c2 = @intCast(Score, k2.file().index());
+    var r1 = @intCast(i32, k1.rank().index());
+    var r2 = @intCast(i32, k2.rank().index());
+    var c1 = @intCast(i32, k1.file().index());
+    var c2 = @intCast(i32, k2.file().index());
 
-    var score: Score = 0;
-    var m_dist: Score = (std.math.absInt(r1 - r2) catch 0) + (std.math.absInt(c1 - c2) catch 0);
+    var score: i32 = 0;
+    var m_dist: i32 = (std.math.absInt(r1 - r2) catch 0) + (std.math.absInt(c1 - c2) catch 0);
 
     if (white_winning) {
         score -= m_dist * 5;
@@ -303,9 +301,9 @@ pub inline fn distance_eval(pos: *position.Position, comptime white_winning: boo
     return score;
 }
 
-pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) Score {
+pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i32 {
     var phase = pos.phase();
-    var result: Score = 0;
+    var result: i32 = 0;
     if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
         result = evaluate_nnue_comptime(pos, color);
     } else {
@@ -315,10 +313,10 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) S
         }
         // Tapered eval
 
-        var mg_phase: Score = 0;
-        var eg_phase: Score = 0;
-        var mg_score: Score = 0;
-        var eg_score: Score = 0;
+        var mg_phase: i32 = 0;
+        var eg_phase: i32 = 0;
+        var mg_score: i32 = 0;
+        var eg_score: i32 = 0;
 
         mg_phase = @intCast(i32, phase);
         if (mg_phase > 24) {
@@ -336,13 +334,13 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) S
                     // White is winning
                     eg_score += distance_eval(pos, true);
                     eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
-                    eg_score = @max(100, eg_score - @intCast(Score, pos.history[pos.game_ply].fifty));
+                    eg_score = @max(100, eg_score - @intCast(i32, pos.history[pos.game_ply].fifty));
                     break;
                 } else if (pos.piece_bitboards[types.Piece.WHITE_KING.index()] == pos.all_pieces(types.Color.White)) {
                     // Black is winning
                     eg_score += distance_eval(pos, false);
                     eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
-                    eg_score = @min(-100, eg_score + @intCast(Score, pos.history[pos.game_ply].fifty));
+                    eg_score = @min(-100, eg_score + @intCast(i32, pos.history[pos.game_ply].fifty));
                     break;
                 }
             }
@@ -361,21 +359,21 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) S
     }
 
     if (phase <= 5 and std.math.absInt(result) catch 0 >= 16 and is_material_drawish(pos)) {
-        const drawish_factor: Score = 8;
+        const drawish_factor: i32 = 8;
         result = @divTrunc(result, drawish_factor);
     }
 
     // Scaling idea from Clover
-    result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - @intCast(Score, pos.history[pos.game_ply].fifty) * 5), 1024);
+    result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - @intCast(i32, pos.history[pos.game_ply].fifty) * 5), 1024);
 
     return result;
 }
 
-pub inline fn evaluate_nnue(pos: *position.Position) Score {
+pub inline fn evaluate_nnue(pos: *position.Position) i32 {
     return pos.evaluator.nnue_evaluator.evaluate(pos.turn);
 }
 
-pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: types.Color) Score {
+pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: types.Color) i32 {
     return pos.evaluator.nnue_evaluator.evaluate_comptime(color);
 }
 
@@ -487,6 +485,6 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
 
 pub const MaxMate: i32 = 256;
 
-pub inline fn is_near_mate(score: Score) bool {
+pub inline fn is_near_mate(score: i32) bool {
     return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;
 }
