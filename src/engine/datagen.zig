@@ -52,7 +52,7 @@ pub const DatagenSingle = struct {
         pos.set_fen(types.DEFAULT_FEN);
         tt.GlobalTT.reset(64);
 
-        self.searcher.reset_heuristics();
+        self.searcher.reset_heuristics(true);
         self.searcher.stop = false;
         self.searcher.force_thinking = false;
 

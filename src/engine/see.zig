@@ -5,16 +5,16 @@ const position = @import("../chess/position.zig");
 const hce = @import("hce.zig");
 const movepick = @import("movepick.zig");
 
-pub const SeeWeight = [_]movepick.SortScore{ 93, 308, 346, 521, 994, 20000 };
+pub const SeeWeight = [_]i32{ 93, 308, 346, 521, 994, 20000 };
 
-pub fn see_score(pos: *position.Position, move: types.Move) movepick.SortScore {
+pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     var max_depth: usize = 0;
     var defenders: types.Bitboard = 0;
     var piece_bb: types.Bitboard = 0;
 
     var to_sq = move.get_to();
     var all_pieces = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
-    var gains: [16]movepick.SortScore = undefined;
+    var gains: [16]i32 = undefined;
     var opp = pos.turn.invert();
     var blockers = all_pieces & ~types.SquareIndexBB[move.to];
 

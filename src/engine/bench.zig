@@ -74,7 +74,7 @@ pub fn bench() !void {
         var pos = position.Position.new();
         pos.set_fen(fen);
         searcher.stop = false;
-        searcher.reset_heuristics();
+        searcher.reset_heuristics(true);
         if (pos.turn == types.Color.White) {
             _ = searcher.iterative_deepening(&pos, types.Color.White, depth);
         } else {

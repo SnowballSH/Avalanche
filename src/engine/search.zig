@@ -34,11 +34,11 @@ pub const NodeType = enum {
     NonPV,
 };
 
-pub const MAX_THREADS = 16;
+pub const MAX_THREADS = 512;
 pub var NUM_THREADS: usize = 0;
 
-pub var helper_searchers: [MAX_THREADS]Searcher = undefined;
-pub var threads: [MAX_THREADS]?std.Thread = undefined;
+pub var helper_searchers: std.ArrayList(Searcher) = std.ArrayList(Searcher).init(std.heap.c_allocator);
+pub var threads: std.ArrayList(?std.Thread) = std.ArrayList(?std.Thread).init(std.heap.c_allocator);
 
 pub const Searcher = struct {
     min_depth: usize = 1,
@@ -86,7 +86,7 @@ pub const Searcher = struct {
         };
 
         s.hash_history = std.ArrayList(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
-        s.reset_heuristics();
+        s.reset_heuristics(true);
 
         return s;
     }
@@ -96,7 +96,7 @@ pub const Searcher = struct {
         std.heap.c_allocator.destroy(self.continuation);
     }
 
-    pub fn reset_heuristics(self: *Searcher) void {
+    pub fn reset_heuristics(self: *Searcher, comptime total_reset: bool) void {
         {
             var i: usize = 0;
             while (i < MAX_PLY) : (i += 1) {
@@ -114,7 +114,11 @@ pub const Searcher = struct {
                 while (k < 64) : (k += 1) {
                     var i: usize = 0;
                     while (i < 2) : (i += 1) {
-                        self.history[i][j][k] = @divTrunc(self.history[i][j][k], 2);
+                        if (total_reset) {
+                            self.history[i][j][k] = 0;
+                        } else {
+                            self.history[i][j][k] = @divTrunc(self.history[i][j][k], 2);
+                        }
                         self.counter_moves[i][j][k] = types.Move.empty();
                     }
                     if (j < 12) {
@@ -159,7 +163,7 @@ pub const Searcher = struct {
         self.stop = false;
         self.is_searching = true;
         self.time_stop = false;
-        self.reset_heuristics();
+        self.reset_heuristics(false);
         self.nodes = 0;
         self.best_move = types.Move.empty();
 
@@ -171,9 +175,14 @@ pub const Searcher = struct {
 
         var stability: usize = 0;
 
+        const extra = NUM_THREADS - helper_searchers.items.len;
+        helper_searchers.ensureTotalCapacity(NUM_THREADS) catch unreachable;
+        helper_searchers.appendNTimesAssumeCapacity(undefined, extra);
+        threads.ensureTotalCapacity(NUM_THREADS) catch unreachable;
+        threads.appendNTimesAssumeCapacity(null, extra);
         var ti: usize = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
-            helper_searchers[ti] = Searcher.new();
+            helper_searchers.items[ti] = Searcher.new();
         }
 
         var tdepth: usize = 1;
@@ -244,9 +253,9 @@ pub const Searcher = struct {
                 var thread_index: usize = 0;
                 while (thread_index < NUM_THREADS) : (thread_index += 1) {
                     // outW.print("info string thread {} nodes {}\n", .{
-                    //     thread_index + 1, helper_searchers[thread_index].nodes,
+                    //     thread_index + 1, helper_searchers.items[thread_index].nodes,
                     // }) catch {};
-                    total_nodes += helper_searchers[thread_index].nodes;
+                    total_nodes += helper_searchers.items[thread_index].nodes;
                 }
             }
 
@@ -352,20 +361,20 @@ pub const Searcher = struct {
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
             var id: usize = i + 1;
-            if (threads[i] != null) {
-                threads[i].?.join();
+            if (threads.items[i] != null) {
+                threads.items[i].?.join();
             }
             var depth: usize = depth_;
             if (id % 2 == 1) {
                 depth += 1;
             }
-            helper_searchers[i].max_millis = self.max_millis;
-            helper_searchers[i].thread_id = id;
-            helper_searchers[i].root_board = pos.*;
-            threads[i] = std.Thread.spawn(
+            helper_searchers.items[i].max_millis = self.max_millis;
+            helper_searchers.items[i].thread_id = id;
+            helper_searchers.items[i].root_board = pos.*;
+            threads.items[i] = std.Thread.spawn(
                 .{ .stack_size = 64 * 1024 * 1024 },
                 Searcher.start_helper,
-                .{ &helper_searchers[i], color, depth, alpha_, beta_ },
+                .{ &helper_searchers.items[i], color, depth, alpha_, beta_ },
             ) catch |e| {
                 std.debug.panic("Could not spawn helper thread {}!\n{}", .{ i, e });
                 unreachable;
@@ -394,10 +403,10 @@ pub const Searcher = struct {
         _ = self;
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
-            helper_searchers[i].stop = true;
+            helper_searchers.items[i].stop = true;
         }
         while (i < NUM_THREADS) : (i += 1) {
-            threads[i].?.join();
+            threads.items[i].?.join();
         }
     }
 
@@ -771,8 +780,7 @@ pub const Searcher = struct {
                 self.killer[self.ply][1] = temp;
             }
 
-            const bonus: i32 = @intCast(i32, @min(depth * depth, 512));
-            const max: i32 = 32 * bonus;
+            const adj = @min(1536, @intCast(i32, if (static_eval <= alpha) depth + 1 else depth) * 384 - 384);
 
             if (!is_null and self.ply >= 1) {
                 var last = self.move_history[self.ply - 1];
@@ -781,21 +789,13 @@ pub const Searcher = struct {
 
             const b = best_move.to_u16();
             const max_history: i32 = 16384;
-            for (quiet_moves.items) |m, i| {
-                var hist = @divTrunc(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
+            for (quiet_moves.items) |m| {
                 const is_best = m.to_u16() == b;
+                const hist = self.history[@enumToInt(color)][m.from][m.to] * adj;
                 if (is_best) {
-                    if (i > 6) {
-                        hist = @divTrunc(hist, 2);
-                    }
-                    const adj = max - hist;
-                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
+                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(hist, max_history);
                 } else {
-                    if (i < 2) {
-                        hist *= 2;
-                    }
-                    const adj = -max - hist;
-                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
+                    self.history[@enumToInt(color)][m.from][m.to] += -adj - @divTrunc(hist, max_history);
                 }
 
                 // Continuation History
@@ -806,13 +806,11 @@ pub const Searcher = struct {
                             const prev = self.move_history[self.ply - plies_ago - 1];
                             if (prev.to_u16() == 0) continue;
 
-                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to];
+                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] * adj;
                             if (is_best) {
-                                const adj = max;
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist, max_history);
                             } else {
-                                const adj = -max;
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += -adj - @divTrunc(cont_hist, max_history);
                             }
                         }
                     }
