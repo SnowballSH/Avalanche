@@ -6,26 +6,24 @@ const hce = @import("hce.zig");
 const search = @import("search.zig");
 const see = @import("see.zig");
 
-pub const SortScore = i32;
+pub const MVV_LVA = [6][6]i32{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
 
-pub const MVV_LVA = [6][6]SortScore{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
+pub const SortHash: i32 = 6_000_000;
+pub const SortWinningCapture: i32 = 1_000_000;
+pub const SortLosingCapture: i32 = 0;
+pub const SortQuiet: i32 = 0;
+pub const SortKiller1: i32 = 900_000;
+pub const SortKiller2: i32 = 800_000;
+pub const SortCounterMove: i32 = 600_000;
 
-pub const SortHash: SortScore = 6_000_000;
-pub const SortWinningCapture: SortScore = 1_000_000;
-pub const SortLosingCapture: SortScore = 0;
-pub const SortQuiet: SortScore = 0;
-pub const SortKiller1: SortScore = 900_000;
-pub const SortKiller2: SortScore = 800_000;
-pub const SortCounterMove: SortScore = 600_000;
-
-pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, comptime is_null: bool) std.ArrayList(SortScore) {
-    var res: std.ArrayList(SortScore) = std.ArrayList(SortScore).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
+pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, comptime is_null: bool) std.ArrayList(i32) {
+    var res: std.ArrayList(i32) = std.ArrayList(i32).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
 
     var hm = hashmove.to_u16();
 
     for (list.items) |move_| {
         var move: *const types.Move = &move_;
-        var score: SortScore = 0;
+        var score: i32 = 0;
         if (move.is_promotion()) {
             if (move.get_flags().promote_type() == types.PieceType.Queen) {
                 score += 1_000_000;
@@ -90,13 +88,13 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
     return res;
 }
 
-pub inline fn getNextBest(list: *std.ArrayList(types.Move), evals: *std.ArrayList(SortScore), i: usize) types.Move {
+pub inline fn getNextBest(list: *std.ArrayList(types.Move), evals: *std.ArrayList(i32), i: usize) types.Move {
     var move_size = list.items.len;
     var j = i + 1;
     while (j < move_size) : (j += 1) {
         if (evals.items[i] < evals.items[j]) {
             std.mem.swap(types.Move, &list.items[i], &list.items[j]);
-            std.mem.swap(SortScore, &evals.items[i], &evals.items[j]);
+            std.mem.swap(i32, &evals.items[i], &evals.items[j]);
         }
     }
     return list.items[i];

@@ -52,7 +52,7 @@ pub const DatagenSingle = struct {
         pos.set_fen(types.DEFAULT_FEN);
         tt.GlobalTT.reset(64);
 
-        self.searcher.reset_heuristics();
+        self.searcher.reset_heuristics(true);
         self.searcher.stop = false;
         self.searcher.force_thinking = false;
 
@@ -60,7 +60,7 @@ pub const DatagenSingle = struct {
         defer arena.deinit();
 
         var fens = try std.ArrayList([]u8).initCapacity(arena.allocator(), 128);
-        var evals = try std.ArrayList(hce.Score).initCapacity(arena.allocator(), 128);
+        var evals = try std.ArrayList(i32).initCapacity(arena.allocator(), 128);
         defer fens.deinit();
         defer evals.deinit();
 
@@ -113,7 +113,7 @@ pub const DatagenSingle = struct {
             }
             movelist.deinit();
 
-            var res: hce.Score = if (pos.turn == types.Color.White)
+            var res: i32 = if (pos.turn == types.Color.White)
                 self.searcher.iterative_deepening(pos, types.Color.White, MAX_DEPTH)
             else
                 -self.searcher.iterative_deepening(pos, types.Color.Black, MAX_DEPTH);

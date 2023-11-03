@@ -1,5 +1,22 @@
 # v2.1.0
 
+## 11/2/2023
+
+- New bucketed net: bingshan
+
+Positive elo gain, just trust me
+
+## 10/30/2023
+
+- Simplify History (formula from Stormphrax)
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 228 - 199 - 490  [0.516] 917
+Elo difference: 11.0 +/- 15.3, LOS: 92.0 %, DrawRatio: 53.4 %
+Ordo: +12.0
+```
+
 ## 10/22/2023
 
 - Continuation History

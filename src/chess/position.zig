@@ -295,6 +295,10 @@ pub const Position = struct {
             self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()];
     }
 
+    pub inline fn all_all_pieces(self: Position) types.Bitboard {
+        return self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black);
+    }
+
     pub inline fn attackers_from(self: Position, comptime color: types.Color, sq: types.Square, occ: types.Bitboard) types.Bitboard {
         if (color == types.Color.White) {
             const p = (tables.BlackPawnAttacks[sq.index()] & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]);

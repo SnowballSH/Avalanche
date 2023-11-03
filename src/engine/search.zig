@@ -34,11 +34,11 @@ pub const NodeType = enum {
     NonPV,
 };
 
-pub const MAX_THREADS = 16;
+pub const MAX_THREADS = 512;
 pub var NUM_THREADS: usize = 0;
 
-pub var helper_searchers: [MAX_THREADS]Searcher = undefined;
-pub var threads: [MAX_THREADS]?std.Thread = undefined;
+pub var helper_searchers: std.ArrayList(Searcher) = std.ArrayList(Searcher).init(std.heap.c_allocator);
+pub var threads: std.ArrayList(?std.Thread) = std.ArrayList(?std.Thread).init(std.heap.c_allocator);
 
 pub const Searcher = struct {
     min_depth: usize = 1,
@@ -62,7 +62,7 @@ pub const Searcher = struct {
     exclude_move: [MAX_PLY]types.Move = undefined,
 
     hash_history: std.ArrayList(u64) = undefined,
-    eval_history: [MAX_PLY]hce.Score = undefined,
+    eval_history: [MAX_PLY]i32 = undefined,
     move_history: [MAX_PLY]types.Move = undefined,
     moved_piece_history: [MAX_PLY]types.Piece = undefined,
 
@@ -86,7 +86,7 @@ pub const Searcher = struct {
         };
 
         s.hash_history = std.ArrayList(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
-        s.reset_heuristics();
+        s.reset_heuristics(true);
 
         return s;
     }
@@ -96,7 +96,7 @@ pub const Searcher = struct {
         std.heap.c_allocator.destroy(self.continuation);
     }
 
-    pub fn reset_heuristics(self: *Searcher) void {
+    pub fn reset_heuristics(self: *Searcher, comptime total_reset: bool) void {
         {
             var i: usize = 0;
             while (i < MAX_PLY) : (i += 1) {
@@ -114,7 +114,11 @@ pub const Searcher = struct {
                 while (k < 64) : (k += 1) {
                     var i: usize = 0;
                     while (i < 2) : (i += 1) {
-                        self.history[i][j][k] = @divTrunc(self.history[i][j][k], 2);
+                        if (total_reset) {
+                            self.history[i][j][k] = 0;
+                        } else {
+                            self.history[i][j][k] = @divTrunc(self.history[i][j][k], 2);
+                        }
                         self.counter_moves[i][j][k] = types.Move.empty();
                     }
                     if (j < 12) {
@@ -153,13 +157,13 @@ pub const Searcher = struct {
         return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @floatToInt(u64, @floor(@intToFloat(f32, self.ideal_time) * factor))))));
     }
 
-    pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) hce.Score {
+    pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) i32 {
         var out = std.io.bufferedWriter(std.io.getStdOut().writer());
         var outW = out.writer();
         self.stop = false;
         self.is_searching = true;
         self.time_stop = false;
-        self.reset_heuristics();
+        self.reset_heuristics(false);
         self.nodes = 0;
         self.best_move = types.Move.empty();
 
@@ -171,9 +175,14 @@ pub const Searcher = struct {
 
         var stability: usize = 0;
 
+        const extra = NUM_THREADS - helper_searchers.items.len;
+        helper_searchers.ensureTotalCapacity(NUM_THREADS) catch unreachable;
+        helper_searchers.appendNTimesAssumeCapacity(undefined, extra);
+        threads.ensureTotalCapacity(NUM_THREADS) catch unreachable;
+        threads.appendNTimesAssumeCapacity(null, extra);
         var ti: usize = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
-            helper_searchers[ti] = Searcher.new();
+            helper_searchers.items[ti] = Searcher.new();
         }
 
         var tdepth: usize = 1;
@@ -244,9 +253,9 @@ pub const Searcher = struct {
                 var thread_index: usize = 0;
                 while (thread_index < NUM_THREADS) : (thread_index += 1) {
                     // outW.print("info string thread {} nodes {}\n", .{
-                    //     thread_index + 1, helper_searchers[thread_index].nodes,
+                    //     thread_index + 1, helper_searchers.items[thread_index].nodes,
                     // }) catch {};
-                    total_nodes += helper_searchers[thread_index].nodes;
+                    total_nodes += helper_searchers.items[thread_index].nodes;
                 }
             }
 
@@ -260,7 +269,7 @@ pub const Searcher = struct {
 
                 if ((std.math.absInt(score) catch 0) >= (hce.MateScore - hce.MaxMate)) {
                     outW.print("mate {} pv", .{
-                        (@divTrunc(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(hce.Score, if (score > 0) 1 else -1),
+                        (@divTrunc(hce.MateScore - (std.math.absInt(score) catch 0), 2) + 1) * @as(i32, if (score > 0) 1 else -1),
                     }) catch {};
                     if (bound == MAX_PLY - 1) {
                         bound = depth + 2;
@@ -348,24 +357,24 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score) void {
+    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
             var id: usize = i + 1;
-            if (threads[i] != null) {
-                threads[i].?.join();
+            if (threads.items[i] != null) {
+                threads.items[i].?.join();
             }
             var depth: usize = depth_;
             if (id % 2 == 1) {
                 depth += 1;
             }
-            helper_searchers[i].max_millis = self.max_millis;
-            helper_searchers[i].thread_id = id;
-            helper_searchers[i].root_board = pos.*;
-            threads[i] = std.Thread.spawn(
+            helper_searchers.items[i].max_millis = self.max_millis;
+            helper_searchers.items[i].thread_id = id;
+            helper_searchers.items[i].root_board = pos.*;
+            threads.items[i] = std.Thread.spawn(
                 .{ .stack_size = 64 * 1024 * 1024 },
                 Searcher.start_helper,
-                .{ &helper_searchers[i], color, depth, alpha_, beta_ },
+                .{ &helper_searchers.items[i], color, depth, alpha_, beta_ },
             ) catch |e| {
                 std.debug.panic("Could not spawn helper thread {}!\n{}", .{ i, e });
                 unreachable;
@@ -373,7 +382,7 @@ pub const Searcher = struct {
         }
     }
 
-    pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score) void {
+    pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
         self.stop = false;
         self.is_searching = true;
         self.time_stop = false;
@@ -394,14 +403,14 @@ pub const Searcher = struct {
         _ = self;
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
-            helper_searchers[i].stop = true;
+            helper_searchers.items[i].stop = true;
         }
         while (i < NUM_THREADS) : (i += 1) {
-            threads[i].?.join();
+            threads.items[i].?.join();
         }
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: hce.Score, beta_: hce.Score, comptime is_null: bool, comptime node: NodeType) hce.Score {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType) i32 {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -441,8 +450,8 @@ pub const Searcher = struct {
 
         // Step 1.4: Mate-distance pruning
         if (!is_root) {
-            var r_alpha = @max(-hce.MateScore + @intCast(hce.Score, self.ply), alpha);
-            var r_beta = @min(hce.MateScore - @intCast(hce.Score, self.ply) - 1, beta);
+            var r_alpha = @max(-hce.MateScore + @intCast(i32, self.ply), alpha);
+            var r_beta = @min(hce.MateScore - @intCast(i32, self.ply) - 1, beta);
 
             if (r_alpha >= r_beta) {
                 return r_alpha;
@@ -459,16 +468,16 @@ pub const Searcher = struct {
         // >> Step 2: TT Probe
         var hashmove = types.Move.empty();
         var tthit = false;
-        var tt_eval: hce.Score = 0;
+        var tt_eval: i32 = 0;
         var entry = tt.GlobalTT.get(pos.hash);
 
         if (entry != null) {
             tthit = true;
             tt_eval = entry.?.eval;
             if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
-                tt_eval -= @intCast(hce.Score, self.ply);
+                tt_eval -= @intCast(i32, self.ply);
             } else if (tt_eval < -hce.MateScore + hce.MaxMate and tt_eval >= -hce.MateScore) {
-                tt_eval += @intCast(hce.Score, self.ply);
+                tt_eval += @intCast(i32, self.ply);
             }
             hashmove = entry.?.bestmove;
             if (is_root) {
@@ -496,10 +505,10 @@ pub const Searcher = struct {
             }
         }
 
-        var static_eval: hce.Score = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
-        var best_score: hce.Score = static_eval;
+        var static_eval: i32 = if (in_check) -hce.MateScore + @intCast(i32, self.ply) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
+        var best_score: i32 = static_eval;
 
-        var low_estimate: hce.Score = -hce.MateScore - 1;
+        var low_estimate: i32 = -hce.MateScore - 1;
 
         self.eval_history[self.ply] = static_eval;
 
@@ -523,7 +532,7 @@ pub const Searcher = struct {
 
             // Step 4.1: Reverse Futility Pruning
             if (std.math.absInt(beta) catch 0 < hce.MateScore - hce.MaxMate and depth <= parameters.RFPDepth) {
-                var n = @intCast(hce.Score, depth) * parameters.RFPMultiplier;
+                var n = @intCast(i32, depth) * parameters.RFPMultiplier;
                 if (improving) {
                     n -= parameters.RFPImprovingDeduction;
                 }
@@ -584,7 +593,7 @@ pub const Searcher = struct {
         if (move_size == 0) {
             if (in_check) {
                 // Checkmate
-                return -hce.MateScore + @intCast(hce.Score, self.ply);
+                return -hce.MateScore + @intCast(i32, self.ply);
             } else {
                 // Stalemate
                 return 0;
@@ -597,7 +606,7 @@ pub const Searcher = struct {
 
         // Step 5.3: Move Iteration
         var best_move = types.Move.empty();
-        best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
+        best_score = -hce.MateScore + @intCast(i32, self.ply);
 
         var skip_quiet = false;
 
@@ -691,7 +700,7 @@ pub const Searcher = struct {
 
             tt.GlobalTT.prefetch(pos.hash);
 
-            var score: hce.Score = 0;
+            var score: i32 = 0;
             var min_lmr_move: usize = if (on_pv) 5 else 3;
             var do_full_search = false;
             const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 100;
@@ -771,8 +780,7 @@ pub const Searcher = struct {
                 self.killer[self.ply][1] = temp;
             }
 
-            const bonus: i32 = @intCast(i32, @min(depth * depth, 512));
-            const max: i32 = 32 * bonus;
+            const adj = @min(1536, @intCast(i32, if (static_eval <= alpha) depth + 1 else depth) * 384 - 384);
 
             if (!is_null and self.ply >= 1) {
                 var last = self.move_history[self.ply - 1];
@@ -781,21 +789,13 @@ pub const Searcher = struct {
 
             const b = best_move.to_u16();
             const max_history: i32 = 16384;
-            for (quiet_moves.items) |m, i| {
-                var hist = @divTrunc(self.history[@enumToInt(color)][best_move.from][best_move.to] * bonus, 512);
+            for (quiet_moves.items) |m| {
                 const is_best = m.to_u16() == b;
+                const hist = self.history[@enumToInt(color)][m.from][m.to] * adj;
                 if (is_best) {
-                    if (i > 6) {
-                        hist = @divTrunc(hist, 2);
-                    }
-                    const adj = max - hist;
-                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
+                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(hist, max_history);
                 } else {
-                    if (i < 2) {
-                        hist *= 2;
-                    }
-                    const adj = -max - hist;
-                    self.history[@enumToInt(color)][m.from][m.to] += adj - @divTrunc(self.history[@enumToInt(color)][m.from][m.to] * (std.math.absInt(adj) catch 0), max_history);
+                    self.history[@enumToInt(color)][m.from][m.to] += -adj - @divTrunc(hist, max_history);
                 }
 
                 // Continuation History
@@ -806,13 +806,11 @@ pub const Searcher = struct {
                             const prev = self.move_history[self.ply - plies_ago - 1];
                             if (prev.to_u16() == 0) continue;
 
-                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to];
+                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] * adj;
                             if (is_best) {
-                                const adj = max;
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist, max_history);
                             } else {
-                                const adj = -max;
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist * max, max_history);
+                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += -adj - @divTrunc(cont_hist, max_history);
                             }
                         }
                     }
@@ -837,7 +835,7 @@ pub const Searcher = struct {
         return best_score;
     }
 
-    pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, alpha_: hce.Score, beta_: hce.Score) hce.Score {
+    pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, alpha_: i32, beta_: i32) i32 {
         var alpha = alpha_;
         var beta = beta_;
         comptime var opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
@@ -868,7 +866,7 @@ pub const Searcher = struct {
 
         // >> Step 2: Prunings
 
-        var best_score = -hce.MateScore + @intCast(hce.Score, self.ply);
+        var best_score = -hce.MateScore + @intCast(i32, self.ply);
         var static_eval = best_score;
         if (!in_check) {
             static_eval = hce.evaluate_comptime(pos, color);
@@ -907,7 +905,7 @@ pub const Searcher = struct {
             pos.generate_legal_moves(color, &movelist);
             if (movelist.items.len == 0) {
                 // Checkmated
-                return -hce.MateScore + @intCast(hce.Score, self.ply);
+                return -hce.MateScore + @intCast(i32, self.ply);
             }
         } else {
             pos.generate_q_moves(color, &movelist);
