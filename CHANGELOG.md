@@ -1,5 +1,11 @@
 # v2.1.0
 
+## 11/2/2023
+
+- New bucketed net: bingshan
+
+Positive elo gain, just trust me
+
 ## 10/30/2023
 
 - Simplify History (formula from Stormphrax)

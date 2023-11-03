@@ -374,7 +374,7 @@ pub inline fn evaluate_nnue(pos: *position.Position) i32 {
 }
 
 pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: types.Color) i32 {
-    return pos.evaluator.nnue_evaluator.evaluate_comptime(color);
+    return pos.evaluator.nnue_evaluator.evaluate_comptime(color, pos);
 }
 
 pub inline fn is_material_draw(pos: *position.Position) bool {

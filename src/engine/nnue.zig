@@ -17,6 +17,10 @@ pub const WhiteBlackPair = packed struct {
     black: usize,
 };
 
+pub inline fn get_bucket(pos: *position.Position) usize {
+    return (types.popcount_usize(pos.all_all_pieces()) - 2) / 4;
+}
+
 pub fn nnue_index(piece: types.Piece, sq: types.Square) WhiteBlackPair {
     const p: usize = piece.piece_type().index();
     const c: types.Color = piece.color();
@@ -111,23 +115,25 @@ pub const NNUE = struct {
         self.accumulator_stack[self.stack_index].exchange_weights(nnue_index(pc, from), nnue_index(pc, to));
     }
 
-    pub inline fn evaluate(self: *NNUE, turn: types.Color) i32 {
-        return if (turn == types.Color.White) self.evaluate_comptime(types.Color.White) else self.evaluate_comptime(types.Color.Black);
+    pub inline fn evaluate(self: *NNUE, turn: types.Color, pos: *position.Position) i32 {
+        return if (turn == types.Color.White) self.evaluate_comptime(types.Color.White, pos) else self.evaluate_comptime(types.Color.Black, pos);
     }
 
-    pub inline fn evaluate_comptime(self: *NNUE, comptime turn: types.Color) i32 {
+    pub inline fn evaluate_comptime(self: *NNUE, comptime turn: types.Color, pos: *position.Position) i32 {
         const acc = &self.accumulator_stack[self.stack_index];
 
-        var res = @as(i32, weights.MODEL.layer_2_bias);
+        const bucket = get_bucket(pos);
+
+        var res = @as(i32, weights.MODEL.layer_2_bias[bucket]);
 
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += 1) {
             if (turn == types.Color.White) {
-                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[i];
-                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[weights.HIDDEN_SIZE..][i];
+                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[bucket][i];
+                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[bucket][weights.HIDDEN_SIZE..][i];
             } else {
-                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[i];
-                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[weights.HIDDEN_SIZE..][i];
+                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[bucket][i];
+                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[bucket][weights.HIDDEN_SIZE..][i];
             }
         }
 
