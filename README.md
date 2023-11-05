@@ -12,11 +12,9 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v2.0.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3273**
+**Official [40/15 CCRL ELO (v2.0.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3249**
 
-**Official [40/15 CCRL ELO (v1.5.0 4CPU)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%201.5.0%2064-bit%204CPU#Avalanche_1_5_0_64-bit_4CPU): 3247**
-
-**Official [Blitz CCRL ELO (v1.5.0)](http://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=1&print=Details&each_game=1&eng=Avalanche%201.5.0%2064-bit#Avalanche_1_5_0_64-bit): 3245**
+**Official [Blitz CCRL ELO (v2.0.0)](https://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3324**
 
 ## About
 
@@ -46,7 +44,7 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 | Version      | CCRL 40/15 | CCRL Blitz |
 |--------------|------------|------------|
-| v2.0.0       | 3273       | N/A        |
+| v2.0.0       | 3249       | 3324        |
 | v1.5.0 4CPU  | 3247       | N/A        |
 | v1.5.0       | 3188       | 3245       |
 | v1.4.0       | 3147       | 3214       |
