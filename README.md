@@ -12,9 +12,9 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v2.0.0)](http://ccrl.chessdom.com/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3249**
+**Official [40/15 CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3247**
 
-**Official [Blitz CCRL ELO (v2.0.0)](https://ccrl.chessdom.com/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3324**
+**Official [Blitz CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3332**
 
 ## About
 
@@ -44,18 +44,18 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 | Version      | CCRL 40/15 | CCRL Blitz |
 |--------------|------------|------------|
-| v2.0.0       | 3249       | 3324        |
-| v1.5.0 4CPU  | 3247       | N/A        |
-| v1.5.0       | 3188       | 3245       |
-| v1.4.0       | 3147       | 3214       |
+| v2.0.0       | 3247       | 3332       |
+| v1.5.0 4CPU  | 3246       | N/A        |
+| v1.5.0       | 3187       | 3249       |
+| v1.4.0       | 3146       | 3216       |
 | v1.3.1       | 3080       | N/A        |
-| v1.3.0       | 3037       | 3094       |
-| v1.2.0       | 3046       | 3033       |
-| v1.1.0       | 2835       | 2926       |
-| v1.0.0       | 2742       | N/A        |
-| v0.2.2       | 2626       | 2588       |
-| v0.2.1       | 2563       | N/A        |
-| v0.2.0       | 2424       | 2489       |
+| v1.3.0       | 3038       | 3096       |
+| v1.2.0       | 3044       | 3035       |
+| v1.1.0       | 2834       | 2929       |
+| v1.0.0       | 2739       | N/A        |
+| v0.2.2       | 2626       | 2589       |
+| v0.2.1       | 2562       | N/A        |
+| v0.2.0       | 2424       | 2490       |
 
 <img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&amp;format=image" width=600/>
 
