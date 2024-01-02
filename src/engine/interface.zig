@@ -73,8 +73,11 @@ pub const UciInterface = struct {
                 _ = try stdout.write(build_options.version);
                 _ = try stdout.writeByte('\n');
                 _ = try stdout.write("id author Yinuo Huang\n\n");
-                _ = try stdout.write("option name Hash type spin default 16 min 1 max 65536\n");
-                _ = try stdout.write("option name Threads type spin default 1 min 1 max 512\n");
+                _ = try stdout.write("option name Hash type spin default 16 min 1 max 131072\n");
+                _ = try stdout.write("option name Threads type spin default 1 min 1 max 2048\n");
+                for (parameters.TunableParams) |tunable| {
+                    _ = try stdout.print("option name {s} type spin default {s} min {s} max {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
+                }
                 _ = try stdout.writeAll("uciok\n");
             } else if (std.mem.eql(u8, token.?, "setoption")) {
                 while (true) {
@@ -113,6 +116,65 @@ pub const UciInterface = struct {
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
                         search.NUM_THREADS = value - 1;
+                    } else {
+                        for (parameters.TunableParams) |tunable| {
+                            if (std.mem.eql(u8, token.?, tunable.name)) {
+                                token = tokens.next();
+                                if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                                    break;
+                                }
+
+                                token = tokens.next();
+                                if (token == null) {
+                                    break;
+                                }
+
+                                const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
+                                switch (tunable.id) {
+                                    0 => {
+                                        parameters.LMRWeight = @intToFloat(f64, value) / 1000.0;
+                                        search.init_lmr();
+                                    },
+                                    1 => {
+                                        parameters.LMRBias = @intToFloat(f64, value) / 1000.0;
+                                        search.init_lmr();
+                                    },
+                                    2 => {
+                                        parameters.RFPDepth = @intCast(i32, value);
+                                    },
+                                    3 => {
+                                        parameters.RFPMultiplier = @intCast(i32, value);
+                                    },
+                                    4 => {
+                                        parameters.RFPImprovingDeduction = @intCast(i32, value);
+                                    },
+                                    5 => {
+                                        parameters.NMPImprovingMargin = @intCast(i32, value);
+                                    },
+                                    6 => {
+                                        parameters.NMPBase = @intCast(usize, value);
+                                    },
+                                    7 => {
+                                        parameters.NMPDepthDivisor = @intCast(usize, value);
+                                    },
+                                    8 => {
+                                        parameters.NMPBetaDivisor = @intCast(i32, value);
+                                    },
+                                    9 => {
+                                        parameters.RazoringBase = @intCast(i32, value);
+                                    },
+                                    10 => {
+                                        parameters.RazoringMargin = @intCast(i32, value);
+                                    },
+                                    11 => {
+                                        parameters.AspirationWindow = @intCast(i32, value);
+                                    },
+                                    else => unreachable,
+                                }
+                                // std.debug.print("info string {s} set to {d}\n", .{ tunable.name, value });
+                                break;
+                            }
+                        }
                     }
 
                     break;
