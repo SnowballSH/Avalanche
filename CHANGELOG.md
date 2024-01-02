@@ -1,5 +1,20 @@
 # v2.1.0
 
+## 1/2/2024
+
+- 30+0.3 5k games tunes
+
+Probably didn't lose elo but whatever
+
+LMR wasn't tuned due to an initial bug
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 211 - 205 - 535  [0.503] 951
+Elo difference: 2.2 +/- 14.6, LOS: 61.6 %, DrawRatio: 56.3 %
+Ordo: +2.4
+```
+
 ## 11/2/2023
 
 - New bucketed net: bingshan
