@@ -40,6 +40,10 @@ Avalanche is only guaranteed to compile using Zig v0.10.x. Newer versions will n
 
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
+## Usage
+
+Avalanche follows the UCI protocol and is not a full chess application. You should use Avalanche with a UCI-compatible GUI interface. If you need to use the CLI, make sure to send \n at the end of your input (^\n on windows command prompt).
+
 ## Past Versions
 
 | Version      | CCRL 40/15 | CCRL Blitz |

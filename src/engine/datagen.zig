@@ -11,9 +11,9 @@ pub const FileLock = struct {
     lock: std.Thread.Mutex,
 };
 
-const MAX_DEPTH: ?u8 = 8;
-const MAX_NODES: ?u64 = null;
-const SOFT_MAX_NODES: ?u64 = null;
+const MAX_DEPTH: ?u8 = null;
+const MAX_NODES: ?u64 = 8000000;
+const SOFT_MAX_NODES: ?u64 = 5000;
 
 pub const DatagenSingle = struct {
     id: u64,
@@ -25,7 +25,6 @@ pub const DatagenSingle = struct {
 
     pub fn new(lock: *FileLock, prng: *utils.PRNG, id: u64) DatagenSingle {
         var searcher = search.Searcher.new();
-        defer searcher.deinit();
         searcher.max_millis = 1000;
         searcher.ideal_time = 500;
         searcher.max_nodes = MAX_NODES;
@@ -43,6 +42,7 @@ pub const DatagenSingle = struct {
     }
 
     pub fn deinit(self: *DatagenSingle) void {
+        self.searcher.deinit();
         self.fileLock.file.close();
     }
 
