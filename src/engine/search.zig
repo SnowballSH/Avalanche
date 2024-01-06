@@ -60,6 +60,7 @@ pub const Searcher = struct {
     is_searching: bool = false,
 
     exclude_move: [MAX_PLY]types.Move = undefined,
+    nmp_min_ply: u32 = 0,
 
     hash_history: std.ArrayList(u64) = undefined,
     eval_history: [MAX_PLY]i32 = undefined,
@@ -209,7 +210,7 @@ pub const Searcher = struct {
                     self.helpers(pos, color, depth, alpha, beta);
                 }
 
-                var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root);
+                var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root, false);
 
                 if (depth > 1) {
                     self.stop_helpers();
@@ -393,9 +394,9 @@ pub const Searcher = struct {
         self.ply = 0;
         self.seldepth = 0;
         if (color == types.Color.White) {
-            _ = self.negamax(&self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root);
+            _ = self.negamax(&self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root, false);
         } else {
-            _ = self.negamax(&self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root);
+            _ = self.negamax(&self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root, false);
         }
     }
 
@@ -410,7 +411,7 @@ pub const Searcher = struct {
         }
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType) i32 {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType, comptime cutnode: bool) i32 {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -421,7 +422,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 1023 == 0 and self.should_stop()) {
+        if (self.nodes & 2047 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
@@ -522,7 +523,7 @@ pub const Searcher = struct {
         // >> Step 3: Extensions/Reductions
         // Step 3.1: IIR
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (depth >= 3 and !tthit and self.exclude_move[self.ply].to_u16() == 0) {
+        if (depth >= 3 and !in_check and !tthit and self.exclude_move[self.ply].to_u16() == 0 and (on_pv or cutnode)) {
             depth -= 1;
         }
 
@@ -547,14 +548,14 @@ pub const Searcher = struct {
             }
 
             // Step 4.2: Null move pruning
-            if (!is_null and depth >= 3 and nmp_static_eval >= beta and has_non_pawns) {
+            if (!is_null and depth >= 3 and self.ply >= self.nmp_min_ply and nmp_static_eval >= beta and has_non_pawns) {
                 var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
                 r += @intCast(usize, @min(4, @divTrunc((static_eval - beta), parameters.NMPBetaDivisor)));
                 r = @min(r, depth);
 
                 self.ply += 1;
                 pos.play_null_move();
-                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV);
+                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV, !cutnode);
                 self.ply -= 1;
                 pos.undo_null_move();
 
@@ -566,7 +567,24 @@ pub const Searcher = struct {
                     if (null_score >= hce.MateScore - hce.MaxMate) {
                         null_score = beta;
                     }
-                    return null_score;
+
+                    if (depth < 12 or self.nmp_min_ply > 0) {
+                        return null_score;
+                    }
+
+                    self.nmp_min_ply = self.ply + @intCast(u32, (depth - r) * 3 / 4);
+
+                    var verif_score = self.negamax(pos, color, depth - r, beta - 1, beta, false, NodeType.NonPV, false);
+
+                    self.nmp_min_ply = 0;
+
+                    if (self.time_stop) {
+                        return 0;
+                    }
+
+                    if (verif_score >= beta) {
+                        return verif_score;
+                    }
                 }
             }
 
@@ -611,6 +629,7 @@ pub const Searcher = struct {
         var skip_quiet = false;
 
         var quiet_count: usize = 0;
+        var legals: usize = 0;
 
         var index: usize = 0;
         while (index < move_size) : (index += 1) {
@@ -653,6 +672,8 @@ pub const Searcher = struct {
                 }
             }
 
+            legals += 1;
+
             var extension: i32 = 0;
 
             // Step 5.5: Singular extension
@@ -672,15 +693,15 @@ pub const Searcher = struct {
                 var singular_beta = @max(tt_eval - margin, -hce.MateScore + hce.MaxMate);
 
                 self.exclude_move[self.ply] = hashmove;
-                var singular_score = self.negamax(pos, color, (depth - 1) / 2, singular_beta - 1, singular_beta, true, NodeType.NonPV);
+                var singular_score = self.negamax(pos, color, (depth - 1) / 2, singular_beta - 1, singular_beta, true, NodeType.NonPV, cutnode);
                 self.exclude_move[self.ply] = types.Move.empty();
                 if (singular_score < singular_beta) {
                     extension = 1;
                 } else if (singular_beta >= beta) {
                     return singular_beta;
                 } else if (tt_eval >= beta) {
-                    extension = -1;
-                } else if (tt_eval <= alpha) {
+                    extension = -2;
+                } else if (cutnode) {
                     extension = -1;
                 }
             } else if (on_pv and !is_root and self.ply < depth * 2) {
@@ -702,42 +723,46 @@ pub const Searcher = struct {
 
             var score: i32 = 0;
             var min_lmr_move: usize = if (on_pv) 5 else 3;
+            const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 200;
             var do_full_search = false;
-            const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 100;
-            if (!in_check and depth >= 3 and index >= min_lmr_move and (!is_capture or !is_winning_capture)) {
-                // Step 5.6: Late-Move Reduction
-                var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
-
-                if (self.thread_id % 2 == 1) {
-                    reduction -= 1;
-                }
-
-                if (improving) {
-                    reduction += 1;
-                }
-
-                if (!on_pv) {
-                    reduction += 1;
-                }
-
-                reduction -= @divTrunc(self.history[@enumToInt(color)][move.from][move.to], 6144);
-
-                var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
-
-                // Step 5.7: Principal-Variation-Search (PVS)
-                score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV);
-
-                do_full_search = score > alpha and rd < new_depth;
+            if (on_pv and legals == 1) {
+                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV, false);
             } else {
-                do_full_search = !on_pv or index > 0;
-            }
+                if (!in_check and depth >= 3 and index >= min_lmr_move and (!is_capture or !is_winning_capture)) {
+                    // Step 5.6: Late-Move Reduction
+                    var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
-            if (do_full_search) {
-                score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV);
-            }
+                    if (self.thread_id % 2 == 1) {
+                        reduction -= 1;
+                    }
 
-            if (on_pv and ((score > alpha and score < beta) or index == 0)) {
-                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV);
+                    if (improving) {
+                        reduction += 1;
+                    }
+
+                    if (!on_pv) {
+                        reduction += 1;
+                    }
+
+                    reduction -= @divTrunc(self.history[@enumToInt(color)][move.from][move.to], 6144);
+
+                    var rd: usize = @intCast(usize, std.math.clamp(@intCast(i32, new_depth) - reduction, 1, new_depth + 1));
+
+                    // Step 5.7: Principal-Variation-Search (PVS)
+                    score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV, true);
+
+                    do_full_search = score > alpha and rd < new_depth;
+                } else {
+                    do_full_search = !on_pv or index > 0;
+                }
+
+                if (do_full_search) {
+                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV, !cutnode);
+                }
+
+                if (on_pv and ((score > alpha and score < beta) or index == 0)) {
+                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV, false);
+                }
             }
 
             self.ply -= 1;
@@ -843,7 +868,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparation
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 1023 == 0 and self.should_stop()) {
+        if (self.nodes & 2047 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }

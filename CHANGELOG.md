@@ -1,5 +1,15 @@
 # v2.1.0
 
+## 1/5/2024
+
+- Add cutnode conditions
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 66 - 60 - 144  [0.511] 270
+Elo difference: 8.7 +/- 31.9
+```
+
 ## 1/2/2024
 
 - 30+0.3 5k games tunes
