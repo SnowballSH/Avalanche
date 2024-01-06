@@ -6,8 +6,8 @@
 
 STC 8.0+0.08 | Pohl
 ```
-Score of New vs Master: 66 - 60 - 144  [0.511] 270
-Elo difference: 8.7 +/- 31.9
+Score of New_16 vs Master_16: 345 - 318 - 680  [0.510] 1343
+Elo difference: 7.0 +/- 13.0
 ```
 
 ## 1/2/2024

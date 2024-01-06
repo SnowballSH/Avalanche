@@ -737,7 +737,7 @@ pub const Searcher = struct {
                     }
 
                     if (improving) {
-                        reduction += 1;
+                        reduction -= 1;
                     }
 
                     if (!on_pv) {
