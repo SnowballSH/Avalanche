@@ -40,7 +40,7 @@ pub const UciInterface = struct {
 
         out: while (true) {
             // The command will probably be less than 16384 characters
-            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\r', 16384);
+            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 16384);
 
             if (line == null) {
                 break;
