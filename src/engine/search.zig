@@ -37,6 +37,8 @@ pub const NodeType = enum {
 pub const MAX_THREADS = 512;
 pub var NUM_THREADS: usize = 0;
 
+pub const STABILITY_MULTIPLIER = [5]f32{ 2.50, 1.20, 0.90, 0.80, 0.75 };
+
 pub var helper_searchers: std.ArrayList(Searcher) = std.ArrayList(Searcher).init(std.heap.c_allocator);
 pub var threads: std.ArrayList(?std.Thread) = std.ArrayList(?std.Thread).init(std.heap.c_allocator);
 
@@ -296,13 +298,10 @@ pub const Searcher = struct {
                 out.flush() catch {};
             }
 
-            // Time Management algorithm by BlackCore
-            // https://github.com/SzilBalazs/BlackCore/blob/master/src/timeman.cpp
-
-            var factor: f32 = @max(0.5, 1.1 - 0.03 * @intToFloat(f32, stability));
+            var factor = STABILITY_MULTIPLIER[@min(stability, 4)];
 
             if (score - prev_score > parameters.AspirationWindow) {
-                factor *= 1.1;
+                factor *= 1.25;
             }
 
             prev_score = score;

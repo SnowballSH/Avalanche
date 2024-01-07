@@ -72,9 +72,8 @@ Avalanche follows the UCI protocol and is not a full chess application. You shou
 - https://www.chessprogramming.org/ for explanation on everything I need, including search, tt, pruning, reductions... everything.
 - https://github.com/nkarve/surge for movegen inspiration.
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
-- https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton
+- https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton (1.5.0 and older)
 - https://github.com/Disservin/Smallbrain and https://github.com/cosmobobak/viridithas for search ideas
-- https://github.com/SzilBalazs/BlackCore for time management ideas
 - https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status

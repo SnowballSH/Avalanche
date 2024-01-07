@@ -1,5 +1,15 @@
 # v2.1.0
 
+## 1/6/2024
+
+- Tune and limit stability in time management
+
+STC 8.0+0.08 | Pohl
+```
+Score of New vs Master: 267 - 246 - 500  [0.510] 1013
+Elo difference: 7.2 +/- 15.2
+```
+
 ## 1/5/2024
 
 - Add cutnode conditions
