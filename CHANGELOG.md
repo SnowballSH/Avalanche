@@ -1,5 +1,22 @@
 # v2.1.0
 
+## 1/7/2024
+
+- Regression vs v2.0.0
+
+LTC 40.0+0.40 | 8moves_v3
+```
+Score of New vs v2.0.0: 201 - 57 - 542  [0.590] 800
+Elo difference: 63.2 +/- 13.4, LOS: 100.0 %, DrawRatio: 67.8 %
+```
+
+SMP 30.0+0.30 | 8moves_v3
+```
+Score of New_4T_256 vs v2.0.0_4T_256: 80 - 7 - 113  [0.682] 200
+Elo difference: 132.9 +/- 30.6, LOS: 100.0 %, DrawRatio: 56.5 %
+Ordo: +134.2
+```
+
 ## 1/6/2024
 
 - Tune and limit stability in time management

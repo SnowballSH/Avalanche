@@ -100,6 +100,8 @@ pub const Searcher = struct {
     }
 
     pub fn reset_heuristics(self: *Searcher, comptime total_reset: bool) void {
+        self.nmp_min_ply = 0;
+
         {
             var i: usize = 0;
             while (i < MAX_PLY) : (i += 1) {
@@ -183,7 +185,7 @@ pub const Searcher = struct {
         helper_searchers.appendNTimesAssumeCapacity(undefined, extra);
         threads.ensureTotalCapacity(NUM_THREADS) catch unreachable;
         threads.appendNTimesAssumeCapacity(null, extra);
-        var ti: usize = 0;
+        var ti: usize = NUM_THREADS - extra;
         while (ti < NUM_THREADS) : (ti += 1) {
             helper_searchers.items[ti] = Searcher.new();
         }
@@ -211,6 +213,8 @@ pub const Searcher = struct {
                 if (depth > 1) {
                     self.helpers(pos, color, depth, alpha, beta);
                 }
+
+                self.nmp_min_ply = 0;
 
                 var val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root, false);
 
@@ -250,14 +254,14 @@ pub const Searcher = struct {
             var total_nodes: usize = self.nodes;
 
             if (depth > 1) {
-                // outW.print("info string thread 0 nodes {}\n", .{
-                //     self.nodes,
-                // }) catch {};
+                outW.print("info string thread 0 nodes {}\n", .{
+                    self.nodes,
+                }) catch {};
                 var thread_index: usize = 0;
                 while (thread_index < NUM_THREADS) : (thread_index += 1) {
-                    // outW.print("info string thread {} nodes {}\n", .{
-                    //     thread_index + 1, helper_searchers.items[thread_index].nodes,
-                    // }) catch {};
+                    outW.print("info string thread {} nodes {}\n", .{
+                        thread_index + 1, helper_searchers.items[thread_index].nodes,
+                    }) catch {};
                     total_nodes += helper_searchers.items[thread_index].nodes;
                 }
             }
