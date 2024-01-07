@@ -298,10 +298,10 @@ pub const Searcher = struct {
                 out.flush() catch {};
             }
 
-            var factor = STABILITY_MULTIPLIER[@min(stability, 4)];
+            var factor: f32 = @max(0.5, 1.1 - 0.03 * @intToFloat(f32, stability));
 
             if (score - prev_score > parameters.AspirationWindow) {
-                factor *= 1.25;
+                factor *= 1.1;
             }
 
             prev_score = score;
