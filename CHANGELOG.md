@@ -1,5 +1,15 @@
 # v2.1.0
 
+## 1/9/2024
+
+- More LTC Tune
+
+LTC 40.0+0.40 | Pohl
+```
+Score of New vs Master: 112 - 100 - 270  [0.512] 482
+Elo difference: 8.7 +/- 20.6, LOS: 79.5 %, DrawRatio: 56.0 %
+```
+
 ## 1/7/2024
 
 - Regression vs v2.0.0
