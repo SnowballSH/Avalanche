@@ -1,5 +1,21 @@
 # v2.1.0
 
+## 1/11/2024
+
+- Regression
+
+STC 8.0+0.08 | noob_4moves
+```
+Score of New vs v2.0.0: 608 - 303 - 1089  [0.576] 2000
+Elo difference: 53.4 +/- 10.2, LOS: 100.0 %, DrawRatio: 54.4 %
+```
+
+LTC 40.0+0.40 | noob_4moves
+```
+Score of New vs v2.0.0: 249 - 68 - 683  [0.591] 1000
+Elo difference: 63.6 +/- 11.9, LOS: 100.0 %, DrawRatio: 68.3 %
+```
+
 ## 1/9/2024
 
 - More LTC Tune
