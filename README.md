@@ -12,7 +12,7 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3247**
+**Official [40/15 CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3307**
 
 **Official [Blitz CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3332**
 
@@ -48,18 +48,18 @@ Avalanche follows the UCI protocol and is not a full chess application. You shou
 
 | Version      | CCRL 40/15 | CCRL Blitz |
 |--------------|------------|------------|
-| v2.0.0       | 3247       | 3332       |
-| v1.5.0 4CPU  | 3246       | N/A        |
-| v1.5.0       | 3187       | 3249       |
-| v1.4.0       | 3146       | 3216       |
-| v1.3.1       | 3080       | N/A        |
-| v1.3.0       | 3038       | 3096       |
-| v1.2.0       | 3044       | 3035       |
-| v1.1.0       | 2834       | 2929       |
-| v1.0.0       | 2739       | N/A        |
-| v0.2.2       | 2626       | 2589       |
-| v0.2.1       | 2562       | N/A        |
-| v0.2.0       | 2424       | 2490       |
+| v2.0.0       | 3307       | 3332       |
+| v1.5.0 4CPU  | 3305       | N/A        |
+| v1.5.0       | 3241       | 3249       |
+| v1.4.0       | 3195       | 3216       |
+| v1.3.1       | 3122       | N/A        |
+| v1.3.0       | 3083       | 3096       |
+| v1.2.0       | 3076       | 3035       |
+| v1.1.0       | 2850       | 2929       |
+| v1.0.0       | 2744       | N/A        |
+| v0.2.2       | 2619       | 2589       |
+| v0.2.1       | 2548       | N/A        |
+| v0.2.0       | 2394       | 2490       |
 
 <img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&amp;format=image" width=600/>
 
