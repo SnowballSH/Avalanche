@@ -1,4 +1,4 @@
-VERSION="2.1.0"
+VERSION="2.2.0-dev"
 
 # Windows
 zig build -Dtarget=x86_64-windows -Drelease-fast -Dcpu=x86_64 --prefix artifacts/ -Dtarget-name="Avalanche-${VERSION}-x86_64-win-v1"

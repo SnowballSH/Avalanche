@@ -190,6 +190,11 @@ pub const Searcher = struct {
             helper_searchers.items[ti] = Searcher.new();
         }
 
+        ti = 0;
+        while (ti < NUM_THREADS) : (ti += 1) {
+            helper_searchers.items[ti].nodes = 0;
+        }
+
         var tdepth: usize = 1;
         var bound: usize = if (max_depth == null) MAX_PLY - 2 else max_depth.?;
         outer: while (tdepth <= bound) {
@@ -390,7 +395,6 @@ pub const Searcher = struct {
         self.stop = false;
         self.is_searching = true;
         self.time_stop = false;
-        self.nodes = 0;
         self.best_move = types.Move.empty();
         self.timer = std.time.Timer.start() catch unreachable;
         self.force_thinking = true;
