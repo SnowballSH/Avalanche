@@ -12,9 +12,9 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3307**
+**Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3343**
 
-**Official [Blitz CCRL ELO (v2.0.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.0.0%2064-bit#Avalanche_2_0_0_64-bit): 3332**
+**Official [Blitz CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3399**
 
 ## About
 
@@ -45,21 +45,6 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 Avalanche follows the UCI protocol and is not a full chess application. You should use Avalanche with a UCI-compatible GUI interface. If you need to use the CLI, make sure to send \n at the end of your input (^\n on windows command prompt).
 
 ## Past Versions
-
-| Version      | CCRL 40/15 | CCRL Blitz |
-|--------------|------------|------------|
-| v2.0.0       | 3307       | 3332       |
-| v1.5.0 4CPU  | 3305       | N/A        |
-| v1.5.0       | 3241       | 3249       |
-| v1.4.0       | 3195       | 3216       |
-| v1.3.1       | 3122       | N/A        |
-| v1.3.0       | 3083       | 3096       |
-| v1.2.0       | 3076       | 3035       |
-| v1.1.0       | 2850       | 2929       |
-| v1.0.0       | 2744       | N/A        |
-| v0.2.2       | 2619       | 2589       |
-| v0.2.1       | 2548       | N/A        |
-| v0.2.0       | 2394       | 2490       |
 
 <img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&amp;format=image" width=600/>
 
