@@ -55,10 +55,10 @@ test "Bitboard general" {
     try expect(types.popcount(0b0110111010010) == 7);
     try expect(types.lsb(0b01101000) == 3);
     var b: types.Bitboard = 0b01101000;
-    try expect(@enumToInt(types.pop_lsb(&b)) == 3);
+    try expect(@intFromEnum(types.pop_lsb(&b)) == 3);
     try expect(b == 0b01100000);
 
-    var bb_i: types.Bitboard = 0x3c18183c0000;
+    const bb_i: types.Bitboard = 0x3c18183c0000;
     try expect(types.shift_bitboard(bb_i, types.Direction.North) == 0x3c18183c000000);
     try expect(types.shift_bitboard(bb_i, types.Direction.NorthNorth) == 0x3c18183c00000000);
     try expect(types.shift_bitboard(bb_i, types.Direction.South) == 0x3c18183c00);
@@ -181,18 +181,18 @@ test "Position" {
     try expect(!pos.in_check(types.Color.White));
 
     pos.set_fen(types.DEFAULT_FEN[0..]);
-    var score = hce.evaluate(&pos);
+    const score = hce.evaluate_nnue(&pos);
 
-    var m1 = types.Move.new_from_string(&pos, "e2e4"[0..]);
+    const m1 = types.Move.new_from_string(&pos, "e2e4"[0..]);
     pos.play_move(types.Color.White, m1);
-    var m2 = types.Move.new_from_string(&pos, "d7d5"[0..]);
+    const m2 = types.Move.new_from_string(&pos, "d7d5"[0..]);
     pos.play_move(types.Color.Black, m2);
-    var m3 = types.Move.new_from_string(&pos, "e4d5"[0..]);
+    const m3 = types.Move.new_from_string(&pos, "e4d5"[0..]);
     pos.play_move(types.Color.White, m3);
 
     pos.undo_move(types.Color.White, m3);
     pos.undo_move(types.Color.Black, m2);
     pos.undo_move(types.Color.White, m1);
 
-    try expect(score == hce.evaluate(&pos));
+    try expect(score == hce.evaluate_nnue(&pos));
 }

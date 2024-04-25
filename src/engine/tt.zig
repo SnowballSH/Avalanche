@@ -68,12 +68,12 @@ pub const TranspositionTable = struct {
     }
 
     pub inline fn index(self: *TranspositionTable, hash: u64) u64 {
-        return @intCast(u64, @intCast(u128, hash) * @intCast(u128, self.size) >> 64);
+        return @intCast(@as(u128, @intCast(hash)) * @as(u128, @intCast(self.size)) >> 64);
     }
 
     pub inline fn set(self: *TranspositionTable, entry: Item) void {
-        var p = &self.data.items[self.index(entry.hash)];
-        var p_val: Item = @ptrCast(*Item, p).*;
+        const p = &self.data.items[self.index(entry.hash)];
+        const p_val: Item = @as(*Item, @ptrCast(p)).*;
         // We overwrite entry if:
         // 1. It's empty
         // 2. New entry is exact
@@ -82,8 +82,20 @@ pub const TranspositionTable = struct {
         // 5. Previous entry is from same search but has lower depth
         if (p.* == 0 or entry.flag == Bound.Exact or p_val.age != self.age or p_val.hash != entry.hash or p_val.depth <= entry.depth + 4) {
             //_ = @atomicRmw(i128, p, .Xchg, @ptrCast(*const i128, @alignCast(@alignOf(i128), &entry)).*, .Acquire);
-            _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p)), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry)).*, .Acquire);
-            _ = @atomicRmw(i64, @intToPtr(*i64, @ptrToInt(p) + 8), .Xchg, @intToPtr(*const i64, @ptrToInt(&entry) + 8).*, .Acquire);
+            _ = @atomicRmw(
+                i64,
+                @as(*i64, @ptrFromInt(@intFromPtr(p))),
+                .Xchg,
+                @as(*const i64, @ptrFromInt(@intFromPtr(&entry))).*,
+                .acquire,
+            );
+            _ = @atomicRmw(
+                i64,
+                @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)),
+                .Xchg,
+                @as(*const i64, @ptrFromInt(@intFromPtr(&entry) + 8)).*,
+                .acquire,
+            );
         }
     }
 
@@ -98,7 +110,7 @@ pub const TranspositionTable = struct {
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
         // self.data.items[hash % self.size].lock.lock();
         // defer self.data.items[hash % self.size].lock.unlock();
-        var entry = @ptrCast(*Item, &self.data.items[self.index(hash)]);
+        const entry = @as(*Item, @ptrCast(&self.data.items[self.index(hash)]));
         if (entry.flag != Bound.None and entry.hash == hash) {
             return entry.*;
         }

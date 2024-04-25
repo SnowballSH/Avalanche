@@ -6,7 +6,7 @@ pub const Color = enum(u8) {
     White,
     Black,
     pub inline fn invert(self: Color) Color {
-        return @intToEnum(Color, @enumToInt(self) ^ 1);
+        return @enumFromInt(@intFromEnum(self) ^ 1);
     }
 };
 
@@ -26,7 +26,10 @@ pub const Direction = enum(i32) {
     SouthSouth = -16,
 
     pub inline fn relative_dir(self: Direction, comptime c: Color) Direction {
-        return if (c == Color.White) self else @intToEnum(Direction, -@enumToInt(self));
+        return if (c == Color.White)
+            self
+        else
+            @enumFromInt(-@intFromEnum(self));
     }
 };
 
@@ -40,7 +43,7 @@ pub const PieceType = enum(u8) {
     King,
 
     pub inline fn index(self: PieceType) u8 {
-        return @enumToInt(self);
+        return @intFromEnum(self);
     }
 };
 
@@ -67,27 +70,27 @@ pub const Piece = enum(u8) {
     NO_PIECE,
 
     pub inline fn new(c: Color, pt: PieceType) Piece {
-        return @intToEnum(Piece, (@enumToInt(c) << 3) + @enumToInt(pt));
+        return @as(Piece, @enumFromInt((@intFromEnum(c) << 3) + @intFromEnum(pt)));
     }
 
     pub inline fn new_comptime(comptime c: Color, comptime pt: PieceType) Piece {
-        return @intToEnum(Piece, (@enumToInt(c) << 3) + @enumToInt(pt));
+        return @as(Piece, @enumFromInt((@intFromEnum(c) << 3) + @intFromEnum(pt)));
     }
 
     pub inline fn piece_type(self: Piece) PieceType {
-        return @intToEnum(PieceType, @enumToInt(self) & 0b111);
+        return @as(PieceType, @enumFromInt(@intFromEnum(self) & 0b111));
     }
 
     pub inline fn color(self: Piece) Color {
-        return @intToEnum(Color, (@enumToInt(self) & 0b1000) >> 3);
+        return @as(Color, @enumFromInt((@intFromEnum(self) & 0b1000) >> 3));
     }
 
     pub inline fn index(self: Piece) u8 {
-        return @enumToInt(self);
+        return @intFromEnum(self);
     }
 
     pub inline fn pure_index(self: Piece) usize {
-        return if (@enumToInt(self) <= 5) @enumToInt(self) else @enumToInt(self) - 2;
+        return if (@intFromEnum(self) <= 5) @intFromEnum(self) else @intFromEnum(self) - 2;
     }
 };
 
@@ -111,40 +114,40 @@ pub const Square = enum(u8) {
     // zig fmt: on
 
     pub inline fn inc(self: *Square) *Square {
-        self.* = @intToEnum(Square, @enumToInt(self.*) + 1);
+        self.* = @as(Square, @enumFromInt(@intFromEnum(self.*) + 1));
         return self;
     }
 
     pub inline fn add(self: Square, d: Direction) Square {
-        return @intToEnum(Square, @enumToInt(self) + @enumToInt(d));
+        return @as(Square, @enumFromInt(@intFromEnum(self) + @intFromEnum(d)));
     }
 
     pub inline fn sub(self: Square, d: Direction) Square {
-        return @intToEnum(Square, @enumToInt(self) - @enumToInt(d));
+        return @as(Square, @enumFromInt(@intFromEnum(self) - @intFromEnum(d)));
     }
 
     pub inline fn rank(self: Square) Rank {
-        return @intToEnum(Rank, @enumToInt(self) >> 3);
+        return @as(Rank, @enumFromInt(@intFromEnum(self) >> 3));
     }
 
     pub inline fn file(self: Square) File {
-        return @intToEnum(File, @enumToInt(self) & 0b111);
+        return @as(File, @enumFromInt(@intFromEnum(self) & 0b111));
     }
 
     pub inline fn diagonal(self: Square) i32 {
-        return @intCast(i32, 7 + @enumToInt(self.rank()) - @enumToInt(self.file()));
+        return @as(i32, @intCast(7 + @intFromEnum(self.rank()) - @intFromEnum(self.file())));
     }
 
     pub inline fn anti_diagonal(self: Square) i32 {
-        return @intCast(i32, @enumToInt(self.rank()) + @enumToInt(self.file()));
+        return @as(i32, @intCast(@intFromEnum(self.rank()) + @intFromEnum(self.file())));
     }
 
     pub inline fn new(f: File, r: Rank) Square {
-        return @intToEnum(Square, @enumToInt(f) | (@enumToInt(r) << 3));
+        return @as(Square, @enumFromInt(@intFromEnum(f) | (@intFromEnum(r) << 3)));
     }
 
     pub inline fn index(self: Square) u8 {
-        return @intCast(u8, @enumToInt(self));
+        return @as(u8, @intCast(@intFromEnum(self)));
     }
 };
 
@@ -175,7 +178,7 @@ pub const File = enum(u8) {
     HFILE,
 
     pub inline fn index(self: File) u8 {
-        return @enumToInt(self);
+        return @intFromEnum(self);
     }
 };
 
@@ -190,11 +193,11 @@ pub const Rank = enum(u8) {
     RANK8,
 
     pub inline fn index(self: Rank) u8 {
-        return @enumToInt(self);
+        return @intFromEnum(self);
     }
 
     pub inline fn relative_rank(self: Rank, comptime c: Color) Rank {
-        return if (c == Color.White) self else @intToEnum(Rank, @enumToInt(Rank.RANK8) - @enumToInt(self));
+        return if (c == Color.White) self else @as(Rank, @enumFromInt(@intFromEnum(Rank.RANK8) - @intFromEnum(self)));
     }
 };
 
@@ -266,7 +269,7 @@ pub fn debug_print_bitboard(b: Bitboard) void {
     while (i >= 0) : (i -= 8) {
         var j: i32 = 0;
         while (j < 8) : (j += 1) {
-            if ((b >> @intCast(u6, i + j)) & 1 != 0) {
+            if ((b >> @as(u6, @intCast(i + j))) & 1 != 0) {
                 std.debug.print("1 ", .{});
             } else {
                 std.debug.print("0 ", .{});
@@ -283,15 +286,15 @@ pub const k3: Bitboard = 0x0f0f0f0f0f0f0f0f;
 pub const kf: Bitboard = 0x0101010101010101;
 
 pub inline fn popcount(x: Bitboard) i32 {
-    return @intCast(i32, @popCount(x));
+    return @as(i32, @intCast(@popCount(x)));
 }
 
 pub inline fn popcount_usize(x: Bitboard) usize {
-    return @intCast(usize, @popCount(x));
+    return @as(usize, @intCast(@popCount(x)));
 }
 
 pub inline fn lsb(x: Bitboard) i32 {
-    return @intCast(i32, @ctz(x));
+    return @as(i32, @intCast(@ctz(x)));
     // Ancient machines:
     //const DEBRUIJN64: [64]i32 = .{
     //    // zig fmt: off
@@ -310,9 +313,9 @@ pub inline fn lsb(x: Bitboard) i32 {
 }
 
 pub inline fn pop_lsb(x: *Bitboard) Square {
-    var l = lsb(x.*);
+    const l = lsb(x.*);
     x.* &= x.* - 1;
-    return @intToEnum(Square, l);
+    return @as(Square, @enumFromInt(l));
 }
 
 pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
@@ -321,12 +324,12 @@ pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
         Direction.South => x >> 8,
         Direction.NorthNorth => x << 16,
         Direction.SouthSouth => x >> 16,
-        Direction.East => (x & ~MaskFile[@enumToInt(File.HFILE)]) << 1,
-        Direction.West => (x & ~MaskFile[@enumToInt(File.AFILE)]) >> 1,
-        Direction.NorthEast => (x & ~MaskFile[@enumToInt(File.HFILE)]) << 9,
-        Direction.NorthWest => (x & ~MaskFile[@enumToInt(File.AFILE)]) << 7,
-        Direction.SouthEast => (x & ~MaskFile[@enumToInt(File.HFILE)]) >> 7,
-        Direction.SouthWest => (x & ~MaskFile[@enumToInt(File.AFILE)]) >> 9,
+        Direction.East => (x & ~MaskFile[@intFromEnum(File.HFILE)]) << 1,
+        Direction.West => (x & ~MaskFile[@intFromEnum(File.AFILE)]) >> 1,
+        Direction.NorthEast => (x & ~MaskFile[@intFromEnum(File.HFILE)]) << 9,
+        Direction.NorthWest => (x & ~MaskFile[@intFromEnum(File.AFILE)]) << 7,
+        Direction.SouthEast => (x & ~MaskFile[@intFromEnum(File.HFILE)]) >> 7,
+        Direction.SouthWest => (x & ~MaskFile[@intFromEnum(File.AFILE)]) >> 9,
     };
 }
 
@@ -351,7 +354,7 @@ pub const MoveFlags = enum(u4) {
     PC_ROOK = 0b1110,
 
     pub inline fn promote_type(self: MoveFlags) PieceType {
-        return switch (@enumToInt(self) & @enumToInt(MoveFlags.PROMOTIONS)) {
+        return switch (@intFromEnum(self) & @intFromEnum(MoveFlags.PROMOTIONS)) {
             PR_KNIGHT => PieceType.Knight,
             PR_BISHOP => PieceType.Bishop,
             PR_ROOK => PieceType.Rook,
@@ -377,19 +380,19 @@ pub const Move = packed struct {
     to: u6,
 
     pub inline fn to_u16(self: Move) u16 {
-        return @bitCast(u16, self);
+        return @as(u16, @bitCast(self));
     }
 
     pub inline fn get_flags(self: Move) MoveFlags {
-        return @intToEnum(MoveFlags, self.flags);
+        return @as(MoveFlags, @enumFromInt(self.flags));
     }
 
     pub inline fn get_from(self: Move) Square {
-        return @intToEnum(Square, self.from);
+        return @as(Square, @enumFromInt(self.from));
     }
 
     pub inline fn get_to(self: Move) Square {
-        return @intToEnum(Square, self.to);
+        return @as(Square, @enumFromInt(self.to));
     }
 
     pub inline fn empty() Move {
@@ -401,19 +404,19 @@ pub const Move = packed struct {
     }
 
     pub inline fn new_from_to(from: Square, to: Square) Move {
-        return Move{ .flags = 0, .from = @intCast(u6, @enumToInt(from)), .to = @intCast(u6, @enumToInt(to)) };
+        return Move{ .flags = 0, .from = @as(u6, @intCast(@intFromEnum(from))), .to = @as(u6, @intCast(@intFromEnum(to))) };
     }
 
     pub inline fn new_from_to_flag(from: Square, to: Square, flag: MoveFlags) Move {
-        return Move{ .flags = @enumToInt(flag), .from = @intCast(u6, @enumToInt(from)), .to = @intCast(u6, @enumToInt(to)) };
+        return Move{ .flags = @intFromEnum(flag), .from = @as(u6, @intCast(@intFromEnum(from))), .to = @as(u6, @intCast(@intFromEnum(to))) };
     }
 
     pub fn new_from_string(pos: *position.Position, move: []const u8) Move {
         var list = std.ArrayList(Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         defer list.deinit();
-        var f = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[0] - 'a'), @intToEnum(Rank, move[1] - '1'))));
-        var t = @intCast(u6, @enumToInt(Square.new(@intToEnum(File, move[2] - 'a'), @intToEnum(Rank, move[3] - '1'))));
-        var p: ?u8 = if (move.len >= 5) move[4] else null;
+        const f = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[0] - 'a')), @as(Rank, @enumFromInt(move[1] - '1'))))));
+        const t = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[2] - 'a')), @as(Rank, @enumFromInt(move[3] - '1'))))));
+        const p: ?u8 = if (move.len >= 5) move[4] else null;
         if (pos.turn == Color.White) {
             pos.generate_legal_moves(Color.White, &list);
         } else {

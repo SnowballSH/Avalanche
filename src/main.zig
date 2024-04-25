@@ -23,7 +23,7 @@ pub fn main() anyerror!void {
     var args = try std.process.argsWithAllocator(std.heap.page_allocator);
 
     _ = args.next();
-    var second = args.next();
+    const second = args.next();
     if (second != null) {
         if (std.mem.eql(u8, second.?, "bench")) {
             try bench.bench();

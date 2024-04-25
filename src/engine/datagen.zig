@@ -69,7 +69,7 @@ pub const DatagenSingle = struct {
         var white_win_count: usize = 0;
         var black_win_count: usize = 0;
         var ply: usize = 0;
-        var random_plies: u64 = 9 + (self.prng.rand64() % 4);
+        const random_plies: u64 = 9 + (self.prng.rand64() % 4);
         while (true) : (ply += 1) {
             if (self.searcher.is_draw(pos, true)) {
                 result = 0.5;
@@ -81,7 +81,7 @@ pub const DatagenSingle = struct {
             } else {
                 pos.generate_legal_moves(types.Color.Black, &movelist);
             }
-            var move_size = movelist.items.len;
+            const move_size = movelist.items.len;
             if (move_size == 0) {
                 if (pos.turn == types.Color.White) {
                     if (pos.in_check(types.Color.White)) {
@@ -102,7 +102,7 @@ pub const DatagenSingle = struct {
 
             // play a random move if we're in the first few plies or with a 0.01% chance
             if (ply < random_plies or self.prng.rand64() % 10000 == 0) {
-                var move = movelist.items[self.prng.rand64() % move_size];
+                const move = movelist.items[self.prng.rand64() % move_size];
                 if (pos.turn == types.Color.White) {
                     pos.play_move(types.Color.White, move);
                 } else {
@@ -113,7 +113,7 @@ pub const DatagenSingle = struct {
             }
             movelist.deinit();
 
-            var res: i32 = if (pos.turn == types.Color.White)
+            const res: i32 = if (pos.turn == types.Color.White)
                 self.searcher.iterative_deepening(pos, types.Color.White, MAX_DEPTH)
             else
                 -self.searcher.iterative_deepening(pos, types.Color.Black, MAX_DEPTH);
@@ -124,8 +124,8 @@ pub const DatagenSingle = struct {
 
             var best_move = self.searcher.best_move;
 
-            var fen = pos.basic_fen(arena.allocator());
-            var in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            const fen = pos.basic_fen(arena.allocator());
+            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
             if (pos.turn == types.Color.White) {
                 pos.play_move(types.Color.White, best_move);
@@ -175,7 +175,7 @@ pub const DatagenSingle = struct {
                 continue;
             }
 
-            var gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            const gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
             if (!in_check and !gave_check and !best_move.is_capture() and !best_move.is_promotion()) {
                 // pretty quiet
                 try fens.append(fen);
@@ -192,7 +192,7 @@ pub const DatagenSingle = struct {
         var i: usize = 0;
         while (i < fens.items.len) : (i += 1) {
             try writer.print("{s}", .{fens.items[i]});
-            var s = if (result == 0.0) "0.0" else if (result == 1.0) "1.0" else "0.5";
+            const s = if (result == 0.0) "0.0" else if (result == 1.0) "1.0" else "0.5";
             try writer.print(" | {} | {s}\n", .{ evals.items[i], s });
         }
         self.count += fens.items.len;
@@ -206,9 +206,9 @@ pub const DatagenSingle = struct {
             try self.playGame();
             game_count += 1;
             if (game_count % 50 == 0) {
-                var elapsed = @intToFloat(f64, self.timer.read()) / std.time.ns_per_s;
-                var pps = @intToFloat(f64, self.count) / elapsed;
-                var gps = @intToFloat(f64, game_count) / elapsed;
+                const elapsed = @as(f64, @floatFromInt(self.timer.read())) / std.time.ns_per_s;
+                const pps = @as(f64, @floatFromInt(self.count)) / elapsed;
+                const gps = @as(f64, @floatFromInt(game_count)) / elapsed;
 
                 std.debug.print("id {}: {} games, {} pos, {d:.4} pos/s, {d:.4} games/s\n", .{ self.id, game_count, self.count, pps, gps });
             }
@@ -222,11 +222,13 @@ pub const Datagen = struct {
     datagens: std.ArrayList(DatagenSingle),
 
     pub fn new() Datagen {
-        var prng = std.rand.DefaultPrng.init(blk: {
-            var seed: u64 = undefined;
-            std.os.getrandom(std.mem.asBytes(&seed)) catch unreachable;
-            break :blk seed;
-        });
+        var prng = std.rand.DefaultPrng.init(
+            blk: {
+                var seed: u64 = undefined;
+                std.posix.getrandom(std.mem.asBytes(&seed)) catch unreachable;
+                break :blk seed;
+            },
+        );
         const rand = prng.random();
         return Datagen{
             .fileLock = undefined,
@@ -251,7 +253,7 @@ pub const Datagen = struct {
         ) catch {
             std.debug.panic("Unable to open {s}", .{path});
         };
-        var lock = std.Thread.Mutex{};
+        const lock = std.Thread.Mutex{};
         self.fileLock = FileLock{ .file = file, .lock = lock };
         self.datagens.clearAndFree();
 
@@ -260,9 +262,9 @@ pub const Datagen = struct {
 
         var th: usize = 0;
         while (th < num_threads) : (th += 1) {
-            var datagen = DatagenSingle.new(&self.fileLock, &self.prng, th);
+            const datagen = DatagenSingle.new(&self.fileLock, &self.prng, th);
             try self.datagens.append(datagen);
-            var thread = std.Thread.spawn(
+            const thread = std.Thread.spawn(
                 .{ .stack_size = 64 * 1024 * 1024 },
                 DatagenSingle.startMany,
                 .{&self.datagens.items[th]},
@@ -279,7 +281,7 @@ pub const Datagen = struct {
     }
 
     pub fn startSingleThreaded(self: *Datagen) !void {
-        var id: u64 = @intCast(u64, std.time.timestamp());
+        const id: u64 = @as(u64, @intCast(std.time.timestamp()));
         const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.txt", .{id});
         const file = std.fs.cwd().createFile(
             path,
@@ -287,7 +289,7 @@ pub const Datagen = struct {
         ) catch {
             std.debug.panic("Unable to open {s}", .{path});
         };
-        var lock = std.Thread.Mutex{};
+        const lock = std.Thread.Mutex{};
         self.fileLock = FileLock{ .file = file, .lock = lock };
         self.datagens.clearAndFree();
 

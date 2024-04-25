@@ -10,8 +10,8 @@ pub const PRNG = struct {
         x ^= x << 25;
         x ^= x >> 27;
         self.seed = x;
-        var r = @truncate(u64, x);
-        r = r ^ @truncate(u64, x >> 64);
+        var r = @as(u64, @truncate(x));
+        r = r ^ @as(u64, @truncate(x >> 64));
         return r;
     }
 
@@ -27,7 +27,7 @@ pub const PRNG = struct {
 
 pub fn first_index(comptime T: type, arr: []const T, val: T) ?usize {
     var i: usize = 0;
-    var end = arr.len;
+    const end = arr.len;
     while (i < end) : (i += 1) {
         if (arr[i] == val) {
             return i;

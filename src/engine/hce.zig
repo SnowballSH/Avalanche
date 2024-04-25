@@ -254,11 +254,11 @@ pub const DynamicEvaluator = struct {
         var mg: i32 = 0;
         var eg_material: i32 = 0;
         var eg_non_mat: i32 = 0;
-        for (pos.mailbox) |piece, index| {
+        for (pos.mailbox, 0..) |piece, index| {
             if (piece == types.Piece.NO_PIECE) {
                 continue;
             }
-            var i = piece.piece_type().index();
+            const i = piece.piece_type().index();
             if (piece.color() == types.Color.White) {
                 mg += Mateiral[i][0];
                 mg += PSQT[i][0][index ^ 56];
@@ -279,16 +279,16 @@ pub const DynamicEvaluator = struct {
 };
 
 pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) i32 {
-    var k1 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()]));
-    var k2 = @intToEnum(types.Square, types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()]));
+    var k1 = @as(types.Square, @enumFromInt(types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()])));
+    var k2 = @as(types.Square, @enumFromInt(types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()])));
 
-    var r1 = @intCast(i32, k1.rank().index());
-    var r2 = @intCast(i32, k2.rank().index());
-    var c1 = @intCast(i32, k1.file().index());
-    var c2 = @intCast(i32, k2.file().index());
+    const r1 = @as(i32, @intCast(k1.rank().index()));
+    const r2 = @as(i32, @intCast(k2.rank().index()));
+    const c1 = @as(i32, @intCast(k1.file().index()));
+    const c2 = @as(i32, @intCast(k2.file().index()));
 
     var score: i32 = 0;
-    var m_dist: i32 = (std.math.absInt(r1 - r2) catch 0) + (std.math.absInt(c1 - c2) catch 0);
+    const m_dist: i32 = @intCast((@abs(r1 - r2)) + (@abs(c1 - c2)));
 
     if (white_winning) {
         score -= m_dist * 5;
@@ -302,7 +302,7 @@ pub inline fn distance_eval(pos: *position.Position, comptime white_winning: boo
 }
 
 pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i32 {
-    var phase = pos.phase();
+    const phase = pos.phase();
     var result: i32 = 0;
     if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
         result = evaluate_nnue_comptime(pos, color);
@@ -318,7 +318,7 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i
         var mg_score: i32 = 0;
         var eg_score: i32 = 0;
 
-        mg_phase = @intCast(i32, phase);
+        mg_phase = @as(i32, @intCast(phase));
         if (mg_phase > 24) {
             mg_phase = 24;
         }
@@ -334,13 +334,13 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i
                     // White is winning
                     eg_score += distance_eval(pos, true);
                     eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
-                    eg_score = @max(100, eg_score - @intCast(i32, pos.history[pos.game_ply].fifty));
+                    eg_score = @max(100, eg_score - @as(i32, @intCast(pos.history[pos.game_ply].fifty)));
                     break;
                 } else if (pos.piece_bitboards[types.Piece.WHITE_KING.index()] == pos.all_pieces(types.Color.White)) {
                     // Black is winning
                     eg_score += distance_eval(pos, false);
                     eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
-                    eg_score = @min(-100, eg_score + @intCast(i32, pos.history[pos.game_ply].fifty));
+                    eg_score = @min(-100, eg_score + @as(i32, @intCast(pos.history[pos.game_ply].fifty)));
                     break;
                 }
             }
@@ -350,7 +350,7 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i
             break;
         }
 
-        var score = @divTrunc(mg_score * mg_phase + eg_score * eg_phase, 24);
+        const score = @divTrunc(mg_score * mg_phase + eg_score * eg_phase, 24);
         if (color == types.Color.White) {
             result = score;
         } else {
@@ -358,19 +358,19 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i
         }
     }
 
-    if (phase <= 5 and std.math.absInt(result) catch 0 >= 16 and is_material_drawish(pos)) {
+    if (phase <= 5 and @abs(result) >= 16 and is_material_drawish(pos)) {
         const drawish_factor: i32 = 8;
         result = @divTrunc(result, drawish_factor);
     }
 
     // Scaling idea from Clover
-    result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - @intCast(i32, pos.history[pos.game_ply].fifty) * 5), 1024);
+    result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - @as(i32, @intCast(pos.history[pos.game_ply].fifty)) * 5), 1024);
 
     return result;
 }
 
 pub inline fn evaluate_nnue(pos: *position.Position) i32 {
-    return pos.evaluator.nnue_evaluator.evaluate(pos.turn);
+    return pos.evaluator.nnue_evaluator.evaluate(pos.turn, pos);
 }
 
 pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: types.Color) i32 {
@@ -378,22 +378,22 @@ pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: ty
 }
 
 pub inline fn is_material_draw(pos: *position.Position) bool {
-    var all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
-    var kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
+    const all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    const kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
 
     if (kings == all) {
         return true;
     }
 
-    var wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
-    var bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
-    var wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
-    var bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
+    const wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
+    const bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
+    const wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
+    const bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
 
-    var wbc = types.popcount(wb);
-    var bbc = types.popcount(bb);
-    var wnc = types.popcount(wn);
-    var bnc = types.popcount(bn);
+    const wbc = types.popcount(wb);
+    const bbc = types.popcount(bb);
+    const wnc = types.popcount(wn);
+    const bnc = types.popcount(bn);
 
     // KB vs K
     if (wbc == 1 and wb | kings == all) {
@@ -417,22 +417,22 @@ pub inline fn is_material_draw(pos: *position.Position) bool {
 }
 
 pub inline fn is_material_drawish(pos: *position.Position) bool {
-    var all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
-    var kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
+    const all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    const kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
 
     if (kings == all) {
         return true;
     }
 
-    var wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
-    var bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
-    var wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
-    var bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
+    const wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
+    const bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
+    const wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
+    const bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
 
-    var wbc = types.popcount(wb);
-    var bbc = types.popcount(bb);
-    var wnc = types.popcount(wn);
-    var bnc = types.popcount(bn);
+    const wbc = types.popcount(wb);
+    const bbc = types.popcount(bb);
+    const wnc = types.popcount(wn);
+    const bnc = types.popcount(bn);
 
     // KN vs K or KNN vs K
     if (wnc <= 2 and wn | kings == all) {

@@ -67,7 +67,7 @@ pub const Position = struct {
     pub fn new() Position {
         var pos = Position{};
 
-        std.mem.set(types.Piece, pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
+        @memset(pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         pos.history[0] = UndoInfo.new();
         pos.evaluator = hce.DynamicEvaluator{};
 
@@ -83,14 +83,14 @@ pub const Position = struct {
             std.debug.print("{s} {} ", .{ line, @divTrunc(i, 8) + 1 });
             var j: i32 = 0;
             while (j < 8) : (j += 1) {
-                std.debug.print("| {c} ", .{types.PieceString[self.mailbox[@intCast(usize, i + j)].index()]});
+                std.debug.print("| {c} ", .{types.PieceString[self.mailbox[@as(usize, @intCast(i + j))].index()]});
             }
             std.debug.print("| {}\n", .{@divTrunc(i, 8) + 1});
         }
         std.debug.print("{s}", .{line});
         std.debug.print("{s}\n", .{letters});
 
-        var s = if (self.turn == types.Color.White) "White" else "Black";
+        const s = if (self.turn == types.Color.White) "White" else "Black";
 
         std.debug.print("{s} to move\n", .{s});
         std.debug.print("Hash: 0x{x}\n", .{self.hash});
@@ -98,21 +98,21 @@ pub const Position = struct {
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
         self.* = Position.new();
-        var sq: i32 = @intCast(i32, @enumToInt(types.Square.a8));
+        var sq: i32 = @as(i32, @intCast(@intFromEnum(types.Square.a8)));
         var tokens = std.mem.tokenize(u8, fen, " ");
-        var bd = tokens.next().?;
+        const bd = tokens.next().?;
         for (bd) |ch| {
             if (std.ascii.isDigit(ch)) {
-                sq += @intCast(i32, ch - '0') * @enumToInt(types.Direction.East);
+                sq += @as(i32, @intCast(ch - '0')) * @intFromEnum(types.Direction.East);
             } else if (ch == '/') {
-                sq += @enumToInt(types.Direction.South) * 2;
+                sq += @intFromEnum(types.Direction.South) * 2;
             } else {
-                self.add_piece(@intToEnum(types.Piece, utils.first_index(u8, types.PieceString[0..], ch).?), @intToEnum(types.Square, sq));
+                self.add_piece(@as(types.Piece, @enumFromInt(utils.first_index(u8, types.PieceString[0..], ch).?)), @as(types.Square, @enumFromInt(sq)));
                 sq += 1;
             }
         }
 
-        var turn = tokens.next().?;
+        const turn = tokens.next().?;
         if (std.mem.eql(u8, turn, "w")) {
             self.turn = types.Color.White;
         } else {
@@ -121,7 +121,7 @@ pub const Position = struct {
         }
 
         self.history[self.game_ply].entry = types.AllCastlingMask;
-        var castle = tokens.next().?;
+        const castle = tokens.next().?;
         for (castle) |ch| {
             switch (ch) {
                 'K' => {
@@ -140,11 +140,11 @@ pub const Position = struct {
             }
         }
 
-        var ep = tokens.next().?;
+        const ep = tokens.next().?;
         if (ep.len == 2) {
-            for (types.SquareToString) |sq_str, i| {
+            for (types.SquareToString, 0..) |sq_str, i| {
                 if (std.mem.eql(u8, ep, sq_str)) {
-                    self.history[self.game_ply].ep_sq = @intToEnum(types.Square, i);
+                    self.history[self.game_ply].ep_sq = @as(types.Square, @enumFromInt(i));
                     self.hash ^= zobrist.EnPassantHash[types.file_plain(i)];
                     break;
                 }
@@ -164,7 +164,7 @@ pub const Position = struct {
             var empty_count: u8 = 0;
             var j: i32 = 0;
             while (j < 8) : (j += 1) {
-                const idx = @intCast(usize, i + j);
+                const idx = @as(usize, @intCast(i + j));
 
                 if (self.mailbox[idx] == types.Piece.NO_PIECE) {
                     empty_count += 1;
@@ -317,8 +317,8 @@ pub const Position = struct {
 
     pub inline fn in_check(self: Position, comptime color: types.Color) bool {
         comptime var king: types.Piece = types.Piece.new_comptime(color, types.PieceType.King);
-        comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
-        return self.attackers_from(opp, @intToEnum(types.Square, types.lsb(self.piece_bitboards[king.index()])), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
+        const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+        return self.attackers_from(opp, @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[king.index()]))), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
     }
 
     pub inline fn has_non_pawns(self: Position) bool {
@@ -337,10 +337,10 @@ pub const Position = struct {
         self.game_ply += 1;
         self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
 
-        var flags = move.get_flags();
+        const flags = move.get_flags();
         self.history[self.game_ply].entry |= types.SquareIndexBB[move.to] | types.SquareIndexBB[move.from];
 
-        var pt = self.mailbox[move.from].piece_type();
+        const pt = self.mailbox[move.from].piece_type();
         if (pt == types.PieceType.Pawn or move.is_capture()) {
             self.history[self.game_ply].fifty = 0;
         }
@@ -378,7 +378,7 @@ pub const Position = struct {
                 self.remove_piece(move.get_to().add(types.Direction.South.relative_dir(color)));
             },
             else => {
-                var index = @enumToInt(flags);
+                const index = @intFromEnum(flags);
                 switch (index) {
                     types.PR_KNIGHT => {
                         self.remove_piece(move.get_from());
@@ -422,7 +422,7 @@ pub const Position = struct {
                     },
                     else => {
                         if (flags == types.MoveFlags.CAPTURE) {
-                            var c = self.mailbox[move.to];
+                            const c = self.mailbox[move.to];
                             self.history[self.game_ply].captured = c;
                             self.move_piece(move.get_from(), move.get_to());
                         }
@@ -433,8 +433,8 @@ pub const Position = struct {
     }
 
     pub fn undo_move(self: *Position, comptime color: types.Color, move: types.Move) void {
-        var flags = move.get_flags();
-        comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+        const flags = move.get_flags();
+        const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
         switch (flags) {
             types.MoveFlags.QUIET => {
@@ -467,7 +467,7 @@ pub const Position = struct {
                 self.add_piece(types.Piece.new_comptime(opp, types.PieceType.Pawn), move.get_to().add(types.Direction.South.relative_dir(color)));
             },
             else => {
-                var index = @enumToInt(flags);
+                const index = @intFromEnum(flags);
                 switch (index) {
                     types.PR_KNIGHT, types.PR_BISHOP, types.PR_ROOK, types.PR_QUEEN => {
                         self.remove_piece(move.get_to());
@@ -516,14 +516,14 @@ pub const Position = struct {
 
     // Generate all LEGAL moves
     pub fn generate_legal_moves(self: *Position, comptime color: types.Color, list: *std.ArrayList(types.Move)) void {
-        comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+        const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
         const us_bb = self.all_pieces(color);
         const them_bb = self.all_pieces(opp);
         const all_bb = us_bb | them_bb;
 
-        const our_king = @intToEnum(types.Square, types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()]));
-        const their_king = @intToEnum(types.Square, types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()]));
+        const our_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()])));
+        const their_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()])));
 
         const our_diag_sliders = self.diagonal_sliders(color);
         const their_diag_sliders = self.diagonal_sliders(opp);
@@ -535,10 +535,10 @@ pub const Position = struct {
         var b2: types.Bitboard = 0;
         var b3: types.Bitboard = 0;
 
-        comptime var rel_north = if (color == types.Color.White) types.Direction.North else types.Direction.South;
-        comptime var rel_south = if (color == types.Color.White) types.Direction.South else types.Direction.North;
-        comptime var rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
-        comptime var rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
+        const rel_north = if (color == types.Color.White) types.Direction.North else types.Direction.South;
+        const rel_south = if (color == types.Color.White) types.Direction.South else types.Direction.North;
+        const rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
+        const rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
 
         // Squares King cannot go to
         var danger: types.Bitboard = 0;
@@ -603,7 +603,7 @@ pub const Position = struct {
             1 => {
                 // Single check: Move, capture, or block
 
-                var checker_sq = @intToEnum(types.Square, types.lsb(self.checkers));
+                var checker_sq = @as(types.Square, @enumFromInt(types.lsb(self.checkers)));
 
                 switch (self.mailbox[checker_sq.index()]) {
                     types.Piece.new_comptime(opp, types.PieceType.Pawn) => {
@@ -630,10 +630,10 @@ pub const Position = struct {
                         while (b1 != 0) {
                             var psq = types.pop_lsb(&b1);
                             if (self.mailbox[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_QUEEN))) catch {};
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_ROOK))) catch {};
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_KNIGHT))) catch {};
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @intToEnum(types.MoveFlags, types.PC_BISHOP))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
                             } else {
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.CAPTURE)) catch {};
                             }
@@ -673,7 +673,7 @@ pub const Position = struct {
                     // Diagonal pin? OK
                     b1 = b2 & self.pinned & tables.LineOf[ep.index()][our_king.index()];
                     if (b1 != 0) {
-                        list.append(types.Move.new_from_to_flag(@intToEnum(types.Square, types.lsb(b1)), ep, types.MoveFlags.EN_PASSANT)) catch {};
+                        list.append(types.Move.new_from_to_flag(@as(types.Square, @enumFromInt(types.lsb(b1))), ep, types.MoveFlags.EN_PASSANT)) catch {};
                     }
                 }
 
@@ -682,7 +682,7 @@ pub const Position = struct {
                 // 1. The king and the rook have both not moved
                 // 2. No piece is attacking between the the rook and the king
                 // 3. The king is not in check
-                var entry = self.history[self.game_ply].entry;
+                const entry = self.history[self.game_ply].entry;
                 if (0 == ((entry & types.get_oo_mask(color)) | ((all_bb | danger) & types.get_oo_blocker_mask(color)))) {
                     if (color == types.Color.White) {
                         list.append(types.Move.new_from_to_flag(types.Square.e1, types.Square.g1, types.MoveFlags.OO)) catch {};
@@ -803,10 +803,10 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @intToEnum(types.MoveFlags, types.PR_QUEEN))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @intToEnum(types.MoveFlags, types.PR_ROOK))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @intToEnum(types.MoveFlags, types.PR_KNIGHT))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @intToEnum(types.MoveFlags, types.PR_BISHOP))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_QUEEN)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_ROOK)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_KNIGHT)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_BISHOP)))) catch {};
             }
 
             // Promotion Captures
@@ -816,19 +816,19 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_QUEEN))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_ROOK))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_KNIGHT))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_BISHOP))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_QUEEN))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_ROOK))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_KNIGHT))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_BISHOP))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
             }
         }
 
@@ -838,14 +838,14 @@ pub const Position = struct {
 
     // Generate all CAPTURE moves
     pub fn generate_q_moves(self: *Position, comptime color: types.Color, list: *std.ArrayList(types.Move)) void {
-        comptime var opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+        const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
         const us_bb = self.all_pieces(color);
         const them_bb = self.all_pieces(opp);
         const all_bb = us_bb | them_bb;
 
-        const our_king = @intToEnum(types.Square, types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()]));
-        const their_king = @intToEnum(types.Square, types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()]));
+        const our_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()])));
+        const their_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()])));
 
         const our_diag_sliders = self.diagonal_sliders(color);
         const their_diag_sliders = self.diagonal_sliders(opp);
@@ -857,9 +857,9 @@ pub const Position = struct {
         var b2: types.Bitboard = 0;
         var b3: types.Bitboard = 0;
 
-        comptime var rel_south = if (color == types.Color.White) types.Direction.South else types.Direction.North;
-        comptime var rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
-        comptime var rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
+        const rel_south = if (color == types.Color.White) types.Direction.South else types.Direction.North;
+        const rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
+        const rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
 
         // Squares King cannot go to
         var danger: types.Bitboard = 0;
@@ -923,7 +923,7 @@ pub const Position = struct {
             1 => {
                 // Single check: Move, capture, or block
 
-                var checker_sq = @intToEnum(types.Square, types.lsb(self.checkers));
+                var checker_sq = @as(types.Square, @enumFromInt(types.lsb(self.checkers)));
 
                 switch (self.mailbox[checker_sq.index()]) {
                     types.Piece.new_comptime(opp, types.PieceType.Pawn) => {
@@ -985,7 +985,7 @@ pub const Position = struct {
                     // Diagonal pin? OK
                     b1 = b2 & self.pinned & tables.LineOf[ep.index()][our_king.index()];
                     if (b1 != 0) {
-                        list.append(types.Move.new_from_to_flag(@intToEnum(types.Square, types.lsb(b1)), ep, types.MoveFlags.EN_PASSANT)) catch {};
+                        list.append(types.Move.new_from_to_flag(@as(types.Square, @enumFromInt(types.lsb(b1))), ep, types.MoveFlags.EN_PASSANT)) catch {};
                     }
                 }
 
@@ -1067,19 +1067,19 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_QUEEN))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_ROOK))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_KNIGHT))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @intToEnum(types.MoveFlags, types.PC_BISHOP))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_QUEEN))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_ROOK))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_KNIGHT))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @intToEnum(types.MoveFlags, types.PC_BISHOP))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
             }
         }
 

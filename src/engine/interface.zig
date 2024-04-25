@@ -40,7 +40,7 @@ pub const UciInterface = struct {
 
         out: while (true) {
             // The command will probably be less than 16384 characters
-            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 16384);
+            const line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 16384);
 
             if (line == null) {
                 break;
@@ -133,42 +133,42 @@ pub const UciInterface = struct {
                                 const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
                                 switch (tunable.id) {
                                     0 => {
-                                        parameters.LMRWeight = @intToFloat(f64, value) / 1000.0;
+                                        parameters.LMRWeight = @as(f64, @floatFromInt(value)) / 1000.0;
                                         search.init_lmr();
                                     },
                                     1 => {
-                                        parameters.LMRBias = @intToFloat(f64, value) / 1000.0;
+                                        parameters.LMRBias = @as(f64, @floatFromInt(value)) / 1000.0;
                                         search.init_lmr();
                                     },
                                     2 => {
-                                        parameters.RFPDepth = @intCast(i32, value);
+                                        parameters.RFPDepth = @as(i32, @intCast(value));
                                     },
                                     3 => {
-                                        parameters.RFPMultiplier = @intCast(i32, value);
+                                        parameters.RFPMultiplier = @as(i32, @intCast(value));
                                     },
                                     4 => {
-                                        parameters.RFPImprovingDeduction = @intCast(i32, value);
+                                        parameters.RFPImprovingDeduction = @as(i32, @intCast(value));
                                     },
                                     5 => {
-                                        parameters.NMPImprovingMargin = @intCast(i32, value);
+                                        parameters.NMPImprovingMargin = @as(i32, @intCast(value));
                                     },
                                     6 => {
-                                        parameters.NMPBase = @intCast(usize, value);
+                                        parameters.NMPBase = @as(usize, @intCast(value));
                                     },
                                     7 => {
-                                        parameters.NMPDepthDivisor = @intCast(usize, value);
+                                        parameters.NMPDepthDivisor = @as(usize, @intCast(value));
                                     },
                                     8 => {
-                                        parameters.NMPBetaDivisor = @intCast(i32, value);
+                                        parameters.NMPBetaDivisor = @as(i32, @intCast(value));
                                     },
                                     9 => {
-                                        parameters.RazoringBase = @intCast(i32, value);
+                                        parameters.RazoringBase = @as(i32, @intCast(value));
                                     },
                                     10 => {
-                                        parameters.RazoringMargin = @intCast(i32, value);
+                                        parameters.RazoringMargin = @as(i32, @intCast(value));
                                     },
                                     11 => {
-                                        parameters.AspirationWindow = @intCast(i32, value);
+                                        parameters.AspirationWindow = @as(i32, @intCast(value));
                                     },
                                     else => unreachable,
                                 }
@@ -194,7 +194,7 @@ pub const UciInterface = struct {
                     depth = std.fmt.parseUnsigned(u32, token.?, 10) catch 1;
                 }
 
-                depth = std.math.max(depth, 1);
+                depth = @max(depth, 1);
 
                 _ = perft.perft_test(&self.position, depth);
             } else if (std.mem.eql(u8, token.?, "perftdiv")) {
@@ -204,7 +204,7 @@ pub const UciInterface = struct {
                     depth = std.fmt.parseUnsigned(u32, token.?, 10) catch 1;
                 }
 
-                depth = std.math.max(depth, 1);
+                depth = @max(depth, 1);
 
                 if (self.position.turn == types.Color.White) {
                     perft.perft_div(types.Color.White, &self.position, depth);
@@ -281,7 +281,7 @@ pub const UciInterface = struct {
                             if (mt <= 0) {
                                 mt = 1;
                             }
-                            var t = @intCast(u64, mt);
+                            const t = @as(u64, @intCast(mt));
 
                             mytime = t;
                         }
@@ -301,7 +301,7 @@ pub const UciInterface = struct {
                             if (mt <= 0) {
                                 mt = 1;
                             }
-                            var t = @intCast(u64, mt);
+                            const t = @as(u64, @intCast(mt));
 
                             mytime = t;
                         }
@@ -345,7 +345,7 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
-                    const overhead = 25;
+                    const overhead: u64 = 25;
                     if (mytime != null) {
                         var inc: u64 = 0;
                         if (myinc != null) {
@@ -362,7 +362,10 @@ pub const UciInterface = struct {
                             } else {
                                 self.searcher.ideal_time = inc + (2 * (mytime.? - overhead)) / (2 * movestogo.? + 1);
                                 movetime = 2 * self.searcher.ideal_time;
-                                movetime = @min(movetime.?, mytime.? - @min(mytime.? - overhead, overhead * @min(movestogo.?, 5)));
+                                movetime = @min(
+                                    movetime.?,
+                                    mytime.? - @min(mytime.? - overhead, overhead * @min(movestogo.?, 5)),
+                                );
                             }
                             self.searcher.ideal_time = @min(self.searcher.ideal_time, mytime.? - overhead);
                             movetime = @min(movetime.?, mytime.? - overhead);
@@ -400,7 +403,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    var move = types.Move.new_from_string(&self.position, token.?);
+                                    const move = types.Move.new_from_string(&self.position, token.?);
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -414,13 +417,13 @@ pub const UciInterface = struct {
                         }
                     } else if (std.mem.eql(u8, token.?, "fen")) {
                         tokens = std.mem.split(u8, tokens.rest(), " moves ");
-                        var fen = tokens.next();
+                        const fen = tokens.next();
                         if (fen != null) {
                             self.position.set_fen(fen.?);
                             self.searcher.hash_history.clearRetainingCapacity();
                             self.searcher.hash_history.append(self.position.hash) catch {};
 
-                            var afterfen = tokens.next();
+                            const afterfen = tokens.next();
                             if (afterfen != null) {
                                 tokens = std.mem.split(u8, afterfen.?, " ");
                                 while (true) {
@@ -429,7 +432,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    var move = types.Move.new_from_string(&self.position, token.?);
+                                    const move = types.Move.new_from_string(&self.position, token.?);
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -464,7 +467,7 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
     } else {
         pos.generate_legal_moves(types.Color.Black, &movelist);
     }
-    var move_size = movelist.items.len;
+    const move_size = movelist.items.len;
     if (move_size == 1) {
         depth = 1;
     }

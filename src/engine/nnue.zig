@@ -25,8 +25,8 @@ pub fn nnue_index(piece: types.Piece, sq: types.Square) WhiteBlackPair {
     const p: usize = piece.piece_type().index();
     const c: types.Color = piece.color();
 
-    const white = @intCast(usize, @enumToInt(c)) * 64 * 6 + p * 64 + @intCast(usize, sq.index());
-    const black = @intCast(usize, @enumToInt(c.invert())) * 64 * 6 + p * 64 + @intCast(usize, sq.index() ^ 56);
+    const white = @as(usize, @intCast(@intFromEnum(c))) * 64 * 6 + p * 64 + @as(usize, @intCast(sq.index()));
+    const black = @as(usize, @intCast(@intFromEnum(c.invert()))) * 64 * 6 + p * 64 + @as(usize, @intCast(sq.index() ^ 56));
 
     return WhiteBlackPair{
         .white = white * weights.HIDDEN_SIZE,
@@ -43,7 +43,7 @@ pub inline fn clipped_relu(input: i16) i32 {
     }
 }
 
-pub const Accumulator = packed struct {
+pub const Accumulator = struct {
     white: [weights.HIDDEN_SIZE]i16,
     black: [weights.HIDDEN_SIZE]i16,
 
@@ -93,12 +93,12 @@ pub const NNUE = struct {
         self.stack_index = 0;
         self.accumulator_stack[0].clear();
 
-        for (pos.mailbox) |pc, i| {
+        for (pos.mailbox, 0..) |pc, i| {
             if (pc == types.Piece.NO_PIECE) {
                 continue;
             }
 
-            self.toggle(true, pc, @intToEnum(types.Square, i));
+            self.toggle(true, pc, @as(types.Square, @enumFromInt(i)));
         }
     }
 
