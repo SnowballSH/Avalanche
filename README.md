@@ -12,7 +12,7 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3322**
+**Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3341**
 
 **Official [Blitz CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3399**
 
