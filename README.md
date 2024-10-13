@@ -12,17 +12,15 @@
 
 ## Strength
 
-**Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3341**
+**Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3346**
 
-**Official [Blitz CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3399**
+**Official [Blitz CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3400**
 
 Version 2.1.0 participated in TCEC Swiss 6.
 
 ## About
 
 Avalanche is the **first and strongest chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
-
-This is my second attempt at computer chess, after dropping development of my MiniShogi (五将棋) engine.
 
 Avalanche v1.4.0 was the **sole winner** of the 102nd CCRL Amateur Series Tournament (Division 5), having a score of **29.5/44**. See [Tournament Page](https://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=15613&sid=8ada67b5589f716aaf477dd1befe051b).
 
