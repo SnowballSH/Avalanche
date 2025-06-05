@@ -19,7 +19,7 @@ pub const SortCounterMove: i32 = 600_000;
 pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.ArrayList(types.Move), hashmove: types.Move, comptime is_null: bool) std.ArrayList(i32) {
     var res: std.ArrayList(i32) = std.ArrayList(i32).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
 
-    var hm = hashmove.to_u16();
+    const hm = hashmove.to_u16();
 
     for (list.items) |move_| {
         var move: *const types.Move = &move_;
@@ -37,7 +37,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
                 score += SortWinningCapture + MVV_LVA[0][0];
             } else {
-                var see_value = see.see_threshold(pos, move.*, -90);
+                const see_value = see.see_threshold(pos, move.*, -90);
 
                 score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
 
@@ -57,16 +57,16 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                 }
             }
         } else {
-            var last = if (searcher.ply > 0) searcher.move_history[searcher.ply - 1] else types.Move.empty();
+            const last = if (searcher.ply > 0) searcher.move_history[searcher.ply - 1] else types.Move.empty();
             if (searcher.killer[searcher.ply][0].to_u16() == move.to_u16()) {
                 score += SortKiller1;
             } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
                 score += SortKiller2;
-            } else if (searcher.ply >= 1 and searcher.counter_moves[@enumToInt(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
+            } else if (searcher.ply >= 1 and searcher.counter_moves[@intFromEnum(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
                 score += SortCounterMove;
             } else {
                 score += SortQuiet;
-                score += searcher.history[@enumToInt(pos.turn)][move.from][move.to];
+                score += searcher.history[@intFromEnum(pos.turn)][move.from][move.to];
                 if (!is_null and searcher.ply >= 1) {
                     const plies: [3]usize = .{ 0, 1, 3 };
                     for (plies) |plies_ago| {
@@ -89,7 +89,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
 }
 
 pub inline fn getNextBest(list: *std.ArrayList(types.Move), evals: *std.ArrayList(i32), i: usize) types.Move {
-    var move_size = list.items.len;
+    const move_size = list.items.len;
     var j = i + 1;
     while (j < move_size) : (j += 1) {
         if (evals.items[i] < evals.items[j]) {

@@ -55,7 +55,7 @@ test "Bitboard general" {
     try expect(types.popcount(0b0110111010010) == 7);
     try expect(types.lsb(0b01101000) == 3);
     var b: types.Bitboard = 0b01101000;
-    try expect(@enumToInt(types.pop_lsb(&b)) == 3);
+    try expect(@intFromEnum(types.pop_lsb(&b)) == 3);
     try expect(b == 0b01100000);
 
     var bb_i: types.Bitboard = 0x3c18183c0000;
