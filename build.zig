@@ -62,13 +62,17 @@ pub fn build(b: *std.Build) void {
     );
     // Standard release options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
-    const optimise = b.standardOptimizeOption(.{});
-
+    const optimize = b.standardOptimizeOption(.{});
+    const omit_frame_ptr = switch (optimize) {
+        .ReleaseFast, .ReleaseSmall => true,
+        .Debug, .ReleaseSafe => false,
+    };
     const exe = b.addExecutable(.{
         .name = targetName,
         .root_source_file = b.path("src/main.zig"),
         .target = target,
-        .optimize = optimise,
+        .optimize = optimize,
+        .omit_frame_pointer = omit_frame_ptr,
     });
 
     exe.root_module.addImport("net", net_module);
@@ -95,7 +99,7 @@ pub fn build(b: *std.Build) void {
     const exe_tests = b.addTest(.{
         .root_source_file = b.path("src/tests.zig"),
         .target = target,
-        .optimize = optimise,
+        .optimize = optimize,
     });
 
     const test_step = b.step("test", "Run unit tests");
