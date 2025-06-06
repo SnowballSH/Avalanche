@@ -28,8 +28,8 @@ pub const UciInterface = struct {
     pub fn main_loop(self: *UciInterface) !void {
         var stdin = std.io.getStdIn().reader();
         var stdout = std.io.getStdOut().writer();
-        var command_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-        defer command_arena.deinit();
+
+        const allocator = std.heap.c_allocator;
 
         self.searcher.deinit();
         self.searcher = search.Searcher.new();
@@ -40,13 +40,10 @@ pub const UciInterface = struct {
 
         out: while (true) {
             // The command will probably be less than 16384 characters
-            const line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 16384);
+            const line = (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 16384)) orelse break;
+            defer allocator.free(line);
 
-            if (line == null) {
-                break;
-            }
-
-            const tline = std.mem.trim(u8, line.?, "\r");
+            const tline = std.mem.trim(u8, line, "\r");
 
             var tokens = std.mem.tokenizeSequence(u8, tline, " ");
             var token = tokens.next();
@@ -370,9 +367,8 @@ pub const UciInterface = struct {
                 }
 
                 self.searcher.stop = false;
-
                 self.search_thread = std.Thread.spawn(
-                    .{ .stack_size = 64 * 1024 * 1024 },
+                    .{ .stack_size = 256 * 1024 * 1024 },
                     startSearch,
                     .{ &self.searcher, &self.position, movetime.?, max_depth },
                 ) catch |e| {
@@ -441,8 +437,6 @@ pub const UciInterface = struct {
                     }
                 }
             }
-
-            command_arena.allocator().free(line.?);
         }
 
         self.searcher.deinit();

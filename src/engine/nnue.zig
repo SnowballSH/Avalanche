@@ -43,7 +43,7 @@ pub inline fn clipped_relu(input: i16) i32 {
     }
 }
 
-pub const Accumulator = extern struct {
+pub const Accumulator = struct {
     white: [weights.HIDDEN_SIZE]i16,
     black: [weights.HIDDEN_SIZE]i16,
 
