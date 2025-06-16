@@ -154,14 +154,14 @@ test "Position" {
     try expect(pos.hash == 0);
     try expect(pos.turn == types.Color.White);
     try expect(pos.game_ply == 0);
-    try expect(pos.mailbox[0] == types.Piece.NO_PIECE);
+    try expect((&pos.mailbox)[0] == types.Piece.NO_PIECE);
 
     pos.add_piece(types.Piece.WHITE_KNIGHT, types.Square.f3);
-    try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.WHITE_KNIGHT);
+    try expect((&pos.mailbox)[types.Square.f3.index()] == types.Piece.WHITE_KNIGHT);
     try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0x200000);
 
     pos.remove_piece(types.Square.f3);
-    try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.NO_PIECE);
+    try expect((&pos.mailbox)[types.Square.f3.index()] == types.Piece.NO_PIECE);
     try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0);
 
     pos = position.Position.new();

@@ -191,7 +191,7 @@ pub const DynamicEvaluator = struct {
     }
 
     pub inline fn remove_piece(self: *DynamicEvaluator, sq: types.Square, pos: *position.Position) void {
-        const pc = pos.mailbox[sq.index()];
+        const pc = (&pos.mailbox)[sq.index()];
 
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
@@ -220,7 +220,7 @@ pub const DynamicEvaluator = struct {
     }
 
     pub inline fn move_piece_quiet(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
-        const pc = pos.mailbox[from.index()];
+        const pc = (&pos.mailbox)[from.index()];
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
                 self.nnue_evaluator.toggle(false, pc, from);

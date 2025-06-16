@@ -18,8 +18,8 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     var opp = pos.turn.invert();
     var blockers = all_pieces & ~types.SquareIndexBB[move.to];
 
-    gains[0] = SeeWeight[pos.mailbox[move.to].piece_type().index()];
-    var last_piece_pts = SeeWeight[pos.mailbox[move.from].piece_type().index()];
+    gains[0] = SeeWeight[(&pos.mailbox)[move.to].piece_type().index()];
+    var last_piece_pts = SeeWeight[(&pos.mailbox)[move.from].piece_type().index()];
 
     var depth: usize = 1;
     outer: while (depth < gains.len) : (depth += 1) {
@@ -57,8 +57,8 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
 pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) bool {
     const from = move.from;
     const to = move.to;
-    const attacker = pos.mailbox[from].piece_type().index();
-    const victim = pos.mailbox[to].piece_type().index();
+    const attacker = (&pos.mailbox)[from].piece_type().index();
+    const victim = (&pos.mailbox)[to].piece_type().index();
     var swap = SeeWeight[victim] - threshold;
     if (swap < 0) {
         return false;
@@ -76,7 +76,7 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     const bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
     const rooks = pos.orthogonal_sliders(types.Color.White) | pos.orthogonal_sliders(types.Color.Black);
 
-    var stm = pos.mailbox[from].color().invert();
+    var stm = (&pos.mailbox)[from].color().invert();
 
     while (true) {
         attackers &= occ;
@@ -125,5 +125,5 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         }
     }
 
-    return stm != pos.mailbox[from].color();
+    return stm != (&pos.mailbox)[from].color();
 }

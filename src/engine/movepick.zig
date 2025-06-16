@@ -34,12 +34,12 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
         if (hm == move.to_u16()) {
             score += SortHash;
         } else if (move.is_capture()) {
-            if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
+            if ((&pos.mailbox)[move.to] == types.Piece.NO_PIECE) {
                 score += SortWinningCapture + MVV_LVA[0][0];
             } else {
                 const see_value = see.see_threshold(pos, move.*, -90);
 
-                score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
+                score += MVV_LVA[(&pos.mailbox)[move.to].piece_type().index()][(&pos.mailbox)[move.from].piece_type().index()];
 
                 if (see_value) {
                     score += SortWinningCapture;

@@ -720,7 +720,7 @@ pub const Searcher = struct {
             const new_depth: usize = @intCast(@as(i32, @intCast(depth)) + extension - 1);
 
             self.move_history[self.ply] = move;
-            self.moved_piece_history[self.ply] = pos.mailbox[move.from];
+            self.moved_piece_history[self.ply] = (&pos.mailbox)[move.from];
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
@@ -789,8 +789,8 @@ pub const Searcher = struct {
                 }
 
                 if (!is_null) {
-                    self.pv[self.ply][0] = move;
-                    @memcpy(self.pv[self.ply][1..(self.pv_size[self.ply + 1] + 1)], self.pv[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
+                    ((&self.pv)[self.ply])[0] = move;
+                    @memcpy((&self.pv)[self.ply][1..(self.pv_size[self.ply + 1] + 1)], (&self.pv)[self.ply + 1][0..(self.pv_size[self.ply + 1])]);
                     self.pv_size[self.ply] = self.pv_size[self.ply + 1] + 1;
                 }
 
@@ -964,7 +964,7 @@ pub const Searcher = struct {
             }
 
             self.move_history[self.ply] = move;
-            self.moved_piece_history[self.ply] = pos.mailbox[move.from];
+            self.moved_piece_history[self.ply] = (&pos.mailbox)[move.from];
             self.ply += 1;
             pos.play_move(color, move);
             tt.GlobalTT.prefetch(pos.hash);

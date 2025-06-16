@@ -154,7 +154,7 @@ pub fn init_rook_attacks() void {
 
 // Returns the bitboard for rook attacks
 pub inline fn get_rook_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
-    return RookAttacks[square.index()][((occ & RookAttackMasks[square.index()]) *% RookMagics[square.index()]) >> @intCast(RookAttackShifts[square.index()])];
+    return (&(&RookAttacks)[square.index()])[((occ & (&RookAttackMasks)[square.index()]) *% (&RookMagics)[square.index()]) >> @intCast((&RookAttackShifts)[square.index()])];
 }
 
 // Returns x-ray attacks, which is the attack when the first-layer blockers are removed.
@@ -222,7 +222,7 @@ pub fn init_bishop_attacks() void {
 
 // Returns the bitboard for bishop attacks
 pub inline fn get_bishop_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
-    return BishopAttacks[square.index()][((occ & BishopAttackMasks[square.index()]) *% BishopMagics[square.index()]) >> @intCast(BishopAttackShifts[square.index()])];
+    return (&(&BishopAttacks)[square.index()])[((occ & (&BishopAttackMasks)[square.index()]) *% (&BishopMagics)[square.index()]) >> @intCast((&BishopAttackShifts)[square.index()])];
 }
 
 // Returns x-ray attacks, which is the attack when the first-layer blockers are removed.

@@ -67,7 +67,7 @@ pub const Position = struct {
     pub fn new() Position {
         var pos = Position{};
 
-        @memset(pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
+        @memset((&pos.mailbox)[0..types.N_SQUARES], types.Piece.NO_PIECE);
         pos.history[0] = UndoInfo.new();
         pos.evaluator = hce.DynamicEvaluator{};
 
@@ -83,7 +83,7 @@ pub const Position = struct {
             std.debug.print("{s} {} ", .{ line, @divTrunc(i, 8) + 1 });
             var j: i32 = 0;
             while (j < 8) : (j += 1) {
-                std.debug.print("| {c} ", .{types.PieceString[self.mailbox[@intCast(i + j)].index()]});
+                std.debug.print("| {c} ", .{types.PieceString[(&self.mailbox)[@intCast(i + j)].index()]});
             }
             std.debug.print("| {}\n", .{@divTrunc(i, 8) + 1});
         }
@@ -166,10 +166,10 @@ pub const Position = struct {
             while (j < 8) : (j += 1) {
                 const idx: usize = @intCast(i + j);
 
-                if (self.mailbox[idx] == types.Piece.NO_PIECE) {
+                if ((&self.mailbox)[idx] == types.Piece.NO_PIECE) {
                     empty_count += 1;
                 } else {
-                    const pieceChar = types.PieceString[self.mailbox[idx].index()];
+                    const pieceChar = types.PieceString[(&self.mailbox)[idx].index()];
                     if (empty_count > 0) {
                         fen[index] = empty_count + '0';
                         index += 1;
@@ -246,17 +246,17 @@ pub const Position = struct {
 
     pub inline fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
         self.evaluator.add_piece(pc, sq, self);
-        self.mailbox[sq.index()] = pc;
+        (&self.mailbox)[sq.index()] = pc;
         self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
         self.hash ^= zobrist.ZobristTable[pc.index()][sq.index()];
     }
 
     pub inline fn remove_piece(self: *Position, sq: types.Square) void {
         self.evaluator.remove_piece(sq, self);
-        const pc = self.mailbox[sq.index()].index();
+        const pc = (&self.mailbox)[sq.index()].index();
         self.hash ^= zobrist.ZobristTable[pc][sq.index()];
         self.piece_bitboards[pc] &= ~types.SquareIndexBB[sq.index()];
-        self.mailbox[sq.index()] = types.Piece.NO_PIECE;
+        (&self.mailbox)[sq.index()] = types.Piece.NO_PIECE;
     }
 
     pub inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
@@ -267,11 +267,11 @@ pub const Position = struct {
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
     pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
         self.evaluator.move_piece_quiet(from, to, self);
-        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()] ^ zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
+        self.hash ^= zobrist.ZobristTable[(&self.mailbox)[from.index()].index()][from.index()] ^ zobrist.ZobristTable[(&self.mailbox)[from.index()].index()][to.index()];
 
-        self.piece_bitboards[self.mailbox[from.index()].index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
-        self.mailbox[to.index()] = self.mailbox[from.index()];
-        self.mailbox[from.index()] = types.Piece.NO_PIECE;
+        self.piece_bitboards[(&self.mailbox)[from.index()].index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+        (&self.mailbox)[to.index()] = (&self.mailbox)[from.index()];
+        (&self.mailbox)[from.index()] = types.Piece.NO_PIECE;
     }
 
     pub inline fn diagonal_sliders(self: Position, comptime color: types.Color) types.Bitboard {
@@ -340,7 +340,7 @@ pub const Position = struct {
         const flags = move.get_flags();
         self.history[self.game_ply].entry |= types.SquareIndexBB[move.to] | types.SquareIndexBB[move.from];
 
-        const pt = self.mailbox[move.from].piece_type();
+        const pt = (&self.mailbox)[move.from].piece_type();
         if (pt == types.PieceType.Pawn or move.is_capture()) {
             self.history[self.game_ply].fifty = 0;
         }
@@ -398,31 +398,31 @@ pub const Position = struct {
                     },
                     types.PC_KNIGHT => {
                         self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.history[self.game_ply].captured = (&self.mailbox)[move.to];
                         self.remove_piece(move.get_to());
                         self.add_piece(types.Piece.new_comptime(color, types.PieceType.Knight), move.get_to());
                     },
                     types.PC_BISHOP => {
                         self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.history[self.game_ply].captured = (&self.mailbox)[move.to];
                         self.remove_piece(move.get_to());
                         self.add_piece(types.Piece.new_comptime(color, types.PieceType.Bishop), move.get_to());
                     },
                     types.PC_ROOK => {
                         self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.history[self.game_ply].captured = (&self.mailbox)[move.to];
                         self.remove_piece(move.get_to());
                         self.add_piece(types.Piece.new_comptime(color, types.PieceType.Rook), move.get_to());
                     },
                     types.PC_QUEEN => {
                         self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
+                        self.history[self.game_ply].captured = (&self.mailbox)[move.to];
                         self.remove_piece(move.get_to());
                         self.add_piece(types.Piece.new_comptime(color, types.PieceType.Queen), move.get_to());
                     },
                     else => {
                         if (flags == types.MoveFlags.CAPTURE) {
-                            self.history[self.game_ply].captured = self.mailbox[move.to];
+                            self.history[self.game_ply].captured = (&self.mailbox)[move.to];
                             self.move_piece(move.get_from(), move.get_to());
                         }
                     },
@@ -604,7 +604,7 @@ pub const Position = struct {
 
                 const checker_sq: types.Square = @enumFromInt(types.lsb(self.checkers));
 
-                switch (self.mailbox[checker_sq.index()]) {
+                switch ((&self.mailbox)[checker_sq.index()]) {
                     types.Piece.new_comptime(opp, types.PieceType.Pawn) => {
                         var ep = self.history[self.game_ply].ep_sq;
                         if (self.checkers == types.shift_bitboard(types.SquareIndexBB[ep.index()], rel_south)) {
@@ -628,7 +628,7 @@ pub const Position = struct {
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned;
                         while (b1 != 0) {
                             var psq = types.pop_lsb(&b1);
-                            if (self.mailbox[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
+                            if ((&self.mailbox)[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, @enumFromInt(types.PC_QUEEN))) catch {};
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, @enumFromInt(types.PC_ROOK))) catch {};
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, @enumFromInt(types.PC_KNIGHT))) catch {};
@@ -704,7 +704,7 @@ pub const Position = struct {
 
                     // Only include moves that align with king.
 
-                    b2 = tables.get_attacks(self.mailbox[sq.index()].piece_type(), sq, all_bb) & tables.LineOf[our_king.index()][sq.index()];
+                    b2 = tables.get_attacks((&self.mailbox)[sq.index()].piece_type(), sq, all_bb) & tables.LineOf[our_king.index()][sq.index()];
                     types.Move.make_all(types.MoveFlags.QUIET, sq, b2 & quiet_mask, list);
                     types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2 & capture_mask, list);
                 }
@@ -924,7 +924,7 @@ pub const Position = struct {
 
                 var checker_sq: types.Square = @enumFromInt(types.lsb(self.checkers));
 
-                switch (self.mailbox[checker_sq.index()]) {
+                switch ((&self.mailbox)[checker_sq.index()]) {
                     types.Piece.new_comptime(opp, types.PieceType.Pawn) => {
                         var ep = self.history[self.game_ply].ep_sq;
                         if (self.checkers == types.shift_bitboard(types.SquareIndexBB[ep.index()], rel_south)) {
@@ -995,7 +995,7 @@ pub const Position = struct {
 
                     // Only include moves that align with king.
 
-                    b2 = tables.get_attacks(self.mailbox[sq.index()].piece_type(), sq, all_bb) & tables.LineOf[our_king.index()][sq.index()];
+                    b2 = tables.get_attacks((&self.mailbox)[sq.index()].piece_type(), sq, all_bb) & tables.LineOf[our_king.index()][sq.index()];
 
                     types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2 & capture_mask, list);
                 }
