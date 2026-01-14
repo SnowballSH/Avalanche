@@ -8,7 +8,7 @@
 
 <br/>
 
-### Avalanche is the first and strongest UCI Chess Engine written in [Zig](https://ziglang.org/)
+### Avalanche is the first UCI Chess Engine written in [Zig](https://ziglang.org/)
 
 ## Strength
 
