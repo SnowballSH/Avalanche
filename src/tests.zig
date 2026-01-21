@@ -55,7 +55,7 @@ test "Bitboard general" {
     try expect(types.popcount(0b0110111010010) == 7);
     try expect(types.lsb(0b01101000) == 3);
     var b: types.Bitboard = 0b01101000;
-    try expect(@enumToInt(types.pop_lsb(&b)) == 3);
+    try expect(@intFromEnum(types.pop_lsb(&b)) == 3);
     try expect(b == 0b01100000);
 
     var bb_i: types.Bitboard = 0x3c18183c0000;
@@ -154,14 +154,14 @@ test "Position" {
     try expect(pos.hash == 0);
     try expect(pos.turn == types.Color.White);
     try expect(pos.game_ply == 0);
-    try expect(pos.mailbox[0] == types.Piece.NO_PIECE);
+    try expect((&pos.mailbox)[0] == types.Piece.NO_PIECE);
 
     pos.add_piece(types.Piece.WHITE_KNIGHT, types.Square.f3);
-    try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.WHITE_KNIGHT);
+    try expect((&pos.mailbox)[types.Square.f3.index()] == types.Piece.WHITE_KNIGHT);
     try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0x200000);
 
     pos.remove_piece(types.Square.f3);
-    try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.NO_PIECE);
+    try expect((&pos.mailbox)[types.Square.f3.index()] == types.Piece.NO_PIECE);
     try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0);
 
     pos = position.Position.new();

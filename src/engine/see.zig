@@ -12,14 +12,14 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     var defenders: types.Bitboard = 0;
     var piece_bb: types.Bitboard = 0;
 
-    var to_sq = move.get_to();
-    var all_pieces = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    const to_sq = move.get_to();
+    const all_pieces = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
     var gains: [16]i32 = undefined;
     var opp = pos.turn.invert();
     var blockers = all_pieces & ~types.SquareIndexBB[move.to];
 
-    gains[0] = SeeWeight[pos.mailbox[move.to].piece_type().index()];
-    var last_piece_pts = SeeWeight[pos.mailbox[move.from].piece_type().index()];
+    gains[0] = SeeWeight[(&pos.mailbox)[move.to].piece_type().index()];
+    var last_piece_pts = SeeWeight[(&pos.mailbox)[move.from].piece_type().index()];
 
     var depth: usize = 1;
     outer: while (depth < gains.len) : (depth += 1) {
@@ -30,12 +30,12 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
             defenders = pos.all_pieces(types.Color.Black) & blockers;
         }
         var pt = types.PieceType.Pawn.index();
-        var ending = types.PieceType.King.index();
+        const ending = types.PieceType.King.index();
         while (pt <= ending) : (pt += 1) {
             last_piece_pts = SeeWeight[pt];
-            piece_bb = (if (pt == 0) (if (opp == types.Color.White) tables.get_pawn_attacks(types.Color.Black, to_sq) else tables.get_pawn_attacks(types.Color.White, to_sq)) else (tables.get_attacks(@intToEnum(types.PieceType, pt), to_sq, blockers))) & defenders & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]);
+            piece_bb = (if (pt == 0) (if (opp == types.Color.White) tables.get_pawn_attacks(types.Color.Black, to_sq) else tables.get_pawn_attacks(types.Color.White, to_sq)) else (tables.get_attacks(@enumFromInt(pt), to_sq, blockers))) & defenders & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]);
             if (piece_bb != 0) {
-                blockers &= ~(types.SquareIndexBB[@intCast(usize, types.lsb(piece_bb))]);
+                blockers &= ~(types.SquareIndexBB[@intCast(types.lsb(piece_bb))]);
                 opp = opp.invert();
                 continue :outer;
             }
@@ -55,10 +55,10 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
 
 // Logic https://github.com/TerjeKir/weiss
 pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) bool {
-    var from = move.from;
-    var to = move.to;
-    var attacker = pos.mailbox[from].piece_type().index();
-    var victim = pos.mailbox[to].piece_type().index();
+    const from = move.from;
+    const to = move.to;
+    const attacker = (&pos.mailbox)[from].piece_type().index();
+    const victim = (&pos.mailbox)[to].piece_type().index();
     var swap = SeeWeight[victim] - threshold;
     if (swap < 0) {
         return false;
@@ -68,15 +68,15 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         return true;
     }
 
-    var all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    const all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
 
     var occ = (all ^ types.SquareIndexBB[from]) | types.SquareIndexBB[to];
-    var attackers = (pos.attackers_from(types.Color.White, @intToEnum(types.Square, to), occ) | pos.attackers_from(types.Color.Black, @intToEnum(types.Square, to), occ)) & occ;
+    var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @enumFromInt(to)), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @enumFromInt(to)), occ)) & occ;
 
-    var bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
-    var rooks = pos.orthogonal_sliders(types.Color.White) | pos.orthogonal_sliders(types.Color.Black);
+    const bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
+    const rooks = pos.orthogonal_sliders(types.Color.White) | pos.orthogonal_sliders(types.Color.Black);
 
-    var stm = pos.mailbox[from].color().invert();
+    var stm = (&pos.mailbox)[from].color().invert();
 
     while (true) {
         attackers &= occ;
@@ -116,14 +116,14 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
             break;
         }
 
-        occ ^= types.SquareIndexBB[@intCast(usize, types.lsb(my_attackers & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8])))];
+        occ ^= types.SquareIndexBB[@intCast(types.lsb(my_attackers & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8])))];
 
         if (pt == 0 or pt == 2 or pt == 4) {
-            attackers |= tables.get_bishop_attacks(@intToEnum(types.Square, to), occ) & bishops;
+            attackers |= tables.get_bishop_attacks(@as(types.Square, @enumFromInt(to)), occ) & bishops;
         } else if (pt == 3 or pt == 4) {
-            attackers |= tables.get_rook_attacks(@intToEnum(types.Square, to), occ) & rooks;
+            attackers |= tables.get_rook_attacks(@as(types.Square, @enumFromInt(to)), occ) & rooks;
         }
     }
 
-    return stm != pos.mailbox[from].color();
+    return stm != (&pos.mailbox)[from].color();
 }

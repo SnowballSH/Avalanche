@@ -28,8 +28,8 @@ pub const UciInterface = struct {
     pub fn main_loop(self: *UciInterface) !void {
         var stdin = std.io.getStdIn().reader();
         var stdout = std.io.getStdOut().writer();
-        var command_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-        defer command_arena.deinit();
+
+        const allocator = std.heap.c_allocator;
 
         self.searcher.deinit();
         self.searcher = search.Searcher.new();
@@ -40,15 +40,12 @@ pub const UciInterface = struct {
 
         out: while (true) {
             // The command will probably be less than 16384 characters
-            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 16384);
+            const line = (try stdin.readUntilDelimiterOrEofAlloc(allocator, '\n', 16384)) orelse break;
+            defer allocator.free(line);
 
-            if (line == null) {
-                break;
-            }
+            const tline = std.mem.trim(u8, line, "\r");
 
-            const tline = std.mem.trim(u8, line.?, "\r");
-
-            var tokens = std.mem.split(u8, tline, " ");
+            var tokens = std.mem.tokenizeSequence(u8, tline, " ");
             var token = tokens.next();
             if (token == null) {
                 break;
@@ -133,42 +130,42 @@ pub const UciInterface = struct {
                                 const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
                                 switch (tunable.id) {
                                     0 => {
-                                        parameters.LMRWeight = @intToFloat(f64, value) / 1000.0;
+                                        parameters.LMRWeight = @as(f64, @floatFromInt(value)) / 1000.0;
                                         search.init_lmr();
                                     },
                                     1 => {
-                                        parameters.LMRBias = @intToFloat(f64, value) / 1000.0;
+                                        parameters.LMRBias = @as(f64, @floatFromInt(value)) / 1000.0;
                                         search.init_lmr();
                                     },
                                     2 => {
-                                        parameters.RFPDepth = @intCast(i32, value);
+                                        parameters.RFPDepth = @intCast(value);
                                     },
                                     3 => {
-                                        parameters.RFPMultiplier = @intCast(i32, value);
+                                        parameters.RFPMultiplier = @intCast(value);
                                     },
                                     4 => {
-                                        parameters.RFPImprovingDeduction = @intCast(i32, value);
+                                        parameters.RFPImprovingDeduction = @intCast(value);
                                     },
                                     5 => {
-                                        parameters.NMPImprovingMargin = @intCast(i32, value);
+                                        parameters.NMPImprovingMargin = @intCast(value);
                                     },
                                     6 => {
-                                        parameters.NMPBase = @intCast(usize, value);
+                                        parameters.NMPBase = @intCast(value);
                                     },
                                     7 => {
-                                        parameters.NMPDepthDivisor = @intCast(usize, value);
+                                        parameters.NMPDepthDivisor = @intCast(value);
                                     },
                                     8 => {
-                                        parameters.NMPBetaDivisor = @intCast(i32, value);
+                                        parameters.NMPBetaDivisor = @intCast(value);
                                     },
                                     9 => {
-                                        parameters.RazoringBase = @intCast(i32, value);
+                                        parameters.RazoringBase = @intCast(value);
                                     },
                                     10 => {
-                                        parameters.RazoringMargin = @intCast(i32, value);
+                                        parameters.RazoringMargin = @intCast(value);
                                     },
                                     11 => {
-                                        parameters.AspirationWindow = @intCast(i32, value);
+                                        parameters.AspirationWindow = @intCast(value);
                                     },
                                     else => unreachable,
                                 }
@@ -194,7 +191,7 @@ pub const UciInterface = struct {
                     depth = std.fmt.parseUnsigned(u32, token.?, 10) catch 1;
                 }
 
-                depth = std.math.max(depth, 1);
+                depth = @max(depth, 1);
 
                 _ = perft.perft_test(&self.position, depth);
             } else if (std.mem.eql(u8, token.?, "perftdiv")) {
@@ -204,7 +201,7 @@ pub const UciInterface = struct {
                     depth = std.fmt.parseUnsigned(u32, token.?, 10) catch 1;
                 }
 
-                depth = std.math.max(depth, 1);
+                depth = @max(depth, 1);
 
                 if (self.position.turn == types.Color.White) {
                     perft.perft_div(types.Color.White, &self.position, depth);
@@ -281,9 +278,8 @@ pub const UciInterface = struct {
                             if (mt <= 0) {
                                 mt = 1;
                             }
-                            var t = @intCast(u64, mt);
 
-                            mytime = t;
+                            mytime = @intCast(mt);
                         }
                     } else if (std.mem.eql(u8, token.?, "btime")) {
                         self.searcher.force_thinking = false;
@@ -301,9 +297,7 @@ pub const UciInterface = struct {
                             if (mt <= 0) {
                                 mt = 1;
                             }
-                            var t = @intCast(u64, mt);
-
-                            mytime = t;
+                            mytime = @intCast(mt);
                         }
                     } else if (std.mem.eql(u8, token.?, "winc")) {
                         self.searcher.force_thinking = false;
@@ -345,7 +339,7 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
-                    const overhead = 25;
+                    const overhead: u64 = 25;
                     if (mytime != null) {
                         var inc: u64 = 0;
                         if (myinc != null) {
@@ -373,9 +367,8 @@ pub const UciInterface = struct {
                 }
 
                 self.searcher.stop = false;
-
                 self.search_thread = std.Thread.spawn(
-                    .{ .stack_size = 64 * 1024 * 1024 },
+                    .{ .stack_size = 256 * 1024 * 1024 },
                     startSearch,
                     .{ &self.searcher, &self.position, movetime.?, max_depth },
                 ) catch |e| {
@@ -400,7 +393,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    var move = types.Move.new_from_string(&self.position, token.?);
+                                    const move = types.Move.new_from_string(&self.position, token.?);
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -413,23 +406,23 @@ pub const UciInterface = struct {
                             }
                         }
                     } else if (std.mem.eql(u8, token.?, "fen")) {
-                        tokens = std.mem.split(u8, tokens.rest(), " moves ");
-                        var fen = tokens.next();
+                        tokens = std.mem.tokenizeSequence(u8, tokens.rest(), " moves ");
+                        const fen = tokens.next();
                         if (fen != null) {
                             self.position.set_fen(fen.?);
                             self.searcher.hash_history.clearRetainingCapacity();
                             self.searcher.hash_history.append(self.position.hash) catch {};
 
-                            var afterfen = tokens.next();
+                            const afterfen = tokens.next();
                             if (afterfen != null) {
-                                tokens = std.mem.split(u8, afterfen.?, " ");
+                                tokens = std.mem.tokenizeSequence(u8, afterfen.?, " ");
                                 while (true) {
                                     token = tokens.next();
                                     if (token == null) {
                                         break;
                                     }
 
-                                    var move = types.Move.new_from_string(&self.position, token.?);
+                                    const move = types.Move.new_from_string(&self.position, token.?);
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -444,8 +437,6 @@ pub const UciInterface = struct {
                     }
                 }
             }
-
-            command_arena.allocator().free(line.?);
         }
 
         self.searcher.deinit();
@@ -464,7 +455,7 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
     } else {
         pos.generate_legal_moves(types.Color.Black, &movelist);
     }
-    var move_size = movelist.items.len;
+    const move_size = movelist.items.len;
     if (move_size == 1) {
         depth = 1;
     }
