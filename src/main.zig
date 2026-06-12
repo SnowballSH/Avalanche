@@ -12,7 +12,9 @@ const datagen = @import("engine/datagen.zig");
 
 const arch = @import("build_options");
 
-pub fn main() anyerror!void {
+pub fn main(init: std.process.Init) anyerror!void {
+    types.GLOBAL_IO = init.io;
+
     tables.init_all();
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);
@@ -20,16 +22,16 @@ pub fn main() anyerror!void {
     weights.do_nnue();
     search.init_lmr();
 
-    var args = try std.process.argsWithAllocator(std.heap.page_allocator);
-
-    _ = args.next();
-    var second = args.next();
-    if (second != null) {
-        if (std.mem.eql(u8, second.?, "bench")) {
+    // `toSlice` is the cross-platform way to read argv (the bare `Iterator.init`
+    // is a compile error on Windows, where argument parsing needs an allocator).
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len >= 2) {
+        const second = args[1];
+        if (std.mem.eql(u8, second, "bench")) {
             try bench.bench();
             return;
         }
-        if (std.mem.eql(u8, second.?, "datagen")) {
+        if (std.mem.eql(u8, second, "datagen")) {
             var gen = datagen.Datagen.new();
             defer gen.deinit();
 
@@ -39,7 +41,7 @@ pub fn main() anyerror!void {
             return;
         }
 
-        if (std.mem.eql(u8, second.?, "datagen_single")) {
+        if (std.mem.eql(u8, second, "datagen_single")) {
             var gen = datagen.Datagen.new();
             defer gen.deinit();
 

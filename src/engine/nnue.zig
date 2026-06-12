@@ -25,8 +25,8 @@ pub fn nnue_index(piece: types.Piece, sq: types.Square) WhiteBlackPair {
     const p: usize = piece.piece_type().index();
     const c: types.Color = piece.color();
 
-    const white = @intCast(usize, @enumToInt(c)) * 64 * 6 + p * 64 + @intCast(usize, sq.index());
-    const black = @intCast(usize, @enumToInt(c.invert())) * 64 * 6 + p * 64 + @intCast(usize, sq.index() ^ 56);
+    const white = @as(usize, @intCast(@intFromEnum(c))) * 64 * 6 + p * 64 + @as(usize, @intCast(sq.index()));
+    const black = @as(usize, @intCast(@intFromEnum(c.invert()))) * 64 * 6 + p * 64 + @as(usize, @intCast(sq.index() ^ 56));
 
     return WhiteBlackPair{
         .white = white * weights.HIDDEN_SIZE,
@@ -43,9 +43,13 @@ pub inline fn clipped_relu(input: i16) i32 {
     }
 }
 
-pub const Accumulator = packed struct {
-    white: [weights.HIDDEN_SIZE]i16,
-    black: [weights.HIDDEN_SIZE]i16,
+// SIMD vector width (in i16 lanes) for the NNUE hot loops. HIDDEN_SIZE is a
+// multiple of this, so the loops need no scalar tail.
+const VL: usize = 16;
+
+pub const Accumulator = struct {
+    white: [weights.HIDDEN_SIZE]i16 align(64),
+    black: [weights.HIDDEN_SIZE]i16 align(64),
 
     pub inline fn clear(self: *Accumulator) void {
         self.white = weights.MODEL.layer_1_bias;
@@ -53,14 +57,21 @@ pub const Accumulator = packed struct {
     }
 
     pub fn update_weights(self: *Accumulator, comptime on: bool, data: WhiteBlackPair) void {
+        const V = @Vector(VL, i16);
+        const m1 = &weights.MODEL.layer_1;
+        // Elementwise vector add/sub is bit-identical to the scalar loop.
         var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) : (i += 1) {
+        while (i < weights.HIDDEN_SIZE) : (i += VL) {
+            const ww: V = self.white[i..][0..VL].*;
+            const wb: V = self.black[i..][0..VL].*;
+            const mw: V = m1[data.white + i ..][0..VL].*;
+            const mb: V = m1[data.black + i ..][0..VL].*;
             if (on) {
-                self.white[i] += weights.MODEL.layer_1[data.white + i];
-                self.black[i] += weights.MODEL.layer_1[data.black + i];
+                self.white[i..][0..VL].* = ww + mw;
+                self.black[i..][0..VL].* = wb + mb;
             } else {
-                self.white[i] -= weights.MODEL.layer_1[data.white + i];
-                self.black[i] -= weights.MODEL.layer_1[data.black + i];
+                self.white[i..][0..VL].* = ww - mw;
+                self.black[i..][0..VL].* = wb - mb;
             }
         }
     }
@@ -93,12 +104,12 @@ pub const NNUE = struct {
         self.stack_index = 0;
         self.accumulator_stack[0].clear();
 
-        for (pos.mailbox) |pc, i| {
+        for (pos.mailbox, 0..) |pc, i| {
             if (pc == types.Piece.NO_PIECE) {
                 continue;
             }
 
-            self.toggle(true, pc, @intToEnum(types.Square, i));
+            self.toggle(true, pc, @as(types.Square, @enumFromInt(i)));
         }
     }
 
@@ -124,18 +135,33 @@ pub const NNUE = struct {
 
         const bucket = get_bucket(pos);
 
-        var res = @as(i32, weights.MODEL.layer_2_bias[bucket]);
+        const w2 = &weights.MODEL.layer_2[bucket];
+        const own = if (turn == types.Color.White) &acc.white else &acc.black;
+        const opp = if (turn == types.Color.White) &acc.black else &acc.white;
 
+        const Vi16 = @Vector(VL, i16);
+        const Vi32 = @Vector(VL, i32);
+        const zero: Vi16 = @splat(0);
+        const cap: Vi16 = @splat(255);
+
+        // Squared clipped ReLU dot product, accumulated in i32 lanes. Integer
+        // addition is associative, so the lane-wise reduction reproduces the
+        // scalar accumulation exactly (assuming, as the trained net guarantees,
+        // the running sum stays within i32 — verified by bench parity).
+        var sum: Vi32 = @splat(0);
         var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) : (i += 1) {
-            if (turn == types.Color.White) {
-                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[bucket][i];
-                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[bucket][weights.HIDDEN_SIZE..][i];
-            } else {
-                res += clipped_relu(acc.black[i]) * weights.MODEL.layer_2[bucket][i];
-                res += clipped_relu(acc.white[i]) * weights.MODEL.layer_2[bucket][weights.HIDDEN_SIZE..][i];
-            }
+        while (i < weights.HIDDEN_SIZE) : (i += VL) {
+            const ov: Vi32 = @intCast(@min(@max(@as(Vi16, own[i..][0..VL].*), zero), cap));
+            const owt: Vi32 = @intCast(@as(Vi16, w2[i..][0..VL].*));
+            sum += (ov * ov) * owt;
+
+            const pv: Vi32 = @intCast(@min(@max(@as(Vi16, opp[i..][0..VL].*), zero), cap));
+            const pwt: Vi32 = @intCast(@as(Vi16, w2[weights.HIDDEN_SIZE + i ..][0..VL].*));
+            sum += (pv * pv) * pwt;
         }
+
+        var res = @as(i32, weights.MODEL.layer_2_bias[bucket]);
+        res += @reduce(.Add, sum);
 
         if (SQUARED_ACTIVATION) {
             return @divTrunc(@divTrunc(res, QA) * SCALE, QAB);

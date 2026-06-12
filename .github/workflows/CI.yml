@@ -1,50 +1,187 @@
-# This is a basic workflow to help you get started with Actions
+# CI for Avalanche (Zig 0.16.0 port).
+#
+# On every push to master/modernize, every pull request into master, a daily
+# schedule, and manual dispatch it:
+#   * builds Debug AND Release on all 3 host OSes (Linux, macOS, Windows),
+#   * runs the unit-test suite (zig build test),
+#   * runs the fixed benchmark and asserts the exact node count, and
+#   * drives the UCI frontend with a mock user session and checks the responses.
+# After the matrix succeeds (on push/dispatch, not PRs) it cross-compiles
+# optimized release binaries for the standard platforms and uploads them.
+#
+# Platform notes (see MIGRATION.md):
+#   * The engine links libc (build.zig sets .link_libc = true) and uses the
+#     std.Io runtime introduced in Zig 0.16. Native host builds use the system
+#     libc; cross builds use Zig's bundled libc (musl/mingw), so NO system SDKs
+#     or sysroots are needed on any runner.
+#   * Windows needed one source fix during the port (CLI args are read via
+#     std.process.Init.minimal.args.toSlice, since the bare Args.Iterator.init
+#     is a compile error on Windows) -- already applied, so the native
+#     windows-latest build/run works unmodified.
+#   * GitHub's windows-latest runner ships Git-Bash, so `shell: bash` is
+#     available on all three runners. The bench + UCI steps use it so there is
+#     one canonical script everywhere; only the binary path gets a .exe suffix.
 
 name: CI
 
 on:
   push:
+    branches: [master, modernize]
+  pull_request:
     branches: [master]
-  schedule:
-    - cron: "0 0 * * *" #Makes sense, we are testing against master
   workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *" # daily regression guard against master
+
+# Cancel superseded runs on the same ref (e.g. rapid PR pushes).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: build / ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-13, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
-      - name: Setup Zig
-        # You may pin to the exact commit or the version.
-        # uses: goto-bus-stop/setup-zig@41ae19e72e21b9a1380e86ff9f058db709fc8fc6
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig 0.16.0
+        # mlugg/setup-zig@v2 is the maintained successor to goto-bus-stop/setup-zig:
+        # it knows the 0.16.0 release channel and current ziglang.org download
+        # layout, verifies the release minisign signature, and caches the global
+        # zig cache (~/.cache/zig) keyed on build.zig[.zon] across runs.
+        uses: mlugg/setup-zig@v2
         with:
-          version: 0.10.1
+          version: 0.16.0
 
-      - run: zig version
-      - run: zig env
+      - name: Zig version / env
+        run: |
+          zig version
+          zig env
 
-      - name: Debug Build
+      - name: Debug build
         run: zig build
 
-      - name: Release Build
-        run: zig build -Drelease-fast
+      - name: Release build
+        run: zig build --release=fast
 
-      - name: Bench
-        run: ./zig-out/bin/Avalanche bench
+      - name: Unit tests
+        run: zig build test
 
-      - name: Build artifacts
-        if: ${{ matrix.os == 'ubuntu-latest' }}
+      # The release build above leaves the binary at zig-out/bin/Avalanche[.exe].
+      - name: Bench (assert node count)
+        shell: bash
         run: |
-          chmod +x build_all_v2.sh
-          ./build_all_v2.sh
-      - name: Upload artifacts
-        if: ${{ matrix.os == 'ubuntu-latest' }}
-        uses: actions/upload-artifact@v3
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
+          echo "Running: $BIN bench"
+          OUT="$("$BIN" bench)"
+          echo "$OUT"
+          # bench prints "33745282 nodes <nps> nps" -- assert the fixed node count
+          # (the node count is speed-independent and must match the 0.10.x original).
+          if echo "$OUT" | grep -qF "33745282 nodes"; then
+            echo "OK: bench node count matches (33745282 nodes)"
+          else
+            echo "FAIL: expected '33745282 nodes' in bench output"; exit 1
+          fi
+
+      - name: UCI frontend smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
+          # Mock a user driving the UCI frontend, then quit. The engine spawns the
+          # search on a detached thread, so "bestmove" prints asynchronously after
+          # "go"; pad with a sleep before "quit" so it can flush before stdin closes.
+          OUT="$(
+            {
+              printf 'uci\n'
+              printf 'isready\n'
+              printf 'position startpos moves e2e4 e7e5\n'
+              printf 'go depth 8\n'
+              sleep 3
+              printf 'quit\n'
+            } | "$BIN"
+          )"
+          echo "----- engine output -----"
+          echo "$OUT"
+          echo "-------------------------"
+          fail=0
+          echo "$OUT" | grep -q "uciok"     || { echo "FAIL: missing 'uciok'";    fail=1; }
+          echo "$OUT" | grep -q "readyok"   || { echo "FAIL: missing 'readyok'";  fail=1; }
+          echo "$OUT" | grep -q "^bestmove" || { echo "FAIL: missing 'bestmove' line"; fail=1; }
+          [ "$fail" -eq 0 ] || exit 1
+          echo "OK: UCI smoke test passed (uciok / readyok / bestmove)"
+
+  # Cross-compile optimized release binaries for the standard platforms and
+  # upload them. Runs only after the matrix passes, on push-to-master and manual
+  # dispatch -- never on pull requests (so forks cannot trigger artifact builds).
+  artifacts:
+    name: release artifacts
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig 0.16.0
+        uses: mlugg/setup-zig@v2
         with:
-          name: builds
-          path: artifacts/*.zip
+          version: 0.16.0
+
+      - name: Cross-compile release binaries
+        run: |
+          set -euo pipefail
+          VERSION="2.2.0-dev"
+          OUT="artifacts"
+          mkdir -p "$OUT"
+
+          # build <target-triple> <cpu|""> <name-suffix>
+          # Zig bundles libc for every target, so one host toolchain builds them all.
+          build() {
+            local triple="$1" cpu="$2" suffix="$3"
+            local name="Avalanche-${VERSION}-${suffix}"
+            echo "==> $name  (target=$triple cpu=${cpu:-baseline})"
+            if [ -n "$cpu" ]; then
+              zig build --release=fast -Dtarget="$triple" -Dcpu="$cpu" --prefix "$OUT" -Dtarget-name="$name"
+            else
+              zig build --release=fast -Dtarget="$triple" --prefix "$OUT" -Dtarget-name="$name"
+            fi
+          }
+
+          # Baseline aarch64 (all OSes) + x86_64 macOS.
+          build aarch64-linux-musl "" aarch64-linux
+          build aarch64-windows    "" aarch64-windows
+          build aarch64-macos      "" aarch64-macos
+          build x86_64-macos       "" x86_64-macos
+
+          # x86_64 microarchitecture levels for linux (musl, static) and windows.
+          build x86_64-linux-musl  x86_64    x86_64-linux-v1
+          build x86_64-linux-musl  x86_64_v2 x86_64-linux-v2
+          build x86_64-linux-musl  x86_64_v3 x86_64-linux-v3
+          build x86_64-windows     x86_64    x86_64-windows-v1
+          build x86_64-windows     x86_64_v2 x86_64-windows-v2
+          build x86_64-windows     x86_64_v3 x86_64-windows-v3
+
+          echo "----- built binaries -----"
+          ls -la "$OUT/bin"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Avalanche-${{ github.sha }}
+          # Ship the runnable binaries only; drop the Windows .pdb debug symbols.
+          path: |
+            artifacts/bin/*
+            !artifacts/bin/*.pdb
+          if-no-files-found: error
+          retention-days: 30
