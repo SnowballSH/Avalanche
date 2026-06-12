@@ -77,20 +77,25 @@ jobs:
         run: zig build test
 
       # The release build above leaves the binary at zig-out/bin/Avalanche[.exe].
+      # The expected node count is NOT hardcoded here -- it is read from the
+      # committed `bench.nodes` file. Whenever a change legitimately alters the
+      # node count, run `scripts/update_bench.sh` and commit the updated file.
       - name: Bench (assert node count)
         shell: bash
         run: |
           set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
-          echo "Running: $BIN bench"
+          EXPECTED="$(tr -d '[:space:]' < bench.nodes)"
+          echo "Expected node count (from bench.nodes): $EXPECTED"
           OUT="$("$BIN" bench)"
           echo "$OUT"
-          # bench prints "33745282 nodes <nps> nps" -- assert the fixed node count
-          # (the node count is speed-independent and must match the 0.10.x original).
-          if echo "$OUT" | grep -qF "33745282 nodes"; then
-            echo "OK: bench node count matches (33745282 nodes)"
+          # bench prints "<nodes> nodes <nps> nps"; the node count is speed-independent.
+          if echo "$OUT" | grep -qE "^${EXPECTED} nodes"; then
+            echo "OK: bench node count matches ($EXPECTED nodes)"
           else
-            echo "FAIL: expected '33745282 nodes' in bench output"; exit 1
+            echo "FAIL: expected '$EXPECTED nodes' (from bench.nodes), but bench printed the line above."
+            echo "      If this change intentionally alters the node count, run scripts/update_bench.sh and commit bench.nodes."
+            exit 1
           fi
 
       - name: UCI frontend smoke test
