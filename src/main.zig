@@ -22,16 +22,16 @@ pub fn main(init: std.process.Init) anyerror!void {
     weights.do_nnue();
     search.init_lmr();
 
-    var args = std.process.Args.Iterator.init(init.minimal.args);
-
-    _ = args.skip();
-    const second = args.next();
-    if (second != null) {
-        if (std.mem.eql(u8, second.?, "bench")) {
+    // `toSlice` is the cross-platform way to read argv (the bare `Iterator.init`
+    // is a compile error on Windows, where argument parsing needs an allocator).
+    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    if (args.len >= 2) {
+        const second = args[1];
+        if (std.mem.eql(u8, second, "bench")) {
             try bench.bench();
             return;
         }
-        if (std.mem.eql(u8, second.?, "datagen")) {
+        if (std.mem.eql(u8, second, "datagen")) {
             var gen = datagen.Datagen.new();
             defer gen.deinit();
 
@@ -41,7 +41,7 @@ pub fn main(init: std.process.Init) anyerror!void {
             return;
         }
 
-        if (std.mem.eql(u8, second.?, "datagen_single")) {
+        if (std.mem.eql(u8, second, "datagen_single")) {
             var gen = datagen.Datagen.new();
             defer gen.deinit();
 

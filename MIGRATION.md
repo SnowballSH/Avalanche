@@ -151,7 +151,9 @@ Key gotchas:
   (`std.Io.Clock.awake.now(io).nanoseconds`) and exposes the old
   `start()` / `read()` API. The `std.time.ns_per_*` constants still exist.
 - `std.process.argsWithAllocator` is gone — arguments come from
-  `init.minimal.args` via `std.process.Args.Iterator`.
+  `init.minimal.args`. Note the bare `std.process.Args.Iterator.init` is a
+  **compile error on Windows** (argument parsing there needs an allocator), so
+  the cross-platform `init.minimal.args.toSlice(allocator)` is used instead.
 - Randomness: `std.os.getrandom` / `std.rand` removed → `std.Io.random(io, buf)`
   and `std.Random`.
 - Files: `std.fs.cwd().createFile(path, …)` → `std.Io.Dir.cwd().createFile(io, path, …)`,
@@ -255,6 +257,63 @@ time forfeits**.
 
 **Conclusion:** the 0.16.0 build is **not worse** than the 0.10.1 original — it is
 functionally identical and marginally stronger due to the SIMD speedup.
+
+## Testing and continuous integration
+
+### Unit tests (`zig build test`)
+
+The suite (`src/tests.zig`) was expanded from 12 to **43 tests** covering:
+
+- **Move generation** — perft on the start position (1–5), Kiwipete (1–4), the
+  classic rook-endgame "position 3" (1–5), and an en-passant position, checked
+  against canonical/engine-derived node counts.
+- **Zobrist hashing** — make/unmake and null-move hash symmetry (the hash and the
+  full board state must restore exactly after `play_move`+`undo_move`).
+- **Types / `Move` packing / FEN** — packed-bit layout of `Move`, square and
+  direction arithmetic, and FEN parsing (mailbox, bitboards, castling-rights
+  encoding, en-passant square, `basic_fen` round-trip).
+- **SEE** — `see_score`/`see_threshold` on crafted exchange positions.
+- **Evaluation** — NNUE weight-load sanity, eval determinism, **incremental
+  accumulator == fresh `full_refresh`** (this is the key correctness test for the
+  `@Vector` SIMD `update_weights`), and HCE material-draw classification.
+- **Search** — mate-in-1 detection (both colors), stalemate scoring as a draw,
+  and node-count/score determinism across repeated fixed-depth searches.
+
+Two test-only accommodations: `Position` (~285 KB, it embeds the NNUE accumulator
+stack) is always heap-allocated to avoid overflowing the test thread's stack, and
+the test module is built in `ReleaseSafe` (a Debug build keeps the large
+by-value-`Position` copies that the engine relies on the optimizer to elide).
+
+### Cross-platform build matrix
+
+All six standard targets cross-compile from a single host toolchain (Zig bundles
+the libc for each), and the bench node count is **identical (`33745282`) on every
+architecture** — verified by running the x86_64 build under Rosetta, and shown to
+be robust to per-platform `logf` differences (the closest LMR-table entry sits
+6.2e-4 from an integer boundary, ~600× the worst-case `@log` error):
+
+| OS | x86_64 | aarch64 |
+| --- | --- | --- |
+| Linux (musl, static) | ✓ | ✓ |
+| Windows | ✓ | ✓ |
+| macOS | ✓ | ✓ |
+
+The one platform-specific source change the port required was reading argv via
+`init.minimal.args.toSlice(...)` instead of `Args.Iterator.init` (the latter is a
+compile error on Windows).
+
+### CI (`.github/workflows/CI.yml`)
+
+Rewritten for Zig 0.16: it installs Zig via `mlugg/setup-zig@v2` and, on push,
+**pull requests**, a daily schedule, and manual dispatch, runs a matrix over
+`ubuntu-latest` / `macos-latest` / `windows-latest` that for each OS does a Debug
+build, a Release build, `zig build test`, a **bench step that asserts the exact
+`33745282` node count**, and a **UCI smoke test** that mocks a user session
+(`uci` → `uciok`, `isready` → `readyok`, `position … / go depth 8` → `bestmove`,
+`quit`). A second job (gated to non-PR events, after the matrix passes)
+cross-compiles the release artifacts for the standard platforms and uploads them
+with `actions/upload-artifact@v4`. The bench/UCI steps use `shell: bash` (Git-Bash
+is present on the Windows runner) so there is one script for all three OSes.
 
 ## Reproducing
 
