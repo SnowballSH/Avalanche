@@ -22,3 +22,8 @@ testing/
 cutechess-cli
 
 *.json
+
+.zig-cache
+**/zig-**
+
+fastchess
