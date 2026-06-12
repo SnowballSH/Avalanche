@@ -4,6 +4,7 @@ const tables = @import("chess/tables.zig");
 const position = @import("chess/position.zig");
 const zobrist = @import("chess/zobrist.zig");
 const hce = @import("engine/hce.zig");
+const weights = @import("engine/weights.zig");
 const expect = std.testing.expect;
 
 test "Basic Piece and Color" {
@@ -55,10 +56,10 @@ test "Bitboard general" {
     try expect(types.popcount(0b0110111010010) == 7);
     try expect(types.lsb(0b01101000) == 3);
     var b: types.Bitboard = 0b01101000;
-    try expect(@enumToInt(types.pop_lsb(&b)) == 3);
+    try expect(@intFromEnum(types.pop_lsb(&b)) == 3);
     try expect(b == 0b01100000);
 
-    var bb_i: types.Bitboard = 0x3c18183c0000;
+    const bb_i: types.Bitboard = 0x3c18183c0000;
     try expect(types.shift_bitboard(bb_i, types.Direction.North) == 0x3c18183c000000);
     try expect(types.shift_bitboard(bb_i, types.Direction.NorthNorth) == 0x3c18183c00000000);
     try expect(types.shift_bitboard(bb_i, types.Direction.South) == 0x3c18183c00);
@@ -147,9 +148,15 @@ test "Pawn Attacks" {
 }
 
 test "Position" {
+    tables.init_all();
     zobrist.init_zobrist();
+    weights.do_nnue();
 
-    var pos = position.Position.new();
+    // Position embeds the full NNUE accumulator stack and is large, so keep it
+    // on the heap to avoid overflowing the test thread's stack.
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.* = position.Position.new();
 
     try expect(pos.hash == 0);
     try expect(pos.turn == types.Color.White);
@@ -164,35 +171,35 @@ test "Position" {
     try expect(pos.mailbox[types.Square.f3.index()] == types.Piece.NO_PIECE);
     try expect(pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] == 0);
 
-    pos = position.Position.new();
+    pos.* = position.Position.new();
 
-    pos.set_fen("rnbqkbnr/1ppp1pp1/p6p/4p3/8/1P3N2/PBPPPPPP/RN1QKB1R w KQkq"[0..]);
+    pos.set_fen("rnbqkbnr/1ppp1pp1/p6p/4p3/8/1P3N2/PBPPPPPP/RN1QKB1R w KQkq -"[0..]);
     try expect(pos.attackers_from(types.Color.White, types.Square.e5, 0) == 0x200200);
     try expect(!pos.in_check(types.Color.White));
 
     // queen check
-    pos.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4PP1q/8/PPPP2PP/RNBQKBNR w KQkq"[0..]);
+    pos.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4PP1q/8/PPPP2PP/RNBQKBNR w KQkq -"[0..]);
     try expect(pos.attackers_from(types.Color.Black, types.Square.e1, 0) == 0x80000000);
     try expect(pos.in_check(types.Color.White));
     try expect(!pos.in_check(types.Color.Black));
 
     // blocked
-    pos.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4PP1q/6P1/PPPP3P/RNBQKBNR b KQkq"[0..]);
+    pos.set_fen("rnb1kbnr/pppp1ppp/8/4p3/4PP1q/6P1/PPPP3P/RNBQKBNR b KQkq -"[0..]);
     try expect(!pos.in_check(types.Color.White));
 
     pos.set_fen(types.DEFAULT_FEN[0..]);
-    var score = hce.evaluate(&pos);
+    const score = hce.evaluate_comptime(pos, types.Color.White);
 
-    var m1 = types.Move.new_from_string(&pos, "e2e4"[0..]);
+    const m1 = types.Move.new_from_string(pos, "e2e4"[0..]);
     pos.play_move(types.Color.White, m1);
-    var m2 = types.Move.new_from_string(&pos, "d7d5"[0..]);
+    const m2 = types.Move.new_from_string(pos, "d7d5"[0..]);
     pos.play_move(types.Color.Black, m2);
-    var m3 = types.Move.new_from_string(&pos, "e4d5"[0..]);
+    const m3 = types.Move.new_from_string(pos, "e4d5"[0..]);
     pos.play_move(types.Color.White, m3);
 
     pos.undo_move(types.Color.White, m3);
     pos.undo_move(types.Color.Black, m2);
     pos.undo_move(types.Color.White, m1);
 
-    try expect(score == hce.evaluate(&pos));
+    try expect(score == hce.evaluate_comptime(pos, types.Color.White));
 }

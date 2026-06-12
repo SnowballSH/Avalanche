@@ -60,11 +60,13 @@ const FENS = [_][:0]const u8{
 // zig fmt: on
 
 pub fn bench() !void {
-    var stdout = std.io.getStdOut().writer();
+    var out_buf: [256]u8 = undefined;
+    var stdout_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
+    const stdout = &stdout_file.interface;
 
     const depth = 15;
     var nodes: u64 = 0;
-    var timer = try std.time.Timer.start();
+    const timer = types.Timer.start();
     var searcher = search.Searcher.new();
     defer searcher.deinit();
     searcher.force_thinking = true;
@@ -84,4 +86,5 @@ pub fn bench() !void {
     }
 
     try stdout.print("{} nodes {} nps\n", .{ nodes, nodes * std.time.ns_per_s / timer.read() });
+    try stdout.flush();
 }

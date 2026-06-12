@@ -7,8 +7,8 @@ const search = @import("search.zig");
 const tt = @import("tt.zig");
 
 pub const FileLock = struct {
-    file: std.fs.File,
-    lock: std.Thread.Mutex,
+    file: std.Io.File,
+    lock: std.Io.Mutex,
 };
 
 const MAX_DEPTH: ?u8 = null;
@@ -17,7 +17,7 @@ const SOFT_MAX_NODES: ?u64 = 5000;
 
 pub const DatagenSingle = struct {
     id: u64,
-    timer: std.time.Timer,
+    timer: types.Timer,
     count: u64,
     searcher: search.Searcher,
     fileLock: *FileLock,
@@ -43,7 +43,7 @@ pub const DatagenSingle = struct {
 
     pub fn deinit(self: *DatagenSingle) void {
         self.searcher.deinit();
-        self.fileLock.file.close();
+        self.fileLock.file.close(types.GLOBAL_IO);
     }
 
     pub fn playGame(self: *DatagenSingle) !void {
@@ -59,8 +59,8 @@ pub const DatagenSingle = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        var fens = try std.ArrayList([]u8).initCapacity(arena.allocator(), 128);
-        var evals = try std.ArrayList(i32).initCapacity(arena.allocator(), 128);
+        var fens = try std.array_list.Managed([]u8).initCapacity(arena.allocator(), 128);
+        var evals = try std.array_list.Managed(i32).initCapacity(arena.allocator(), 128);
         defer fens.deinit();
         defer evals.deinit();
 
@@ -69,19 +69,19 @@ pub const DatagenSingle = struct {
         var white_win_count: usize = 0;
         var black_win_count: usize = 0;
         var ply: usize = 0;
-        var random_plies: u64 = 9 + (self.prng.rand64() % 4);
+        const random_plies: u64 = 9 + (self.prng.rand64() % 4);
         while (true) : (ply += 1) {
             if (self.searcher.is_draw(pos, true)) {
                 result = 0.5;
                 break;
             }
-            var movelist = try std.ArrayList(types.Move).initCapacity(arena.allocator(), 32);
+            var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
             if (pos.turn == types.Color.White) {
                 pos.generate_legal_moves(types.Color.White, &movelist);
             } else {
                 pos.generate_legal_moves(types.Color.Black, &movelist);
             }
-            var move_size = movelist.items.len;
+            const move_size = movelist.items.len;
             if (move_size == 0) {
                 if (pos.turn == types.Color.White) {
                     if (pos.in_check(types.Color.White)) {
@@ -102,7 +102,7 @@ pub const DatagenSingle = struct {
 
             // play a random move if we're in the first few plies or with a 0.01% chance
             if (ply < random_plies or self.prng.rand64() % 10000 == 0) {
-                var move = movelist.items[self.prng.rand64() % move_size];
+                const move = movelist.items[self.prng.rand64() % move_size];
                 if (pos.turn == types.Color.White) {
                     pos.play_move(types.Color.White, move);
                 } else {
@@ -113,7 +113,7 @@ pub const DatagenSingle = struct {
             }
             movelist.deinit();
 
-            var res: i32 = if (pos.turn == types.Color.White)
+            const res: i32 = if (pos.turn == types.Color.White)
                 self.searcher.iterative_deepening(pos, types.Color.White, MAX_DEPTH)
             else
                 -self.searcher.iterative_deepening(pos, types.Color.Black, MAX_DEPTH);
@@ -124,8 +124,8 @@ pub const DatagenSingle = struct {
 
             var best_move = self.searcher.best_move;
 
-            var fen = pos.basic_fen(arena.allocator());
-            var in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            const fen = pos.basic_fen(arena.allocator());
+            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
             if (pos.turn == types.Color.White) {
                 pos.play_move(types.Color.White, best_move);
@@ -175,7 +175,7 @@ pub const DatagenSingle = struct {
                 continue;
             }
 
-            var gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            const gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
             if (!in_check and !gave_check and !best_move.is_capture() and !best_move.is_promotion()) {
                 // pretty quiet
                 try fens.append(fen);
@@ -187,28 +187,31 @@ pub const DatagenSingle = struct {
             return;
         }
 
-        self.fileLock.lock.lock();
-        var writer = self.fileLock.file.writer();
+        self.fileLock.lock.lockUncancelable(types.GLOBAL_IO);
+        var wbuf: [4096]u8 = undefined;
+        var file_writer = self.fileLock.file.writer(types.GLOBAL_IO, &wbuf);
+        const writer = &file_writer.interface;
         var i: usize = 0;
         while (i < fens.items.len) : (i += 1) {
             try writer.print("{s}", .{fens.items[i]});
-            var s = if (result == 0.0) "0.0" else if (result == 1.0) "1.0" else "0.5";
+            const s = if (result == 0.0) "0.0" else if (result == 1.0) "1.0" else "0.5";
             try writer.print(" | {} | {s}\n", .{ evals.items[i], s });
         }
+        try writer.flush();
         self.count += fens.items.len;
-        self.fileLock.lock.unlock();
+        self.fileLock.lock.unlock(types.GLOBAL_IO);
     }
 
     pub fn startMany(self: *DatagenSingle) !void {
-        self.timer = try std.time.Timer.start();
+        self.timer = types.Timer.start();
         var game_count: usize = 0;
         while (true) {
             try self.playGame();
             game_count += 1;
             if (game_count % 50 == 0) {
-                var elapsed = @intToFloat(f64, self.timer.read()) / std.time.ns_per_s;
-                var pps = @intToFloat(f64, self.count) / elapsed;
-                var gps = @intToFloat(f64, game_count) / elapsed;
+                const elapsed = @as(f64, @floatFromInt(self.timer.read())) / std.time.ns_per_s;
+                const pps = @as(f64, @floatFromInt(self.count)) / elapsed;
+                const gps = @as(f64, @floatFromInt(game_count)) / elapsed;
 
                 std.debug.print("id {}: {} games, {} pos, {d:.4} pos/s, {d:.4} games/s\n", .{ self.id, game_count, self.count, pps, gps });
             }
@@ -219,19 +222,15 @@ pub const DatagenSingle = struct {
 pub const Datagen = struct {
     fileLock: FileLock,
     prng: utils.PRNG,
-    datagens: std.ArrayList(DatagenSingle),
+    datagens: std.array_list.Managed(DatagenSingle),
 
     pub fn new() Datagen {
-        var prng = std.rand.DefaultPrng.init(blk: {
-            var seed: u64 = undefined;
-            std.os.getrandom(std.mem.asBytes(&seed)) catch unreachable;
-            break :blk seed;
-        });
-        const rand = prng.random();
+        var seed: u128 = undefined;
+        std.Io.random(types.GLOBAL_IO, std.mem.asBytes(&seed));
         return Datagen{
             .fileLock = undefined,
-            .prng = utils.PRNG.new(rand.int(u128)),
-            .datagens = std.ArrayList(DatagenSingle).init(std.heap.c_allocator),
+            .prng = utils.PRNG.new(seed),
+            .datagens = std.array_list.Managed(DatagenSingle).init(std.heap.c_allocator),
         };
     }
 
@@ -244,25 +243,26 @@ pub const Datagen = struct {
     }
 
     pub fn start(self: *Datagen, num_threads: usize) !void {
-        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.txt", .{std.time.timestamp()});
-        const file = std.fs.cwd().createFile(
+        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.txt", .{std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds()});
+        const file = std.Io.Dir.cwd().createFile(
+            types.GLOBAL_IO,
             path,
             .{ .read = true },
         ) catch {
             std.debug.panic("Unable to open {s}", .{path});
         };
-        var lock = std.Thread.Mutex{};
+        const lock = std.Io.Mutex.init;
         self.fileLock = FileLock{ .file = file, .lock = lock };
         self.datagens.clearAndFree();
 
-        var threads = std.ArrayList(std.Thread).init(std.heap.c_allocator);
+        var threads = std.array_list.Managed(std.Thread).init(std.heap.c_allocator);
         defer threads.deinit();
 
         var th: usize = 0;
         while (th < num_threads) : (th += 1) {
-            var datagen = DatagenSingle.new(&self.fileLock, &self.prng, th);
+            const datagen = DatagenSingle.new(&self.fileLock, &self.prng, th);
             try self.datagens.append(datagen);
-            var thread = std.Thread.spawn(
+            const thread = std.Thread.spawn(
                 .{ .stack_size = 64 * 1024 * 1024 },
                 DatagenSingle.startMany,
                 .{&self.datagens.items[th]},
@@ -279,15 +279,16 @@ pub const Datagen = struct {
     }
 
     pub fn startSingleThreaded(self: *Datagen) !void {
-        var id: u64 = @intCast(u64, std.time.timestamp());
+        const id: u64 = @as(u64, @intCast(std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds()));
         const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.txt", .{id});
-        const file = std.fs.cwd().createFile(
+        const file = std.Io.Dir.cwd().createFile(
+            types.GLOBAL_IO,
             path,
             .{ .read = true },
         ) catch {
             std.debug.panic("Unable to open {s}", .{path});
         };
-        var lock = std.Thread.Mutex{};
+        const lock = std.Io.Mutex.init;
         self.fileLock = FileLock{ .file = file, .lock = lock };
         self.datagens.clearAndFree();
 

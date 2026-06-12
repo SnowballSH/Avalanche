@@ -12,7 +12,9 @@ const datagen = @import("engine/datagen.zig");
 
 const arch = @import("build_options");
 
-pub fn main() anyerror!void {
+pub fn main(init: std.process.Init) anyerror!void {
+    types.GLOBAL_IO = init.io;
+
     tables.init_all();
     zobrist.init_zobrist();
     tt.GlobalTT.reset(16);
@@ -20,10 +22,10 @@ pub fn main() anyerror!void {
     weights.do_nnue();
     search.init_lmr();
 
-    var args = try std.process.argsWithAllocator(std.heap.page_allocator);
+    var args = std.process.Args.Iterator.init(init.minimal.args);
 
-    _ = args.next();
-    var second = args.next();
+    _ = args.skip();
+    const second = args.next();
     if (second != null) {
         if (std.mem.eql(u8, second.?, "bench")) {
             try bench.bench();

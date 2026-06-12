@@ -26,10 +26,12 @@ pub const UciInterface = struct {
     }
 
     pub fn main_loop(self: *UciInterface) !void {
-        var stdin = std.io.getStdIn().reader();
-        var stdout = std.io.getStdOut().writer();
-        var command_arena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
-        defer command_arena.deinit();
+        var in_buf: [1 << 16]u8 = undefined;
+        var in_file = std.Io.File.stdin().readerStreaming(types.GLOBAL_IO, &in_buf);
+        const stdin = &in_file.interface;
+        var out_buf: [1 << 16]u8 = undefined;
+        var out_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
+        const stdout = &out_file.interface;
 
         self.searcher.deinit();
         self.searcher = search.Searcher.new();
@@ -37,18 +39,19 @@ pub const UciInterface = struct {
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
         try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)\n", .{build_options.version});
+        try stdout.flush();
 
         out: while (true) {
-            // The command will probably be less than 16384 characters
-            var line = try stdin.readUntilDelimiterOrEofAlloc(command_arena.allocator(), '\n', 16384);
+            // The command will probably be less than 65536 characters
+            const line = stdin.takeDelimiterInclusive('\n') catch |e| switch (e) {
+                error.EndOfStream => break,
+                error.StreamTooLong => break,
+                else => return e,
+            };
 
-            if (line == null) {
-                break;
-            }
+            const tline = std.mem.trim(u8, line, "\r\n");
 
-            const tline = std.mem.trim(u8, line.?, "\r");
-
-            var tokens = std.mem.split(u8, tline, " ");
+            var tokens = std.mem.splitScalar(u8, tline, ' ');
             var token = tokens.next();
             if (token == null) {
                 break;
@@ -59,7 +62,8 @@ pub const UciInterface = struct {
                 self.searcher.is_searching = false;
                 continue;
             } else if (std.mem.eql(u8, token.?, "isready")) {
-                _ = try stdout.writeAll("readyok\n");
+                try stdout.writeAll("readyok\n");
+                try stdout.flush();
                 continue;
             }
 
@@ -70,16 +74,17 @@ pub const UciInterface = struct {
             if (std.mem.eql(u8, token.?, "quit")) {
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
-                _ = try stdout.write("id name Avalanche ");
-                _ = try stdout.write(build_options.version);
-                _ = try stdout.writeByte('\n');
-                _ = try stdout.write("id author Yinuo Huang\n\n");
-                _ = try stdout.write("option name Hash type spin default 16 min 1 max 131072\n");
-                _ = try stdout.write("option name Threads type spin default 1 min 1 max 2048\n");
+                try stdout.writeAll("id name Avalanche ");
+                try stdout.writeAll(build_options.version);
+                try stdout.writeByte('\n');
+                try stdout.writeAll("id author Yinuo Huang\n\n");
+                try stdout.writeAll("option name Hash type spin default 16 min 1 max 131072\n");
+                try stdout.writeAll("option name Threads type spin default 1 min 1 max 2048\n");
                 for (parameters.TunableParams) |tunable| {
-                    _ = try stdout.print("option name {s} type spin default {s} min {s} max {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
+                    try stdout.print("option name {s} type spin default {s} min {s} max {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
                 }
-                _ = try stdout.writeAll("uciok\n");
+                try stdout.writeAll("uciok\n");
+                try stdout.flush();
             } else if (std.mem.eql(u8, token.?, "setoption")) {
                 while (true) {
                     token = tokens.next();
@@ -133,42 +138,42 @@ pub const UciInterface = struct {
                                 const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
                                 switch (tunable.id) {
                                     0 => {
-                                        parameters.LMRWeight = @intToFloat(f64, value) / 1000.0;
+                                        parameters.LMRWeight = @as(f64, @floatFromInt(value)) / 1000.0;
                                         search.init_lmr();
                                     },
                                     1 => {
-                                        parameters.LMRBias = @intToFloat(f64, value) / 1000.0;
+                                        parameters.LMRBias = @as(f64, @floatFromInt(value)) / 1000.0;
                                         search.init_lmr();
                                     },
                                     2 => {
-                                        parameters.RFPDepth = @intCast(i32, value);
+                                        parameters.RFPDepth = @as(i32, @intCast(value));
                                     },
                                     3 => {
-                                        parameters.RFPMultiplier = @intCast(i32, value);
+                                        parameters.RFPMultiplier = @as(i32, @intCast(value));
                                     },
                                     4 => {
-                                        parameters.RFPImprovingDeduction = @intCast(i32, value);
+                                        parameters.RFPImprovingDeduction = @as(i32, @intCast(value));
                                     },
                                     5 => {
-                                        parameters.NMPImprovingMargin = @intCast(i32, value);
+                                        parameters.NMPImprovingMargin = @as(i32, @intCast(value));
                                     },
                                     6 => {
-                                        parameters.NMPBase = @intCast(usize, value);
+                                        parameters.NMPBase = @as(usize, @intCast(value));
                                     },
                                     7 => {
-                                        parameters.NMPDepthDivisor = @intCast(usize, value);
+                                        parameters.NMPDepthDivisor = @as(usize, @intCast(value));
                                     },
                                     8 => {
-                                        parameters.NMPBetaDivisor = @intCast(i32, value);
+                                        parameters.NMPBetaDivisor = @as(i32, @intCast(value));
                                     },
                                     9 => {
-                                        parameters.RazoringBase = @intCast(i32, value);
+                                        parameters.RazoringBase = @as(i32, @intCast(value));
                                     },
                                     10 => {
-                                        parameters.RazoringMargin = @intCast(i32, value);
+                                        parameters.RazoringMargin = @as(i32, @intCast(value));
                                     },
                                     11 => {
-                                        parameters.AspirationWindow = @intCast(i32, value);
+                                        parameters.AspirationWindow = @as(i32, @intCast(value));
                                     },
                                     else => unreachable,
                                 }
@@ -194,7 +199,7 @@ pub const UciInterface = struct {
                     depth = std.fmt.parseUnsigned(u32, token.?, 10) catch 1;
                 }
 
-                depth = std.math.max(depth, 1);
+                depth = @max(depth, 1);
 
                 _ = perft.perft_test(&self.position, depth);
             } else if (std.mem.eql(u8, token.?, "perftdiv")) {
@@ -204,7 +209,7 @@ pub const UciInterface = struct {
                     depth = std.fmt.parseUnsigned(u32, token.?, 10) catch 1;
                 }
 
-                depth = std.math.max(depth, 1);
+                depth = @max(depth, 1);
 
                 if (self.position.turn == types.Color.White) {
                     perft.perft_div(types.Color.White, &self.position, depth);
@@ -281,7 +286,7 @@ pub const UciInterface = struct {
                             if (mt <= 0) {
                                 mt = 1;
                             }
-                            var t = @intCast(u64, mt);
+                            const t = @as(u64, @intCast(mt));
 
                             mytime = t;
                         }
@@ -301,7 +306,7 @@ pub const UciInterface = struct {
                             if (mt <= 0) {
                                 mt = 1;
                             }
-                            var t = @intCast(u64, mt);
+                            const t = @as(u64, @intCast(mt));
 
                             mytime = t;
                         }
@@ -362,7 +367,7 @@ pub const UciInterface = struct {
                             } else {
                                 self.searcher.ideal_time = inc + (2 * (mytime.? - overhead)) / (2 * movestogo.? + 1);
                                 movetime = 2 * self.searcher.ideal_time;
-                                movetime = @min(movetime.?, mytime.? - @min(mytime.? - overhead, overhead * @min(movestogo.?, 5)));
+                                movetime = @min(movetime.?, mytime.? - @min(mytime.? - overhead, overhead * @as(u64, @min(movestogo.?, 5))));
                             }
                             self.searcher.ideal_time = @min(self.searcher.ideal_time, mytime.? - overhead);
                             movetime = @min(movetime.?, mytime.? - overhead);
@@ -400,7 +405,7 @@ pub const UciInterface = struct {
                                         break;
                                     }
 
-                                    var move = types.Move.new_from_string(&self.position, token.?);
+                                    const move = types.Move.new_from_string(&self.position, token.?);
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -413,23 +418,23 @@ pub const UciInterface = struct {
                             }
                         }
                     } else if (std.mem.eql(u8, token.?, "fen")) {
-                        tokens = std.mem.split(u8, tokens.rest(), " moves ");
-                        var fen = tokens.next();
+                        var fen_tokens = std.mem.splitSequence(u8, tokens.rest(), " moves ");
+                        const fen = fen_tokens.next();
                         if (fen != null) {
                             self.position.set_fen(fen.?);
                             self.searcher.hash_history.clearRetainingCapacity();
                             self.searcher.hash_history.append(self.position.hash) catch {};
 
-                            var afterfen = tokens.next();
+                            const afterfen = fen_tokens.next();
                             if (afterfen != null) {
-                                tokens = std.mem.split(u8, afterfen.?, " ");
+                                tokens = std.mem.splitScalar(u8, afterfen.?, ' ');
                                 while (true) {
                                     token = tokens.next();
                                     if (token == null) {
                                         break;
                                     }
 
-                                    var move = types.Move.new_from_string(&self.position, token.?);
+                                    const move = types.Move.new_from_string(&self.position, token.?);
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -444,8 +449,6 @@ pub const UciInterface = struct {
                     }
                 }
             }
-
-            command_arena.allocator().free(line.?);
         }
 
         self.searcher.deinit();
@@ -458,13 +461,13 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
     searcher.max_millis = movetime;
     var depth = max_depth;
 
-    var movelist = std.ArrayList(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+    var movelist = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
     if (pos.turn == types.Color.White) {
         pos.generate_legal_moves(types.Color.White, &movelist);
     } else {
         pos.generate_legal_moves(types.Color.Black, &movelist);
     }
-    var move_size = movelist.items.len;
+    const move_size = movelist.items.len;
     if (move_size == 1) {
         depth = 1;
     }

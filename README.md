@@ -8,7 +8,9 @@
 
 <br/>
 
-### Avalanche is the first UCI Chess Engine written in [Zig](https://ziglang.org/)
+**NOTE: Avalanche is currently being migrated to Zig 0.16.0, after four years of hiatus.**
+
+### Avalanche is the first UCI Chess Engine written in [Zig](https://ziglang.org/).
 
 ## Strength
 
@@ -34,9 +36,24 @@ Good Old MIT License. In short, feel free to use this program anywhere, but plea
 
 ## Compile
 
-`zig build -Drelease-fast`
+`zig build --release=fast`
 
-Avalanche is only guaranteed to compile using Zig v0.10.x. Newer versions will not work as Avalanche still uses Stage1.
+Avalanche now builds with **Zig 0.16.0**. The engine was ported from the original
+Zig 0.10.x / Stage1 codebase to the modern compiler and standard library; the
+ported build is functionally identical to the 0.10.x version (the fixed
+benchmark produces the exact same node count) and is roughly 25% faster thanks
+to explicit SIMD in the NNUE evaluation. See [MIGRATION.md](MIGRATION.md) for the
+full set of breaking changes, the performance work, and the verification data.
+
+```sh
+zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
+zig build                     # debug build
+zig build test                # unit tests
+./zig-out/bin/Avalanche bench # fixed-position benchmark -> "33745282 nodes <nps> nps"
+```
+
+Older Zig 0.10.x is no longer required (but a pinned 0.10.1 toolchain is kept in
+`zig-macos-aarch64-0.10.1/` for reference benchmarking).
 
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
@@ -80,4 +97,3 @@ Avalanche follows the UCI protocol and is not a full chess application. You shou
 <img src="https://github.com/SnowballSH/Avalanche/assets/66022611/cf099f87-91ad-4fd9-a2c3-177b790cd59e" alt="Logo 2" width=400 height=400/>
 <img src="https://github.com/SnowballSH/Avalanche/assets/66022611/6ece76d4-ce7c-43e7-8321-27e368b12760" alt="Logo 3" width=400 height=400/>
 <img src="https://github.com/SnowballSH/Avalanche/assets/66022611/ef77edf1-9f8d-45dc-867f-533a4c84d22f" alt="Logo 4" width=400 height=400/>
-
