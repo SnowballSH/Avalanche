@@ -22,8 +22,7 @@ pub fn main(init: std.process.Init) anyerror!void {
     weights.do_nnue();
     search.init_lmr();
 
-    // `toSlice` is the cross-platform way to read argv (the bare `Iterator.init`
-    // is a compile error on Windows, where argument parsing needs an allocator).
+    // toSlice works on all targets (Args.Iterator.init is a Windows compile error).
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len >= 2) {
         const second = args[1];

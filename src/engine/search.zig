@@ -70,10 +70,10 @@ pub const Searcher = struct {
     moved_piece_history: [MAX_PLY]types.Piece = undefined,
 
     best_move: types.Move = undefined,
-    pv: [MAX_PLY][MAX_PLY]types.Move = undefined,
-    pv_size: [MAX_PLY]usize = undefined,
+    pv: [MAX_PLY + 1][MAX_PLY]types.Move = undefined,
+    pv_size: [MAX_PLY + 1]usize = undefined,
 
-    killer: [MAX_PLY][2]types.Move = undefined,
+    killer: [MAX_PLY + 1][2]types.Move = undefined,
     history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
@@ -181,7 +181,7 @@ pub const Searcher = struct {
 
         var stability: usize = 0;
 
-        const extra = NUM_THREADS - helper_searchers.items.len;
+        const extra = if (NUM_THREADS > helper_searchers.items.len) NUM_THREADS - helper_searchers.items.len else 0;
         helper_searchers.ensureTotalCapacity(NUM_THREADS) catch unreachable;
         helper_searchers.appendNTimesAssumeCapacity(undefined, extra);
         threads.ensureTotalCapacity(NUM_THREADS) catch unreachable;
@@ -284,7 +284,7 @@ pub const Searcher = struct {
                     outW.print("mate {} pv", .{
                         (@divTrunc(hce.MateScore - (@as(i32, @intCast(@abs(score)))), 2) + 1) * @as(i32, if (score > 0) 1 else -1),
                     }) catch {};
-                    if (bound == MAX_PLY - 1) {
+                    if (max_depth == null and bound == MAX_PLY - 2) {
                         bound = depth + 2;
                     }
                 } else {
@@ -414,6 +414,7 @@ pub const Searcher = struct {
         while (i < NUM_THREADS) : (i += 1) {
             helper_searchers.items[i].stop = true;
         }
+        i = 0;
         while (i < NUM_THREADS) : (i += 1) {
             threads.items[i].?.join();
         }

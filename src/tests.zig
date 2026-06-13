@@ -156,8 +156,7 @@ test "Position" {
     zobrist.init_zobrist();
     weights.do_nnue();
 
-    // Position embeds the full NNUE accumulator stack and is large, so keep it
-    // on the heap to avoid overflowing the test thread's stack.
+    // Position is large (NNUE accumulator stack); keep it off the test stack.
     const pos = try std.testing.allocator.create(position.Position);
     defer std.testing.allocator.destroy(pos);
     pos.* = position.Position.new();
@@ -208,9 +207,7 @@ test "Position" {
     try expect(score == hce.evaluate_comptime(pos, types.Color.White));
 }
 
-// ===========================================================================
 // Move generation correctness (perft) + zobrist hashing
-// ===========================================================================
 
 test "movegen: startpos perft 1-5" {
     tables.init_all();
@@ -370,9 +367,7 @@ test "zobrist: null-move hash symmetry" {
     }
 }
 
-// ===========================================================================
 // Core types, Move packing, and FEN parsing
-// ===========================================================================
 
 test "types-move: packed layout and to_u16 bit ordering" {
     // packed struct is LSB-first: flags occupy bits 0-3, from bits 4-9, to bits 10-15.
@@ -554,8 +549,7 @@ test "fen: basic_fen board round-trips" {
     defer std.testing.allocator.destroy(pos);
     pos.* = position.Position.new();
 
-    // basic_fen over-allocates and returns a sub-slice, so use an arena
-    // (matching how the engine calls it) instead of freeing the sub-slice.
+    // basic_fen returns a sub-slice of an over-allocation; use an arena.
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
@@ -583,9 +577,7 @@ test "fen: basic_fen board round-trips" {
     }
 }
 
-// ===========================================================================
 // Static exchange evaluation (SEE)
-// ===========================================================================
 
 // Helper: build a heap Position with the given FEN, after global init.
 fn see_make_pos(fen: []const u8) *position.Position {
@@ -691,9 +683,7 @@ test "see: pawn captures undefended pawn is winning" {
     try expect(!see.see_threshold(pos, mv, 100));
 }
 
-// ===========================================================================
 // Evaluation: NNUE incremental-vs-fresh correctness + HCE material draws
-// ===========================================================================
 
 test "eval: nnue weights load and dimensions" {
     weights.do_nnue();
@@ -840,9 +830,7 @@ test "eval: hce material draw classification" {
     try expect(hce.is_material_drawish(pos));
 }
 
-// ===========================================================================
 // Search: mate detection, draws, determinism
-// ===========================================================================
 
 test "search: mate in 1 (white back-rank)" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});

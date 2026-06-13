@@ -27,3 +27,8 @@ cutechess-cli
 **/zig-**
 
 fastchess
+
+# SPRT testing tool
+.sprt-cache/
+
+data_*.txt

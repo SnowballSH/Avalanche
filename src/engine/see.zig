@@ -45,6 +45,7 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
         break;
     }
 
+    if (max_depth == 0) max_depth = gains.len - 1;
     depth = max_depth - 1;
     while (depth >= 1) : (depth -= 1) {
         gains[depth - 1] = -@max(-gains[depth - 1], gains[depth]);

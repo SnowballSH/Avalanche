@@ -44,12 +44,13 @@ pub const TranspositionTable = struct {
         self.data.deinit();
         var tt = TranspositionTable{
             .data = std.array_list.Managed(i128).init(TTArena.allocator()),
-            .size = mb * MB / @sizeOf(Item),
+            .size = @max(1, mb * MB / @sizeOf(Item)),
             .age = 0,
         };
 
         tt.data.ensureTotalCapacity(tt.size) catch {};
         tt.data.expandToCapacity();
+        @memset(tt.data.items, 0);
 
         // std.debug.print("{}\n", .{@sizeOf(Item)});
         // std.debug.print("Allocated {} KB, {} items for TT\n", .{ tt.size * @sizeOf(Item) / KB, tt.size });
