@@ -856,8 +856,19 @@ pub const Searcher = struct {
         if (!skip_quiet and self.exclude_move[self.ply].to_u16() == 0) {
             const tt_flag = if (best_score >= beta) tt.Bound.Lower else if (alpha != alpha_) tt.Bound.Exact else tt.Bound.Upper;
 
+            // Store mate scores node-relative (the exact inverse of the probe
+            // adjustment above), so a mate found at one ply reads back correctly
+            // when the entry is probed at a different ply. best_score itself stays
+            // root-relative for the return value below.
+            var stored_eval = best_score;
+            if (stored_eval > hce.MateScore - hce.MaxMate and stored_eval <= hce.MateScore) {
+                stored_eval += @as(i32, @intCast(self.ply));
+            } else if (stored_eval < -hce.MateScore + hce.MaxMate and stored_eval >= -hce.MateScore) {
+                stored_eval -= @as(i32, @intCast(self.ply));
+            }
+
             tt.GlobalTT.set(tt.Item{
-                .eval = best_score,
+                .eval = stored_eval,
                 .bestmove = best_move,
                 .flag = tt_flag,
                 .depth = @as(u8, @intCast(depth)),
@@ -921,12 +932,21 @@ pub const Searcher = struct {
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
+            // Convert a node-relative stored mate score back to root-relative
+            // (same adjustment as the negamax probe; inverse of the store). A
+            // no-op for non-mate scores, so ordinary cutoffs are unchanged.
+            var tt_eval = entry.?.eval;
+            if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
+                tt_eval -= @as(i32, @intCast(self.ply));
+            } else if (tt_eval < -hce.MateScore + hce.MaxMate and tt_eval >= -hce.MateScore) {
+                tt_eval += @as(i32, @intCast(self.ply));
+            }
             if (entry.?.flag == tt.Bound.Exact) {
-                return entry.?.eval;
-            } else if (entry.?.flag == tt.Bound.Lower and entry.?.eval >= beta) {
-                return entry.?.eval;
-            } else if (entry.?.flag == tt.Bound.Upper and entry.?.eval <= alpha) {
-                return entry.?.eval;
+                return tt_eval;
+            } else if (entry.?.flag == tt.Bound.Lower and tt_eval >= beta) {
+                return tt_eval;
+            } else if (entry.?.flag == tt.Bound.Upper and tt_eval <= alpha) {
+                return tt_eval;
             }
         }
 

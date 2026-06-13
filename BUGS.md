@@ -1,122 +1,115 @@
 # Bug audit (logic bugs in the engine)
 
 Findings from an adversarial, per-component audit of the engine logic (not just the
-0.16 migration). Split into **fixed** (safe, no change to playing strength — `bench`
-still reports `33745282 nodes`), **recommended** (genuine correctness bugs that *do*
-change playing strength, so they are SPRT-gated and left for you to apply + test), and
-**rejected** (not actually bugs).
+0.16 migration). Every claim below was re-verified against the current source; the
+genuine bugs have now been **fixed and verified** (unit tests pass; the affected
+repros were confirmed empirically).
 
-## Fixed (safe — applied; bench unchanged at 33745282)
+**Bench impact.** The crash/robustness fixes do not change the fixed benchmark. The
+four correctness fixes (move generation, en-passant hashing, SEE x-ray, TT mate
+scores) legitimately change the deterministic search output, so the bench node count
+moved from **`33745282`** to **`35183719`**. `bench.nodes` has been updated to match;
+`zig build test` passes (43 tests).
 
-These are crash/robustness/resource fixes that do not affect normal single-threaded play:
+## Fixed: crash / robustness (no change to bench)
+
+These were already present in the source before this pass and do not affect normal
+single-threaded play:
 
 | file | bug |
 | --- | --- |
 | `engine/search.zig` | `stop_helpers` reused its loop counter, so the join loop never ran → the final helper-thread batch was never joined (leak + node-aggregation race). Reset `i = 0` between the loops. |
 | `engine/search.zig` | Dead `bound == MAX_PLY - 1` branch (initializer is `MAX_PLY - 2`) disabled early-stop-on-forced-mate in `go infinite`. Fixed to `max_depth == null and bound == MAX_PLY - 2`. |
-| `engine/search.zig` | Per-ply arrays (`pv`/`pv_size`/`killer`) were sized exactly `MAX_PLY` but indexed at `ply+1`/`MAX_PLY` at extreme ply → out-of-bounds in ReleaseFast. Sized to `MAX_PLY + 1`. |
+| `engine/search.zig` | Per-ply arrays (`pv`/`pv_size`/`killer`) were sized exactly `MAX_PLY` but indexed at `ply+1` at extreme ply → out-of-bounds in ReleaseFast. Sized to `MAX_PLY + 1`. |
 | `engine/search.zig` | `const extra = NUM_THREADS - helper_searchers.items.len` underflows (usize) if `Threads` is reduced between searches. Guarded. |
 | `engine/see.zig` | `see_score`: `max_depth` stays 0 → `max_depth - 1` underflows if a capture chain fills all 15 slots. Guarded. |
 | `engine/tt.zig` | `reset()` did not zero the (re-used arena) backing store → garbage TT entries after a second `reset` (e.g. `setoption Hash`). Added `@memset(.., 0)`. |
 | `engine/tt.zig` | `setoption Hash value 0` → size 0 → `index()` into an empty list → OOB crash. Clamped size to `@max(1, ..)`. |
 | `engine/interface.zig` | `setoption Threads value 0` → `NUM_THREADS = value - 1` underflows → crash. Clamped to `@max(value, 1) - 1`. |
+| `engine/datagen.zig` | datagen used a positional `file.writer()` (each game overwrote the previous one). Fixed to `writerStreaming`. |
 
-Also: the migration bug where datagen used a positional `file.writer()` (each game
-overwrote the previous one) was fixed to `writerStreaming` (verified: 50 games now
-accumulate ~3700 lines instead of one game's worth).
+## Fixed: correctness (changes bench → `35183719`)
 
-## Recommended (SPRT-gated — NOT applied)
+Each of these is a genuine correctness bug whose fix changes search/eval output. They
+were previously deferred for SPRT; they have now been applied. (Strength was **not**
+re-tested with games per request — only bench + unit tests.)
 
-Each of these is a genuine correctness bug, but fixing it changes search/eval output and
-therefore playing strength. Per standard engine testing, apply each as its own commit and
-SPRT it before trusting (use `tools/test`, e.g. `tools/test vs-commit <parent-commit>`).
+### 1. Move generator omitted queen/rook/bishop promotion-captures for a pinned pawn — FIXED
 
-### 1. Move generator omits queen/rook/bishop promotion-captures for a pinned pawn (verified)
+A diagonally-pinned pawn capturing its pinner on the promotion rank generated **only the
+knight** promotion-capture, because the pinned path used a single
+`make_all(MoveFlags.PROMOTION_CAPTURES, ..)` and `PROMOTION_CAPTURES` (`0b1100`) aliases
+`PC_KNIGHT`. Both pinned call sites — `generate_legal_moves` and `generate_q_moves` in
+`chess/position.zig` — now emit all four (Q/R/B/N) via `new_from_to_flag`, matching the
+non-pinned and in-check pinner paths.
 
-A diagonally-pinned pawn capturing its pinner on the promotion rank generates **only the
-knight** promotion-capture. Verified: `position fen 2b5/1P6/K7/8/8/8/8/7k w - -` →
-`perftdiv 1` reports `Total: 5` (only `b7c8N`); it should be `8` (`bxc8=Q/R/B/N` plus 4
-king moves). The pinned path uses one `make_all(MoveFlags.PROMOTION_CAPTURES, ..)` (a
-single flag = knight) whereas the non-pinned path emits all four.
+Verified: `position fen 2b5/1P6/K7/8/8/8/8/7k w - -` → `perftdiv 1` now reports
+`Total: 8` (`bxc8=Q/R/B/N` + 4 king moves), was `5`.
 
-Fix — `chess/position.zig`, in `generate_legal_moves` (~line 719-720) and
-`generate_q_moves` (~line 1010-1011), replace the single `make_all(.. PROMOTION_CAPTURES ..)`
-with the four-fold emission used elsewhere:
+### 2. Zobrist en-passant hash leak — FIXED (with a correction to the originally-proposed patch)
 
-```zig
-while (b2 != 0) {
-    const t = types.pop_lsb(&b2);
-    list.append(types.Move.new_from_to_flag(sq, t, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-    list.append(types.Move.new_from_to_flag(sq, t, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-    list.append(types.Move.new_from_to_flag(sq, t, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-    list.append(types.Move.new_from_to_flag(sq, t, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
-}
-```
+The EP key XOR'd in on a double push was never XOR'd out by the next move, so positions
+after any double push carried a stale EP component → wrong keys → degraded TT hits and
+repetition detection. `play_null_move`/`undo_null_move` cleared EP correctly; real moves
+did not.
 
-(Only adds legal moves, so it can only help; still SPRT it. Re-run `scripts/update_bench.sh`
-afterwards — the node count will change.)
+Fix applied in `chess/position.zig`:
+- **`play_move`**: after `self.history[self.game_ply] = UndoInfo.from(..)`, XOR out the
+  previous ply's EP key if set (mirrors `play_null_move`).
+- **`undo_move`**: after `self.game_ply -= 1`, XOR the restored position's EP key back in
+  if set (mirrors `undo_null_move`).
 
-### 2. Zobrist en-passant hash leak (verified)
+> **Correction to the original recommendation:** an earlier draft of this fix said to
+> *remove* the special-case EP toggle inside `undo_move`'s `DOUBLE_PUSH` branch. That is
+> wrong — that toggle removes the double-push's *own* new EP key and must be **kept**.
+> The correct fix keeps it and *adds* the post-decrement re-add of the previous EP key.
 
-The EP hash XOR'd in on a double push is never XOR'd out by the next move, so positions
-reached after any double push carry a stale EP component → wrong keys → degraded TT
-transposition hits and repetition detection. Verified: `startpos moves e2e4 a7a6` hashes
-to `0xd16e…` while the same position parsed fresh hashes to `0x80e4…` (differ by exactly
-the e-file EP key). `play_null_move`/`undo_null_move` already clear EP correctly; real
-moves do not.
+Verified: `position startpos moves e2e4 a7a6` now hashes identically to the same position
+parsed fresh from FEN (`0x80e44cb9c6900229`); previously they differed by the e-file EP key.
 
-Fix — `chess/position.zig`, in `play_move`, right after
-`self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);` add:
+### 3. SEE dropped the rook x-ray when a queen was captured — FIXED
 
-```zig
-if (self.history[self.game_ply - 1].ep_sq != types.Square.NO_SQUARE)
-    self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply - 1].ep_sq.file().index()];
-```
+`see_threshold` re-added x-ray attackers with `if (pt==0|2|4) bishop; else if (pt==3|4) rook;`
+(piece encoding: pawn 0, knight 1, bishop 2, rook 3, queen 4, king 5). The `else if` meant a
+captured **queen** (`pt==4`) only revealed diagonal x-rays, never orthogonal ones. Changed to
+two independent `if`s, matching the cited Weiss source — a queen capture now reveals both.
+(`engine/see.zig`)
 
-and symmetrically re-add it at the end of `undo_move` (after `game_ply` is decremented),
-removing the now-redundant special-case toggle inside `undo_move`'s `DOUBLE_PUSH` branch.
+### 4. TT mate-score store/probe asymmetry — FIXED
 
-### 3. SEE drops the rook x-ray when a queen is captured
+The TT probe converts mate scores toward the current node (`tt_eval -= ply` / `+= ply`), but
+the store wrote `best_score` raw with no inverse conversion, so mate scores were off by the
+storing ply when round-tripping the TT. The store now normalizes a **local copy** of
+`best_score` (positive mate `+= ply`, negative mate `-= ply`, same thresholds as the probe)
+before building the `tt.Item`; the returned `best_score` stays root-relative. (`engine/search.zig`)
 
-`see_threshold` re-adds x-ray attackers with `if (pt==0|2|4) bishop; else if (pt==3|4) rook;`
-— the `else if` means a captured **queen** (`pt==4`) only reveals diagonal x-rays, never
-orthogonal ones (and the `pt==4` in the second clause is dead). Weiss (the cited source)
-uses two independent `if`s.
+## Fixed: UCI robustness / thread lifecycle (no change to bench)
 
-Fix — `engine/see.zig` (~line 121-125): make the two re-adds independent `if`s (not `else if`).
+These live only in the async UCI path (`bench` calls `iterative_deepening` synchronously and
+never touches them), so they do not affect the bench node count.
 
-### 4. TT mate-score store/probe asymmetry
+- **Illegal/garbage move in `position … moves` no longer crashes.** `types.Move.new_from_string`
+  now validates the coordinate token (length + char ranges) and returns the idiomatic
+  `Move.empty()` sentinel (`to_u16() == 0`) on a malformed or non-legal move instead of reading
+  out of bounds / `@enumFromInt`-out-of-range / `std.debug.panic`. The two `position … moves`
+  loops stop applying moves when they hit the sentinel. (`chess/types.zig`, `engine/interface.zig`)
+- **Search thread is joined before teardown / re-spawn.** The detached search thread was never
+  joined, so EOF mid-search raced `deinit()` (use-after-free on `hash_history`/`continuation`/TT).
+  The handle is now kept (not detached) and joined — after setting `stop` — on `stop`,
+  `ucinewgame`, the next `go`, and the exit path (`join_search` helper). (`engine/interface.zig`)
+- **`is_searching` is set before spawning** (not only inside the worker), closing the
+  double-spawn window where a second `go` arriving before the worker started could pass the
+  guard and spawn a second searcher on the same state. (`engine/interface.zig`)
 
-The TT probe converts mate scores toward the current node (`tt_eval -= ply` / `+= ply`),
-but the store writes `best_score` raw without the inverse conversion, so mate scores are
-off by the storing ply when they pass through the TT (the root masks reported mate
-distances, which is why it survived testing).
+## Not a bug
 
-Fix — `engine/search.zig`, just before building the `tt.Item` (~line 858), make the stored
-eval node-relative:
-
-```zig
-var stored_eval = best_score;
-if (stored_eval > hce.MateScore - hce.MaxMate and stored_eval <= hce.MateScore)
-    stored_eval += @as(i32, @intCast(self.ply))
-else if (stored_eval < -hce.MateScore + hce.MaxMate and stored_eval >= -hce.MateScore)
-    stored_eval -= @as(i32, @intCast(self.ply));
-// ... .eval = stored_eval
-```
-
-### Lower-confidence / robustness (also not applied)
-
-- `engine/search.zig`: history malus is applied to quiet moves that were LMP-skipped (never
-  searched). Possibly intentional; SPRT if changed.
-- `engine/interface.zig`: the detached search thread is never joined before `deinit()`
-  (use-after-free if `quit`/EOF arrives mid-search), `is_searching` is set inside the worker
-  (a double-spawn race window), and an illegal move in `position … moves` panics the whole
-  engine. These need a small thread-lifecycle/input-validation refactor; left out to avoid
-  introducing a UCI-loop deadlock without testing.
-
-## Rejected (not a bug)
-
-- **NNUE output bias scaling** (`engine/nnue.zig`): an audit flagged the `layer_2_bias`
-  as being divided by an extra `QA`. This is the engine's deliberate quantization scheme —
-  the net was trained/selected for exactly this arithmetic, so "fixing" it would change
-  every eval and almost certainly require retraining. Not a bug; do not change.
+- **History malus on LMP-skipped quiets** (`engine/search.zig`): a quiet move is appended to the
+  malus list before the late-move-pruning `continue`, so LMP-skipped quiets do receive a history
+  malus. Re-verified as accurate, but this is a deliberate, pre-existing history-heuristic choice
+  (identical across the 0.10.x→0.16 migration), not a correctness defect — no crash, no UB, and
+  the history table was SPRT-tuned against exactly this behavior. **Left unchanged**; changing it
+  would alter strength and must go through SPRT, not this pass.
+- **NNUE output bias scaling** (`engine/nnue.zig`): the `layer_2_bias` is added at the same
+  `QA²·QB` scale as the squared-clipped-ReLU dot product and descaled once (`/QA` then `/QAB`).
+  This is the deliberate bullet quantization scheme the net was trained for (depth-9 output is
+  bit-identical to the reference), not an extra-`QA` bug. **Do not change.**

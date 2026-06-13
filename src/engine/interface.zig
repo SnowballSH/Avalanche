@@ -25,6 +25,17 @@ pub const UciInterface = struct {
         };
     }
 
+    // Wait for the background search thread (if any) to finish, then drop the
+    // handle. A caller that wants to interrupt an in-flight search sets
+    // self.searcher.stop = true first so the worker terminates promptly.
+    fn join_search(self: *UciInterface) void {
+        if (self.search_thread) |t| {
+            t.join();
+            self.search_thread = null;
+        }
+        self.searcher.is_searching = false;
+    }
+
     pub fn main_loop(self: *UciInterface) !void {
         var in_buf: [1 << 16]u8 = undefined;
         var in_file = std.Io.File.stdin().readerStreaming(types.GLOBAL_IO, &in_buf);
@@ -59,7 +70,7 @@ pub const UciInterface = struct {
 
             if (std.mem.eql(u8, token.?, "stop")) {
                 self.searcher.stop = true;
-                self.searcher.is_searching = false;
+                self.join_search();
                 continue;
             } else if (std.mem.eql(u8, token.?, "isready")) {
                 try stdout.writeAll("readyok\n");
@@ -186,6 +197,8 @@ pub const UciInterface = struct {
                     break;
                 }
             } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
+                self.searcher.stop = true;
+                self.join_search();
                 self.searcher.deinit();
                 self.searcher = search.Searcher.new();
                 tt.GlobalTT.clear();
@@ -377,7 +390,13 @@ pub const UciInterface = struct {
                     movetime = 1000000;
                 }
 
+                // Reap any finished search thread before starting a new one.
+                self.join_search();
                 self.searcher.stop = false;
+                // Mark searching BEFORE spawning so a second `go` arriving before
+                // the worker starts cannot pass the is_searching guard and
+                // double-spawn onto the same searcher/position.
+                self.searcher.is_searching = true;
 
                 self.search_thread = std.Thread.spawn(
                     .{ .stack_size = 64 * 1024 * 1024 },
@@ -387,7 +406,6 @@ pub const UciInterface = struct {
                     std.debug.panic("Could not spawn main thread!\n{}", .{e});
                     unreachable;
                 };
-                self.search_thread.?.detach();
             } else if (std.mem.eql(u8, token.?, "position")) {
                 token = tokens.next();
                 if (token != null) {
@@ -406,6 +424,10 @@ pub const UciInterface = struct {
                                     }
 
                                     const move = types.Move.new_from_string(&self.position, token.?);
+                                    // Stop applying moves on an illegal/garbage token instead of crashing.
+                                    if (move.to_u16() == 0) {
+                                        break;
+                                    }
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -435,6 +457,10 @@ pub const UciInterface = struct {
                                     }
 
                                     const move = types.Move.new_from_string(&self.position, token.?);
+                                    // Stop applying moves on an illegal/garbage token instead of crashing.
+                                    if (move.to_u16() == 0) {
+                                        break;
+                                    }
 
                                     if (self.position.turn == types.Color.White) {
                                         self.position.play_move(types.Color.White, move);
@@ -450,6 +476,11 @@ pub const UciInterface = struct {
                 }
             }
         }
+
+        // EOF/quit can break the loop mid-search; stop and join the worker
+        // before freeing the searcher/position/TT it still references.
+        self.searcher.stop = true;
+        self.join_search();
 
         self.searcher.deinit();
         search.helper_searchers.deinit();

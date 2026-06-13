@@ -337,6 +337,13 @@ pub const Position = struct {
         self.game_ply += 1;
         self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
 
+        // Clear the previous position's en-passant key from the hash (mirrors
+        // play_null_move). A DOUBLE_PUSH below re-adds the new EP key; otherwise
+        // the new position simply has no EP square.
+        if (self.history[self.game_ply - 1].ep_sq != types.Square.NO_SQUARE) {
+            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply - 1].ep_sq.file().index()];
+        }
+
         const flags = move.get_flags();
         self.history[self.game_ply].entry |= types.SquareIndexBB[move.to] | types.SquareIndexBB[move.from];
 
@@ -491,6 +498,12 @@ pub const Position = struct {
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;
+
+        // Re-add the restored position's en-passant key (mirrors undo_null_move).
+        // The DOUBLE_PUSH branch above already removed this move's own EP key.
+        if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
+            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
+        }
     }
 
     pub fn play_null_move(self: *Position) void {
@@ -717,7 +730,17 @@ pub const Position = struct {
                     if (sq.rank() == types.Rank.RANK7.relative_rank(color)) {
                         // Quiet promotions are not possible here
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
-                        types.Move.make_all(types.MoveFlags.PROMOTION_CAPTURES, sq, b2, list);
+                        // A pinned pawn capturing on the promotion rank must emit
+                        // all four promotion-captures, not just the knight (a single
+                        // PROMOTION_CAPTURES flag aliases PC_KNIGHT). Mirrors the
+                        // non-pinned path below and the in-check pinner path above.
+                        while (b2 != 0) {
+                            const pcsq = types.pop_lsb(&b2);
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                        }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
                         types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2, list);
@@ -1008,7 +1031,17 @@ pub const Position = struct {
                     if (sq.rank() == types.Rank.RANK7.relative_rank(color)) {
                         // Quiet promotions are not possible here
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
-                        types.Move.make_all(types.MoveFlags.PROMOTION_CAPTURES, sq, b2, list);
+                        // A pinned pawn capturing on the promotion rank must emit
+                        // all four promotion-captures, not just the knight (a single
+                        // PROMOTION_CAPTURES flag aliases PC_KNIGHT). Mirrors the
+                        // non-pinned path below and the in-check pinner path above.
+                        while (b2 != 0) {
+                            const pcsq = types.pop_lsb(&b2);
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                        }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
                         types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2, list);

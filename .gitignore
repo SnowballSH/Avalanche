@@ -32,3 +32,6 @@ fastchess
 .sprt-cache/
 
 data_*.txt
+
+CLAUDE.md
+*.pyc

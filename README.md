@@ -8,7 +8,7 @@
 
 <br/>
 
-**NOTE: Avalanche is currently being migrated to Zig 0.16.0, after four years of hiatus.**
+**NOTE: Avalanche is currently being migrated to Zig 0.16.0, after a long hiatus.**
 
 ### Avalanche is the first UCI Chess Engine written in [Zig](https://ziglang.org/).
 

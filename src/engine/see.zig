@@ -119,9 +119,12 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
 
         occ ^= types.SquareIndexBB[@as(usize, @intCast(types.lsb(my_attackers & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]))))];
 
+        // Independent ifs (not else-if): a captured queen (pt == 4) must reveal
+        // BOTH diagonal and orthogonal x-ray attackers, matching the Weiss source.
         if (pt == 0 or pt == 2 or pt == 4) {
             attackers |= tables.get_bishop_attacks(@as(types.Square, @enumFromInt(to)), occ) & bishops;
-        } else if (pt == 3 or pt == 4) {
+        }
+        if (pt == 3 or pt == 4) {
             attackers |= tables.get_rook_attacks(@as(types.Square, @enumFromInt(to)), occ) & rooks;
         }
     }

@@ -425,7 +425,18 @@ pub const Move = packed struct {
         return Move{ .flags = @intFromEnum(flag), .from = @as(u6, @intCast(@intFromEnum(from))), .to = @as(u6, @intCast(@intFromEnum(to))) };
     }
 
+    // Returns the matching legal move, or Move.empty() (to_u16() == 0) if the
+    // string is malformed or names no legal move. Callers must check the result;
+    // a real legal move never has from == to, so the empty() sentinel is unambiguous.
     pub fn new_from_string(pos: *position.Position, move: []const u8) Move {
+        // Validate the coordinate token before parsing so a garbage token cannot
+        // index out of bounds or build an out-of-range Square/File/Rank.
+        if (move.len < 4) return Move.empty();
+        if (move[0] < 'a' or move[0] > 'h') return Move.empty();
+        if (move[1] < '1' or move[1] > '8') return Move.empty();
+        if (move[2] < 'a' or move[2] > 'h') return Move.empty();
+        if (move[3] < '1' or move[3] > '8') return Move.empty();
+
         var list = std.array_list.Managed(Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
         defer list.deinit();
         const f = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[0] - 'a')), @as(Rank, @enumFromInt(move[1] - '1'))))));
@@ -440,19 +451,15 @@ pub const Move = packed struct {
         for (list.items) |m| {
             if (m.from == f and m.to == t) {
                 if (p != null) {
-                    if (p.? != PromMoveTypeString[m.flags][0]) {
+                    const promo = PromMoveTypeString[m.flags];
+                    if (promo.len == 0 or p.? != promo[0]) {
                         continue;
                     }
                 }
                 return m;
             }
         }
-        std.debug.panic("move not found: {s}", .{move});
-        return Move{
-            .flags = 0,
-            .from = f,
-            .to = t,
-        };
+        return Move.empty();
     }
 
     pub fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *std.array_list.Managed(Move)) void {
