@@ -1,115 +1,80 @@
-# Bug audit (logic bugs in the engine)
+# Bugs
 
-Findings from an adversarial, per-component audit of the engine logic (not just the
-0.16 migration). Every claim below was re-verified against the current source; the
-genuine bugs have now been **fixed and verified** (unit tests pass; the affected
-repros were confirmed empirically).
+All entries below are **fixed**. The reported issue (#1) was the visible symptom; the
+SMP crash (#2) and the stop/quit hang (#3) were uncovered while auditing the area.
+`zig build test` is green (43/43) and `bench` is deterministic at the committed
+`bench.nodes` (`35032097`).
 
-**Bench impact.** The crash/robustness fixes do not change the fixed benchmark. The
-four correctness fixes (move generation, en-passant hashing, SEE x-ray, TT mate
-scores) legitimately change the deterministic search output, so the bench node count
-moved from **`33745282`** to **`35183719`**. `bench.nodes` has been updated to match;
-`zig build test` passes (43 tests).
+## 1. PV continued after a threefold repetition (fixed)
 
-## Fixed: crash / robustness (no change to bench)
+Symptom — the search reported a PV that walked *through* a repeated position instead of
+stopping at the draw:
 
-These were already present in the source before this pass and do not affect normal
-single-threaded play:
+```
+Warning; PV continues after threefold repetition - move h3h4 from current
+Info; info depth 23 ... score cp 0 pv h3h4 a6a4 h4h3 a4a6 h3h4 a6a4 h4h3 a4a6 h3h4
+Position; fen r1bqkbnr/pppp1p1p/2n3p1/4p3/Q1P5/2N1P3/PP1P1PPP/R1B1KBNR w KQkq - 0 5
+Moves; ... g2h3 h7h5
+```
 
-| file | bug |
-| --- | --- |
-| `engine/search.zig` | `stop_helpers` reused its loop counter, so the join loop never ran → the final helper-thread batch was never joined (leak + node-aggregation race). Reset `i = 0` between the loops. |
-| `engine/search.zig` | Dead `bound == MAX_PLY - 1` branch (initializer is `MAX_PLY - 2`) disabled early-stop-on-forced-mate in `go infinite`. Fixed to `max_depth == null and bound == MAX_PLY - 2`. |
-| `engine/search.zig` | Per-ply arrays (`pv`/`pv_size`/`killer`) were sized exactly `MAX_PLY` but indexed at `ply+1` at extreme ply → out-of-bounds in ReleaseFast. Sized to `MAX_PLY + 1`. |
-| `engine/search.zig` | `const extra = NUM_THREADS - helper_searchers.items.len` underflows (usize) if `Threads` is reduced between searches. Guarded. |
-| `engine/see.zig` | `see_score`: `max_depth` stays 0 → `max_depth - 1` underflows if a capture chain fills all 15 slots. Guarded. |
-| `engine/tt.zig` | `reset()` did not zero the (re-used arena) backing store → garbage TT entries after a second `reset` (e.g. `setoption Hash`). Added `@memset(.., 0)`. |
-| `engine/tt.zig` | `setoption Hash value 0` → size 0 → `index()` into an empty list → OOB crash. Clamped size to `@max(1, ..)`. |
-| `engine/interface.zig` | `setoption Threads value 0` → `NUM_THREADS = value - 1` underflows → crash. Clamped to `@max(value, 1) - 1`. |
-| `engine/datagen.zig` | datagen used a positional `file.writer()` (each game overwrote the previous one). Fixed to `writerStreaming`. |
+**Root cause — "phantom" en-passant in the hash.** The previous commit's en-passant
+hash-leak fix made the Zobrist key correctly reflect the EP square *only* for the position
+right after a double push. But `set_fen` and `play_move`'s `DOUBLE_PUSH` branch recorded
+and hashed the EP square on *every* double push, even when no enemy pawn could actually
+capture en passant. In the position above Black's last move `h7h5` set EP `h6`, yet no
+white pawn is on g5 — the EP right is illusory. The hash still mixed in `EnPassantHash[h]`,
+so the root position hashed differently from the *identical* position reached four plies
+later (after the EP right silently expires), and `is_draw`'s repetition scan never matched
+them. (The earlier hash-leak bug had masked this by smearing the stale EP key across every
+later position, making the two accidentally agree.) Per the FIDE/Zobrist definition, an EP
+square that cannot be captured is not part of the position.
 
-## Fixed: correctness (changes bench → `35183719`)
+**Fix** — `chess/position.zig`: in `set_fen` and `play_move`'s `DOUBLE_PUSH`, record/hash
+the EP square only when a pawn of the side to move can actually capture it
+(`get_pawn_attacks(pusher, ep) & enemy_pawns != 0`, matching the move generator's own EP
+predicate and Stockfish). `undo_move`'s `DOUBLE_PUSH` branch was guarded to remove the EP
+key only when it was recorded, keeping make/unmake symmetric. Verified: the phantom-EP root
+now hashes identically to the EP-expired position, legitimate EP captures still hash and
+generate normally, all perft counts are unchanged, and the depth-23 PV stops exactly at the
+threefold.
 
-Each of these is a genuine correctness bug whose fix changes search/eval output. They
-were previously deferred for SPRT; they have now been applied. (Strength was **not**
-re-tested with games per request — only bench + unit tests.)
+## 2. Lazy-SMP double-join crash (fixed)
 
-### 1. Move generator omitted queen/rook/bishop promotion-captures for a pinned pawn — FIXED
+With more than one thread (`setoption name Threads value N`, `N > 1`) the engine aborted as
+soon as the search advanced from depth 2 to depth 3:
 
-A diagonally-pinned pawn capturing its pinner on the promotion rank generated **only the
-knight** promotion-capture, because the pinned path used a single
-`make_all(MoveFlags.PROMOTION_CAPTURES, ..)` and `PROMOTION_CAPTURES` (`0b1100`) aliases
-`PC_KNIGHT`. Both pinned call sites — `generate_legal_moves` and `generate_q_moves` in
-`chess/position.zig` — now emit all four (Q/R/B/N) via `new_from_to_flag`, matching the
-non-pinned and in-check pinner paths.
+```
+setoption name Threads value 2 / position startpos / go depth 6
+-> thread panic: reached unreachable code  (pthread_join on a reaped handle)
+```
 
-Verified: `position fen 2b5/1P6/K7/8/8/8/8/7k w - -` → `perftdiv 1` now reports
-`Total: 8` (`bxc8=Q/R/B/N` + 4 king moves), was `5`.
+**Root cause.** `stop_helpers()` joined every helper thread but left the reaped
+`std.Thread` handle in `threads.items[i]`. At the next depth, `helpers()` sees the slot is
+non-null and joins it again; a second `pthread_join` returns `ESRCH`, which Zig's
+`Thread.join` maps to `unreachable` (panic in ReleaseSafe, UB in ReleaseFast). CI never
+caught it because the smoke test runs the default single-threaded (`Threads=1`, zero
+helpers).
 
-### 2. Zobrist en-passant hash leak — FIXED (with a correction to the originally-proposed patch)
+**Fix** — `engine/search.zig` `stop_helpers()`: set `threads.items[i] = null` after joining
+each helper. Verified: `Threads 2/4/8` now search cleanly to high depth and across repeated
+`go` commands.
 
-The EP key XOR'd in on a double push was never XOR'd out by the next move, so positions
-after any double push carried a stale EP component → wrong keys → degraded TT hits and
-repetition detection. `play_null_move`/`undo_null_move` cleared EP correctly; real moves
-did not.
+## 3. UCI `stop`/`quit` hang from a lost-stop race (fixed)
 
-Fix applied in `chess/position.zig`:
-- **`play_move`**: after `self.history[self.game_ply] = UndoInfo.from(..)`, XOR out the
-  previous ply's EP key if set (mirrors `play_null_move`).
-- **`undo_move`**: after `self.game_ply -= 1`, XOR the restored position's EP key back in
-  if set (mirrors `undo_null_move`).
+A `stop` (or `quit`) arriving immediately after `go` could be ignored, and because the
+recent commit made `stop`/`quit`/EOF *join* the search thread, the whole engine then hung
+(e.g. `go infinite` never terminated).
 
-> **Correction to the original recommendation:** an earlier draft of this fix said to
-> *remove* the special-case EP toggle inside `undo_move`'s `DOUBLE_PUSH` branch. That is
-> wrong — that toggle removes the double-push's *own* new EP key and must be **kept**.
-> The correct fix keeps it and *adds* the post-decrement re-add of the previous EP key.
+**Root cause.** The worker reset `self.stop = false` at the start of `iterative_deepening`,
+on the worker thread. The UCI `go` handler already clears `stop` before spawning, so the
+worker's reset was redundant — and racy: if a `stop` landed after the handler's reset but
+before the worker ran its own, the worker clobbered it and the search ran to full
+depth/`infinite`. The pre-existing race was harmless when `stop` merely detached the worker;
+once `stop`/`quit` started joining it, a lost stop became a hang.
 
-Verified: `position startpos moves e2e4 a7a6` now hashes identically to the same position
-parsed fresh from FEN (`0x80e44cb9c6900229`); previously they differed by the e-file EP key.
-
-### 3. SEE dropped the rook x-ray when a queen was captured — FIXED
-
-`see_threshold` re-added x-ray attackers with `if (pt==0|2|4) bishop; else if (pt==3|4) rook;`
-(piece encoding: pawn 0, knight 1, bishop 2, rook 3, queen 4, king 5). The `else if` meant a
-captured **queen** (`pt==4`) only revealed diagonal x-rays, never orthogonal ones. Changed to
-two independent `if`s, matching the cited Weiss source — a queen capture now reveals both.
-(`engine/see.zig`)
-
-### 4. TT mate-score store/probe asymmetry — FIXED
-
-The TT probe converts mate scores toward the current node (`tt_eval -= ply` / `+= ply`), but
-the store wrote `best_score` raw with no inverse conversion, so mate scores were off by the
-storing ply when round-tripping the TT. The store now normalizes a **local copy** of
-`best_score` (positive mate `+= ply`, negative mate `-= ply`, same thresholds as the probe)
-before building the `tt.Item`; the returned `best_score` stays root-relative. (`engine/search.zig`)
-
-## Fixed: UCI robustness / thread lifecycle (no change to bench)
-
-These live only in the async UCI path (`bench` calls `iterative_deepening` synchronously and
-never touches them), so they do not affect the bench node count.
-
-- **Illegal/garbage move in `position … moves` no longer crashes.** `types.Move.new_from_string`
-  now validates the coordinate token (length + char ranges) and returns the idiomatic
-  `Move.empty()` sentinel (`to_u16() == 0`) on a malformed or non-legal move instead of reading
-  out of bounds / `@enumFromInt`-out-of-range / `std.debug.panic`. The two `position … moves`
-  loops stop applying moves when they hit the sentinel. (`chess/types.zig`, `engine/interface.zig`)
-- **Search thread is joined before teardown / re-spawn.** The detached search thread was never
-  joined, so EOF mid-search raced `deinit()` (use-after-free on `hash_history`/`continuation`/TT).
-  The handle is now kept (not detached) and joined — after setting `stop` — on `stop`,
-  `ucinewgame`, the next `go`, and the exit path (`join_search` helper). (`engine/interface.zig`)
-- **`is_searching` is set before spawning** (not only inside the worker), closing the
-  double-spawn window where a second `go` arriving before the worker started could pass the
-  guard and spawn a second searcher on the same state. (`engine/interface.zig`)
-
-## Not a bug
-
-- **History malus on LMP-skipped quiets** (`engine/search.zig`): a quiet move is appended to the
-  malus list before the late-move-pruning `continue`, so LMP-skipped quiets do receive a history
-  malus. Re-verified as accurate, but this is a deliberate, pre-existing history-heuristic choice
-  (identical across the 0.10.x→0.16 migration), not a correctness defect — no crash, no UB, and
-  the history table was SPRT-tuned against exactly this behavior. **Left unchanged**; changing it
-  would alter strength and must go through SPRT, not this pass.
-- **NNUE output bias scaling** (`engine/nnue.zig`): the `layer_2_bias` is added at the same
-  `QA²·QB` scale as the squared-clipped-ReLU dot product and descaled once (`/QA` then `/QAB`).
-  This is the deliberate bullet quantization scheme the net was trained for (depth-9 output is
-  bit-identical to the reference), not an extra-`QA` bug. **Do not change.**
+**Fix** — `engine/search.zig`: don't reset `self.stop` in `iterative_deepening` (the `go`
+handler clears it on the main thread before spawn; the non-UCI callers — datagen/bench/tests
+— never set it). Also added a legal-move fallback before emitting `bestmove`, so an
+immediate stop (before depth 1 finishes) yields a real move instead of the null `a1a1`.
+Verified: `go infinite` + `stop` and `go ... ` + `quit` now terminate promptly with a legal
+bestmove, while a normal timed/depth-limited search is unchanged.

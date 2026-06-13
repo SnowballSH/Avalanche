@@ -528,13 +528,25 @@ test "fen: en-passant target square stored" {
 
     const pos = try std.testing.allocator.create(position.Position);
     defer std.testing.allocator.destroy(pos);
-    pos.* = position.Position.new();
 
-    // Position after 1.e4, black to move, ep target e3.
-    pos.set_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3"[0..]);
+    // Capturable en passant: a black pawn on d4 can answer e3, so the square is
+    // recorded (and folded into the hash).
+    pos.* = position.Position.new();
+    pos.set_fen("rnbqkbnr/pppp1ppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3"[0..]);
     try expect(pos.turn == types.Color.Black);
     try expect(pos.history[pos.game_ply].ep_sq == types.Square.e3);
     // The pushed pawn is on e4; e2 is now empty.
+    try expect(pos.mailbox[types.Square.e4.index()] == types.Piece.WHITE_PAWN);
+    try expect(pos.mailbox[types.Square.e2.index()] == types.Piece.NO_PIECE);
+
+    // Phantom en passant: after 1.e4 no black pawn can capture e3, so the FEN's
+    // EP target is dropped (matches the FIDE/Zobrist definition of equality — the
+    // position must not be distinguished from the same one with the EP right gone).
+    pos.* = position.Position.new();
+    pos.set_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3"[0..]);
+    try expect(pos.turn == types.Color.Black);
+    try expect(pos.history[pos.game_ply].ep_sq == types.Square.NO_SQUARE);
+    // The board is still parsed correctly; only the idle EP marker is dropped.
     try expect(pos.mailbox[types.Square.e4.index()] == types.Piece.WHITE_PAWN);
     try expect(pos.mailbox[types.Square.e2.index()] == types.Piece.NO_PIECE);
     try expect(pos.piece_bitboards[types.Piece.WHITE_PAWN.index()] == 0x1000ef00);

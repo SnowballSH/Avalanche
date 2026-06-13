@@ -144,8 +144,20 @@ pub const Position = struct {
         if (ep.len == 2) {
             for (types.SquareToString, 0..) |sq_str, i| {
                 if (std.mem.eql(u8, ep, sq_str)) {
-                    self.history[self.game_ply].ep_sq = @as(types.Square, @enumFromInt(i));
-                    self.hash ^= zobrist.EnPassantHash[types.file_plain(i)];
+                    // Same "phantom EP" guard as play_move: only record the square
+                    // when a pawn of the side to move can actually capture en
+                    // passant, so an idle EP square in the FEN does not give this
+                    // position a hash that differs from the same position with the
+                    // EP right expired (see play_move's DOUBLE_PUSH branch).
+                    const ep_target = @as(types.Square, @enumFromInt(i));
+                    const can_capture = if (self.turn == types.Color.White)
+                        (tables.get_pawn_attacks(types.Color.Black, ep_target) & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]) != 0
+                    else
+                        (tables.get_pawn_attacks(types.Color.White, ep_target) & self.piece_bitboards[types.Piece.BLACK_PAWN.index()]) != 0;
+                    if (can_capture) {
+                        self.history[self.game_ply].ep_sq = ep_target;
+                        self.hash ^= zobrist.EnPassantHash[types.file_plain(i)];
+                    }
                     break;
                 }
             }
@@ -359,8 +371,19 @@ pub const Position = struct {
             types.MoveFlags.DOUBLE_PUSH => {
                 self.move_piece_quiet(move.get_from(), move.get_to());
 
-                self.history[self.game_ply].ep_sq = move.get_from().add(types.Direction.North.relative_dir(color));
-                self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
+                // Only record/hash the en-passant square when an enemy pawn can
+                // actually capture en passant. A "phantom" EP square (no possible
+                // capture) would make this position hash differently from the
+                // identical one reached once the EP right silently expires, which
+                // breaks threefold-repetition detection and TT transposition. This
+                // matches the FIDE/Zobrist definition of EP equality (and Stockfish,
+                // which sets the EP square only when the capture is pseudo-legal).
+                const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+                const ep_target = move.get_from().add(types.Direction.North.relative_dir(color));
+                if (tables.get_pawn_attacks(color, ep_target) & self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()] != 0) {
+                    self.history[self.game_ply].ep_sq = ep_target;
+                    self.hash ^= zobrist.EnPassantHash[ep_target.file().index()];
+                }
             },
             types.MoveFlags.OO => {
                 if (color == types.Color.White) {
@@ -449,7 +472,12 @@ pub const Position = struct {
             },
             types.MoveFlags.DOUBLE_PUSH => {
                 self.move_piece_quiet(move.get_to(), move.get_from());
-                self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
+                // Mirror play_move: the EP key was only XOR'd in if the square was
+                // actually recorded (an enemy pawn could capture), so only remove it
+                // when ep_sq was set. Otherwise make/unmake desyncs the hash.
+                if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
+                    self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
+                }
             },
             types.MoveFlags.OO => {
                 if (color == types.Color.White) {
@@ -730,10 +758,6 @@ pub const Position = struct {
                     if (sq.rank() == types.Rank.RANK7.relative_rank(color)) {
                         // Quiet promotions are not possible here
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
-                        // A pinned pawn capturing on the promotion rank must emit
-                        // all four promotion-captures, not just the knight (a single
-                        // PROMOTION_CAPTURES flag aliases PC_KNIGHT). Mirrors the
-                        // non-pinned path below and the in-check pinner path above.
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
                             list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
@@ -1031,10 +1055,6 @@ pub const Position = struct {
                     if (sq.rank() == types.Rank.RANK7.relative_rank(color)) {
                         // Quiet promotions are not possible here
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
-                        // A pinned pawn capturing on the promotion rank must emit
-                        // all four promotion-captures, not just the knight (a single
-                        // PROMOTION_CAPTURES flag aliases PC_KNIGHT). Mirrors the
-                        // non-pinned path below and the in-check pinner path above.
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
                             list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};

@@ -166,7 +166,13 @@ pub const Searcher = struct {
         var out_buf: [4096]u8 = undefined;
         var out_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
         const outW = &out_file.interface;
-        self.stop = false;
+        // NOTE: `self.stop` is intentionally NOT reset here. It is cleared by the
+        // UCI `go` handler on the main thread *before* this worker is spawned, so a
+        // `stop` arriving immediately after `go` would otherwise be clobbered by a
+        // reset on the worker thread (the worker can start after the `stop` lands),
+        // making the engine ignore `stop` and run to full depth — a hang now that
+        // `stop`/`quit` join the worker. The non-UCI callers (datagen/bench/tests)
+        // never set `stop`, so it is already false for them.
         self.is_searching = true;
         self.time_stop = false;
         self.reset_heuristics(false);
@@ -323,6 +329,19 @@ pub const Searcher = struct {
             tdepth += 1;
         }
 
+        // If `stop` arrived before even depth 1 completed, `bm` is still empty.
+        // Fall back to the first legal move so we always emit a legal bestmove
+        // rather than the null `a1a1`. Only reachable on an immediate stop — the
+        // depth-limited callers (bench/datagen/tests) always finish depth 1.
+        if (bm.to_u16() == 0) {
+            var fallback = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+            defer fallback.deinit();
+            pos.generate_legal_moves(color, &fallback);
+            if (fallback.items.len > 0) {
+                bm = fallback.items[0];
+            }
+        }
+
         self.best_move = bm;
 
         if (!self.silent_output) {
@@ -416,7 +435,14 @@ pub const Searcher = struct {
         }
         i = 0;
         while (i < NUM_THREADS) : (i += 1) {
-            threads.items[i].?.join();
+            // Clear the slot after joining: a reaped std.Thread handle must never
+            // be joined twice (pthread_join returns ESRCH -> `unreachable`). The
+            // next `helpers()` call re-checks this slot for a still-running thread,
+            // so leaving the dead handle here would crash it on the very next depth.
+            if (threads.items[i]) |t| {
+                t.join();
+                threads.items[i] = null;
+            }
         }
     }
 
@@ -933,8 +959,6 @@ pub const Searcher = struct {
         if (entry != null) {
             hashmove = entry.?.bestmove;
             // Convert a node-relative stored mate score back to root-relative
-            // (same adjustment as the negamax probe; inverse of the store). A
-            // no-op for non-mate scores, so ordinary cutoffs are unchanged.
             var tt_eval = entry.?.eval;
             if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
                 tt_eval -= @as(i32, @intCast(self.ply));

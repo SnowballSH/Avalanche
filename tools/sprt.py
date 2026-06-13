@@ -21,6 +21,7 @@ Global options go BEFORE the subcommand; the subcommand's own arguments
 Time-control presets and SPRT bound presets are configured at the top of this
 file (see the "Configuration" block) — edit them there.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -44,9 +45,9 @@ BIN_CACHE = CACHE / "bin"
 # with --tc-string / --threads / --hash / --concurrency.
 TC_PRESETS = {
     #          tc          threads  hash(MB)  run games in parallel?
-    "stc": {"tc": "10+0.1", "threads": 1, "hash": 16, "parallel": True},
-    "ltc": {"tc": "60+0.6", "threads": 1, "hash": 64, "parallel": True},
-    "smp": {"tc": "30+0.3", "threads": 4, "hash": 256, "parallel": False},
+    "stc": {"tc": "5+0.05", "threads": 1, "hash": 16, "parallel": True},
+    "ltc": {"tc": "50+0.5", "threads": 1, "hash": 64, "parallel": True},
+    "smp": {"tc": "30+0.3", "threads": 4, "hash": 1024, "parallel": False},
 }
 DEFAULT_TC = "stc"
 
@@ -54,9 +55,9 @@ DEFAULT_TC = "stc"
 # are the valid choices); --elo0/--elo1 override per run. Add your own with a new
 # line: "my_bounds": (elo0, elo1).
 BOUNDS: dict[str, tuple[float, float]] = {
-    "gain": (0.0, 5.0),         # is the new version stronger?
-    "regression": (-5.0, 0.0),  # guard against a regression
-    "simplify": (-3.0, 1.0),    # accept a simplification that is not a regression
+    "gain": (0.0, 7.0),  # is the new version stronger?
+    "regression": (-7.0, 0.0),  # guard against a regression
+    "simplify": (-5.0, 1.0),  # accept a simplification that is not a regression
 }
 DEFAULT_BOUNDS = "gain"
 
@@ -65,8 +66,16 @@ ALPHA = 0.05
 BETA = 0.05
 
 # Default opening book, and the hard cap on rounds if the SPRT never decides.
-DEFAULT_BOOK = REPO / "books" / "noob_4moves.epd"
+DEFAULT_BOOK = REPO / "books" / "UHO_4060_v4.epd"
 DEFAULT_MAX_ROUNDS = 50000
+
+# Standard Adjudication defaults
+DRAW_MOVENUMBER = 34
+DRAW_MOVECOUNT = 8
+DRAW_SCORE = 8
+
+RESIGN_MOVECOUNT = 3
+RESIGN_SCORE = 400
 # ============================================================================
 
 
@@ -106,8 +115,11 @@ def run(
 
 def capture(cmd: Sequence[str | Path], cwd: Path | None = None) -> str:
     return subprocess.run(
-        [str(c) for c in cmd], cwd=str(cwd) if cwd is not None else None,
-        check=True, capture_output=True, text=True,
+        [str(c) for c in cmd],
+        cwd=str(cwd) if cwd is not None else None,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout.strip()
 
 
@@ -122,8 +134,17 @@ def build_current() -> Path:
     require("zig")
     out = CACHE / "current"
     info(f"Building current working tree -> {bold('Avalanche-current')}")
-    run(["zig", "build", "--release=fast", "-Dtarget-name=Avalanche-current",
-         "--prefix", str(out)], cwd=REPO)
+    run(
+        [
+            "zig",
+            "build",
+            "--release=fast",
+            "-Dtarget-name=Avalanche-current",
+            "--prefix",
+            str(out),
+        ],
+        cwd=REPO,
+    )
     binary = out / "bin" / "Avalanche-current"
     if not binary.exists():
         die(f"build did not produce {binary}")
@@ -154,8 +175,17 @@ def build_ref(ref: str) -> Path:
     info(f"Building ref {bold(ref)} ({sha}) in a temporary worktree")
     run(["git", "worktree", "add", "--detach", "--force", wt, sha], cwd=REPO)
     try:
-        run(["zig", "build", "--release=fast", "-Dtarget-name=Avalanche",
-             "--prefix", str(wt / "out")], cwd=wt)
+        run(
+            [
+                "zig",
+                "build",
+                "--release=fast",
+                "-Dtarget-name=Avalanche",
+                "--prefix",
+                str(wt / "out"),
+            ],
+            cwd=wt,
+        )
         built = wt / "out" / "bin" / "Avalanche"
         if not built.exists():
             die(f"ref build did not produce {built}")
@@ -184,8 +214,9 @@ def book_args(book: Path) -> list[str]:
     return ["-openings", f"file={book}", f"format={fmt}", "order=random"]
 
 
-def sprt_run(new_bin: Path, opp_bin: Path, new_name: str, opp_name: str,
-             a: argparse.Namespace) -> int:
+def sprt_run(
+    new_bin: Path, opp_bin: Path, new_name: str, opp_name: str, a: argparse.Namespace
+) -> int:
     preset = TC_PRESETS[a.tc]
     tc = a.tc_string or preset["tc"]
     threads = a.threads if a.threads is not None else preset["threads"]
@@ -200,17 +231,47 @@ def sprt_run(new_bin: Path, opp_bin: Path, new_name: str, opp_name: str,
 
     cmd: list[str | Path] = [
         FASTCHESS,
-        "-engine", f"cmd={new_bin}", f"name={new_name}",
-        "-engine", f"cmd={opp_bin}", f"name={opp_name}",
-        "-each", f"tc={tc}", f"option.Hash={hashmb}",
-        f"option.Threads={threads}", "proto=uci",
+        "-engine",
+        f"cmd={new_bin}",
+        f"name={new_name}",
+        "-engine",
+        f"cmd={opp_bin}",
+        f"name={opp_name}",
+        "-each",
+        f"tc={tc}",
+        f"option.Hash={hashmb}",
+        f"option.Threads={threads}",
+        "proto=uci",
         *book_args(Path(a.book)),
-        "-games", "2", "-rounds", str(a.max_rounds), "-repeat",
-        "-sprt", f"elo0={elo0}", f"elo1={elo1}", f"alpha={a.alpha}", f"beta={a.beta}",
-        "-concurrency", str(conc),
-        "-ratinginterval", "10",
+        "-games",
+        "2",
+        "-rounds",
+        str(a.max_rounds),
+        "-repeat",
+        "-sprt",
+        f"elo0={elo0}",
+        f"elo1={elo1}",
+        f"alpha={a.alpha}",
+        f"beta={a.beta}",
+        "-concurrency",
+        str(conc),
+        "-ratinginterval",
+        "10",
         "-recover",
     ]
+
+    # Add standard adjudication unless explicitly disabled
+    if not a.no_adj:
+        cmd += [
+            "-draw",
+            f"movenumber={DRAW_MOVENUMBER}",
+            f"movecount={DRAW_MOVECOUNT}",
+            f"score={DRAW_SCORE}",
+            "-resign",
+            f"movecount={RESIGN_MOVECOUNT}",
+            f"score={RESIGN_SCORE}",
+        ]
+
     if a.pgn:
         cmd += ["-pgnout", f"file={a.pgn}", "notation=uci"]
     if a.extra:
@@ -221,8 +282,10 @@ def sprt_run(new_bin: Path, opp_bin: Path, new_name: str, opp_name: str,
     print(bold("  Avalanche SPRT"))
     print(f"    {new_name}  vs  {opp_name}")
     print(f"    tc={tc}  threads={threads}  hash={hashmb}MB  concurrency={conc}")
-    print(f"    book={Path(a.book).name}  sprt=[{elo0}, {elo1}]"
-          f" alpha={a.alpha} beta={a.beta}")
+    print(
+        f"    book={Path(a.book).name}  sprt=[{elo0}, {elo1}]"
+        f" alpha={a.alpha} beta={a.beta}"
+    )
     print(f"    max rounds={a.max_rounds} (2 games each, color-balanced)")
     print()
 
@@ -259,32 +322,52 @@ def cmd_build(a: argparse.Namespace) -> int:
 def add_common(p: argparse.ArgumentParser) -> None:
     # Global options; give them BEFORE the subcommand, e.g.
     #   tools/test --tc ltc --bounds regression vs-commit HEAD~1
-    p.add_argument("--tc", choices=list(TC_PRESETS), default=DEFAULT_TC,
-                   help=f"time-control preset (default: {DEFAULT_TC})")
+    p.add_argument(
+        "--tc",
+        choices=list(TC_PRESETS),
+        default=DEFAULT_TC,
+        help=f"time-control preset (default: {DEFAULT_TC})",
+    )
     p.add_argument("--tc-string", help="override the raw fastchess tc, e.g. 8+0.08")
     p.add_argument("--threads", type=int, help="override UCI Threads per engine")
     p.add_argument("--hash", type=int, help="override UCI Hash (MB) per engine")
     p.add_argument("--concurrency", type=int, help="override number of parallel games")
-    p.add_argument("--bounds", choices=list(BOUNDS), default=DEFAULT_BOUNDS,
-                   help=f"SPRT bound preset (default: {DEFAULT_BOUNDS})")
+    p.add_argument(
+        "--bounds",
+        choices=list(BOUNDS),
+        default=DEFAULT_BOUNDS,
+        help=f"SPRT bound preset (default: {DEFAULT_BOUNDS})",
+    )
     p.add_argument("--elo0", type=float, help="override SPRT elo0 (use with --elo1)")
     p.add_argument("--elo1", type=float, help="override SPRT elo1")
-    p.add_argument("--alpha", type=float, default=ALPHA,
-                   help=f"SPRT alpha (default {ALPHA})")
-    p.add_argument("--beta", type=float, default=BETA,
-                   help=f"SPRT beta (default {BETA})")
+    p.add_argument(
+        "--alpha", type=float, default=ALPHA, help=f"SPRT alpha (default {ALPHA})"
+    )
+    p.add_argument(
+        "--beta", type=float, default=BETA, help=f"SPRT beta (default {BETA})"
+    )
     p.add_argument("--book", default=str(DEFAULT_BOOK), help="opening book (epd/pgn)")
     p.add_argument(
-        "--max-rounds", type=int, default=DEFAULT_MAX_ROUNDS, dest="max_rounds",
+        "--max-rounds",
+        type=int,
+        default=DEFAULT_MAX_ROUNDS,
+        dest="max_rounds",
         help=f"max rounds if the SPRT never decides (default {DEFAULT_MAX_ROUNDS})",
     )
     p.add_argument("--pgn", help="write games to this PGN file")
     p.add_argument("--extra", help="extra args appended verbatim to fastchess")
 
+    p.add_argument(
+        "--no-adj",
+        action="store_true",
+        help="disable standard draw/resign adjudication",
+    )
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        prog="tools/test", description=__doc__,
+        prog="tools/test",
+        description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_common(parser)  # global options are given before the subcommand

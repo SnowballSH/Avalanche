@@ -424,7 +424,6 @@ pub const UciInterface = struct {
                                     }
 
                                     const move = types.Move.new_from_string(&self.position, token.?);
-                                    // Stop applying moves on an illegal/garbage token instead of crashing.
                                     if (move.to_u16() == 0) {
                                         break;
                                     }
@@ -457,7 +456,6 @@ pub const UciInterface = struct {
                                     }
 
                                     const move = types.Move.new_from_string(&self.position, token.?);
-                                    // Stop applying moves on an illegal/garbage token instead of crashing.
                                     if (move.to_u16() == 0) {
                                         break;
                                     }
