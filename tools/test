@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Convenience wrapper: run the SPRT CLI on pypy3 via uv.
+#   tools/test vs-commit HEAD~1
+#   tools/test --tc ltc vs-engine /path/to/engine
+set -euo pipefail
+here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+exec uv run --python pypy3 --no-project "$here/sprt.py" "$@"

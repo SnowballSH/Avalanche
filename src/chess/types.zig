@@ -1,10 +1,10 @@
 const std = @import("std");
 const position = @import("position.zig");
 
-// Global Io instance (set once in main), used for clocks and stdio across the engine.
+// Global Io (set in main); backs clocks and stdio.
 pub var GLOBAL_IO: std.Io = undefined;
 
-// Monotonic timer shim mirroring the old std.time.Timer API, backed by the Io clock.
+// Monotonic timer; replaces std.time.Timer (removed in 0.16).
 pub const Timer = struct {
     start_ns: i96,
 

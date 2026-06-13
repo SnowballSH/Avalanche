@@ -92,10 +92,8 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // The engine passes the large `Position` struct (it embeds the NNUE
-    // accumulator stack) by value into `inline` helpers and relies on the
-    // optimizer to elide those copies. In a Debug test build the copies are
-    // real and overflow the test thread's stack, so build the tests optimized.
+    // Build tests optimized: Position is passed by value into inline helpers,
+    // and a Debug build's un-elided copies overflow the test thread's stack.
     const test_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSafe else optimize;
     const exe_tests = b.addTest(.{
         .root_module = b.createModule(.{

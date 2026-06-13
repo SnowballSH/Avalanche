@@ -43,8 +43,7 @@ pub inline fn clipped_relu(input: i16) i32 {
     }
 }
 
-// SIMD vector width (in i16 lanes) for the NNUE hot loops. HIDDEN_SIZE is a
-// multiple of this, so the loops need no scalar tail.
+// SIMD width in i16 lanes; HIDDEN_SIZE is a multiple of it.
 const VL: usize = 16;
 
 pub const Accumulator = struct {
@@ -59,7 +58,6 @@ pub const Accumulator = struct {
     pub fn update_weights(self: *Accumulator, comptime on: bool, data: WhiteBlackPair) void {
         const V = @Vector(VL, i16);
         const m1 = &weights.MODEL.layer_1;
-        // Elementwise vector add/sub is bit-identical to the scalar loop.
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += VL) {
             const ww: V = self.white[i..][0..VL].*;
@@ -144,10 +142,7 @@ pub const NNUE = struct {
         const zero: Vi16 = @splat(0);
         const cap: Vi16 = @splat(255);
 
-        // Squared clipped ReLU dot product, accumulated in i32 lanes. Integer
-        // addition is associative, so the lane-wise reduction reproduces the
-        // scalar accumulation exactly (assuming, as the trained net guarantees,
-        // the running sum stays within i32 — verified by bench parity).
+        // Squared clipped ReLU dot product; accumulate in i32 lanes, reduce at the end.
         var sum: Vi32 = @splat(0);
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += VL) {

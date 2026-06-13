@@ -121,7 +121,7 @@ pub const UciInterface = struct {
                         }
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
-                        search.NUM_THREADS = value - 1;
+                        search.NUM_THREADS = @max(value, 1) - 1;
                     } else {
                         for (parameters.TunableParams) |tunable| {
                             if (std.mem.eql(u8, token.?, tunable.name)) {

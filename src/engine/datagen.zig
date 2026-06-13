@@ -189,7 +189,9 @@ pub const DatagenSingle = struct {
 
         self.fileLock.lock.lockUncancelable(types.GLOBAL_IO);
         var wbuf: [4096]u8 = undefined;
-        var file_writer = self.fileLock.file.writer(types.GLOBAL_IO, &wbuf);
+        // Streaming (shared OS seek) so each game appends; positional .writer()
+        // would restart at offset 0 and overwrite the previous game.
+        var file_writer = self.fileLock.file.writerStreaming(types.GLOBAL_IO, &wbuf);
         const writer = &file_writer.interface;
         var i: usize = 0;
         while (i < fens.items.len) : (i += 1) {
