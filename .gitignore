@@ -32,3 +32,5 @@ fastchess
 .sprt-cache/
 
 data_*.txt
+
+*.pyc
