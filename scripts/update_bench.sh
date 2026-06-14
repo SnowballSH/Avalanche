@@ -53,5 +53,9 @@ if [ "$OLD" = "$NODES" ]; then
   echo "==> $NODES_FILE unchanged ($NODES nodes)."
 else
   echo "==> $NODES_FILE updated: $OLD -> $NODES"
-  echo "    Commit $NODES_FILE so CI asserts the new count."
+  echo ""
+  echo "    Commit bench.nodes and include 'Bench: $NODES' in the commit"
+  echo "    message so OpenBench can auto-detect it when creating tests:"
+  echo ""
+  echo "      git commit -m \"<description>\" -m \"Bench: $NODES\""
 fi

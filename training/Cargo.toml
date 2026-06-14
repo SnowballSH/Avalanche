@@ -1,0 +1,7 @@
+[package]
+name = "avalanche-trainer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bullet = { git = "https://github.com/jw1912/bullet", package = "bullet_lib" }

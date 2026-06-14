@@ -8,7 +8,7 @@
 
 <br/>
 
-**NOTE: Avalanche is currently being migrated to Zig 0.16.0, after a long hiatus.**
+**Avalanche now builds with Zig 0.16.0.** See [MIGRATION.md](docs/MIGRATION.md) for details on the port.
 
 ### Avalanche is the first UCI Chess Engine written in [Zig](https://ziglang.org/).
 
@@ -42,14 +42,14 @@ Avalanche now builds with **Zig 0.16.0**. The engine was ported from the origina
 Zig 0.10.x / Stage1 codebase to the modern compiler and standard library; the
 ported build is functionally identical to the 0.10.x version (the fixed
 benchmark produces the exact same node count) and is roughly 25% faster thanks
-to explicit SIMD in the NNUE evaluation. See [MIGRATION.md](MIGRATION.md) for the
+to explicit SIMD in the NNUE evaluation. See [MIGRATION.md](docs/MIGRATION.md) for the
 full set of breaking changes, the performance work, and the verification data.
 
 ```sh
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
 zig build                     # debug build
 zig build test                # unit tests
-./zig-out/bin/Avalanche bench # fixed-position benchmark -> "33745282 nodes <nps> nps"
+./zig-out/bin/Avalanche bench # fixed-position benchmark -> "35032097 nodes <nps> nps"
 ```
 
 Older Zig 0.10.x is no longer required (but a pinned 0.10.1 toolchain is kept in

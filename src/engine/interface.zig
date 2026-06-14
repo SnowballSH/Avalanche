@@ -9,6 +9,7 @@ const tt = @import("tt.zig");
 const search = @import("search.zig");
 const parameters = @import("parameters.zig");
 const build_options = @import("build_options");
+const genfens = @import("genfens.zig");
 
 pub const UciInterface = struct {
     position: position.Position,
@@ -83,6 +84,17 @@ pub const UciInterface = struct {
             }
 
             if (std.mem.eql(u8, token.?, "quit")) {
+                break :out;
+            } else if (std.mem.eql(u8, token.?, "genfens")) {
+                // OpenBench datagen: tokenize the rest of the line and generate FENs
+                var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+                defer arena.deinit();
+                var toks_list = std.array_list.Managed([]const u8).init(arena.allocator());
+                toks_list.append("genfens") catch {};
+                while (tokens.next()) |tok| {
+                    if (tok.len > 0) toks_list.append(tok) catch {};
+                }
+                genfens.run(toks_list.items) catch {};
                 break :out;
             } else if (std.mem.eql(u8, token.?, "uci")) {
                 try stdout.writeAll("id name Avalanche ");

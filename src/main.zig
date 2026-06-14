@@ -35,8 +35,18 @@ pub fn main(init: std.process.Init) anyerror!void {
             defer gen.deinit();
 
             tt.LOCK_GLOBAL_TT = true;
-            tt.GlobalTT.reset(512);
-            try gen.start(7);
+            tt.GlobalTT.reset(2048);
+
+            const num_threads: usize = if (args.len >= 3)
+                std.fmt.parseInt(usize, args[2], 10) catch 7
+            else
+                7;
+
+            if (args.len >= 4) {
+                gen.openings = try datagen.loadEpdFile(args[3]);
+            }
+
+            try gen.start(num_threads);
             return;
         }
 

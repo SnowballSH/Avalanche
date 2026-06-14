@@ -32,8 +32,18 @@ fastchess
 .sprt-cache/
 
 data_*.txt
+data_*.bin
+data/
 
 CLAUDE.md
 *.pyc
 
 bin/**
+bullet/
+
+# Training build artifacts (source is tracked, build output is not)
+training/target/
+training/checkpoints/
+
+OpenBench/
+OpenBench.wiki/

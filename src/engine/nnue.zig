@@ -75,10 +75,18 @@ pub const Accumulator = struct {
     }
 
     pub fn exchange_weights(self: *Accumulator, from: WhiteBlackPair, to: WhiteBlackPair) void {
+        const V = @Vector(VL, i16);
+        const m1 = &weights.MODEL.layer_1;
         var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) : (i += 1) {
-            self.white[i] += weights.LAYER_1[to.white + i] - weights.LAYER_1[from.white + i];
-            self.black[i] += weights.LAYER_1[to.black + i] - weights.LAYER_1[from.black + i];
+        while (i < weights.HIDDEN_SIZE) : (i += VL) {
+            const fw: V = m1[from.white + i ..][0..VL].*;
+            const tw: V = m1[to.white + i ..][0..VL].*;
+            const fb: V = m1[from.black + i ..][0..VL].*;
+            const tb: V = m1[to.black + i ..][0..VL].*;
+            const ww: V = self.white[i..][0..VL].*;
+            const wb: V = self.black[i..][0..VL].*;
+            self.white[i..][0..VL].* = ww + tw - fw;
+            self.black[i..][0..VL].* = wb + tb - fb;
         }
     }
 };
