@@ -1,3 +1,18 @@
+# v3.0.0_dev
+
+- Migrate to Zig 0.16.0 and fix some bugs
+
+```
+Results of current vs Avalanche-2.1.0 (50+0.5, 1t, 64MB, UHO_4060_v4.epd):
+Elo: 34.05 +/- 15.43, nElo: 66.25 +/- 29.80
+LOS: 100.00 %, DrawRatio: 51.72 %, PairsRatio: 2.15
+Games: 522, Wins: 136, Losses: 85, Draws: 301, Points: 286.5 (54.89 %)
+Ptnml(0-2): [1, 39, 135, 80, 6], WL/DD Ratio: 0.48
+LLR: 2.98 (101.2%) (-2.94, 2.94) [-10.00, 0.00]
+--------------------------------------------------
+SPRT ([-10.00, 0.00]) completed - H1 was accepted
+```
+
 # v2.1.0
 
 ## 1/11/2024

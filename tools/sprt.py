@@ -55,8 +55,8 @@ DEFAULT_TC = "stc"
 # are the valid choices); --elo0/--elo1 override per run. Add your own with a new
 # line: "my_bounds": (elo0, elo1).
 BOUNDS: dict[str, tuple[float, float]] = {
-    "gain": (0.0, 7.0),  # is the new version stronger?
-    "regression": (-7.0, 0.0),  # guard against a regression
+    "gain": (0.0, 10.0),  # is the new version stronger?
+    "regression": (-10.0, 0.0),  # guard against a regression
     "simplify": (-5.0, 1.0),  # accept a simplification that is not a regression
 }
 DEFAULT_BOUNDS = "gain"

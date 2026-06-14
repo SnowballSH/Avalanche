@@ -35,3 +35,5 @@ data_*.txt
 
 CLAUDE.md
 *.pyc
+
+bin/**
