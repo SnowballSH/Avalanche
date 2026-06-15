@@ -9,11 +9,11 @@ Run SPRT matches of the current working tree against a previous git commit (buil
 automatically) or against any foreign UCI engine, at the standard time controls.
 
 Examples:
-    tools/test vs-commit HEAD~1                 # current vs previous commit, STC
-    tools/test --tc ltc vs-commit v2.1.0        # long time control
-    tools/test --tc smp --bounds regression vs-commit master
-    tools/test vs-engine /path/to/other-engine  # current vs a foreign engine
-    tools/test build HEAD~5                      # just build a ref, print its path
+    scripts/sprt.py vs-commit HEAD~1                 # current vs previous commit, STC
+    scripts/sprt.py --tc ltc vs-commit v2.1.0        # long time control
+    scripts/sprt.py --tc smp --bounds regression vs-commit master
+    scripts/sprt.py vs-engine /path/to/other-engine  # current vs a foreign engine
+    scripts/sprt.py build HEAD~5                      # just build a ref, print its path
 
 Global options go BEFORE the subcommand; the subcommand's own arguments
 (ref / engine path / --name) go after.

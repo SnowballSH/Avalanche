@@ -45,7 +45,7 @@ fn main() {
     let superbatches = 400;
     let batch_size = 16_384;
     let batches_per_superbatch = 6104; // ≈100M positions per superbatch
-    let wdl_proportion = 0.75;
+    let wdl_proportion = 0.35;
     let threads = num_cpus();
     let save_rate = 20;
 
