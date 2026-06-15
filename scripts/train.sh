@@ -18,6 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TRAINING_DIR="$ROOT_DIR/training"
 
+# Auto-detect CUDA toolkit for GPU-accelerated training
+if [ -z "${CUDA_PATH:-}" ]; then
+    if [ -d "/usr/local/cuda" ]; then
+        export CUDA_PATH="/usr/local/cuda"
+    fi
+fi
+
 # Collect data file arguments (default to data/training.bin)
 if [ $# -eq 0 ]; then
     DATA_FILES=("$ROOT_DIR/data/training.bin")
@@ -44,6 +51,11 @@ fi
 echo "=== Avalanche NNUE Training ==="
 echo "Data: ${DATA_FILES[*]}"
 echo "Output: $TRAINING_DIR/checkpoints/"
+if [ -n "${CUDA_PATH:-}" ]; then
+    echo "GPU: CUDA (${CUDA_PATH})"
+else
+    echo "GPU: none (CPU-only training)"
+fi
 echo "==============================="
 echo ""
 

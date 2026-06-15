@@ -78,7 +78,7 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addAnonymousImport("bingshan.nnue", .{
-        .root_source_file = b.path("nets/bingshan.nnue"),
+        .root_source_file = b.path("nets/avalanche-400.nnue"),
     });
 
     b.installArtifact(exe);
@@ -105,7 +105,7 @@ pub fn build(b: *std.Build) void {
     });
 
     exe_tests.root_module.addAnonymousImport("bingshan.nnue", .{
-        .root_source_file = b.path("nets/bingshan.nnue"),
+        .root_source_file = b.path("nets/avalanche-400.nnue"),
     });
 
     const run_tests = b.addRunArtifact(exe_tests);
