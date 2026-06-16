@@ -42,12 +42,12 @@ fn main() {
     // Training hyperparameters
     let initial_lr = 0.001;
     let final_lr = 0.001 * 0.3f32.powi(5);
-    let superbatches = 400;
+    let superbatches = 250;
     let batch_size = 16_384;
     let batches_per_superbatch = 6104; // ≈100M positions per superbatch
     let wdl_proportion = 0.35;
     let threads = num_cpus();
-    let save_rate = 20;
+    let save_rate = 10;
 
     println!("=== Avalanche NNUE Trainer ===");
     println!("Architecture: (768 -> {HIDDEN_SIZE})x2 -> 1x{NUM_OUTPUT_BUCKETS}");
