@@ -25,7 +25,6 @@ EPD_FILE="${3:-}"
 # Ensure engine is built
 if [ ! -f "$ENGINE" ]; then
     echo "Engine not found at $ENGINE. Building..."
-    export PATH="/home/coder/.vscode-server/data/User/globalStorage/ziglang.vscode-zig/zig/x86_64-linux-0.16.0:$PATH"
     (cd "$ROOT_DIR" && zig build --release=fast)
 fi
 

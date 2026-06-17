@@ -40,11 +40,9 @@ fn main() {
     }
 
     // Training hyperparameters
-    let initial_lr = 0.001;
-    let final_lr = 0.001 * 0.3f32.powi(5);
-    let superbatches = 250;
+    let superbatches = 25;
     let batch_size = 16_384;
-    let batches_per_superbatch = 6104; // ≈100M positions per superbatch
+    let batches_per_superbatch = 12208; // ≈200M positions per superbatch (2x data per sb)
     let wdl_proportion = 0.35;
     let threads = num_cpus();
     let save_rate = 10;
@@ -56,7 +54,7 @@ fn main() {
     println!("Batch size: {batch_size}");
     println!("Positions/superbatch: {}", batch_size * batches_per_superbatch);
     println!("Threads: {threads}");
-    println!("LR: {initial_lr} -> {final_lr} (cosine)");
+    println!("LR: CosineDecay 0.001 -> 2.43e-7 over 200sb");
     println!("WDL: {wdl_proportion}");
     println!("==============================");
     println!();
@@ -88,7 +86,7 @@ fn main() {
         });
 
     let schedule = TrainingSchedule {
-        net_id: "avalanche".to_string(),
+        net_id: "jihan44".to_string(),
         eval_scale: EVAL_SCALE,
         steps: TrainingSteps {
             batch_size,
@@ -97,7 +95,11 @@ fn main() {
             end_superbatch: superbatches,
         },
         wdl_scheduler: wdl::ConstantWDL { value: wdl_proportion },
-        lr_scheduler: lr::CosineDecayLR { initial_lr, final_lr, final_superbatch: superbatches },
+        lr_scheduler: lr::CosineDecayLR {
+            initial_lr: 0.001,
+            final_lr: 0.0000001,
+            final_superbatch: 25,
+        },
         save_rate,
     };
 

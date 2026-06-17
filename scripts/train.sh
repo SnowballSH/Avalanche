@@ -26,10 +26,18 @@ if [ -z "${CUDA_PATH:-}" ]; then
 fi
 
 # Collect data file arguments (default to data/training.bin)
+# Canonicalize to absolute paths so they survive the cd into training/
 if [ $# -eq 0 ]; then
     DATA_FILES=("$ROOT_DIR/data/training.bin")
 else
-    DATA_FILES=("$@")
+    DATA_FILES=()
+    for arg in "$@"; do
+        if [[ "$arg" = /* ]]; then
+            DATA_FILES+=("$arg")
+        else
+            DATA_FILES+=("$(pwd)/$arg")
+        fi
+    done
 fi
 
 # Verify data files exist
@@ -67,4 +75,4 @@ echo "=== Training Complete ==="
 echo "Checkpoints saved to: $TRAINING_DIR/checkpoints/"
 echo ""
 echo "To install a network:"
-echo "  ./scripts/install_net.sh training/checkpoints/avalanche-<N>"
+echo "  ./scripts/install_net.sh training/checkpoints/..."
