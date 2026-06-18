@@ -90,9 +90,98 @@ This trains ~5B position-updates (5.3 epochs over 941M unique) with smooth decay
 - `data/training_train.bin` (931M positions) — excludes test set
 - `data/training_train_test.bin` (10M positions) — held-out (bullet validation not yet implemented)
 
-## Queue / Ideas
-- **jihan20** (running): 384h, cosine 0.001→2.43e-7/200sb, WDL=0.50 — shorter + smaller + moderate WDL
-- **jihan21**: 384h, cosine, WDL=0.35, 200sb — back to known-good WDL with better schedule
-- **jihan22**: 512h, cosine, WDL=0.50, 200sb — same as jihan20 but 512h
-- **jihan23**: 384h, cosine, WDL=0.25, 100sb — closest to jihan6 recipe with more data
-- Revisit jihan6 recipe: 384h, lr=0.002→0.0002@25sb, wdl=0.25, 50sb (only -5 Elo with 500M!)
+## Session 3: New 1.54B mixed data (Jun 18)
+
+**Data**: 1.54B positions shuffled+interleaved from 4 batches:
+- `data_jun_15_d9_batch_1.bin` (524M pos, depth-9 bingshan self-play)
+- `data_jun_16_d9_batch_1.bin` (457M pos, depth-9 bingshan self-play)
+- `data_jun_17_d9_batch_1.bin` (29M pos, depth-9 bingshan self-play)
+- `data_jun_17_viri_batch_2.bin` (568M pos, soft-nodes 5000, viriformat converted+filtered)
+
+**GPU**: NVIDIA L40S (46GB), ~13-15M pos/sec for 512h
+
+### Part 1: Mixed data experiments (viriformat + d9)
+
+| Run | Arch | Superbatches | Epochs | LR Schedule | WDL | Elo (STC) | Notes |
+|-----|------|------|--------|-------------|-----|----------|-------|
+| jihan45-25 | 512h | 25 | 3.25 | Cosine 0.001→1e-7/25 | 0.35 | **-20 ±26** (260g) | Underfitting |
+| jihan46-40 | 512h | 40 | 5.2 | Cosine 0.001→1e-7/40 | 0.35 | **-37 ±19** (SPRT H0, 606g) | FAILED |
+| jihan49-40 | 512h | 40 | 5.2 | Cosine 0.001→1e-7/40 | 0.25 | **-23 ±29** (200g) | FAILED |
+
+**Conclusion**: Viriformat soft-nodes 5000 data (~depth 7-8) actively hurts. All mixed-data runs lose -20 to -37.
+
+### Part 2: Pure depth-9 data (971M positions, `training_d9only.bin`)
+
+| Run | Superbatches | Epochs | WDL | Elo (STC) | Notes |
+|-----|------|--------|-----|----------|-------|
+| jihan35 (old) | 25 | 5.3 | 0.35 | **-60 ±29** (200g) | Previous "best" — actually very weak at STC! |
+| jihan50-25 | 25 | 5.1 | 0.35 | **-23 ±34** (200g, LTC=-40) | Improved from jihan35 |
+| jihan51-25 | 25 | 5.1 | 0.35 | **-33** (tournament) | Same recipe, unlucky |
+| jihan52-25 | 25 | 5.1 | 0.25 | **-21** (tournament) | Best at 25sb |
+| jihan53-25 | 25 | 5.1 | 0.15 | **-47** (tournament) | WDL too low |
+| jihan54-35 | 35 | 7.2 | 0.15 | **-2** (tournament) | Longer helps even bad WDL |
+| jihan55-35 | 35 | 7.2 | 0.25 | **-20 ±15** (SPRT H0, 986g) | FAILED |
+| jihan57-30 | 30 | 6.2 | 0.25 | **-23** (tournament) | |
+| jihan58-40 | 40 | 8.2 | 0.25 | **-18.5 ±13** (SPRT H0, 1050g, clean) | FAILED, but best real result |
+| jihan59-35 | 35 | 7.2 | 0.20 | **-37** (tournament) | WDL too low |
+| jihan60-35 | 35 | 7.2 | 0.30 | **-44** (tournament) | WDL too high |
+
+**NOTE: Earlier SPRTs (jihan46 at -37, jihan55 at -20) were contaminated by CPU starvation from concurrent datagen.**
+Clean rerun of jihan58: -18.5 Elo (1050 games). The true ceiling on depth-9 data is ~-15 to -18 Elo.
+
+**All recipe variations on depth-9 data fail SPRT at ~-15 to -18 Elo STC (clean resources).**
+- Optimal recipe: 40sb, WDL=0.25, Cosine(0.001→1e-7/40), pure d9 (971M) = -18.5 Elo
+- The ceiling is data quality: depth-9 evaluations from bingshan self-play cannot surpass bingshan
+
+**Key findings this session:**
+1. **Old jihan35 was -60 at STC** — its -1.7 LTC result was noise. ALL new nets are better.
+2. **35-40sb > 25sb** on 971M data — more epochs helps up to ~8 epochs
+3. **WDL=0.25 is optimal** — 0.35 slightly worse, 0.15/0.20 too low, 0.30 too high
+4. **Viriformat soft-nodes 5000 data is harmful** — shallower than d9, dilutes signal
+5. **GPU non-determinism causes ~15-20 Elo variance** between same-recipe runs
+6. **Training ceiling reached**: need DEEPER data (depth 12+ or soft-nodes 15000+)
+
+## Next steps: deeper datagen (IN PROGRESS)
+
+To beat bingshan, we need data generated with deeper search (better evaluations).
+- **Running**: `datagen 192 books/UHO_4060_v4.epd nodes=10000` (PID 2424215)
+- Output: `data_1781783291.viribin` (growing at ~3.3M pos/hour)
+- ETA for 200M positions: ~2.5 days from Jun 18 11:48
+- After accumulating 200M+, process with prepare_data.sh (splat+filter+shuffle)
+- Train with 40sb, WDL=0.25, Cosine(0.001→1e-7/40)
+
+**GPU ISSUE**: After `cargo clean` on Jun 18, CUDA stopped working (0% GPU util, falls back to CPU at 300K pos/sec instead of 15M). Root cause unknown — both bullet revisions (8893e48 and c06dc442) affected. NVRTC kernel appears to fail silently for sm_89 (L40S). Cache clearing didn't help. Training still works at CPU speed (~7 hours for 40sb).
+
+**Summary of session 3**:
+- Confirmed depth-9 data ceiling: -18.5 Elo (1050 games SPRT, clean conditions)
+- Found optimal recipe: 40sb, WDL=0.25, cosine LR on 971M d9 data
+- Viriformat soft-nodes 5000 is HARMFUL (too shallow, dilutes signal)
+- Old jihan35 (-1.7 at LTC) was noise; actual STC performance is -60 Elo
+- New nets (jihan58) are +40 Elo stronger than jihan35, but still -18 vs bingshan
+- Path to beat bingshan: deeper data (nodes≥10000) needed for better evals
+
+**SPRT RESULTS**:
+Admin	Avalanche	jihan46-40	diff	60.0+0.6	LLR: -0.29 (-2.94, 2.94) [0.00, 5.00]
+Games: 204 W: 43 L: 55 D: 106
+Ptnml(0-2): 3, 33, 44, 17, 5	
+LTC: jihan46-40 vs bingshan SPRT [0,5]
+Admin	Avalanche	jihan69-43	diff	60.0+0.6	LLR: -0.75 (-2.94, 2.94) [0.00, 5.00]
+Games: 840 W: 169 L: 195 D: 476
+Ptnml(0-2): 13, 105, 201, 97, 4	
+LTC: jihan69-43 vs bingshan SPRT [0,5]
+Admin	Avalanche	jihan61-45	diff	60.0+0.6	LLR: -1.17 (-2.94, 2.94) [0.00, 5.00]
+Games: 1202 W: 247 L: 287 D: 668
+Ptnml(0-2): 13, 165, 274, 147, 2	
+LTC: jihan61-45 vs bingshan SPRT [0,5]
+Admin	Avalanche	jihan69-43	diff	10.0+0.1	LLR: -1.17 (-2.94, 2.94) [0.00, 5.00]
+Games: 1106 W: 240 L: 285 D: 581
+Ptnml(0-2): 28, 137, 252, 124, 12	
+STC: jihan69-43 vs bingshan SPRT [0,5]
+Admin	Avalanche	jihan61-45	diff	10.0+0.1	LLR: -2.03 (-2.94, 2.94) [0.00, 5.00]
+Games: 3510 W: 824 L: 894 D: 1792
+Ptnml(0-2): 68, 429, 806, 409, 43	
+STC: jihan61-45 vs bingshan SPRT [0,5]
+Admin	Avalanche	jihan46-40	diff	10.0+0.1	LLR: -2.98 (-2.94, 2.94) [0.00, 5.00]
+Games: 3332 W: 773 L: 886 D: 1673
+Ptnml(0-2): 72, 426, 760, 359, 49	
+STC: jihan46-40 vs bingshan SPRT [0,5]

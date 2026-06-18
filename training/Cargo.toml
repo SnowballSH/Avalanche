@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 bullet = { git = "https://github.com/jw1912/bullet", package = "bullet_lib", features = ["cuda"] }
+viriformat = "2.0.1"
+rand = "0.9"

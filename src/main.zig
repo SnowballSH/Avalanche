@@ -31,19 +31,39 @@ pub fn main(init: std.process.Init) anyerror!void {
             return;
         }
         if (std.mem.eql(u8, second, "datagen")) {
-            var gen = datagen.Datagen.new();
-            defer gen.deinit();
-
-            tt.LOCK_GLOBAL_TT = true;
-            tt.GlobalTT.reset(2048);
+            // Usage: datagen [threads] [book.epd] [format=viri|bullet] [nodes=5000]
+            var config = datagen.DatagenConfig{};
 
             const num_threads: usize = if (args.len >= 3)
                 std.fmt.parseInt(usize, args[2], 10) catch 7
             else
                 7;
 
-            if (args.len >= 4) {
-                gen.openings = try datagen.loadEpdFile(args[3]);
+            // Parse optional keyword args
+            var book_path: ?[]const u8 = null;
+            for (args[@min(3, args.len)..]) |arg| {
+                if (std.mem.startsWith(u8, arg, "format=")) {
+                    const val = arg[7..];
+                    if (std.mem.eql(u8, val, "bullet")) {
+                        config.format = .bullet;
+                    } else {
+                        config.format = .viri;
+                    }
+                } else if (std.mem.startsWith(u8, arg, "nodes=")) {
+                    config.soft_nodes = std.fmt.parseInt(u64, arg[6..], 10) catch 5000;
+                } else {
+                    book_path = arg;
+                }
+            }
+
+            var gen = datagen.Datagen.new(config);
+            defer gen.deinit();
+
+            tt.LOCK_GLOBAL_TT = true;
+            tt.GlobalTT.reset(2048);
+
+            if (book_path) |path| {
+                gen.openings = try datagen.loadEpdFile(path);
             }
 
             try gen.start(num_threads);
@@ -51,7 +71,7 @@ pub fn main(init: std.process.Init) anyerror!void {
         }
 
         if (std.mem.eql(u8, second, "datagen_single")) {
-            var gen = datagen.Datagen.new();
+            var gen = datagen.Datagen.new(.{});
             defer gen.deinit();
 
             tt.LOCK_GLOBAL_TT = true;

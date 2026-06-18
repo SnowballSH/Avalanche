@@ -11,12 +11,153 @@ pub const FileLock = struct {
     lock: std.Io.Mutex,
 };
 
-const MAX_DEPTH: ?u8 = 9;
-const MAX_NODES: ?u64 = null;
-const SOFT_MAX_NODES: ?u64 = null;
+pub const Format = enum { bullet, viri };
 
-// Binary bulletformat ChessBoard record (32 bytes, matches bulletformat crate's repr(C) layout).
-// All fields are stored relative to the side-to-move (STM).
+pub const DatagenConfig = struct {
+    format: Format = .viri,
+    soft_nodes: u64 = 5000,
+    hard_node_multiplier: u64 = 8,
+    random_plies_min: u64 = 8,
+    random_plies_range: u64 = 2,
+    opening_reject_threshold: i32 = 600,
+    win_adj_threshold: i32 = 2500,
+    win_adj_count: usize = 4,
+    draw_adj_threshold: i32 = 5,
+    draw_adj_count: usize = 12,
+    draw_adj_min_ply: usize = 50,
+};
+
+// Viriformat PackedBoard — 32 bytes, little-endian
+// Piece encoding: bits 0-2 = type (0=P,1=N,2=B,3=R,4=Q,5=K,6=unmoved_rook), bit3 = color (0=white,1=black)
+const ViriPackedBoard = extern struct {
+    occ: u64,
+    pcs: [16]u8,
+    stm_ep: u8,
+    halfmove: u8,
+    fullmove: u16,
+    eval: i16,
+    wdl: u8,
+    extra: u8,
+};
+
+comptime {
+    if (@sizeOf(ViriPackedBoard) != 32) @compileError("ViriPackedBoard must be 32 bytes");
+}
+
+const MoveScorePair = extern struct {
+    move: u16,
+    score: i16,
+};
+
+comptime {
+    if (@sizeOf(MoveScorePair) != 4) @compileError("MoveScorePair must be 4 bytes");
+}
+
+const VIRI_TERMINATOR: MoveScorePair = .{ .move = 0, .score = 0 };
+
+fn encode_viri_move(move: types.Move) u16 {
+    const from: u16 = @as(u16, move.from);
+    const raw_flags: u4 = move.flags;
+
+    var to: u16 = @as(u16, move.to);
+    var promo: u16 = 0;
+    var mtype: u16 = 0;
+
+    if (raw_flags == 0b0010) {
+        // OO: king-takes-rook on h-file
+        to = (from & 0b111000) | 7;
+        mtype = 2;
+    } else if (raw_flags == 0b0011) {
+        // OOO: king-takes-rook on a-file
+        to = (from & 0b111000) | 0;
+        mtype = 2;
+    } else if (raw_flags == 0b1010) {
+        // EN_PASSANT
+        mtype = 1;
+    } else if (raw_flags & 0b0100 != 0) {
+        // Any promotion (bit 2 set in flags = promotion)
+        mtype = 3;
+        promo = @as(u16, raw_flags & 0b0011);
+    }
+
+    return from | (to << 6) | (promo << 12) | (mtype << 14);
+}
+
+fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) ViriPackedBoard {
+    const all_occ = pos.all_all_pieces();
+
+    const castling_entry = pos.history[pos.game_ply].entry;
+    const h1_rook_can_castle = (castling_entry & types.WhiteOOMask) == 0;
+    const a1_rook_can_castle = (castling_entry & types.WhiteOOOMask) == 0;
+    const h8_rook_can_castle = (castling_entry & types.BlackOOMask) == 0;
+    const a8_rook_can_castle = (castling_entry & types.BlackOOOMask) == 0;
+
+    // Pack pieces in occupancy order (LSB first)
+    var pcs: [16]u8 = .{0} ** 16;
+    var idx: usize = 0;
+    var occ_iter = all_occ;
+    while (occ_iter != 0) {
+        const sq_idx = @ctz(occ_iter);
+        const sq_bit: u64 = @as(u64, 1) << @as(u6, @intCast(sq_idx));
+        occ_iter &= occ_iter - 1;
+
+        const piece = pos.mailbox[sq_idx];
+        if (piece == types.Piece.NO_PIECE) continue;
+
+        const pt = piece.piece_type();
+        const color = piece.color();
+        var piece_nibble: u8 = @as(u8, pt.index());
+
+        // Mark unmoved rooks as type 6 (castling rights indicator in viriformat)
+        if (pt == types.PieceType.Rook) {
+            const is_castling_rook = blk: {
+                if (color == types.Color.White) {
+                    if (sq_idx == 0 and a1_rook_can_castle) break :blk true;
+                    if (sq_idx == 7 and h1_rook_can_castle) break :blk true;
+                } else {
+                    if (sq_idx == 56 and a8_rook_can_castle) break :blk true;
+                    if (sq_idx == 63 and h8_rook_can_castle) break :blk true;
+                }
+                break :blk false;
+            };
+            if (is_castling_rook) piece_nibble = 6;
+        }
+
+        // Color bit: 0=white, 1=black (bit 3)
+        if (color == types.Color.Black) piece_nibble |= 8;
+
+        _ = sq_bit;
+        pcs[idx / 2] |= piece_nibble << @as(u3, @intCast(4 * (idx & 1)));
+        idx += 1;
+    }
+
+    // Side-to-move + en-passant byte
+    const ep_sq = pos.history[pos.game_ply].ep_sq;
+    const ep_val: u8 = if (ep_sq == types.Square.NO_SQUARE) 64 else @as(u8, @intCast(ep_sq.index()));
+    const stm_bit: u8 = if (pos.turn == types.Color.Black) 0x80 else 0;
+    const stm_ep: u8 = stm_bit | (ep_val & 0x7F);
+
+    // Halfmove clock
+    const halfmove: u8 = @as(u8, @intCast(@min(pos.history[pos.game_ply].fifty, 255)));
+
+    // Fullmove counter
+    const fullmove: u16 = @as(u16, @intCast(pos.game_ply / 2 + 1));
+
+    // Eval: white-relative, clamped
+    const clamped = std.math.clamp(white_relative_score, -32000, 32000);
+
+    return ViriPackedBoard{
+        .occ = all_occ,
+        .pcs = pcs,
+        .stm_ep = stm_ep,
+        .halfmove = halfmove,
+        .fullmove = fullmove,
+        .eval = @as(i16, @intCast(clamped)),
+        .wdl = 1, // filled at game end
+        .extra = 0,
+    };
+}
+
 const ChessBoard = extern struct {
     occ: u64,
     pcs: [16]u8,
@@ -31,7 +172,6 @@ comptime {
     if (@sizeOf(ChessBoard) != 32) @compileError("ChessBoard must be 32 bytes");
 }
 
-// Intermediate record before game result is known
 const PendingRecord = struct {
     board: ChessBoard,
     white_was_stm: bool,
@@ -56,7 +196,6 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
     var white_occ = w_pawn | w_knight | w_bishop | w_rook | w_queen | w_king;
     var black_occ = b_pawn | b_knight | b_bishop | b_rook | b_queen | b_king;
 
-    // Piece-type bitboards (0=Pawn, 1=Knight, 2=Bishop, 3=Rook, 4=Queen, 5=King)
     var piece_bbs: [6]u64 = .{
         w_pawn | b_pawn,
         w_knight | b_knight,
@@ -66,7 +205,6 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
         w_king | b_king,
     };
 
-    // If black to move, flip board vertically to make STM's back rank = rank 1
     if (stm == types.Color.Black) {
         white_occ = @byteSwap(white_occ);
         black_occ = @byteSwap(black_occ);
@@ -75,12 +213,10 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
         }
     }
 
-    // friendly = STM's pieces, enemy = opponent's pieces
     const friendly_occ = if (stm == types.Color.White) white_occ else black_occ;
     const enemy_occ = if (stm == types.Color.White) black_occ else white_occ;
     const occ = friendly_occ | enemy_occ;
 
-    // Pack pieces ordered by set bits in occ (LSB first)
     var pcs: [16]u8 = .{0} ** 16;
     var idx: usize = 0;
     var occ_iter = occ;
@@ -103,7 +239,6 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
         idx += 1;
     }
 
-    // King squares in STM-relative coordinates
     const our_king_sq: u8 = blk: {
         const kb = if (stm == types.Color.White) w_king else @byteSwap(b_king);
         break :blk @as(u8, @intCast(@ctz(kb)));
@@ -113,7 +248,6 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
         break :blk @as(u8, @intCast(@ctz(kb))) ^ 56;
     };
 
-    // Score: convert to STM-relative
     const clamped = std.math.clamp(white_relative_score, -32000, 32000);
     const score: i16 = if (stm == types.Color.White)
         @as(i16, @intCast(clamped))
@@ -125,7 +259,7 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
             .occ = occ,
             .pcs = pcs,
             .score = score,
-            .result = 0, // filled in at game end
+            .result = 0,
             .ksq = our_king_sq,
             .opp_ksq = opp_king_sq,
             .extra = .{ 0, 0, 0 },
@@ -138,27 +272,31 @@ pub const DatagenSingle = struct {
     id: u64,
     timer: types.Timer,
     count: u64,
+    game_count: u64,
     searcher: search.Searcher,
     fileLock: *FileLock,
     prng: utils.PRNG,
     openings: ?[]const []const u8,
+    config: DatagenConfig,
 
-    pub fn new(lock: *FileLock, seed: u128, id: u64, openings: ?[]const []const u8) DatagenSingle {
+    pub fn new(lock: *FileLock, seed: u128, id: u64, openings: ?[]const []const u8, config: DatagenConfig) DatagenSingle {
         var searcher = search.Searcher.new();
-        searcher.max_millis = 1000;
-        searcher.ideal_time = 500;
-        searcher.max_nodes = MAX_NODES;
-        searcher.soft_max_nodes = SOFT_MAX_NODES;
-        searcher.min_depth = 2;
+        searcher.max_millis = 999999999;
+        searcher.ideal_time = 999999999;
+        searcher.max_nodes = config.soft_nodes * config.hard_node_multiplier;
+        searcher.soft_max_nodes = config.soft_nodes;
+        searcher.min_depth = 1;
         searcher.silent_output = true;
         return DatagenSingle{
             .id = id,
             .timer = undefined,
             .count = 0,
+            .game_count = 0,
             .searcher = searcher,
             .fileLock = lock,
             .prng = utils.PRNG.new(seed),
             .openings = openings,
+            .config = config,
         };
     }
 
@@ -166,11 +304,10 @@ pub const DatagenSingle = struct {
         self.searcher.deinit();
     }
 
-    pub fn playGame(self: *DatagenSingle) !void {
+    pub fn playGameViri(self: *DatagenSingle) !void {
         self.searcher.root_board = position.Position.new();
         var pos = &self.searcher.root_board;
 
-        // Set starting position: EPD book line or default startpos
         const using_book = self.openings != null;
         if (self.openings) |book| {
             const line = book[self.prng.rand64() % book.len];
@@ -179,9 +316,180 @@ pub const DatagenSingle = struct {
             pos.set_fen(types.DEFAULT_FEN);
         }
 
-        // Age the TT to deprecate stale entries (thread-safe, no reallocation)
         tt.GlobalTT.do_age();
+        self.searcher.reset_heuristics(true);
+        self.searcher.stop = false;
+        self.searcher.force_thinking = false;
 
+        var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+        defer arena.deinit();
+
+        var move_scores = try std.array_list.Managed(MoveScorePair).initCapacity(arena.allocator(), 256);
+        defer move_scores.deinit();
+
+        var white_result: u8 = 1; // 0=black win, 1=draw, 2=white win
+        var draw_count: usize = 0;
+        var white_win_count: usize = 0;
+        var black_win_count: usize = 0;
+        var ply: usize = 0;
+        const cfg = self.config;
+
+        const random_plies: u64 = if (using_book)
+            (cfg.random_plies_min -| 6) + (self.prng.rand64() % cfg.random_plies_range)
+        else
+            cfg.random_plies_min + (self.prng.rand64() % cfg.random_plies_range);
+
+        var initial_board: ?ViriPackedBoard = null;
+
+        while (true) : (ply += 1) {
+            if (self.searcher.is_draw(pos, true)) {
+                white_result = 1;
+                break;
+            }
+
+            var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
+            if (pos.turn == types.Color.White) {
+                pos.generate_legal_moves(types.Color.White, &movelist);
+            } else {
+                pos.generate_legal_moves(types.Color.Black, &movelist);
+            }
+            const move_size = movelist.items.len;
+            if (move_size == 0) {
+                if (pos.turn == types.Color.White) {
+                    white_result = if (pos.in_check(types.Color.White)) 0 else 1;
+                } else {
+                    white_result = if (pos.in_check(types.Color.Black)) 2 else 1;
+                }
+                movelist.deinit();
+                break;
+            }
+
+            // Random opening moves
+            if (ply < random_plies) {
+                const move = movelist.items[self.prng.rand64() % move_size];
+                if (pos.turn == types.Color.White) {
+                    pos.play_move(types.Color.White, move);
+                } else {
+                    pos.play_move(types.Color.Black, move);
+                }
+                movelist.deinit();
+                continue;
+            }
+            movelist.deinit();
+
+            // Capture initial board state (once, after random moves)
+            if (initial_board == null) {
+                // Do a quick search to check if position is playable
+                const init_score: i32 = if (pos.turn == types.Color.White)
+                    self.searcher.iterative_deepening(pos, types.Color.White, null)
+                else
+                    -self.searcher.iterative_deepening(pos, types.Color.Black, null);
+
+                if (init_score > cfg.opening_reject_threshold or init_score < -cfg.opening_reject_threshold) {
+                    return; // discard unbalanced opening
+                }
+                initial_board = pos_to_viri_packed_board(pos, init_score);
+                self.searcher.stop = false;
+            }
+
+            // Search
+            const res: i32 = if (pos.turn == types.Color.White)
+                self.searcher.iterative_deepening(pos, types.Color.White, null)
+            else
+                -self.searcher.iterative_deepening(pos, types.Color.Black, null);
+
+            self.searcher.stop = false;
+
+            const best_move = self.searcher.best_move;
+
+            // Record move+score pair
+            const viri_move = encode_viri_move(best_move);
+            try move_scores.append(MoveScorePair{
+                .move = viri_move,
+                .score = @as(i16, @intCast(std.math.clamp(res, -32000, 32000))),
+            });
+
+            // Play the move
+            if (pos.turn == types.Color.White) {
+                pos.play_move(types.Color.White, best_move);
+            } else {
+                pos.play_move(types.Color.Black, best_move);
+            }
+
+            // Win/loss adjudication
+            if (res > cfg.win_adj_threshold) {
+                white_win_count += 1;
+                if (white_win_count >= cfg.win_adj_count) {
+                    white_result = 2;
+                    break;
+                }
+            } else {
+                white_win_count = 0;
+            }
+
+            if (res < -cfg.win_adj_threshold) {
+                black_win_count += 1;
+                if (black_win_count >= cfg.win_adj_count) {
+                    white_result = 0;
+                    break;
+                }
+            } else {
+                black_win_count = 0;
+            }
+
+            // Draw adjudication
+            if (ply >= cfg.draw_adj_min_ply and res > -cfg.draw_adj_threshold and res < cfg.draw_adj_threshold) {
+                draw_count += 1;
+                if (draw_count >= cfg.draw_adj_count) {
+                    white_result = 1;
+                    break;
+                }
+            } else {
+                draw_count = 0;
+            }
+
+            // Safety: max game length
+            if (ply > 500) {
+                white_result = 1;
+                break;
+            }
+        }
+
+        if (initial_board == null or move_scores.items.len == 0) return;
+
+        // Set game result in the initial board
+        var board = initial_board.?;
+        board.wdl = white_result;
+
+        // Write game under file lock: PackedBoard + MoveScorePairs + Terminator
+        self.fileLock.lock.lockUncancelable(types.GLOBAL_IO);
+        defer self.fileLock.lock.unlock(types.GLOBAL_IO);
+        var wbuf: [8192]u8 = undefined;
+        var file_writer = self.fileLock.file.writerStreaming(types.GLOBAL_IO, &wbuf);
+        const writer = &file_writer.interface;
+        try writer.writeAll(std.mem.asBytes(&board));
+        for (move_scores.items) |*ms| {
+            try writer.writeAll(std.mem.asBytes(ms));
+        }
+        try writer.writeAll(std.mem.asBytes(&VIRI_TERMINATOR));
+        try writer.flush();
+        self.count += move_scores.items.len;
+        self.game_count += 1;
+    }
+
+    pub fn playGame(self: *DatagenSingle) !void {
+        self.searcher.root_board = position.Position.new();
+        var pos = &self.searcher.root_board;
+
+        const using_book = self.openings != null;
+        if (self.openings) |book| {
+            const line = book[self.prng.rand64() % book.len];
+            pos.set_fen(line);
+        } else {
+            pos.set_fen(types.DEFAULT_FEN);
+        }
+
+        tt.GlobalTT.do_age();
         self.searcher.reset_heuristics(true);
         self.searcher.stop = false;
         self.searcher.force_thinking = false;
@@ -192,13 +500,17 @@ pub const DatagenSingle = struct {
         var records = try std.array_list.Managed(PendingRecord).initCapacity(arena.allocator(), 128);
         defer records.deinit();
 
-        var white_result: u8 = 1; // 0=black wins, 1=draw, 2=white wins
+        var white_result: u8 = 1;
         var draw_count: usize = 0;
         var white_win_count: usize = 0;
         var black_win_count: usize = 0;
         var ply: usize = 0;
-        // Fewer random plies from book positions (already ~8 moves in) vs startpos
-        const random_plies: u64 = if (using_book) 2 + (self.prng.rand64() % 3) else 9 + (self.prng.rand64() % 4);
+        const cfg = self.config;
+        const random_plies: u64 = if (using_book)
+            (cfg.random_plies_min -| 6) + (self.prng.rand64() % cfg.random_plies_range)
+        else
+            cfg.random_plies_min + (self.prng.rand64() % cfg.random_plies_range);
+
         while (true) : (ply += 1) {
             if (self.searcher.is_draw(pos, true)) {
                 white_result = 1;
@@ -221,8 +533,7 @@ pub const DatagenSingle = struct {
                 break;
             }
 
-            // Random move during opening diversification
-            if (ply < random_plies or self.prng.rand64() % 10000 == 0) {
+            if (ply < random_plies) {
                 const move = movelist.items[self.prng.rand64() % move_size];
                 if (pos.turn == types.Color.White) {
                     pos.play_move(types.Color.White, move);
@@ -234,21 +545,20 @@ pub const DatagenSingle = struct {
             }
             movelist.deinit();
 
-            // Search: result is white-relative score
             const res: i32 = if (pos.turn == types.Color.White)
-                self.searcher.iterative_deepening(pos, types.Color.White, MAX_DEPTH)
+                self.searcher.iterative_deepening(pos, types.Color.White, null)
             else
-                -self.searcher.iterative_deepening(pos, types.Color.Black, MAX_DEPTH);
+                -self.searcher.iterative_deepening(pos, types.Color.Black, null);
 
-            // Discard games where the random opening produced a large imbalance
-            if (ply == random_plies and (res > 1000 or res < -1000)) {
+            self.searcher.stop = false;
+
+            if (ply == random_plies and (res > cfg.opening_reject_threshold or res < -cfg.opening_reject_threshold)) {
                 break;
             }
 
             const best_move = self.searcher.best_move;
             const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
-            // Capture position BEFORE playing the move (the eval applies to this position)
             const min_record_ply: usize = if (using_book) 8 else 16;
             const should_record = ply > min_record_ply and !in_check and
                 !best_move.is_capture() and !best_move.is_promotion() and
@@ -259,25 +569,21 @@ pub const DatagenSingle = struct {
                 pending = pos_to_chessboard(pos, res);
             }
 
-            // Play the move
             if (pos.turn == types.Color.White) {
                 pos.play_move(types.Color.White, best_move);
             } else {
                 pos.play_move(types.Color.Black, best_move);
             }
 
-            // Check if the move gave check (filter out non-quiet positions)
             const gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
             if (pending != null and !gave_check) {
                 try records.append(pending.?);
             }
 
-            // Win/loss adjudication (phase-dependent threshold)
-            const limit: i32 = if (pos.phase() >= 6) 850 else 500;
-
-            if (res > limit) {
+            // Adjudication
+            if (res > cfg.win_adj_threshold) {
                 white_win_count += 1;
-                if (white_win_count >= 8) {
+                if (white_win_count >= cfg.win_adj_count) {
                     white_result = 2;
                     break;
                 }
@@ -285,9 +591,9 @@ pub const DatagenSingle = struct {
                 white_win_count = 0;
             }
 
-            if (res < -limit) {
+            if (res < -cfg.win_adj_threshold) {
                 black_win_count += 1;
-                if (black_win_count >= 8) {
+                if (black_win_count >= cfg.win_adj_count) {
                     white_result = 0;
                     break;
                 }
@@ -295,29 +601,30 @@ pub const DatagenSingle = struct {
                 black_win_count = 0;
             }
 
-            // Draw adjudication
-            if (ply >= 40 and -1 < res and res < 1) {
+            if (ply >= cfg.draw_adj_min_ply and res > -cfg.draw_adj_threshold and res < cfg.draw_adj_threshold) {
                 draw_count += 1;
-                if (draw_count >= 10) {
+                if (draw_count >= cfg.draw_adj_count) {
                     white_result = 1;
                     break;
                 }
             } else {
                 draw_count = 0;
             }
+
+            if (ply > 500) {
+                white_result = 1;
+                break;
+            }
         }
 
-        if (records.items.len == 0) {
-            return;
-        }
+        if (records.items.len == 0) return;
 
-        // Fill in the game result for each recorded position (convert white-relative → STM-relative)
         for (records.items) |*rec| {
             rec.board.result = if (rec.white_was_stm) white_result else 2 - white_result;
         }
 
-        // Write binary records under the file lock
         self.fileLock.lock.lockUncancelable(types.GLOBAL_IO);
+        defer self.fileLock.lock.unlock(types.GLOBAL_IO);
         var wbuf: [4096]u8 = undefined;
         var file_writer = self.fileLock.file.writerStreaming(types.GLOBAL_IO, &wbuf);
         const writer = &file_writer.interface;
@@ -327,21 +634,23 @@ pub const DatagenSingle = struct {
         }
         try writer.flush();
         self.count += records.items.len;
-        self.fileLock.lock.unlock(types.GLOBAL_IO);
+        self.game_count += 1;
     }
 
     pub fn startMany(self: *DatagenSingle) !void {
         self.timer = types.Timer.start();
-        var game_count: usize = 0;
         while (true) {
-            try self.playGame();
-            game_count += 1;
-            if (game_count % 50 == 0) {
+            if (self.config.format == .viri) {
+                try self.playGameViri();
+            } else {
+                try self.playGame();
+            }
+            if (self.game_count % 50 == 0 and self.game_count > 0) {
                 const elapsed = @as(f64, @floatFromInt(self.timer.read())) / std.time.ns_per_s;
                 const pps = @as(f64, @floatFromInt(self.count)) / elapsed;
-                const gps = @as(f64, @floatFromInt(game_count)) / elapsed;
+                const gps = @as(f64, @floatFromInt(self.game_count)) / elapsed;
 
-                std.debug.print("id {}: {} games, {} pos, {d:.4} pos/s, {d:.4} games/s\n", .{ self.id, game_count, self.count, pps, gps });
+                std.debug.print("id {}: {} games, {} pos, {d:.0} pos/s, {d:.2} games/s\n", .{ self.id, self.game_count, self.count, pps, gps });
             }
         }
     }
@@ -385,8 +694,9 @@ pub const Datagen = struct {
     seed: u128,
     datagens: std.array_list.Managed(DatagenSingle),
     openings: ?[]const []const u8,
+    config: DatagenConfig,
 
-    pub fn new() Datagen {
+    pub fn new(config: DatagenConfig) Datagen {
         var seed: u128 = undefined;
         std.Io.random(types.GLOBAL_IO, std.mem.asBytes(&seed));
         return Datagen{
@@ -394,6 +704,7 @@ pub const Datagen = struct {
             .seed = seed,
             .datagens = std.array_list.Managed(DatagenSingle).init(std.heap.c_allocator),
             .openings = null,
+            .config = config,
         };
     }
 
@@ -406,8 +717,16 @@ pub const Datagen = struct {
     }
 
     pub fn start(self: *Datagen, num_threads: usize) !void {
-        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.bin", .{std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds()});
-        std.debug.print("Writing data to {s} with {} threads\n", .{ path, num_threads });
+        const ext = if (self.config.format == .viri) ".viribin" else ".bin";
+        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}{s}", .{ std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds(), ext });
+
+        std.debug.print("=== Avalanche Datagen ===\n", .{});
+        std.debug.print("Format:  {s}\n", .{if (self.config.format == .viri) "viriformat binpack" else "bulletformat"});
+        std.debug.print("Nodes:   {} soft, {} hard\n", .{ self.config.soft_nodes, self.config.soft_nodes * self.config.hard_node_multiplier });
+        std.debug.print("Threads: {}\n", .{num_threads});
+        std.debug.print("Output:  {s}\n", .{path});
+        std.debug.print("=========================\n\n", .{});
+
         const file = std.Io.Dir.cwd().createFile(
             types.GLOBAL_IO,
             path,
@@ -419,20 +738,17 @@ pub const Datagen = struct {
         self.fileLock = FileLock{ .file = file, .lock = lock };
         self.datagens.clearAndFree();
 
-        // Pre-allocate to avoid reallocation invalidating thread pointers
         try self.datagens.ensureTotalCapacity(num_threads);
 
-        // Each thread gets its own PRNG with an independently derived seed
         var seed_prng = utils.PRNG.new(self.seed);
 
         var th: usize = 0;
         while (th < num_threads) : (th += 1) {
             const thread_seed: u128 = @as(u128, seed_prng.rand64()) | (@as(u128, seed_prng.rand64()) << 64);
-            const datagen_inst = DatagenSingle.new(&self.fileLock, thread_seed, th, self.openings);
+            const datagen_inst = DatagenSingle.new(&self.fileLock, thread_seed, th, self.openings, self.config);
             self.datagens.appendAssumeCapacity(datagen_inst);
         }
 
-        // Spawn threads only after all datagen instances are placed in stable memory
         var threads = std.array_list.Managed(std.Thread).init(std.heap.c_allocator);
         defer threads.deinit();
 
@@ -456,8 +772,9 @@ pub const Datagen = struct {
 
     pub fn startSingleThreaded(self: *Datagen) !void {
         const id: u64 = @as(u64, @intCast(std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds()));
-        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}.bin", .{id});
-        std.debug.print("Writing data to {s} (single-threaded)\n", .{path});
+        const ext = if (self.config.format == .viri) ".viribin" else ".bin";
+        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}{s}", .{ id, ext });
+        std.debug.print("Writing data to {s} (single-threaded, {s})\n", .{ path, if (self.config.format == .viri) "viriformat" else "bulletformat" });
         const file = std.Io.Dir.cwd().createFile(
             types.GLOBAL_IO,
             path,
@@ -472,7 +789,7 @@ pub const Datagen = struct {
         var seed_prng = utils.PRNG.new(self.seed);
         const thread_seed: u128 = @as(u128, seed_prng.rand64()) | (@as(u128, seed_prng.rand64()) << 64);
 
-        var datagen_inst = DatagenSingle.new(&self.fileLock, thread_seed, id, self.openings);
+        var datagen_inst = DatagenSingle.new(&self.fileLock, thread_seed, id, self.openings, self.config);
         try datagen_inst.startMany();
     }
 };

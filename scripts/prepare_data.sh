@@ -1,85 +1,130 @@
 #!/bin/bash
-# prepare_data.sh — Shuffle and interleave datagen output for training
+# prepare_data.sh — Convert viriformat datagen output to shuffled bulletformat for training.
 #
-# Usage: ./scripts/prepare_data.sh [output_name]
-#   output_name: Name for the merged output file (default: training)
+# Pipeline: splat (viri→bullet with filter) → interleave → shuffle → good_data/
 #
-# This script:
-# 1. Shuffles each individual .bin file
-# 2. Interleaves all shuffled files into one training file
-# 3. Optionally splits off a test set (5% of data)
+# Usage:
+#   scripts/prepare_data.sh [output_name]
 #
-# Prerequisites: bullet-utils must be built (cargo build --release -p bullet-utils)
+#   output_name: Name for the final training file (default: training.bin)
+#
+# Expects:
+#   - Raw .viribin files in data/ (from datagen)
+#   - bullet-utils built
+#
+# Produces:
+#   - data/good_data/<output_name>  (final shuffled+interleaved bulletformat)
+#   - Moves raw .viribin and intermediate files to data/old_data/
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BULLET_UTILS="$ROOT_DIR/bullet/target/release/bullet-utils"
 DATA_DIR="$ROOT_DIR/data"
-OUTPUT_NAME="${1:-training}"
+GOOD_DATA_DIR="$DATA_DIR/good_data"
+OLD_DATA_DIR="$DATA_DIR/old_data"
+FILTER_CFG="$ROOT_DIR/training/filter.toml"
 
-if [ ! -f "$BULLET_UTILS" ]; then
-    echo "bullet-utils not found. Building..."
-    (cd "$ROOT_DIR/bullet" && cargo build --release -p bullet-utils)
-fi
+# Try multiple possible paths for bullet-utils
+BULLET_UTILS=""
+for candidate in \
+    "$HOME/.cargo/git/checkouts/bullet-8a69ed9a26c6f599/8893e48/target/release/bullet-utils" \
+    "$ROOT_DIR/bullet/target/release/bullet-utils" \
+    "$(which bullet-utils 2>/dev/null)"; do
+    if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+        BULLET_UTILS="$candidate"
+        break
+    fi
+done
 
-if [ ! -d "$DATA_DIR" ] || [ -z "$(find "$DATA_DIR" -name 'data_*.bin' 2>/dev/null)" ]; then
-    echo "Error: No data files found in $DATA_DIR/"
-    echo "Run scripts/datagen.sh first."
+OUTPUT_NAME="${1:-training.bin}"
+# Ensure .bin extension
+[[ "$OUTPUT_NAME" == *.bin ]] || OUTPUT_NAME="${OUTPUT_NAME}.bin"
+
+# Memory for shuffle (MB)
+MEM_MB="${SHUFFLE_MEM_MB:-16384}"
+
+# ============================================================================
+
+mkdir -p "$GOOD_DATA_DIR" "$OLD_DATA_DIR"
+
+if [ -z "$BULLET_UTILS" ]; then
+    echo "Error: bullet-utils not found."
+    echo "Build it:"
+    echo "  cd ~/.cargo/git/checkouts/bullet-8a69ed9a26c6f599/8893e48/crates/utils"
+    echo "  cargo build --release"
     exit 1
 fi
 
-cd "$DATA_DIR"
+if [ ! -f "$FILTER_CFG" ]; then
+    echo "Error: Filter config not found at $FILTER_CFG"
+    exit 1
+fi
 
-echo "=== Data Preparation ==="
+# Find all .viribin files in data/
+shopt -s nullglob
+VIRI_FILES=( "$DATA_DIR"/*.viribin )
+shopt -u nullglob
 
-# Step 1: Shuffle each file individually
-echo "Step 1: Shuffling individual files..."
-SHUFFLED_DIR="shuffled"
-mkdir -p "$SHUFFLED_DIR"
+if [ ${#VIRI_FILES[@]} -eq 0 ]; then
+    echo "Error: No .viribin files found in $DATA_DIR/"
+    echo "Run datagen first: ./zig-out/bin/Avalanche datagen 96 books/UHO_4060_v4.epd nodes=5000"
+    exit 1
+fi
 
-for f in data_*.bin; do
-    out="$SHUFFLED_DIR/${f%.bin}_shuffled.bin"
-    if [ -f "$out" ]; then
-        echo "  Skipping $f (already shuffled)"
-        continue
-    fi
-    echo "  Shuffling $f..."
-    "$BULLET_UTILS" shuffle -i "$f" -o "$out" -m 2048
+echo "=== Avalanche Data Preparation ==="
+echo "Input:      ${#VIRI_FILES[@]} viribin file(s)"
+echo "Filter:     $FILTER_CFG"
+echo "Output:     $GOOD_DATA_DIR/$OUTPUT_NAME"
+echo "Shuffle MB: $MEM_MB"
+echo "==================================="
+echo ""
+
+# Step 1: Splat each viribin file to bulletformat (with filtering)
+echo "[1/3] Converting viriformat → bulletformat (with filter)..."
+SPLATTED_FILES=()
+for f in "${VIRI_FILES[@]}"; do
+    base=$(basename "$f" .viribin)
+    out="$DATA_DIR/${base}_splatted.bin"
+    echo "  $(basename "$f") → $(basename "$out")"
+    "$BULLET_UTILS" viribinpack splat "$f" "$out" "$FILTER_CFG"
+    SPLATTED_FILES+=( "$out" )
 done
+echo ""
 
-# Step 2: Interleave all shuffled files
-echo "Step 2: Interleaving..."
-SHUFFLED_FILES=("$SHUFFLED_DIR"/*_shuffled.bin)
-if [ ${#SHUFFLED_FILES[@]} -eq 1 ]; then
-    cp "${SHUFFLED_FILES[0]}" "${OUTPUT_NAME}.bin"
+# Step 2: Interleave all splatted files into one
+echo "[2/3] Interleaving ${#SPLATTED_FILES[@]} file(s)..."
+INTERLEAVED="$DATA_DIR/_interleaved_tmp.bin"
+if [ ${#SPLATTED_FILES[@]} -eq 1 ]; then
+    mv "${SPLATTED_FILES[0]}" "$INTERLEAVED"
 else
-    "$BULLET_UTILS" interleave "${SHUFFLED_FILES[@]}" -o "${OUTPUT_NAME}.bin"
+    "$BULLET_UTILS" interleave "${SPLATTED_FILES[@]}" --output "$INTERLEAVED"
+    rm -f "${SPLATTED_FILES[@]}"
 fi
 
-# Step 3: Validate
-echo "Step 3: Validating..."
-"$BULLET_UTILS" validate -i "${OUTPUT_NAME}.bin"
+INTER_SIZE=$(stat -c '%s' "$INTERLEAVED")
+echo "  Interleaved: $((INTER_SIZE / 32)) positions ($(numfmt --to=iec "$INTER_SIZE" 2>/dev/null || echo "$((INTER_SIZE/1048576))MB"))"
+echo ""
 
-# Step 4: Optional test set split (last 5%)
-TOTAL_SIZE=$(stat --format=%s "${OUTPUT_NAME}.bin")
-TOTAL_POSITIONS=$(( TOTAL_SIZE / 32 ))
-TEST_POSITIONS=$(( TOTAL_POSITIONS / 20 ))  # 5%
-TRAIN_POSITIONS=$(( TOTAL_POSITIONS - TEST_POSITIONS ))
+# Step 3: Shuffle
+echo "[3/3] Shuffling..."
+"$BULLET_UTILS" shuffle --input "$INTERLEAVED" --output "$GOOD_DATA_DIR/$OUTPUT_NAME" --mem-used-mb "$MEM_MB"
+rm -f "$INTERLEAVED"
+echo ""
 
-if [ "$TEST_POSITIONS" -gt 10000 ]; then
-    echo "Step 4: Splitting test set (${TEST_POSITIONS} positions)..."
-    TRAIN_BYTES=$(( TRAIN_POSITIONS * 32 ))
-    TEST_BYTES=$(( TEST_POSITIONS * 32 ))
-    head -c "$TRAIN_BYTES" "${OUTPUT_NAME}.bin" > "${OUTPUT_NAME}_train.bin"
-    tail -c "$TEST_BYTES" "${OUTPUT_NAME}.bin" > "${OUTPUT_NAME}_test.bin"
-    echo "  Train: ${TRAIN_POSITIONS} positions ($(( TRAIN_BYTES / 1048576 )) MB)"
-    echo "  Test:  ${TEST_POSITIONS} positions ($(( TEST_BYTES / 1048576 )) MB)"
-else
-    echo "Step 4: Skipped test split (not enough data, need >200k positions)"
-fi
+# Move raw viribin files to old_data/
+echo "Archiving raw .viribin files to old_data/..."
+for f in "${VIRI_FILES[@]}"; do
+    mv "$f" "$OLD_DATA_DIR/"
+done
+# Clean any remaining splatted intermediates
+rm -f "$DATA_DIR"/*_splatted.bin
 
+# Summary
+FINAL_SIZE=$(stat -c '%s' "$GOOD_DATA_DIR/$OUTPUT_NAME")
+POSITIONS=$((FINAL_SIZE / 32))
 echo ""
 echo "=== Done ==="
-echo "Training data: $DATA_DIR/${OUTPUT_NAME}.bin (${TOTAL_POSITIONS} positions)"
+echo "Output:    $GOOD_DATA_DIR/$OUTPUT_NAME"
+echo "Positions: $POSITIONS ($(numfmt --to=iec "$FINAL_SIZE" 2>/dev/null || echo "$((FINAL_SIZE/1048576))MB"))"
+echo "Raw data:  $OLD_DATA_DIR/"

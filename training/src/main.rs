@@ -4,9 +4,13 @@ use bullet::{
     trainer::{
         save::SavedFormat,
         schedule::{TrainingSchedule, TrainingSteps, lr, wdl},
-        settings::{LocalSettings, TestDataset},
+        settings::LocalSettings,
     },
-    value::{ValueTrainerBuilder, loader::DirectSequentialDataLoader},
+    value::{ValueTrainerBuilder, loader::{DirectSequentialDataLoader, ViriBinpackLoader, viribinpack::ViriFilter}},
+};
+use viriformat::{
+    chess::{board::Board, chessmove::Move},
+    dataformat::{Filter, WDL},
 };
 
 // Architecture constants — must match engine's weights.zig
@@ -16,10 +20,38 @@ const QA: i16 = 255;
 const QB: i16 = 64;
 const EVAL_SCALE: f32 = 400.0;
 
+// Initially taken from https://github.com/JonathanHallstrom/bullet/blob/bb5a2725b7beb2178aa59fa38f163aeb31bac7fc/examples/advanced.rs
+fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
+    let wdl = match wdl_float {
+        x if x >= 0.9 => WDL::Win,
+        x if x <= 0.1 => WDL::Loss,
+        _ => WDL::Draw,
+    };
+
+    const FILTER: Filter = Filter {
+        min_ply: 8,
+        min_pieces: 4,
+        max_eval: 10000,
+        filter_tactical: true,
+        filter_check: true,
+        filter_castling: false,
+        max_eval_incorrectness: 2500,
+        random_fen_skipping: false,
+        random_fen_skip_probability: 0.0,
+        wdl_filtered: false,
+        wdl_model_params_a: [0.0; 4],
+        wdl_model_params_b: [0.0; 4],
+        material_min: 17,
+        material_max: 78,
+        mom_target: 58,
+        wdl_heuristic_scale: 1.0,
+    };
+
+    let mut rng = rand::rng();
+    !FILTER.should_filter(mv, eval as i32, board, wdl, &mut rng)
+}
+
 fn main() {
-    // --- Configuration ---
-    // Adjust these paths to your data files.
-    // Data must be in bulletformat (.bin), use bullet-utils to convert/shuffle.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let default_path = String::from("data/training.bin");
     let dataset_strings: Vec<&str> = if args.is_empty() {
@@ -29,7 +61,6 @@ fn main() {
     };
     let dataset_paths = dataset_strings;
 
-    // Check data exists
     for path in &dataset_paths {
         if !std::path::Path::new(path).exists() {
             eprintln!("Error: Data file not found: {path}");
@@ -39,11 +70,11 @@ fn main() {
         }
     }
 
-    // Training hyperparameters
-    let superbatches = 25;
+    // Training hyperparameters — fine-tuning from jihan58 checkpoint
+    let superbatches = 47;
     let batch_size = 16_384;
-    let batches_per_superbatch = 12208; // ≈200M positions per superbatch (2x data per sb)
-    let wdl_proportion = 0.35;
+    let batches_per_superbatch = 12208;
+    let wdl_proportion = 0.25;
     let threads = num_cpus();
     let save_rate = 10;
 
@@ -54,7 +85,6 @@ fn main() {
     println!("Batch size: {batch_size}");
     println!("Positions/superbatch: {}", batch_size * batches_per_superbatch);
     println!("Threads: {threads}");
-    println!("LR: CosineDecay 0.001 -> 2.43e-7 over 200sb");
     println!("WDL: {wdl_proportion}");
     println!("==============================");
     println!();
@@ -65,13 +95,9 @@ fn main() {
         .inputs(Chess768)
         .output_buckets(MaterialCount::<NUM_OUTPUT_BUCKETS>)
         .save_format(&[
-            // L0 weights: [768][512] i16, column-major (feature-indexed for incremental updates)
             SavedFormat::id("l0w").round().quantise::<i16>(QA),
-            // L0 bias: [512] i16
             SavedFormat::id("l0b").round().quantise::<i16>(QA),
-            // L1 weights: [8][1024] i16, transposed to row-major (bucket-indexed for inference)
             SavedFormat::id("l1w").round().quantise::<i16>(QB).transpose(),
-            // L1 bias: [8] i16
             SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
         ])
         .loss_fn(|output, target| output.sigmoid().squared_error(target))
@@ -86,7 +112,7 @@ fn main() {
         });
 
     let schedule = TrainingSchedule {
-        net_id: "jihan44".to_string(),
+        net_id: "jihan73".to_string(),
         eval_scale: EVAL_SCALE,
         steps: TrainingSteps {
             batch_size,
@@ -98,33 +124,38 @@ fn main() {
         lr_scheduler: lr::CosineDecayLR {
             initial_lr: 0.001,
             final_lr: 0.0000001,
-            final_superbatch: 25,
+            final_superbatch: superbatches,
         },
         save_rate,
     };
 
-    let test_path_string;
-    let test_set = {
-        let test_path = dataset_paths[0].replace(".bin", "_test.bin");
-        if std::path::Path::new(&test_path).exists() {
-            test_path_string = test_path;
-            Some(TestDataset::at(test_path_string.as_str()))
-        } else {
-            None
-        }
-    };
-
     let settings = LocalSettings {
         threads,
-        test_set,
+        test_set: None,
         output_directory: "checkpoints",
         batch_queue_size: 64,
     };
 
     let path_strs: Vec<&str> = dataset_paths.iter().copied().collect();
-    let dataloader = DirectSequentialDataLoader::new(&path_strs);
 
-    trainer.run(&schedule, &settings, &dataloader);
+    // Auto-detect format: .viribin files use ViriBinpackLoader with custom filter
+    let use_viri = path_strs.iter().any(|p| p.ends_with(".viribin"));
+
+    if use_viri {
+        println!("Using ViriBinpackLoader with custom filter");
+        println!("  filter: min_ply=8, min_pieces=4, max_eval=10000, filter_tactical, filter_check");
+        let dataloader = ViriBinpackLoader::new_concat_multiple(
+            &path_strs,
+            128,
+            threads.min(16),
+            ViriFilter::Custom(viri_filter),
+        );
+        trainer.run(&schedule, &settings, &dataloader);
+    } else {
+        println!("Using DirectSequentialDataLoader (bulletformat)");
+        let dataloader = DirectSequentialDataLoader::new(&path_strs);
+        trainer.run(&schedule, &settings, &dataloader);
+    }
 }
 
 fn num_cpus() -> usize {
