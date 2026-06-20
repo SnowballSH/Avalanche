@@ -47,3 +47,8 @@ training/checkpoints/
 
 OpenBench/
 OpenBench.wiki/
+
+# Archived/old networks and local build outputs
+old_nnue/
+engines_built/
+tmp/

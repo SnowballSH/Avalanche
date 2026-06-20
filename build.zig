@@ -54,6 +54,9 @@ pub fn build(b: *std.Build) void {
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
     const targetName = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
+    // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
+    // It is imported under the name "nnue", which weights.zig @embedFile's.
+    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/jihan81.nnue";
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
@@ -65,7 +68,6 @@ pub fn build(b: *std.Build) void {
     defer io_threaded.deinit();
     const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
     build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(now_seconds), &buf));
-    // build_options.addOption([]const u8, "version", "2.2.0");
 
     const exe = b.addExecutable(.{
         .name = targetName,
@@ -77,8 +79,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
     exe.root_module.addOptions("build_options", build_options);
-    exe.root_module.addAnonymousImport("bingshan.nnue", .{
-        .root_source_file = b.path("nets/bingshan.nnue"),
+    exe.root_module.addAnonymousImport("nnue", .{
+        .root_source_file = b.path(netPath),
     });
 
     b.installArtifact(exe);
@@ -104,8 +106,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    exe_tests.root_module.addAnonymousImport("bingshan.nnue", .{
-        .root_source_file = b.path("nets/bingshan.nnue"),
+    exe_tests.root_module.addAnonymousImport("nnue", .{
+        .root_source_file = b.path(netPath),
     });
 
     const run_tests = b.addRunArtifact(exe_tests);

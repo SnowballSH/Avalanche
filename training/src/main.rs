@@ -14,11 +14,21 @@ use viriformat::{
 };
 
 // Architecture constants — must match engine's weights.zig
-const HIDDEN_SIZE: usize = 512;
 const NUM_OUTPUT_BUCKETS: usize = 8;
 const QA: i16 = 255;
 const QB: i16 = 64;
 const EVAL_SCALE: f32 = 400.0;
+
+// --- env-var helpers (lets us launch many experiments without recompiling) ---
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+fn env_f32(key: &str, default: f32) -> f32 {
+    std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+fn env_string(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
 
 // Initially taken from https://github.com/JonathanHallstrom/bullet/blob/bb5a2725b7beb2178aa59fa38f163aeb31bac7fc/examples/advanced.rs
 fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
@@ -70,22 +80,32 @@ fn main() {
         }
     }
 
-    // Training hyperparameters — fine-tuning from jihan58 checkpoint
-    let superbatches = 47;
-    let batch_size = 16_384;
-    let batches_per_superbatch = 12208;
-    let wdl_proportion = 0.25;
-    let threads = num_cpus();
-    let save_rate = 10;
+    // Hyperparameters, all overridable via TRAIN_* env vars (no recompile between
+    // runs). HIDDEN is a runtime arg to new_affine, so changing it needs no recompile
+    // here; only the engine's weights.zig is compile-time for the architecture.
+    let hidden_size = env_usize("TRAIN_HIDDEN", 512);
+    let superbatches = env_usize("TRAIN_SUPERBATCHES", 40);
+    let batch_size = env_usize("TRAIN_BATCH_SIZE", 16_384);
+    let batches_per_superbatch = env_usize("TRAIN_BATCHES_PER_SB", 12208);
+    let wdl_proportion = env_f32("TRAIN_WDL", 0.25);
+    let wdl_end = env_f32("TRAIN_WDL_END", wdl_proportion); // if != wdl, use LinearWDL
+    let lr_initial = env_f32("TRAIN_LR_INITIAL", 0.001);
+    let lr_final = env_f32("TRAIN_LR_FINAL", 0.0000001);
+    let net_id = env_string("TRAIN_NET_ID", "net");
+    let save_rate = env_usize("TRAIN_SAVE_RATE", 10);
+    let threads = env_usize("TRAIN_THREADS", num_cpus());
 
     println!("=== Avalanche NNUE Trainer ===");
-    println!("Architecture: (768 -> {HIDDEN_SIZE})x2 -> 1x{NUM_OUTPUT_BUCKETS}");
+    println!("net_id: {net_id}");
+    println!("Architecture: (768 -> {hidden_size})x2 -> 1x{NUM_OUTPUT_BUCKETS}");
     println!("Data: {:?}", dataset_paths);
     println!("Superbatches: {superbatches}");
     println!("Batch size: {batch_size}");
+    println!("Batches/superbatch: {batches_per_superbatch}");
     println!("Positions/superbatch: {}", batch_size * batches_per_superbatch);
     println!("Threads: {threads}");
-    println!("WDL: {wdl_proportion}");
+    println!("WDL: {wdl_proportion} -> {wdl_end}");
+    println!("LR: cosine {lr_initial} -> {lr_final} over {superbatches} sb");
     println!("==============================");
     println!();
 
@@ -101,9 +121,9 @@ fn main() {
             SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
         ])
         .loss_fn(|output, target| output.sigmoid().squared_error(target))
-        .build(|builder, stm_inputs, ntm_inputs, output_buckets| {
-            let l0 = builder.new_affine("l0", 768, HIDDEN_SIZE);
-            let l1 = builder.new_affine("l1", 2 * HIDDEN_SIZE, NUM_OUTPUT_BUCKETS);
+        .build(move |builder, stm_inputs, ntm_inputs, output_buckets| {
+            let l0 = builder.new_affine("l0", 768, hidden_size);
+            let l1 = builder.new_affine("l1", 2 * hidden_size, NUM_OUTPUT_BUCKETS);
 
             let stm_hidden = l0.forward(stm_inputs).screlu();
             let ntm_hidden = l0.forward(ntm_inputs).screlu();
@@ -111,22 +131,16 @@ fn main() {
             l1.forward(hidden_layer).select(output_buckets)
         });
 
-    let schedule = TrainingSchedule {
-        net_id: "jihan73".to_string(),
-        eval_scale: EVAL_SCALE,
-        steps: TrainingSteps {
-            batch_size,
-            batches_per_superbatch,
-            start_superbatch: 1,
-            end_superbatch: superbatches,
-        },
-        wdl_scheduler: wdl::ConstantWDL { value: wdl_proportion },
-        lr_scheduler: lr::CosineDecayLR {
-            initial_lr: 0.001,
-            final_lr: 0.0000001,
-            final_superbatch: superbatches,
-        },
-        save_rate,
+    let steps = TrainingSteps {
+        batch_size,
+        batches_per_superbatch,
+        start_superbatch: 1,
+        end_superbatch: superbatches,
+    };
+    let lr_scheduler = lr::CosineDecayLR {
+        initial_lr: lr_initial,
+        final_lr: lr_final,
+        final_superbatch: superbatches,
     };
 
     let settings = LocalSettings {
@@ -141,21 +155,43 @@ fn main() {
     // Auto-detect format: .viribin files use ViriBinpackLoader with custom filter
     let use_viri = path_strs.iter().any(|p| p.ends_with(".viribin"));
 
-    if use_viri {
-        println!("Using ViriBinpackLoader with custom filter");
-        println!("  filter: min_ply=8, min_pieces=4, max_eval=10000, filter_tactical, filter_check");
-        let dataloader = ViriBinpackLoader::new_concat_multiple(
-            &path_strs,
-            128,
-            threads.min(16),
-            ViriFilter::Custom(viri_filter),
-        );
-        trainer.run(&schedule, &settings, &dataloader);
-    } else {
-        println!("Using DirectSequentialDataLoader (bulletformat)");
-        let dataloader = DirectSequentialDataLoader::new(&path_strs);
-        trainer.run(&schedule, &settings, &dataloader);
+    // Build the right dataloader once, then dispatch on the WDL scheduler type.
+    // TrainingSchedule is generic over the WDL scheduler, so the two branches are
+    // monomorphised separately; we duplicate the small run block to keep types concrete.
+    macro_rules! run_with_schedule {
+        ($wdl_sched:expr) => {{
+            let schedule = TrainingSchedule {
+                net_id: net_id.clone(),
+                eval_scale: EVAL_SCALE,
+                steps,
+                wdl_scheduler: $wdl_sched,
+                lr_scheduler,
+                save_rate,
+            };
+            if use_viri {
+                println!("Using ViriBinpackLoader with custom filter");
+                let dataloader = ViriBinpackLoader::new_concat_multiple(
+                    &path_strs,
+                    128,
+                    threads.min(16),
+                    ViriFilter::Custom(viri_filter),
+                );
+                trainer.run(&schedule, &settings, &dataloader);
+            } else {
+                println!("Using DirectSequentialDataLoader (bulletformat)");
+                let dataloader = DirectSequentialDataLoader::new(&path_strs);
+                trainer.run(&schedule, &settings, &dataloader);
+            }
+        }};
     }
+
+    if (wdl_end - wdl_proportion).abs() > 1e-6 {
+        run_with_schedule!(wdl::LinearWDL { start: wdl_proportion, end: wdl_end });
+    } else {
+        run_with_schedule!(wdl::ConstantWDL { value: wdl_proportion });
+    }
+
+    println!("Training complete. net_id={net_id}");
 }
 
 fn num_cpus() -> usize {

@@ -28,7 +28,6 @@ FILTER_CFG="$ROOT_DIR/training/filter.toml"
 # Try multiple possible paths for bullet-utils
 BULLET_UTILS=""
 for candidate in \
-    "$HOME/.cargo/git/checkouts/bullet-8a69ed9a26c6f599/8893e48/target/release/bullet-utils" \
     "$ROOT_DIR/bullet/target/release/bullet-utils" \
     "$(which bullet-utils 2>/dev/null)"; do
     if [ -n "$candidate" ] && [ -f "$candidate" ]; then
@@ -50,9 +49,8 @@ mkdir -p "$GOOD_DATA_DIR" "$OLD_DATA_DIR"
 
 if [ -z "$BULLET_UTILS" ]; then
     echo "Error: bullet-utils not found."
-    echo "Build it:"
-    echo "  cd ~/.cargo/git/checkouts/bullet-8a69ed9a26c6f599/8893e48/crates/utils"
-    echo "  cargo build --release"
+    echo "Build it (cargo build --release in the bullet repo's crates/utils) and put it"
+    echo "on PATH, or at $ROOT_DIR/bullet/target/release/bullet-utils."
     exit 1
 fi
 
