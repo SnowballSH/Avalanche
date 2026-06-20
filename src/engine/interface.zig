@@ -108,6 +108,13 @@ pub const UciInterface = struct {
                 }
                 try stdout.writeAll("uciok\n");
                 try stdout.flush();
+            } else if (std.mem.eql(u8, token.?, "spsa")) {
+                // Print tunables in OpenBench's SPSA input format:
+                // name, int, value, min, max, c_end, r_end
+                for (parameters.TunableParams) |tunable| {
+                    try stdout.print("{s}, int, {s}, {s}, {s}, {s}, {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
+                }
+                try stdout.flush();
             } else if (std.mem.eql(u8, token.?, "setoption")) {
                 while (true) {
                     token = tokens.next();
