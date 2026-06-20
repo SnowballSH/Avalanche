@@ -56,7 +56,7 @@ pub fn build(b: *std.Build) void {
     const targetName = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
     // It is imported under the name "nnue", which weights.zig @embedFile's.
-    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/jihan81.nnue";
+    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/jihan83.nnue";
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
