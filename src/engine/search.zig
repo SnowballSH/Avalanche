@@ -7,6 +7,7 @@ const hce = @import("hce.zig");
 const tt = @import("tt.zig");
 const movepick = @import("movepick.zig");
 const see = @import("see.zig");
+const syzygy = @import("syzygy.zig");
 
 const parameters = @import("parameters.zig");
 
@@ -27,6 +28,12 @@ pub fn init_lmr() void {
 
 pub const MAX_PLY = 128;
 pub const MAX_GAMEPLY = 1024;
+
+// Tablebase win/loss score band, kept just below the mate band
+// (hce.MateScore - hce.MaxMate) so a TB result reads as a large cp score rather
+// than "mate", and is never treated as a real mate by hce.is_near_mate. A TB win
+// at ply p scores TB_WIN_SCORE - p (shallower wins preferred); a loss negates it.
+pub const TB_WIN_SCORE: i32 = hce.MateScore - hce.MaxMate - MAX_PLY;
 
 pub const NodeType = enum {
     Root,
@@ -82,6 +89,10 @@ pub const Searcher = struct {
     root_board: position.Position = undefined,
     thread_id: usize = 0,
     silent_output: bool = false,
+
+    tbhits: u64 = 0,
+    syzygy_root_active: bool = false,
+    syzygy_root: syzygy.RootResult = undefined,
 
     pub fn new() Searcher {
         var s = Searcher{
@@ -166,20 +177,28 @@ pub const Searcher = struct {
         var out_buf: [4096]u8 = undefined;
         var out_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
         const outW = &out_file.interface;
-        // NOTE: `self.stop` is intentionally NOT reset here. It is cleared by the
-        // UCI `go` handler on the main thread *before* this worker is spawned, so a
-        // `stop` arriving immediately after `go` would otherwise be clobbered by a
-        // reset on the worker thread (the worker can start after the `stop` lands),
-        // making the engine ignore `stop` and run to full depth — a hang now that
-        // `stop`/`quit` join the worker. The non-UCI callers (datagen/bench/tests)
-        // never set `stop`, so it is already false for them.
         self.is_searching = true;
         self.time_stop = false;
         self.reset_heuristics(false);
         self.nodes = 0;
+        self.tbhits = 0;
         self.best_move = types.Move.empty();
 
         self.timer = types.Timer.start();
+
+        self.syzygy_root_active = false;
+        if (syzygy.enabled and syzygy.no_castling_rights(pos) and
+            syzygy.piece_count(pos) <= syzygy.max_pieces())
+        {
+            const repeated = self.count_repetitions(pos) > 1;
+            if (syzygy.probe_root(pos, repeated)) |rr| {
+                if (rr.count > 0) {
+                    self.tbhits += 1;
+                    self.syzygy_root = rr;
+                    self.syzygy_root_active = true;
+                }
+            }
+        }
 
         var prev_score = -hce.MateScore;
         var score = -hce.MateScore;
@@ -264,6 +283,7 @@ pub const Searcher = struct {
             bm = self.best_move;
 
             var total_nodes: usize = self.nodes;
+            var total_tbhits: u64 = self.tbhits;
 
             if (depth > 1) {
                 outW.print("info string thread 0 nodes {}\n", .{
@@ -275,14 +295,16 @@ pub const Searcher = struct {
                         thread_index + 1, helper_searchers.items[thread_index].nodes,
                     }) catch {};
                     total_nodes += helper_searchers.items[thread_index].nodes;
+                    total_tbhits += helper_searchers.items[thread_index].tbhits;
                 }
             }
 
             if (!self.silent_output) {
-                outW.print("info depth {} seldepth {} nodes {} time {} score ", .{
+                outW.print("info depth {} seldepth {} nodes {} tbhits {} time {} score ", .{
                     tdepth,
                     self.seldepth,
                     total_nodes,
+                    total_tbhits,
                     self.timer.read() / std.time.ns_per_ms,
                 }) catch {};
 
@@ -383,6 +405,51 @@ pub const Searcher = struct {
             }
         }
 
+        return false;
+    }
+
+    // Counts occurrences of the current position's hash in the game history (the
+    // current position included) so the root DTZ probe knows whether the line has
+    // already repeated.
+    fn count_repetitions(self: *Searcher, pos: *position.Position) usize {
+        var n: usize = 0;
+        for (self.hash_history.items) |h| {
+            if (h == pos.hash) n += 1;
+        }
+        return n;
+    }
+
+    // Restricts the root move list to the Syzygy DTZ-optimal set.
+    fn filter_root_moves(self: *Searcher, list: *std.array_list.Managed(types.Move)) void {
+        var w: usize = 0;
+        for (list.items) |m| {
+            if (self.root_move_is_tb_optimal(m)) {
+                list.items[w] = m;
+                w += 1;
+            }
+        }
+        if (w > 0) {
+            list.shrinkRetainingCapacity(w);
+        }
+    }
+
+    fn root_move_is_tb_optimal(self: *Searcher, m: types.Move) bool {
+        // Promotion piece from the move flags (PR_*/PC_* low two bits: 0=N,1=B,2=R,3=Q).
+        const promo: syzygy.PromoKind = if (!m.is_promotion()) .none else switch (@as(u2, @intCast(m.flags & 0b0011))) {
+            0 => syzygy.PromoKind.knight,
+            1 => syzygy.PromoKind.bishop,
+            2 => syzygy.PromoKind.rook,
+            3 => syzygy.PromoKind.queen,
+        };
+        const from: u8 = m.from;
+        const to: u8 = m.to;
+        var i: usize = 0;
+        while (i < self.syzygy_root.count) : (i += 1) {
+            const rm = self.syzygy_root.moves[i];
+            if (rm.from == from and rm.to == to and rm.promo == promo) {
+                return true;
+            }
+        }
         return false;
     }
 
@@ -541,6 +608,41 @@ pub const Searcher = struct {
             }
         }
 
+        // >> Step 2.5: Syzygy tablebase WDL probe
+        if (syzygy.enabled and !is_root and !is_null and
+            self.exclude_move[self.ply].to_u16() == 0 and
+            @as(i32, @intCast(depth)) >= syzygy.probe_depth and
+            pos.history[pos.game_ply].fifty == 0 and
+            syzygy.no_castling_rights(pos) and
+            syzygy.piece_count(pos) <= syzygy.max_pieces())
+        {
+            if (syzygy.probe_wdl(pos)) |wdl| {
+                self.tbhits += 1;
+                const tb_flag: tt.Bound, const tb_score: i32 = switch (wdl) {
+                    .win => .{ tt.Bound.Lower, TB_WIN_SCORE - @as(i32, @intCast(self.ply)) },
+                    .loss => .{ tt.Bound.Upper, @as(i32, @intCast(self.ply)) - TB_WIN_SCORE },
+                    .draw => .{ tt.Bound.Exact, @as(i32, 0) },
+                };
+                const cutoff = switch (tb_flag) {
+                    tt.Bound.Exact => true,
+                    tt.Bound.Lower => tb_score >= beta,
+                    tt.Bound.Upper => tb_score <= alpha,
+                    else => false,
+                };
+                if (cutoff) {
+                    tt.GlobalTT.set(tt.Item{
+                        .eval = tb_score,
+                        .bestmove = types.Move.empty(),
+                        .flag = tb_flag,
+                        .depth = @as(u8, @intCast(depth)),
+                        .hash = pos.hash,
+                        .age = tt.GlobalTT.age,
+                    });
+                    return tb_score;
+                }
+            }
+        }
+
         const static_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
         var best_score: i32 = static_eval;
 
@@ -635,6 +737,9 @@ pub const Searcher = struct {
         var movelist = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 64) catch unreachable;
         defer movelist.deinit();
         pos.generate_legal_moves(color, &movelist);
+        if (is_root and self.syzygy_root_active) {
+            self.filter_root_moves(&movelist);
+        }
         const move_size = movelist.items.len;
 
         var quiet_moves = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;

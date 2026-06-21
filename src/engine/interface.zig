@@ -10,6 +10,7 @@ const search = @import("search.zig");
 const parameters = @import("parameters.zig");
 const build_options = @import("build_options");
 const genfens = @import("genfens.zig");
+const syzygy = @import("syzygy.zig");
 
 pub const UciInterface = struct {
     position: position.Position,
@@ -103,6 +104,9 @@ pub const UciInterface = struct {
                 try stdout.writeAll("id author Yinuo Huang\n\n");
                 try stdout.writeAll("option name Hash type spin default 16 min 1 max 131072\n");
                 try stdout.writeAll("option name Threads type spin default 1 min 1 max 2048\n");
+                try stdout.writeAll("option name SyzygyPath type string default <empty>\n");
+                try stdout.writeAll("option name SyzygyProbeDepth type spin default 1 min 1 max 100\n");
+                try stdout.writeAll("option name Syzygy50MoveRule type check default true\n");
                 for (parameters.TunableParams) |tunable| {
                     try stdout.print("option name {s} type spin default {s} min {s} max {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
                 }
@@ -152,6 +156,43 @@ pub const UciInterface = struct {
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
                         search.NUM_THREADS = @max(value, 1) - 1;
+                    } else if (std.mem.eql(u8, token.?, "SyzygyPath")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+                        const path = std.mem.trim(u8, tokens.rest(), " ");
+                        if (path.len == 0 or std.mem.eql(u8, path, "<empty>")) {
+                            syzygy.deinit();
+                        } else {
+                            const cpath = std.heap.c_allocator.dupeZ(u8, path) catch break;
+                            if (syzygy.init(cpath.ptr)) {
+                                try stdout.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'\n", .{ syzygy.max_pieces(), path });
+                            } else {
+                                try stdout.print("info string Syzygy: failed to load tablebases from '{s}'\n", .{path});
+                            }
+                            try stdout.flush();
+                        }
+                    } else if (std.mem.eql(u8, token.?, "SyzygyProbeDepth")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        syzygy.probe_depth = std.fmt.parseInt(i32, token.?, 10) catch 1;
+                    } else if (std.mem.eql(u8, token.?, "Syzygy50MoveRule")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        syzygy.use_rule50 = std.ascii.eqlIgnoreCase(token.?, "true");
                     } else {
                         for (parameters.TunableParams) |tunable| {
                             if (std.mem.eql(u8, token.?, tunable.name)) {
@@ -502,6 +543,7 @@ pub const UciInterface = struct {
         self.searcher.deinit();
         search.helper_searchers.deinit();
         search.threads.deinit();
+        syzygy.deinit();
     }
 };
 
