@@ -4,6 +4,15 @@
 # Usage: ./scripts/train.sh [data_file ...]
 #   data_file: Path(s) to training data in bulletformat (default: data/training.bin)
 #
+# Tunables (env vars, all optional — defaults are the current best recipe):
+#   TRAIN_NET_ID (net), TRAIN_HIDDEN (512), TRAIN_SUPERBATCHES (40),
+#   TRAIN_WDL (0.25), TRAIN_WDL_END (=WDL; set != WDL for LinearWDL),
+#   TRAIN_LR_INITIAL (0.001), TRAIN_LR_FINAL (1e-7),
+#   TRAIN_BATCH_SIZE (16384), TRAIN_BATCHES_PER_SB (12208),
+#   TRAIN_SAVE_RATE (10), TRAIN_THREADS (all cores).
+#   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh
+#   (HIDDEN is runtime here; the Zig engine's weights.zig is compile-time for 512 vs 768.)
+#
 # Output: training/checkpoints/ directory with saved networks
 # The quantised.bin file from a checkpoint can be directly used as an .nnue file.
 #
@@ -18,11 +27,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 TRAINING_DIR="$ROOT_DIR/training"
 
+# Auto-detect CUDA toolkit for GPU-accelerated training
+if [ -z "${CUDA_PATH:-}" ]; then
+    if [ -d "/usr/local/cuda" ]; then
+        export CUDA_PATH="/usr/local/cuda"
+    fi
+fi
+
 # Collect data file arguments (default to data/training.bin)
+# Canonicalize to absolute paths so they survive the cd into training/
 if [ $# -eq 0 ]; then
     DATA_FILES=("$ROOT_DIR/data/training.bin")
 else
-    DATA_FILES=("$@")
+    DATA_FILES=()
+    for arg in "$@"; do
+        if [[ "$arg" = /* ]]; then
+            DATA_FILES+=("$arg")
+        else
+            DATA_FILES+=("$(pwd)/$arg")
+        fi
+    done
 fi
 
 # Verify data files exist
@@ -44,6 +68,11 @@ fi
 echo "=== Avalanche NNUE Training ==="
 echo "Data: ${DATA_FILES[*]}"
 echo "Output: $TRAINING_DIR/checkpoints/"
+if [ -n "${CUDA_PATH:-}" ]; then
+    echo "GPU: CUDA (${CUDA_PATH})"
+else
+    echo "GPU: none (CPU-only training)"
+fi
 echo "==============================="
 echo ""
 
@@ -55,4 +84,4 @@ echo "=== Training Complete ==="
 echo "Checkpoints saved to: $TRAINING_DIR/checkpoints/"
 echo ""
 echo "To install a network:"
-echo "  ./scripts/install_net.sh training/checkpoints/avalanche-<N>"
+echo "  ./scripts/install_net.sh training/checkpoints/..."

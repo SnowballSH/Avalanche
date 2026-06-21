@@ -25,6 +25,8 @@ name = "avalanche-trainer"
 version = "0.1.0"
 dependencies = [
  "bullet_lib",
+ "rand 0.9.4",
+ "viriformat",
 ]
 
 [[package]]
@@ -36,12 +38,12 @@ checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
 [[package]]
 name = "bullet-compiler"
 version = "0.1.0"
-source = "git+https://github.com/jw1912/bullet#8893e4891781f4da2161dfbab0a776c156e22ead"
+source = "git+https://github.com/jw1912/bullet#c06dc4422247197ef4ec8f16cbe09b1cf90384c0"
 
 [[package]]
 name = "bullet-gpu"
 version = "0.1.0"
-source = "git+https://github.com/jw1912/bullet#8893e4891781f4da2161dfbab0a776c156e22ead"
+source = "git+https://github.com/jw1912/bullet#c06dc4422247197ef4ec8f16cbe09b1cf90384c0"
 dependencies = [
  "bullet-compiler",
 ]
@@ -49,7 +51,7 @@ dependencies = [
 [[package]]
 name = "bullet-trainer"
 version = "0.1.0"
-source = "git+https://github.com/jw1912/bullet#8893e4891781f4da2161dfbab0a776c156e22ead"
+source = "git+https://github.com/jw1912/bullet#c06dc4422247197ef4ec8f16cbe09b1cf90384c0"
 dependencies = [
  "bullet-compiler",
  "bullet-gpu",
@@ -60,7 +62,7 @@ dependencies = [
 [[package]]
 name = "bullet_lib"
 version = "1.0.0"
-source = "git+https://github.com/jw1912/bullet#8893e4891781f4da2161dfbab0a776c156e22ead"
+source = "git+https://github.com/jw1912/bullet#c06dc4422247197ef4ec8f16cbe09b1cf90384c0"
 dependencies = [
  "bullet-compiler",
  "bullet-gpu",

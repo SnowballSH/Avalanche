@@ -1,0 +1,22 @@
+# Viriformat filter config for Avalanche NNUE training
+# Used by: bullet-utils viribinpack splat <input> <output> filter.toml
+#
+# This filters positions when converting viriformat -> bulletformat.
+# We want quiet, balanced positions that the NNUE can learn from.
+
+min_ply = 8
+min_pieces = 4
+max_eval = 10000
+filter_tactical = true
+filter_check = true
+filter_castling = false
+max_eval_incorrectness = 2500
+random_fen_skipping = false
+random_fen_skip_probability = 0.0
+wdl_filtered = false
+wdl_model_params_a = [0.0, 0.0, 0.0, 0.0]
+wdl_model_params_b = [0.0, 0.0, 0.0, 0.0]
+material_min = 17
+material_max = 78
+mom_target = 58
+wdl_heuristic_scale = 1.0
