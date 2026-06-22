@@ -106,6 +106,7 @@ pub const UciInterface = struct {
                 try stdout.writeAll("option name Threads type spin default 1 min 1 max 2048\n");
                 try stdout.writeAll("option name SyzygyPath type string default <empty>\n");
                 try stdout.writeAll("option name SyzygyProbeDepth type spin default 1 min 1 max 100\n");
+                try stdout.writeAll("option name SyzygyProbeLimit type spin default 7 min 1 max 7\n");
                 try stdout.writeAll("option name Syzygy50MoveRule type check default true\n");
                 for (parameters.TunableParams) |tunable| {
                     try stdout.print("option name {s} type spin default {s} min {s} max {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
@@ -183,6 +184,16 @@ pub const UciInterface = struct {
                             break;
                         }
                         syzygy.probe_depth = std.fmt.parseInt(i32, token.?, 10) catch 1;
+                    } else if (std.mem.eql(u8, token.?, "SyzygyProbeLimit")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        syzygy.probe_limit = std.fmt.parseInt(i32, token.?, 10) catch 7;
                     } else if (std.mem.eql(u8, token.?, "Syzygy50MoveRule")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {

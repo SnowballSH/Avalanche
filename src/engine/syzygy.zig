@@ -24,10 +24,10 @@ pub const MAX_TB_MOVES: usize = 256; // == Pyrrhic TB_MAX_MOVES
 pub var enabled: bool = false;
 pub var probe_depth: i32 = 1;
 pub var use_rule50: bool = true;
+pub var probe_limit: i32 = 7;
 
-/// Largest piece count present in the loaded tables (0 when disabled).
 pub inline fn max_pieces() i32 {
-    return @intCast(c.TB_LARGEST);
+    return @min(@as(i32, @intCast(c.TB_LARGEST)), probe_limit);
 }
 
 pub fn init(path: [*:0]const u8) bool {
