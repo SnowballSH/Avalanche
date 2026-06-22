@@ -167,6 +167,7 @@ pub const UciInterface = struct {
                             syzygy.deinit();
                         } else {
                             const cpath = std.heap.c_allocator.dupeZ(u8, path) catch break;
+                            defer std.heap.c_allocator.free(cpath);
                             if (syzygy.init(cpath.ptr)) {
                                 try stdout.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'\n", .{ syzygy.max_pieces(), path });
                             } else {
@@ -493,6 +494,7 @@ pub const UciInterface = struct {
                                     if (token == null) {
                                         break;
                                     }
+                                    if (self.position.game_ply >= position.MAX_HISTORY_PLY) break;
 
                                     const move = types.Move.new_from_string(&self.position, token.?);
                                     if (move.to_u16() == 0) {
@@ -525,6 +527,7 @@ pub const UciInterface = struct {
                                     if (token == null) {
                                         break;
                                     }
+                                    if (self.position.game_ply >= position.MAX_HISTORY_PLY) break;
 
                                     const move = types.Move.new_from_string(&self.position, token.?);
                                     if (move.to_u16() == 0) {

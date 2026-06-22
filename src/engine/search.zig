@@ -35,6 +35,10 @@ pub const MAX_GAMEPLY = 1024;
 // at ply p scores TB_WIN_SCORE - p (shallower wins preferred); a loss negates it.
 pub const TB_WIN_SCORE: i32 = hce.MateScore - hce.MaxMate - MAX_PLY;
 
+// Threshold for ply-normalizing scores stored in the TT. Covers both mate
+// scores (above MateScore - MaxMate) and TB win/loss scores (above TB_WIN_SCORE - MAX_PLY).
+const SCORE_PLY_ADJ: i32 = TB_WIN_SCORE - MAX_PLY;
+
 pub const NodeType = enum {
     Root,
     PV,
@@ -359,6 +363,9 @@ pub const Searcher = struct {
             var fallback = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
             defer fallback.deinit();
             pos.generate_legal_moves(color, &fallback);
+            if (self.syzygy_root_active) {
+                self.filter_root_moves(&fallback);
+            }
             if (fallback.items.len > 0) {
                 bm = fallback.items[0];
             }
@@ -467,6 +474,8 @@ pub const Searcher = struct {
             helper_searchers.items[i].max_millis = self.max_millis;
             helper_searchers.items[i].thread_id = id;
             helper_searchers.items[i].root_board = pos.*;
+            helper_searchers.items[i].hash_history.clearRetainingCapacity();
+            helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
             threads.items[i] = std.Thread.spawn(
                 .{ .stack_size = 64 * 1024 * 1024 },
                 Searcher.start_helper,
@@ -577,9 +586,9 @@ pub const Searcher = struct {
         if (entry != null) {
             tthit = true;
             tt_eval = entry.?.eval;
-            if (tt_eval > hce.MateScore - hce.MaxMate and tt_eval <= hce.MateScore) {
+            if (tt_eval > SCORE_PLY_ADJ and tt_eval <= hce.MateScore) {
                 tt_eval -= @as(i32, @intCast(self.ply));
-            } else if (tt_eval < -hce.MateScore + hce.MaxMate and tt_eval >= -hce.MateScore) {
+            } else if (tt_eval < -SCORE_PLY_ADJ and tt_eval >= -hce.MateScore) {
                 tt_eval += @as(i32, @intCast(self.ply));
             }
             hashmove = entry.?.bestmove;
@@ -630,8 +639,15 @@ pub const Searcher = struct {
                     else => false,
                 };
                 if (cutoff) {
+                    // Store ply-normalized (same convention as mate scores in Step 7).
+                    var stored_tb = tb_score;
+                    if (stored_tb > SCORE_PLY_ADJ) {
+                        stored_tb += @as(i32, @intCast(self.ply));
+                    } else if (stored_tb < -SCORE_PLY_ADJ) {
+                        stored_tb -= @as(i32, @intCast(self.ply));
+                    }
                     tt.GlobalTT.set(tt.Item{
-                        .eval = tb_score,
+                        .eval = stored_tb,
                         .bestmove = types.Move.empty(),
                         .flag = tb_flag,
                         .depth = @as(u8, @intCast(depth)),
@@ -639,6 +655,12 @@ pub const Searcher = struct {
                         .age = tt.GlobalTT.age,
                     });
                     return tb_score;
+                }
+                // Narrow the search window even without a cutoff.
+                if (tb_flag == tt.Bound.Lower) {
+                    alpha = @max(alpha, tb_score);
+                } else if (tb_flag == tt.Bound.Upper) {
+                    beta = @min(beta, tb_score);
                 }
             }
         }
@@ -987,14 +1009,14 @@ pub const Searcher = struct {
         if (!skip_quiet and self.exclude_move[self.ply].to_u16() == 0) {
             const tt_flag = if (best_score >= beta) tt.Bound.Lower else if (alpha != alpha_) tt.Bound.Exact else tt.Bound.Upper;
 
-            // Store mate scores node-relative (the exact inverse of the probe
-            // adjustment above), so a mate found at one ply reads back correctly
+            // Store mate/TB scores node-relative (the exact inverse of the probe
+            // adjustment above), so a score found at one ply reads back correctly
             // when the entry is probed at a different ply. best_score itself stays
             // root-relative for the return value below.
             var stored_eval = best_score;
-            if (stored_eval > hce.MateScore - hce.MaxMate and stored_eval <= hce.MateScore) {
+            if (stored_eval > SCORE_PLY_ADJ and stored_eval <= hce.MateScore) {
                 stored_eval += @as(i32, @intCast(self.ply));
-            } else if (stored_eval < -hce.MateScore + hce.MaxMate and stored_eval >= -hce.MateScore) {
+            } else if (stored_eval < -SCORE_PLY_ADJ and stored_eval >= -hce.MateScore) {
                 stored_eval -= @as(i32, @intCast(self.ply));
             }
 

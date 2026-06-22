@@ -6,6 +6,8 @@ const utils = @import("utils.zig");
 const hce = @import("../engine/hce.zig");
 const see = @import("../engine/see.zig");
 
+pub const MAX_HISTORY_PLY: u32 = 1920;
+
 // Stores information for undoing a move.
 pub const UndoInfo = packed struct {
     // Bitboard of changed pieces
@@ -52,8 +54,10 @@ pub const Position = struct {
     // Zobrist Hash
     hash: u64 = 0,
 
-    // History of Undo information
-    history: [2048]UndoInfo = undefined,
+    // History of Undo information.
+    // Sized to accommodate the longest game the UCI position parser will replay
+    // (MAX_HISTORY_PLY moves) plus the deepest search (128 plies of play_move).
+    history: [MAX_HISTORY_PLY + 256]UndoInfo = undefined,
 
     // Stores the enemy pieces that are attacking the king
     checkers: types.Bitboard = 0,

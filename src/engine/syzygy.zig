@@ -152,7 +152,7 @@ pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult
     if (!enabled) return null;
     const p = decompose(pos);
     var tb: c.struct_TbRootMoves = std.mem.zeroes(c.struct_TbRootMoves);
-    const rule50: c_uint = @intCast(pos.history[pos.game_ply].fifty);
+    const rule50: c_uint = if (use_rule50) @intCast(pos.history[pos.game_ply].fifty) else 0;
     const ret = c.tb_probe_root_dtz(
         p.white,
         p.black,
