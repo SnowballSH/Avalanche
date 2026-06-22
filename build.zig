@@ -47,6 +47,14 @@ fn dtToString(dt: DateTime, buf: []u8) []const u8 {
     return std.fmt.bufPrint(buf, "Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2}", .{ dt.year, dt.month, dt.day, dt.hour, dt.minute }) catch unreachable;
 }
 
+fn addPyrrhic(b: *std.Build, compile: *std.Build.Step.Compile) void {
+    compile.root_module.addCSourceFile(.{
+        .file = b.path("src/pyrrhic/tbprobe.c"),
+        .flags = &.{ "-O3", "-std=c11" },
+    });
+    compile.root_module.addIncludePath(b.path("src/pyrrhic"));
+}
+
 pub fn build(b: *std.Build) void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
@@ -83,6 +91,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path(netPath),
     });
 
+    addPyrrhic(b, exe);
+
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
@@ -109,6 +119,8 @@ pub fn build(b: *std.Build) void {
     exe_tests.root_module.addAnonymousImport("nnue", .{
         .root_source_file = b.path(netPath),
     });
+
+    addPyrrhic(b, exe_tests);
 
     const run_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run unit tests");
