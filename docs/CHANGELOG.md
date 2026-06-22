@@ -1,5 +1,49 @@
 # v3.0.0_dev
 
+- Add support for Syzygy Tablebases
+
+STC (10+0.10, Endgames.epd):
+```
+Elo   | 15.42 +- 5.09 (95%)
+SPRT  | 10.0+0.10s Threads=1 Hash=8MB
+LLR   | 3.24 (-2.94, 2.94) [-3.00, 0.50]
+Games | N: 2818 W: 600 L: 475 D: 1743
+Penta | [1, 160, 961, 287, 0]
+```
+
+- LTC Tune
+
+- New net: Jihan
+
+Trained on 1.3B fresh self-play data from after migration.
+
+STC (10+0.10):
+```
+Elo   | 21.02 +- 6.98 (95%)
+SPRT  | 10.0+0.10s Threads=1 Hash=8MB
+LLR   | 2.97 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 3774 W: 1101 L: 873 D: 1800
+Penta | [53, 387, 820, 533, 94]
+```
+
+LTC (60+0.60):
+```
+Elo   | 20.43 +- 6.32 (95%)
+SPRT  | 60.0+0.60s Threads=1 Hash=64MB
+LLR   | 3.05 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 3474 W: 914 L: 710 D: 1850
+Penta | [21, 334, 829, 526, 27]
+```
+
+Endgame STC:
+```
+Elo   | 4.20 +- 2.97 (95%)
+SPRT  | 10.0+0.10s Threads=1 Hash=8MB
+LLR   | 3.03 (-2.94, 2.94) [0.00, 5.00]
+Games | N: 10826 W: 2162 L: 2031 D: 6633
+Penta | [29, 943, 3325, 1100, 16]
+```
+
 - Migrate to Zig 0.16.0 and fix some bugs
 
 ```
