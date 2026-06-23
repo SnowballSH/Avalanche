@@ -15,6 +15,9 @@ pub var RazoringMargin: i32 = 227;
 
 pub var AspirationWindow: i32 = 13;
 
+pub var NodeTmBase: i32 = 150;
+pub var NodeTmMultiplier: i32 = 174;
+
 pub const Tunable = struct {
     name: []const u8,
     value: []const u8,
@@ -38,4 +41,6 @@ pub const TunableParams = [_]Tunable{
     Tunable{ .name = "RazoringBase", .value = "68", .min_value = "20", .max_value = "140", .c_end = "6", .r_end = "0.002", .id = 9 },
     Tunable{ .name = "RazoringMargin", .value = "227", .min_value = "80", .max_value = "320", .c_end = "12", .r_end = "0.002", .id = 10 },
     Tunable{ .name = "AspirationWindow", .value = "13", .min_value = "5", .max_value = "30", .c_end = "1.25", .r_end = "0.002", .id = 11 },
+    Tunable{ .name = "NodeTmBase", .value = "150", .min_value = "100", .max_value = "250", .c_end = "8", .r_end = "0.002", .id = 12 },
+    Tunable{ .name = "NodeTmMultiplier", .value = "174", .min_value = "80", .max_value = "260", .c_end = "10", .r_end = "0.002", .id = 13 },
 };
