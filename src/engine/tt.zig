@@ -96,6 +96,23 @@ pub const TranspositionTable = struct {
         });
     }
 
+    pub fn hashfull(self: *TranspositionTable) u64 {
+        const sample = @min(@as(usize, 1000), self.size);
+        if (sample == 0) return 0;
+        var count: u64 = 0;
+        var i: usize = 0;
+        while (i < sample) : (i += 1) {
+            const p = &self.data.items[i];
+            if (p.* != 0) {
+                const entry: Item = @as(*Item, @ptrCast(p)).*;
+                if (entry.age == self.age) {
+                    count += 1;
+                }
+            }
+        }
+        return count * 1000 / @as(u64, sample);
+    }
+
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
         // self.data.items[hash % self.size].lock.lock();
         // defer self.data.items[hash % self.size].lock.unlock();

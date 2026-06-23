@@ -304,12 +304,16 @@ pub const Searcher = struct {
             }
 
             if (!self.silent_output) {
-                outW.print("info depth {} seldepth {} nodes {} tbhits {} time {} score ", .{
+                const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
+                const nps = total_nodes * 1000 / @max(@as(u64, 1), elapsed_ms);
+                outW.print("info depth {} seldepth {} nodes {} nps {} hashfull {} tbhits {} time {} score ", .{
                     tdepth,
                     self.seldepth,
                     total_nodes,
+                    nps,
+                    tt.GlobalTT.hashfull(),
                     total_tbhits,
-                    self.timer.read() / std.time.ns_per_ms,
+                    elapsed_ms,
                 }) catch {};
 
                 if ((@as(i32, @intCast(@abs(score)))) >= (hce.MateScore - hce.MaxMate)) {
