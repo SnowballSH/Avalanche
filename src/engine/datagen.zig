@@ -318,7 +318,7 @@ pub const DatagenSingle = struct {
 
         tt.GlobalTT.do_age();
         self.searcher.reset_heuristics(true);
-        self.searcher.stop = false;
+        @atomicStore(bool, &self.searcher.stop, false, .monotonic);
         self.searcher.force_thinking = false;
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -389,7 +389,7 @@ pub const DatagenSingle = struct {
                     return; // discard unbalanced opening
                 }
                 initial_board = pos_to_viri_packed_board(pos, init_score);
-                self.searcher.stop = false;
+                @atomicStore(bool, &self.searcher.stop, false, .monotonic);
             }
 
             // Search
@@ -398,7 +398,7 @@ pub const DatagenSingle = struct {
             else
                 -self.searcher.iterative_deepening(pos, types.Color.Black, null);
 
-            self.searcher.stop = false;
+            @atomicStore(bool, &self.searcher.stop, false, .monotonic);
 
             const best_move = self.searcher.best_move;
 
@@ -491,7 +491,7 @@ pub const DatagenSingle = struct {
 
         tt.GlobalTT.do_age();
         self.searcher.reset_heuristics(true);
-        self.searcher.stop = false;
+        @atomicStore(bool, &self.searcher.stop, false, .monotonic);
         self.searcher.force_thinking = false;
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -550,7 +550,7 @@ pub const DatagenSingle = struct {
             else
                 -self.searcher.iterative_deepening(pos, types.Color.Black, null);
 
-            self.searcher.stop = false;
+            @atomicStore(bool, &self.searcher.stop, false, .monotonic);
 
             if (ply == random_plies and (res > cfg.opening_reject_threshold or res < -cfg.opening_reject_threshold)) {
                 break;

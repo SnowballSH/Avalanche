@@ -71,7 +71,7 @@ pub const UciInterface = struct {
             }
 
             if (std.mem.eql(u8, token.?, "stop")) {
-                self.searcher.stop = true;
+                @atomicStore(bool, &self.searcher.stop, true, .monotonic);
                 self.join_search();
                 continue;
             } else if (std.mem.eql(u8, token.?, "isready")) {
@@ -275,7 +275,7 @@ pub const UciInterface = struct {
                     break;
                 }
             } else if (std.mem.eql(u8, token.?, "ucinewgame")) {
-                self.searcher.stop = true;
+                @atomicStore(bool, &self.searcher.stop, true, .monotonic);
                 self.join_search();
                 self.searcher.deinit();
                 self.searcher = search.Searcher.new();
@@ -441,7 +441,7 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
-                    const overhead = 25;
+                    const overhead: u64 = 25 + @min(@as(u64, search.NUM_THREADS) * 5, 25);
                     if (mytime != null) {
                         var inc: u64 = 0;
                         if (myinc != null) {
@@ -470,7 +470,7 @@ pub const UciInterface = struct {
 
                 // Reap any finished search thread before starting a new one.
                 self.join_search();
-                self.searcher.stop = false;
+                @atomicStore(bool, &self.searcher.stop, false, .monotonic);
                 // Mark searching BEFORE spawning so a second `go` arriving before
                 // the worker starts cannot pass the is_searching guard and
                 // double-spawn onto the same searcher/position.
@@ -557,7 +557,7 @@ pub const UciInterface = struct {
 
         // EOF/quit can break the loop mid-search; stop and join the worker
         // before freeing the searcher/position/TT it still references.
-        self.searcher.stop = true;
+        @atomicStore(bool, &self.searcher.stop, true, .monotonic);
         self.join_search();
 
         self.searcher.deinit();

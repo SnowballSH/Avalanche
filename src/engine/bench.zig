@@ -75,7 +75,7 @@ pub fn bench() !void {
     for (FENS) |fen| {
         var pos = position.Position.new();
         pos.set_fen(fen);
-        searcher.stop = false;
+        @atomicStore(bool, &searcher.stop, false, .monotonic);
         searcher.reset_heuristics(true);
         if (pos.turn == types.Color.White) {
             _ = searcher.iterative_deepening(&pos, types.Color.White, depth);
