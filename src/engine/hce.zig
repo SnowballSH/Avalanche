@@ -219,12 +219,45 @@ pub const DynamicEvaluator = struct {
         self.move_piece_quiet(from, to, pos);
     }
 
+    pub inline fn capture_piece(self: *DynamicEvaluator, captured: types.Piece, moving: types.Piece, from: types.Square, to: types.Square) void {
+        if (UseNNUE) {
+            self.nnue_evaluator.capture(captured, moving, from, to);
+        }
+        if (self.need_hce) {
+            // Remove captured piece at to
+            const ci = captured.piece_type().index();
+            if (captured.color() == types.Color.White) {
+                self.score_mg -= Mateiral[ci][0];
+                self.score_mg -= PSQT[ci][0][to.index() ^ 56];
+                self.score_eg_material -= Mateiral[ci][1];
+                self.score_eg_non_mat -= PSQT[ci][1][to.index() ^ 56];
+            } else {
+                self.score_mg += Mateiral[ci][0];
+                self.score_mg += PSQT[ci][0][to.index()];
+                self.score_eg_material += Mateiral[ci][1];
+                self.score_eg_non_mat += PSQT[ci][1][to.index()];
+            }
+            // Move piece from -> to
+            const mi = moving.piece_type().index();
+            if (moving.color() == types.Color.White) {
+                self.score_mg -= PSQT[mi][0][from.index() ^ 56];
+                self.score_mg += PSQT[mi][0][to.index() ^ 56];
+                self.score_eg_non_mat -= PSQT[mi][1][from.index() ^ 56];
+                self.score_eg_non_mat += PSQT[mi][1][to.index() ^ 56];
+            } else {
+                self.score_mg += PSQT[mi][0][from.index()];
+                self.score_mg -= PSQT[mi][0][to.index()];
+                self.score_eg_non_mat += PSQT[mi][1][from.index()];
+                self.score_eg_non_mat -= PSQT[mi][1][to.index()];
+            }
+        }
+    }
+
     pub inline fn move_piece_quiet(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
         const pc = pos.mailbox[from.index()];
         if (pc != types.Piece.NO_PIECE) {
             if (UseNNUE) {
-                self.nnue_evaluator.toggle(false, pc, from);
-                self.nnue_evaluator.toggle(true, pc, to);
+                self.nnue_evaluator.move(pc, from, to);
             }
             if (self.need_hce) {
                 const i = pc.piece_type().index();
