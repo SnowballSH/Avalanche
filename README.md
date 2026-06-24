@@ -8,11 +8,13 @@
 
 <br/>
 
+Avalanche is a strong UCI chess engine written in [Zig](https://ziglang.org/).
+
 June 2026 update: **Avalanche now builds with Zig 0.16.0.**
 
-### Avalanche is the first UCI Chess Engine written in [Zig](https://ziglang.org/).
-
 ## Strength
+
+**Latest (3.0.0 dev): estimated 3450-3500**
 
 **Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3346**
 
@@ -22,17 +24,15 @@ Version 2.1.0 participated in TCEC Swiss 6.
 
 ## About
 
-Avalanche is the **first and strongest chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
+Avalanche is the **first chess engine** written in the [Zig programming language](https://ziglang.org/), proving Zig's ability to succeed in real-world, competitive applications.
 
-Avalanche v1.4.0 was the **sole winner** of the 102nd CCRL Amateur Series Tournament (Division 5), having a score of **29.5/44**. See [Tournament Page](https://kirill-kryukov.com/chess/discussion-board/viewtopic.php?f=7&t=15613&sid=8ada67b5589f716aaf477dd1befe051b).
+Avalanche was one of the earliest adopters of the **NNUE** (Efficiently Updatable Neural Network) technology for its evaluation.
 
-Avalanche uses the new **NNUE** (Efficiently Updatable Neural Network) technology for its evaluation.
-
-This project isn't possible without the help of the Zig community, since this is the first and only Zig code I've ever written. Thank you!
+This project isn't possible without the help of the Zig community, since this is the first Zig code I've ever written. Thank you!
 
 ## License
 
-Good Old MIT License. In short, feel free to use this program anywhere, but please credit this repository somewhere in your project :)
+MIT License.
 
 ## Compile
 
@@ -44,7 +44,7 @@ Avalanche now builds with **Zig 0.16.0**.
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
 zig build                     # debug build
 zig build test                # unit tests
-./zig-out/bin/Avalanche bench # fixed-position benchmark -> "35032097 nodes <nps> nps"
+./zig-out/bin/Avalanche bench # fixed-position benchmark
 ```
 
 Older Zig 0.10.x is no longer required.
@@ -83,7 +83,7 @@ Avalanche follows the UCI protocol and is not a full chess application. You shou
 - Evaluation
   - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function with adaptation to endgames. The HCE is only activated at late endgames when finding checkmate against a lone king is needed.
   - NNUE since 2.0.0 is trained with https://github.com/jw1912/bullet
-  - The NNUE data since 2.0.0 is purely generated from self-play games. Currently, the latest dev network is trained on 600 million self-play positions at depth 8.
+  - The NNUE data since 2.0.0 is purely generated from self-play games.
 - UCI Interface/Communication code
   - 100% original
 
