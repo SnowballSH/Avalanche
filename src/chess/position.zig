@@ -297,11 +297,12 @@ pub const Position = struct {
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
     pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
+        const moving = self.mailbox[from.index()];
         self.evaluator.move_piece_quiet(from, to, self);
-        self.hash ^= zobrist.ZobristTable[self.mailbox[from.index()].index()][from.index()] ^ zobrist.ZobristTable[self.mailbox[from.index()].index()][to.index()];
+        self.hash ^= zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
 
-        self.piece_bitboards[self.mailbox[from.index()].index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
-        self.mailbox[to.index()] = self.mailbox[from.index()];
+        self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+        self.mailbox[to.index()] = moving;
         self.mailbox[from.index()] = types.Piece.NO_PIECE;
     }
 
