@@ -172,11 +172,11 @@ pub const Searcher = struct {
     }
 
     pub inline fn should_stop(self: *Searcher) bool {
-        return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.max_nodes != null and self.nodes >= self.max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis)));
+        return @atomicLoad(bool, &self.stop, .monotonic) or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.max_nodes != null and self.nodes >= self.max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= self.max_millis)));
     }
 
     pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
-        return self.stop or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @as(u64, @intFromFloat(@floor(@as(f32, @floatFromInt(self.ideal_time)) * factor)))))));
+        return @atomicLoad(bool, &self.stop, .monotonic) or (self.thread_id == 0 and self.iterative_deepening_depth > self.min_depth and ((self.soft_max_nodes != null and self.nodes >= self.soft_max_nodes.?) or (!self.force_thinking and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @as(u64, @intFromFloat(@floor(@as(f32, @floatFromInt(self.ideal_time)) * factor)))))));
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) i32 {
@@ -509,7 +509,7 @@ pub const Searcher = struct {
     }
 
     pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
-        self.stop = false;
+        @atomicStore(bool, &self.stop, false, .monotonic);
         self.is_searching = true;
         self.time_stop = false;
         self.best_move = types.Move.empty();
@@ -528,7 +528,7 @@ pub const Searcher = struct {
         _ = self;
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
-            helper_searchers.items[i].stop = true;
+            @atomicStore(bool, &helper_searchers.items[i].stop, true, .monotonic);
         }
         i = 0;
         while (i < NUM_THREADS) : (i += 1) {
@@ -554,7 +554,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 2047 == 0 and self.should_stop()) {
+        if (self.nodes & 1023 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
@@ -1068,7 +1068,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparation
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 2047 == 0 and self.should_stop()) {
+        if (self.nodes & 1023 == 0 and self.should_stop()) {
             self.time_stop = true;
             return 0;
         }
