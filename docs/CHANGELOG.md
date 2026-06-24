@@ -1,5 +1,42 @@
 # v3.0.0_dev
 
+- Final match vs 2.1.0
+
+STC (10+0.10):
+```
+Elo: 108.91 +/- 6.49, nElo: 172.56 +/- 9.63
+LOS: 100.00 %, DrawRatio: 34.24 %, PairsRatio: 6.06
+Games: 5000, Wins: 2179, Losses: 661, Draws: 2160, Points: 3259.0 (65.18 %)
+Ptnml(0-2): [21, 212, 856, 1050, 361], WL/DD Ratio: 0.91
+```
+
+LTC (120+1.00):
+```
+Elo: 87.78 +/- 5.56, nElo: 158.58 +/- 9.63
+LOS: 100.00 %, DrawRatio: 38.36 %, PairsRatio: 5.64
+Games: 5000, Wins: 1857, Losses: 620, Draws: 2523, Points: 3118.5 (62.37 %)
+Ptnml(0-2): [10, 222, 959, 1139, 170], WL/DD Ratio: 0.65
+```
+
+SMP (60+0.60):
+```
+Elo: 238.66 +/- 20.61, nElo: 475.60 +/- 30.45
+LOS: 100.00 %, DrawRatio: 8.80 %, PairsRatio: 113.00
+Games: 500, Wins: 309, Losses: 11, Draws: 180, Points: 399.0 (79.80 %)
+Ptnml(0-2): [0, 2, 22, 152, 74], WL/DD Ratio: 0.69
+```
+
+- NNUE Speedup
+
+STC (10+0.10):
+```
+Elo   | 28.17 +- 8.36 (95%)
+SPRT  | 10.0+0.10s Threads=1 Hash=8MB
+LLR   | 2.99 (-2.94, 2.94) [-3.00, 0.50]
+Games | N: 1990 W: 542 L: 381 D: 1067
+Penta | [10, 168, 495, 295, 27]
+```
+
 - Add support for Syzygy Tablebases
 
 STC (10+0.10, Endgames.epd):
