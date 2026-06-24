@@ -276,8 +276,23 @@ pub const Position = struct {
     }
 
     pub inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
-        self.remove_piece(to);
-        self.move_piece_quiet(from, to);
+        const captured = self.mailbox[to.index()];
+        if (captured != types.Piece.NO_PIECE) {
+            const moving = self.mailbox[from.index()];
+            self.evaluator.capture_piece(captured, moving, from, to);
+
+            // Remove captured piece
+            self.hash ^= zobrist.ZobristTable[captured.index()][to.index()];
+            self.piece_bitboards[captured.index()] &= ~types.SquareIndexBB[to.index()];
+
+            // Move piece from -> to
+            self.hash ^= zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
+            self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+            self.mailbox[to.index()] = moving;
+            self.mailbox[from.index()] = types.Piece.NO_PIECE;
+        } else {
+            self.move_piece_quiet(from, to);
+        }
     }
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY

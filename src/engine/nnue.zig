@@ -44,7 +44,7 @@ pub inline fn clipped_relu(input: i16) i32 {
 }
 
 // SIMD width in i16 lanes; HIDDEN_SIZE is a multiple of it.
-const VL: usize = 16;
+const VL: usize = 32;
 
 pub const Accumulator = struct {
     white: [weights.HIDDEN_SIZE]i16 align(64),
@@ -87,6 +87,24 @@ pub const Accumulator = struct {
             const wb: V = self.black[i..][0..VL].*;
             self.white[i..][0..VL].* = ww + tw - fw;
             self.black[i..][0..VL].* = wb + tb - fb;
+        }
+    }
+
+    pub fn capture_weights(self: *Accumulator, captured: WhiteBlackPair, from: WhiteBlackPair, to: WhiteBlackPair) void {
+        const V = @Vector(VL, i16);
+        const m1 = &weights.MODEL.layer_1;
+        var i: usize = 0;
+        while (i < weights.HIDDEN_SIZE) : (i += VL) {
+            const cw: V = m1[captured.white + i ..][0..VL].*;
+            const fw: V = m1[from.white + i ..][0..VL].*;
+            const tw: V = m1[to.white + i ..][0..VL].*;
+            const cb: V = m1[captured.black + i ..][0..VL].*;
+            const fb: V = m1[from.black + i ..][0..VL].*;
+            const tb: V = m1[to.black + i ..][0..VL].*;
+            const ww: V = self.white[i..][0..VL].*;
+            const wb: V = self.black[i..][0..VL].*;
+            self.white[i..][0..VL].* = ww - cw - fw + tw;
+            self.black[i..][0..VL].* = wb - cb - fb + tb;
         }
     }
 };
@@ -132,6 +150,10 @@ pub const NNUE = struct {
         self.accumulator_stack[self.stack_index].exchange_weights(nnue_index(pc, from), nnue_index(pc, to));
     }
 
+    pub inline fn capture(self: *NNUE, captured: types.Piece, pc: types.Piece, from: types.Square, to: types.Square) void {
+        self.accumulator_stack[self.stack_index].capture_weights(nnue_index(captured, to), nnue_index(pc, from), nnue_index(pc, to));
+    }
+
     pub inline fn evaluate(self: *NNUE, turn: types.Color, pos: *position.Position) i32 {
         return if (turn == types.Color.White) self.evaluate_comptime(types.Color.White, pos) else self.evaluate_comptime(types.Color.Black, pos);
     }
@@ -150,7 +172,6 @@ pub const NNUE = struct {
         const zero: Vi16 = @splat(0);
         const cap: Vi16 = @splat(255);
 
-        // Squared clipped ReLU dot product; accumulate in i32 lanes, reduce at the end.
         var sum: Vi32 = @splat(0);
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += VL) {
