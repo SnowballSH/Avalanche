@@ -190,8 +190,10 @@ pub const Searcher = struct {
         self.tbhits = 0;
         self.best_move = types.Move.empty();
 
-        for (&self.node_spent_table) |*row| {
-            @memset(row, 0);
+        if (self.thread_id == 0) {
+            for (&self.node_spent_table) |*row| {
+                @memset(row, 0);
+            }
         }
 
         self.timer = types.Timer.start();
