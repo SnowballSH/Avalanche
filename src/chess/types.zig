@@ -470,7 +470,7 @@ pub const Move = packed struct {
     }
 
     pub inline fn is_capture(self: Move) bool {
-        return (self.flags == 8) or (self.flags == 10) or (self.flags >= 12 and self.flags <= 15);
+        return (self.flags & 0b1000) != 0;
     }
 
     pub inline fn is_promotion(self: Move) bool {

@@ -13,7 +13,9 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     var piece_bb: types.Bitboard = 0;
 
     const to_sq = move.get_to();
-    const all_pieces = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    const white_pieces = pos.all_pieces(types.Color.White);
+    const black_pieces = pos.all_pieces(types.Color.Black);
+    const all_pieces = white_pieces | black_pieces;
     var gains: [16]i32 = undefined;
     var opp = pos.turn.invert();
     var blockers = all_pieces & ~types.SquareIndexBB[move.to];
@@ -24,11 +26,7 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     var depth: usize = 1;
     outer: while (depth < gains.len) : (depth += 1) {
         gains[depth] = last_piece_pts - gains[depth - 1];
-        if (opp == types.Color.White) {
-            defenders = pos.all_pieces(types.Color.White) & blockers;
-        } else {
-            defenders = pos.all_pieces(types.Color.Black) & blockers;
-        }
+        defenders = (if (opp == types.Color.White) white_pieces else black_pieces) & blockers;
         var pt = types.PieceType.Pawn.index();
         const ending = types.PieceType.King.index();
         while (pt <= ending) : (pt += 1) {
@@ -69,7 +67,9 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         return true;
     }
 
-    const all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
+    const white_pieces = pos.all_pieces(types.Color.White);
+    const black_pieces = pos.all_pieces(types.Color.Black);
+    const all = white_pieces | black_pieces;
 
     var occ = (all ^ types.SquareIndexBB[from]) | types.SquareIndexBB[to];
     var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @enumFromInt(to)), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @enumFromInt(to)), occ)) & occ;
@@ -81,12 +81,7 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
 
     while (true) {
         attackers &= occ;
-        var my_attackers = attackers;
-        if (stm == types.Color.White) {
-            my_attackers &= pos.all_pieces(types.Color.White);
-        } else {
-            my_attackers &= pos.all_pieces(types.Color.Black);
-        }
+        const my_attackers = attackers & (if (stm == types.Color.White) white_pieces else black_pieces);
         if (my_attackers == 0) {
             break;
         }
@@ -104,14 +99,8 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
 
         if (swap >= 0) {
             if (pt == 5) {
-                if (stm == types.Color.White) {
-                    if (attackers & pos.all_pieces(types.Color.White) != 0) {
-                        stm = stm.invert();
-                    }
-                } else {
-                    if (attackers & pos.all_pieces(types.Color.Black) != 0) {
-                        stm = stm.invert();
-                    }
+                if (attackers & (if (stm == types.Color.White) white_pieces else black_pieces) != 0) {
+                    stm = stm.invert();
                 }
             }
             break;
