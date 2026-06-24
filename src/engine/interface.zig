@@ -258,6 +258,12 @@ pub const UciInterface = struct {
                                     11 => {
                                         parameters.AspirationWindow = @as(i32, @intCast(value));
                                     },
+                                    12 => {
+                                        parameters.NodeTmBase = @as(i32, @intCast(value));
+                                    },
+                                    13 => {
+                                        parameters.NodeTmMultiplier = @as(i32, @intCast(value));
+                                    },
                                     else => unreachable,
                                 }
                                 // std.debug.print("info string {s} set to {d}\n", .{ tunable.name, value });

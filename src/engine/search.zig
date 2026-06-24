@@ -94,6 +94,8 @@ pub const Searcher = struct {
     thread_id: usize = 0,
     silent_output: bool = false,
 
+    node_spent_table: [64][64]u64 = undefined,
+
     tbhits: u64 = 0,
     syzygy_root_active: bool = false,
     syzygy_root: syzygy.RootResult = undefined,
@@ -187,6 +189,12 @@ pub const Searcher = struct {
         self.nodes = 0;
         self.tbhits = 0;
         self.best_move = types.Move.empty();
+
+        if (self.thread_id == 0) {
+            for (&self.node_spent_table) |*row| {
+                @memset(row, 0);
+            }
+        }
 
         self.timer = types.Timer.start();
 
@@ -348,6 +356,15 @@ pub const Searcher = struct {
 
             if (score - prev_score > parameters.AspirationWindow) {
                 factor *= 1.1;
+            }
+
+            if (tdepth >= 4 and self.nodes > 0) {
+                const bm_nodes = self.node_spent_table[bm.from][bm.to];
+                const frac = @as(f32, @floatFromInt(bm_nodes)) / @as(f32, @floatFromInt(self.nodes));
+                const node_base = @as(f32, @floatFromInt(parameters.NodeTmBase)) / 100.0;
+                const node_mult = @as(f32, @floatFromInt(parameters.NodeTmMultiplier)) / 100.0;
+                const node_scale = std.math.clamp((node_base - frac) * node_mult, 0.5, 2.0);
+                factor *= node_scale;
             }
 
             prev_score = score;
@@ -879,6 +896,8 @@ pub const Searcher = struct {
 
             const new_depth = @as(usize, @intCast(@as(i32, @intCast(depth)) + extension - 1));
 
+            const nodes_before = self.nodes;
+
             self.move_history[self.ply] = move;
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
@@ -934,6 +953,10 @@ pub const Searcher = struct {
             self.ply -= 1;
             pos.undo_move(color, move);
             _ = self.hash_history.pop();
+
+            if (is_root and self.thread_id == 0) {
+                self.node_spent_table[move.from][move.to] += self.nodes - nodes_before;
+            }
 
             if (self.time_stop) {
                 return 0;
