@@ -71,11 +71,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const build_options = b.addOptions();
-    var buf: [64]u8 = undefined;
-    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer io_threaded.deinit();
-    const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
-    build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(now_seconds), &buf));
+    // var buf: [64]u8 = undefined;
+    // var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    // defer io_threaded.deinit();
+    // const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
+    // build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(now_seconds), &buf));
+    build_options.addOption([]const u8, "version", "3.0.0");
 
     const exe = b.addExecutable(.{
         .name = targetName,
