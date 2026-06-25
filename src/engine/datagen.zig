@@ -15,7 +15,7 @@ pub const Format = enum { bullet, viri };
 
 pub const DatagenConfig = struct {
     format: Format = .viri,
-    soft_nodes: u64 = 7500,
+    soft_nodes: u64 = 10000,
     hard_node_multiplier: u64 = 8,
     random_plies_min: u64 = 8,
     random_plies_range: u64 = 2,

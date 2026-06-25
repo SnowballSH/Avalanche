@@ -31,7 +31,7 @@ on:
     branches: [master]
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *" # daily regression guard against master
+    - cron: "0 0 * * 1" # weekly regression guard against master (Monday)
 
 # Cancel superseded runs on the same ref (e.g. rapid PR pushes).
 concurrency:
@@ -144,41 +144,7 @@ jobs:
           version: 0.16.0
 
       - name: Cross-compile release binaries
-        run: |
-          set -euo pipefail
-          VERSION="2.2.0-dev"
-          OUT="artifacts"
-          mkdir -p "$OUT"
-
-          # build <target-triple> <cpu|""> <name-suffix>
-          # Zig bundles libc for every target, so one host toolchain builds them all.
-          build() {
-            local triple="$1" cpu="$2" suffix="$3"
-            local name="Avalanche-${VERSION}-${suffix}"
-            echo "==> $name  (target=$triple cpu=${cpu:-baseline})"
-            if [ -n "$cpu" ]; then
-              zig build --release=fast -Dtarget="$triple" -Dcpu="$cpu" --prefix "$OUT" -Dtarget-name="$name"
-            else
-              zig build --release=fast -Dtarget="$triple" --prefix "$OUT" -Dtarget-name="$name"
-            fi
-          }
-
-          # Baseline aarch64 (all OSes) + x86_64 macOS.
-          build aarch64-linux-musl "" aarch64-linux
-          build aarch64-windows    "" aarch64-windows
-          build aarch64-macos      "" aarch64-macos
-          build x86_64-macos       "" x86_64-macos
-
-          # x86_64 microarchitecture levels for linux (musl, static) and windows.
-          build x86_64-linux-musl  x86_64    x86_64-linux-v1
-          build x86_64-linux-musl  x86_64_v2 x86_64-linux-v2
-          build x86_64-linux-musl  x86_64_v3 x86_64-linux-v3
-          build x86_64-windows     x86_64    x86_64-windows-v1
-          build x86_64-windows     x86_64_v2 x86_64-windows-v2
-          build x86_64-windows     x86_64_v3 x86_64-windows-v3
-
-          echo "----- built binaries -----"
-          ls -la "$OUT/bin"
+        run: bash build_all_v3.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
