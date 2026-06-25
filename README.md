@@ -3,7 +3,7 @@
 <br/>
 
 <p align="center">
-<img src="https://github.com/SnowballSH/Avalanche/assets/66022611/2026b61e-7558-4fb9-8549-da2f8492174f" alt="Logo" width=700 height=400/>
+<img alt="Avalanche_3.0.0 2:1 logo" src="https://github.com/user-attachments/assets/731b5421-e2ab-49ef-8d80-5b4cbff9f62e" width=800 height=400/>
 </p>
 
 <br/>
