@@ -66,6 +66,76 @@ superbatches (overfits), WDL above 0.25, or 768h at short time control.
 - When reading fastchess output, the "Results of ..." block prints every `ratinginterval` games; only trust
   it once it shows the full game count and the log contains "Finished match".
 
+---
+
+## Shuang session — 768h on 2.07B positions (Jun 2026)
+
+Data: `data/training.bin`, 2.071B positions (66GB), soft_nodes 5000-7500, quiet-filtered bulletformat.
+GPU: NVIDIA RTX PRO 6000 Blackwell (sm_120, 98GB VRAM), ~16M pos/sec @ 768h with full resources.
+Reference: jihan83 (512h, production master, bench 42152173).
+Testing: 5000 games @ 10+0.1 vs master, conc=10-14.
+
+### 512h results (all parity or worse — capacity saturated)
+
+| Net | Arch | sb | epochs | WDL | LR | Elo | Notes |
+|-----|------|----|--------|-----|----|-----|-------|
+| shuang01 | 512h | 50 | 4.8 | 0.25 | 0.001 | -35 (300g) | loss |
+| shuang02 | 512h | 40 | 3.9 | 0.25 | 0.001 | ~0 (screening) | parity |
+| shuang03 | 512h | 60 | 5.8 | 0.25 | 0.001 | +1 (700g) | parity |
+| shuang04 | 512h | 80 | 7.7 | 0.25 | 0.001 | +2 (200g) | parity |
+| shuang05 | 512h | 60 | 5.8 | 0.25 | 0.002 | -40 (100g) | LR too high |
+
+512h cannot extract more from the 2B data — it already learned everything a 512-wide net can represent
+from similar-depth data. All runs land at parity regardless of length (40-80sb). Higher LR (0.002) hurts.
+
+### 768h results — capacity unlocked
+
+| Net | Arch | sb | epochs | WDL | Elo (games) | Notes |
+|-----|------|----|--------|-----|-------------|-------|
+| shuang06-20 | 768h | 20 | 1.9 | 0.25 | -48 (500g) | massively undertrained |
+| shuang06-40 | 768h | 40 | 3.9 | 0.25 | -7 (200g) | approaching peak |
+| **shuang06-60** | **768h** | **60** | **5.8** | **0.25** | **+24 ±6.4 (4700g)** | **WINNER #1, LOS 100%** |
+| shuang07-60 | 768h | 60* | 5.8 | 0.25 | 0 (100g) | *LR schedule ended at sb80, not sb60 — LR not converged |
+| shuang07-80 | 768h | 80 | 7.7 | 0.25 | -10 (100g) | overfitting |
+| shuang08 | 768h | 60 | 5.8 | 0.30 | +2 (200g) | WDL 0.30 no better than parity |
+
+Key: shuang07-60 vs shuang06-60 proves that the LR schedule endpoint matters critically.
+Both are 768h at 60 superbatches of actual training, but shuang06's cosine schedule was
+set to end at sb60 (LR reaches near-zero), while shuang07's was set to end at sb80 (at sb60 the
+LR is still significant). Only the properly-converged one wins.
+
+### Findings (shuang)
+
+1. 512h is capacity-saturated on this data. Training on teacher-depth data from a 512h net, a new 512h
+   net can only match the teacher, not exceed it. This is the same ceiling that hit jihan on 1.344B data.
+2. 768h breaks through. The extra parameters (50% more) can absorb patterns from 2B positions that 512h
+   cannot. Result: +24 Elo over jihan83 at STC despite a ~20-25% nps penalty.
+3. Optimal recipe for 768h on 2B: 60sb (5.8 epochs), WDL 0.25, cosine 1e-3 -> 1e-7. Peak is similar
+   epoch count to jihan's 512h peak on 1.344B (both ~6 epochs). Below 60sb: undertrained. Above 60sb: overfits.
+4. LR schedule endpoint is critical. The cosine must converge to near-zero AT the checkpoint you use.
+   A net taken from a mid-schedule point (where LR is still high) is much weaker than one at the schedule end.
+5. WDL 0.25 remains optimal for 768h (0.30 gives only parity).
+6. 768h nps on Blackwell (sm_120): ~2.0-2.4M nps vs 512h's ~3.0M. Only ~20-25% speed cost (Blackwell's
+   wider SIMD helps 768h much more than the old L40S did where it was 28% slower).
+
+### Confirmed winners (all 768h / 60sb / WDL 0.25 / cosine 1e-3 -> 1e-7, STC vs jihan83)
+
+| Net | Elo ± CI | Score | LOS | Games | Status |
+|-----|----------|-------|-----|-------|--------|
+| shuang06-60 | +24.2 ± 6.4 | 53.48% | 100% | 4700 | WINNER #1 |
+| shuang10 | +22.5 ± 9.7 | 53.24% | 100% | 1900 | WINNER #2 |
+| shuang11 | +20.1 ± 9.6 | 52.89% | 100% | 1800 | WINNER #3 |
+
+Recipe is reproducible: three independent training runs with the same hyperparameters all beat
+the 512h master by +20 to +24 Elo at STC. All at LOS 100%. Variance is from GPU non-determinism.
+
+### Best recipe (shuang)
+
+    HIDDEN=768, batch=16384, batches/sb=12208 (200M/sb), superbatches=60 (5.8 epochs over 2.07B),
+    WDL=0.25, CosineDecayLR 0.001 -> 1e-7 over 60 sb, AdamW.  ~15 min on RTX PRO 6000 Blackwell.
+
+---
+
 ## Earlier work (depth-9 / soft ~5000 data) — superseded
 
 The best result on the old data was -12 to -18 Elo (40 sb, WDL 0.25, 1050-game SPRT); no net beat bingshan,

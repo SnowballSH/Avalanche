@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="3.0.0"
+VERSION="3.1.0-dev"
 OUT="artifacts"
 mkdir -p "$OUT"
 
