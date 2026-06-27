@@ -700,9 +700,8 @@ test "see: pawn captures undefended pawn is winning" {
 test "eval: nnue weights load and dimensions" {
     weights.do_nnue();
     // do_nnue() panics unless @sizeOf(NNUEWeights) == embedded net length.
-    // The embedded net (nets/bingshan.nnue) is 803904 bytes.
-    try expect(@sizeOf(weights.NNUEWeights) == 803904);
-    try expect(weights.HIDDEN_SIZE == 512);
+    try expect(@sizeOf(weights.NNUEWeights) == 1205824);
+    try expect(weights.HIDDEN_SIZE == 768);
     try expect(weights.OUTPUT_SIZE == 8);
     try expect(weights.INPUT_SIZE == 768);
 }

@@ -14,7 +14,7 @@ June 2026 update: **Avalanche now builds with Zig 0.16.0.**
 
 ## Strength
 
-**Latest (3.0.0 dev): estimated 3450-3500**
+**Latest (3.1.0 dev): estimated 3460-3520**
 
 **Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3346**
 

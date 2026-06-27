@@ -64,19 +64,18 @@ pub fn build(b: *std.Build) void {
     const targetName = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
     // It is imported under the name "nnue", which weights.zig @embedFile's.
-    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/jihan83.nnue";
+    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/shuang06-60.nnue";
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
 
     const build_options = b.addOptions();
-    // var buf: [64]u8 = undefined;
-    // var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    // defer io_threaded.deinit();
-    // const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
-    // build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(now_seconds), &buf));
-    build_options.addOption([]const u8, "version", "3.0.0");
+    var buf: [64]u8 = undefined;
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
+    build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(now_seconds), &buf));
 
     const exe = b.addExecutable(.{
         .name = targetName,
