@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
@@ -25,7 +26,53 @@ pub const Item = packed struct {
     age: u6,
 };
 
-pub var TTArena = std.heap.ArenaAllocator.init(std.heap.c_allocator);
+const tt_allocator = std.heap.c_allocator;
+
+fn parallelMemset(data: []i128, num_threads: usize) void {
+    const len = data.len;
+    if (len == 0) return;
+
+    const MIN_ENTRIES_PER_THREAD = 1024 * 1024 / @sizeOf(i128);
+    const max_useful_threads = @max(1, len / MIN_ENTRIES_PER_THREAD);
+    const threads_to_use = @max(1, @min(num_threads, @min(max_useful_threads, search.MAX_THREADS)));
+    if (threads_to_use <= 1) {
+        @memset(data, 0);
+        return;
+    }
+
+    const chunk_size = len / threads_to_use;
+    var thread_handles: [search.MAX_THREADS]?std.Thread = undefined;
+
+    for (0..threads_to_use) |i| {
+        const start = i * chunk_size;
+        const end = if (i == threads_to_use - 1) len else (i + 1) * chunk_size;
+        thread_handles[i] = std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, memsetWorker, .{data[start..end]}) catch null;
+        if (thread_handles[i] == null) {
+            @memset(data[start..end], 0);
+        }
+    }
+
+    for (0..threads_to_use) |i| {
+        if (thread_handles[i]) |t| {
+            t.join();
+        }
+    }
+}
+
+fn memsetWorker(slice: []i128) void {
+    @memset(slice, 0);
+}
+
+fn adviseHugePages(ptr: [*]u8, len: usize) void {
+    if (builtin.os.tag == .linux) {
+        const MADV_HUGEPAGE = 14;
+        const addr = @intFromPtr(ptr);
+        if (addr & 4095 == 0) {
+            const aligned_ptr: [*]align(4096) u8 = @ptrFromInt(addr);
+            std.posix.madvise(aligned_ptr, len, MADV_HUGEPAGE) catch {};
+        }
+    }
+}
 
 pub const TranspositionTable = struct {
     data: std.array_list.Managed(i128),
@@ -34,34 +81,44 @@ pub const TranspositionTable = struct {
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
-            .data = std.array_list.Managed(i128).init(TTArena.allocator()),
-            .size = 16 * MB / @sizeOf(Item),
+            .data = std.array_list.Managed(i128).init(tt_allocator),
+            .size = 0,
             .age = 0,
         };
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
         self.data.deinit();
-        var tt = TranspositionTable{
-            .data = std.array_list.Managed(i128).init(TTArena.allocator()),
-            .size = @max(1, mb * MB / @sizeOf(Item)),
+        const requested_size = @max(1, mb * MB / @sizeOf(Item));
+        var new_tt = TranspositionTable{
+            .data = std.array_list.Managed(i128).init(tt_allocator),
+            .size = requested_size,
             .age = 0,
         };
 
-        tt.data.ensureTotalCapacity(tt.size) catch {};
-        tt.data.expandToCapacity();
-        @memset(tt.data.items, 0);
+        new_tt.data.ensureTotalCapacityPrecise(requested_size) catch {};
+        new_tt.data.expandToCapacity();
 
-        // std.debug.print("{}\n", .{@sizeOf(Item)});
-        // std.debug.print("Allocated {} KB, {} items for TT\n", .{ tt.size * @sizeOf(Item) / KB, tt.size });
+        if (new_tt.data.items.len == 0) {
+            new_tt.size = 0;
+            self.* = new_tt;
+            return;
+        }
 
-        self.* = tt;
+        new_tt.size = new_tt.data.items.len;
+
+        const byte_len = new_tt.size * @sizeOf(i128);
+        adviseHugePages(@as([*]u8, @ptrCast(new_tt.data.items.ptr)), byte_len);
+
+        const num_threads = search.NUM_THREADS + 1;
+        parallelMemset(new_tt.data.items, num_threads);
+
+        self.* = new_tt;
     }
 
     pub inline fn clear(self: *TranspositionTable) void {
-        for (self.data.items) |*ptr| {
-            ptr.* = 0;
-        }
+        const num_threads = search.NUM_THREADS + 1;
+        parallelMemset(self.data.items, num_threads);
     }
 
     pub inline fn do_age(self: *TranspositionTable) void {
