@@ -264,6 +264,39 @@ pub const UciInterface = struct {
                                     13 => {
                                         parameters.NodeTmMultiplier = @as(i32, @intCast(value));
                                     },
+                                    14 => {
+                                        parameters.HistPruningDepth = @as(i32, @intCast(value));
+                                    },
+                                    15 => {
+                                        parameters.HistPruningMargin = @as(i32, @intCast(value));
+                                    },
+                                    16 => {
+                                        parameters.FPDepth = @as(i32, @intCast(value));
+                                    },
+                                    17 => {
+                                        parameters.FPBase = @as(i32, @intCast(value));
+                                    },
+                                    18 => {
+                                        parameters.FPMargin = @as(i32, @intCast(value));
+                                    },
+                                    19 => {
+                                        parameters.SEEPruningDepth = @as(i32, @intCast(value));
+                                    },
+                                    20 => {
+                                        parameters.SEEQuietMargin = @as(i32, @intCast(value));
+                                    },
+                                    21 => {
+                                        parameters.SEENoisyMargin = @as(i32, @intCast(value));
+                                    },
+                                    22 => {
+                                        parameters.LMRCutnode = @as(i32, @intCast(value));
+                                    },
+                                    23 => {
+                                        parameters.SEDoubleMargin = @as(i32, @intCast(value));
+                                    },
+                                    24 => {
+                                        parameters.SETripleMargin = @as(i32, @intCast(value));
+                                    },
                                     else => unreachable,
                                 }
                                 // std.debug.print("info string {s} set to {d}\n", .{ tunable.name, value });

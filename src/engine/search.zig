@@ -116,6 +116,25 @@ pub const Searcher = struct {
         std.heap.c_allocator.destroy(self.continuation);
     }
 
+    // Store a quiescence-search result in the TT at depth 0, ply-normalizing mate
+    // scores the same way the main search does.
+    inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, move: types.Move, flag: tt.Bound) void {
+        var stored = score;
+        if (stored > SCORE_PLY_ADJ and stored <= hce.MateScore) {
+            stored += @as(i32, @intCast(self.ply));
+        } else if (stored < -SCORE_PLY_ADJ and stored >= -hce.MateScore) {
+            stored -= @as(i32, @intCast(self.ply));
+        }
+        tt.GlobalTT.set(tt.Item{
+            .eval = stored,
+            .bestmove = move,
+            .flag = flag,
+            .depth = 0,
+            .hash = pos.hash,
+            .age = tt.GlobalTT.age,
+        });
+    }
+
     pub fn reset_heuristics(self: *Searcher, comptime total_reset: bool) void {
         self.nmp_min_ply = 0;
 
@@ -687,6 +706,7 @@ pub const Searcher = struct {
         }
 
         const static_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
+
         var best_score: i32 = static_eval;
 
         var low_estimate: i32 = -hce.MateScore - 1;
@@ -836,6 +856,19 @@ pub const Searcher = struct {
             }
 
             if (!DATAGEN and !is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
+                // Step 5.4d: SEE Pruning (main search). Skip moves that lose too
+                // much material by static exchange evaluation; quiets get a margin
+                // linear in depth, captures a more lenient quadratic margin.
+                if (!is_important and depth <= parameters.SEEPruningDepth) {
+                    const see_margin = if (is_capture)
+                        -parameters.SEENoisyMargin * @as(i32, @intCast(depth)) * @as(i32, @intCast(depth))
+                    else
+                        -parameters.SEEQuietMargin * @as(i32, @intCast(depth));
+                    if (!see.see_threshold(pos, move, see_margin)) {
+                        continue;
+                    }
+                }
+
                 if (!is_important and !is_capture and depth <= 5) {
                     // Step 5.4a: Late Move Pruning
                     var late = 4 + depth * depth;
@@ -847,11 +880,20 @@ pub const Searcher = struct {
                         skip_quiet = true;
                     }
 
-                    // Step 5.4b: Futility Pruning
-                    //if (static_eval + 135 * @as(i32, @intCast(depth)) <= alpha and std.math.absInt(alpha) catch 0 < hce.MateScore - hce.MaxMate) {
-                    //    skip_quiet = true;
-                    //    continue;
-                    //}
+                    // Step 5.4c: History Pruning: late quiets with strongly
+                    // negative history are skipped.
+                    if (depth <= parameters.HistPruningDepth and self.history[@intFromEnum(color)][move.from][move.to] < -parameters.HistPruningMargin * @as(i32, @intCast(depth))) {
+                        skip_quiet = true;
+                    }
+                }
+
+                // Step 5.4b: Futility Pruning: if even a generous margin over the
+                // static eval cannot reach alpha, the remaining quiets are hopeless.
+                if (!is_important and !is_capture and depth <= parameters.FPDepth and
+                    @as(i32, @intCast(@abs(alpha))) < hce.MateScore - hce.MaxMate and
+                    static_eval + parameters.FPBase + parameters.FPMargin * @as(i32, @intCast(depth)) <= alpha)
+                {
+                    skip_quiet = true;
                 }
             }
 
@@ -880,6 +922,15 @@ pub const Searcher = struct {
                 self.exclude_move[self.ply] = types.Move.empty();
                 if (singular_score < singular_beta) {
                     extension = 1;
+                    // Double / triple extension: the more the TT move's score beats
+                    // the rest, the more singular it is. Triple is reserved for
+                    // quiet TT moves.
+                    if (singular_score < singular_beta - parameters.SEDoubleMargin) {
+                        extension = 2;
+                        if (!move.is_capture() and singular_score < singular_beta - parameters.SETripleMargin) {
+                            extension = 3;
+                        }
+                    }
                 } else if (singular_beta >= beta) {
                     return singular_beta;
                 } else if (tt_eval >= beta) {
@@ -927,6 +978,21 @@ pub const Searcher = struct {
 
                     if (!on_pv) {
                         reduction += 1;
+                    }
+
+                    // Expected fail-high (cut) nodes: reduce more.
+                    if (cutnode) {
+                        reduction += parameters.LMRCutnode;
+                    }
+
+                    // A deep TT entry already vetted this subtree; reduce less.
+                    if (tthit and @as(usize, @intCast(entry.?.depth)) >= depth) {
+                        reduction -= 1;
+                    }
+
+                    // Moves that give check are forcing; reduce less.
+                    if (pos.in_check(opp_color)) {
+                        reduction -= 1;
                     }
 
                     reduction -= @divTrunc(self.history[@intFromEnum(color)][move.from][move.to], 6144);
@@ -1108,6 +1174,7 @@ pub const Searcher = struct {
 
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
+        var best_move = types.Move.empty();
         const entry = tt.GlobalTT.get(pos.hash);
 
         if (entry != null) {
@@ -1181,13 +1248,19 @@ pub const Searcher = struct {
             if (score > best_score) {
                 best_score = score;
                 if (score > alpha) {
+                    best_move = move;
                     if (score >= beta) {
+                        self.qsearch_store(pos, best_score, best_move, tt.Bound.Lower);
                         return beta;
                     }
 
                     alpha = score;
                 }
             }
+        }
+
+        if (best_move.to_u16() != 0) {
+            self.qsearch_store(pos, best_score, best_move, tt.Bound.Exact);
         }
 
         return best_score;
