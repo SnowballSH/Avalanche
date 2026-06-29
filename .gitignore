@@ -38,12 +38,19 @@ data/
 CLAUDE.md
 *.pyc
 
+# Documentation drafts (not tracked)
+docs/SCRIPTS.md
+docs/TESTING.md
+docs/TRAINING.md
+docs/TRAINING_GUIDE.md
+
 bin/**
 bullet/
 
 # Training build artifacts (source is tracked, build output is not)
 training/target/
 training/checkpoints/
+training/experiment_log.md
 
 OpenBench/
 OpenBench.wiki/
@@ -53,7 +60,6 @@ old_nnue/
 engines_built/
 tmp/
 
-# Local OpenBench injection helpers (this devspace only; not part of the engine)
 scripts/openbench_inject_local.sh
 scripts/openbench_inject_tune.sh
 scripts/openbench_inject_final.sh
