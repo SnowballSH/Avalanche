@@ -102,7 +102,7 @@ pub const UciInterface = struct {
                 try stdout.writeAll(build_options.version);
                 try stdout.writeByte('\n');
                 try stdout.writeAll("id author Yinuo Huang\n\n");
-                try stdout.writeAll("option name Hash type spin default 16 min 1 max 131072\n");
+                try stdout.writeAll("option name Hash type spin default 16 min 1 max 1048576\n");
                 try stdout.writeAll("option name Threads type spin default 1 min 1 max 2048\n");
                 try stdout.writeAll("option name SyzygyPath type string default <empty>\n");
                 try stdout.writeAll("option name SyzygyProbeDepth type spin default 1 min 1 max 100\n");

@@ -1,5 +1,14 @@
 # v3.1.0
 
+- Multithreaded TT initialization
+
+STC SMP (10+0.1, 16t, 4096MB):
+```
+Elo: 12.17 +/- 17.65, nElo: 23.51 +/- 34.05
+LOS: 91.20 %, DrawRatio: 53.50 %, PairsRatio: 1.32
+Games: 400, Wins: 84, Losses: 70, Draws: 246, Points: 207.0 (51.75 %)
+```
+
 - Search improvements
 
 STC (10+0.10):
