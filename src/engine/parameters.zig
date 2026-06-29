@@ -18,6 +18,22 @@ pub var AspirationWindow: i32 = 13;
 pub var NodeTmBase: i32 = 151;
 pub var NodeTmMultiplier: i32 = 175;
 
+pub var HistPruningDepth: i32 = 4;
+pub var HistPruningMargin: i32 = 1889;
+
+pub var FPDepth: i32 = 8;
+pub var FPBase: i32 = 75;
+pub var FPMargin: i32 = 91;
+
+pub var SEEPruningDepth: i32 = 8;
+pub var SEEQuietMargin: i32 = 78;
+pub var SEENoisyMargin: i32 = 32;
+
+pub var LMRCutnode: i32 = 2;
+
+pub var SEDoubleMargin: i32 = 22;
+pub var SETripleMargin: i32 = 85;
+
 pub const Tunable = struct {
     name: []const u8,
     value: []const u8,
@@ -43,4 +59,15 @@ pub const TunableParams = [_]Tunable{
     Tunable{ .name = "AspirationWindow", .value = "13", .min_value = "5", .max_value = "30", .c_end = "1.25", .r_end = "0.002", .id = 11 },
     Tunable{ .name = "NodeTmBase", .value = "151", .min_value = "100", .max_value = "250", .c_end = "8", .r_end = "0.002", .id = 12 },
     Tunable{ .name = "NodeTmMultiplier", .value = "175", .min_value = "80", .max_value = "260", .c_end = "10", .r_end = "0.002", .id = 13 },
+    Tunable{ .name = "HistPruningDepth", .value = "4", .min_value = "1", .max_value = "5", .c_end = "0.5", .r_end = "0.002", .id = 14 },
+    Tunable{ .name = "HistPruningMargin", .value = "1889", .min_value = "512", .max_value = "5000", .c_end = "150", .r_end = "0.002", .id = 15 },
+    Tunable{ .name = "FPDepth", .value = "8", .min_value = "4", .max_value = "12", .c_end = "0.5", .r_end = "0.002", .id = 16 },
+    Tunable{ .name = "FPBase", .value = "75", .min_value = "20", .max_value = "200", .c_end = "8", .r_end = "0.002", .id = 17 },
+    Tunable{ .name = "FPMargin", .value = "91", .min_value = "50", .max_value = "250", .c_end = "10", .r_end = "0.002", .id = 18 },
+    Tunable{ .name = "SEEPruningDepth", .value = "8", .min_value = "4", .max_value = "12", .c_end = "0.5", .r_end = "0.002", .id = 19 },
+    Tunable{ .name = "SEEQuietMargin", .value = "78", .min_value = "30", .max_value = "150", .c_end = "6", .r_end = "0.002", .id = 20 },
+    Tunable{ .name = "SEENoisyMargin", .value = "32", .min_value = "10", .max_value = "90", .c_end = "4", .r_end = "0.002", .id = 21 },
+    Tunable{ .name = "LMRCutnode", .value = "2", .min_value = "0", .max_value = "3", .c_end = "0.5", .r_end = "0.002", .id = 22 },
+    Tunable{ .name = "SEDoubleMargin", .value = "22", .min_value = "2", .max_value = "60", .c_end = "3", .r_end = "0.002", .id = 23 },
+    Tunable{ .name = "SETripleMargin", .value = "85", .min_value = "30", .max_value = "200", .c_end = "8", .r_end = "0.002", .id = 24 },
 };

@@ -57,8 +57,12 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     const from = move.from;
     const to = move.to;
     const attacker = pos.mailbox[from].piece_type().index();
-    const victim = pos.mailbox[to].piece_type().index();
-    var swap = SeeWeight[victim] - threshold;
+    // Quiet moves (used by main-search SEE pruning) land on an empty square, so
+    // there is no captured victim — value 0. Capture callers always have a piece
+    // on `to`, so their behaviour is unchanged.
+    const victim_piece = pos.mailbox[to];
+    const victim_value: i32 = if (victim_piece == types.Piece.NO_PIECE) 0 else SeeWeight[victim_piece.piece_type().index()];
+    var swap = victim_value - threshold;
     if (swap < 0) {
         return false;
     }

@@ -52,3 +52,13 @@ OpenBench.wiki/
 old_nnue/
 engines_built/
 tmp/
+
+# Local OpenBench injection helpers (this devspace only; not part of the engine)
+scripts/openbench_inject_local.sh
+scripts/openbench_inject_tune.sh
+scripts/openbench_inject_final.sh
+
+# Search-experiment notes & patches (local working artifacts)
+ideas/
+search_patches/
+search_ideas.md
