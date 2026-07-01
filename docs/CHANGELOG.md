@@ -1,5 +1,15 @@
 # v3.1.0
 
+- Tuning
+
+LTC (60+0.60):
+```
+Elo: 6.02 +/- 6.25, nElo: 11.64 +/- 12.08
+LOS: 97.05 %, DrawRatio: 51.51 %, PairsRatio: 1.16
+Games: 3176, Wins: 697, Losses: 642, Draws: 1837, Points: 1615.5 (50.87 %)
+Ptnml(0-2): [15, 341, 818, 402, 12], WL/DD Ratio: 0.50
+```
+
 - Multithreaded TT initialization
 
 STC SMP (10+0.1, 16t, 4096MB):
