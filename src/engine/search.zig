@@ -812,6 +812,7 @@ pub const Searcher = struct {
             // On non-PV nodes with a high eval, if a capture can beat a raised beta
             // under a shallow verification search, prune the entire subtree.
             if (!is_null and depth >= parameters.ProbCutDepth and
+                depth > parameters.ProbCutReduction and
                 @as(i32, @intCast(@abs(beta))) < hce.MateScore - hce.MaxMate)
             {
                 const probcut_beta = beta + parameters.ProbCutMargin;
