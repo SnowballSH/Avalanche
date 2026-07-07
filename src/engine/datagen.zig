@@ -1,9 +1,9 @@
 const std = @import("std");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
-const hce = @import("hce.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
+const see = @import("see.zig");
 const tt = @import("tt.zig");
 
 pub const FileLock = struct {
@@ -18,7 +18,11 @@ pub const DatagenConfig = struct {
     soft_nodes: u64 = 10000,
     hard_node_multiplier: u64 = 8,
     random_plies_min: u64 = 8,
-    random_plies_range: u64 = 2,
+    random_plies_range: u64 = 3,
+    book_random_plies_min: u64 = 0,
+    book_random_plies_range: u64 = 3,
+    random_move_see_threshold: i32 = -200,
+    datagen_tt_mb: u64 = 4,
     opening_reject_threshold: i32 = 600,
     win_adj_threshold: i32 = 2500,
     win_adj_count: usize = 4,
@@ -273,26 +277,27 @@ pub const DatagenSingle = struct {
     timer: types.Timer,
     count: u64,
     game_count: u64,
-    searcher: search.Searcher,
+    searchers: [2]search.Searcher,
+    ttables: [2]*tt.TranspositionTable,
     fileLock: *FileLock,
     prng: utils.PRNG,
     openings: ?[]const []const u8,
     config: DatagenConfig,
 
     pub fn new(lock: *FileLock, seed: u128, id: u64, openings: ?[]const []const u8, config: DatagenConfig) DatagenSingle {
-        var searcher = search.Searcher.new();
-        searcher.max_millis = 999999999;
-        searcher.ideal_time = 999999999;
-        searcher.max_nodes = config.soft_nodes * config.hard_node_multiplier;
-        searcher.soft_max_nodes = config.soft_nodes;
-        searcher.min_depth = 1;
-        searcher.silent_output = true;
+        const white_tt = newDatagenTT(config.datagen_tt_mb);
+        const black_tt = newDatagenTT(config.datagen_tt_mb);
+
         return DatagenSingle{
             .id = id,
             .timer = undefined,
             .count = 0,
             .game_count = 0,
-            .searcher = searcher,
+            .searchers = .{
+                newDatagenSearcher(config, white_tt),
+                newDatagenSearcher(config, black_tt),
+            },
+            .ttables = .{ white_tt, black_tt },
             .fileLock = lock,
             .prng = utils.PRNG.new(seed),
             .openings = openings,
@@ -301,12 +306,138 @@ pub const DatagenSingle = struct {
     }
 
     pub fn deinit(self: *DatagenSingle) void {
-        self.searcher.deinit();
+        for (&self.searchers) |*s| {
+            s.deinit();
+        }
+        for (self.ttables) |table| {
+            table.data.deinit();
+            std.heap.c_allocator.destroy(table);
+        }
+    }
+
+    fn newDatagenTT(mb: u64) *tt.TranspositionTable {
+        const table = std.heap.c_allocator.create(tt.TranspositionTable) catch unreachable;
+        table.* = tt.TranspositionTable.new();
+        table.reset(mb);
+        return table;
+    }
+
+    fn newDatagenSearcher(config: DatagenConfig, table: *tt.TranspositionTable) search.Searcher {
+        var s = search.Searcher.new();
+        s.max_millis = 999999999;
+        s.ideal_time = 999999999;
+        s.max_nodes = config.soft_nodes * config.hard_node_multiplier;
+        s.soft_max_nodes = config.soft_nodes;
+        s.min_depth = 1;
+        s.silent_output = true;
+        s.ttable = table;
+        return s;
+    }
+
+    const SearchResult = struct {
+        score: i32,
+        best_move: types.Move,
+    };
+
+    fn activeSearcher(self: *DatagenSingle, turn: types.Color) *search.Searcher {
+        return &self.searchers[@as(usize, @intFromEnum(turn))];
+    }
+
+    fn resetSearchStateForGame(self: *DatagenSingle, pos: *position.Position) void {
+        for (&self.searchers) |*s| {
+            s.root_board = pos.*;
+            s.reset_heuristics(true);
+            @atomicStore(bool, &s.stop, false, .monotonic);
+            s.time_stop = false;
+            s.force_thinking = false;
+            s.hash_history.clearRetainingCapacity();
+            s.hash_history.append(pos.hash) catch {};
+            s.ttable.do_age();
+        }
+    }
+
+    fn noteGamePosition(self: *DatagenSingle, pos: *position.Position) void {
+        for (&self.searchers) |*s| {
+            s.hash_history.append(pos.hash) catch {};
+        }
+    }
+
+    fn isCurrentPositionDraw(self: *DatagenSingle, pos: *position.Position) bool {
+        return self.activeSearcher(pos.turn).is_draw(pos, true);
+    }
+
+    fn searchPosition(self: *DatagenSingle, pos: *position.Position) SearchResult {
+        var s = self.activeSearcher(pos.turn);
+        s.root_board = pos.*;
+        s.time_stop = false;
+        s.force_thinking = false;
+        @atomicStore(bool, &s.stop, false, .monotonic);
+
+        const score: i32 = if (pos.turn == types.Color.White)
+            s.iterative_deepening(pos, types.Color.White, null)
+        else
+            -s.iterative_deepening(pos, types.Color.Black, null);
+
+        @atomicStore(bool, &s.stop, false, .monotonic);
+        s.time_stop = false;
+        s.force_thinking = false;
+
+        return .{
+            .score = score,
+            .best_move = s.best_move,
+        };
+    }
+
+    fn generateLegalMoves(pos: *position.Position, movelist: *std.array_list.Managed(types.Move)) void {
+        if (pos.turn == types.Color.White) {
+            pos.generate_legal_moves(types.Color.White, movelist);
+        } else {
+            pos.generate_legal_moves(types.Color.Black, movelist);
+        }
+    }
+
+    fn playMove(pos: *position.Position, move: types.Move) void {
+        if (pos.turn == types.Color.White) {
+            pos.play_move(types.Color.White, move);
+        } else {
+            pos.play_move(types.Color.Black, move);
+        }
+    }
+
+    fn randomPlyCount(self: *DatagenSingle, using_book: bool) usize {
+        const min = if (using_book) self.config.book_random_plies_min else self.config.random_plies_min;
+        const range = if (using_book) self.config.book_random_plies_range else self.config.random_plies_range;
+        const extra = if (range == 0) 0 else self.prng.rand64() % range;
+        return @as(usize, @intCast(min + extra));
+    }
+
+    fn randomMovePasses(self: *DatagenSingle, pos: *position.Position, move: types.Move) bool {
+        const flags = move.get_flags();
+        if (flags == types.MoveFlags.OO or flags == types.MoveFlags.OOO or flags == types.MoveFlags.EN_PASSANT or move.is_promotion()) {
+            return true;
+        }
+        return see.see_threshold(pos, move, self.config.random_move_see_threshold);
+    }
+
+    fn pickRandomOpeningMove(self: *DatagenSingle, pos: *position.Position, moves: []const types.Move) types.Move {
+        const fallback_index = @as(usize, @intCast(self.prng.rand64() % @as(u64, @intCast(moves.len))));
+        const fallback = moves[fallback_index];
+
+        var accepted: u64 = 0;
+        var chosen = types.Move.empty();
+        for (moves) |move| {
+            if (!self.randomMovePasses(pos, move)) continue;
+            accepted += 1;
+            if (self.prng.rand64() % accepted == 0) {
+                chosen = move;
+            }
+        }
+
+        return if (chosen.to_u16() != 0) chosen else fallback;
     }
 
     pub fn playGameViri(self: *DatagenSingle) !void {
-        self.searcher.root_board = position.Position.new();
-        var pos = &self.searcher.root_board;
+        var pos = position.Position.new();
 
         const using_book = self.openings != null;
         if (self.openings) |book| {
@@ -316,10 +447,7 @@ pub const DatagenSingle = struct {
             pos.set_fen(types.DEFAULT_FEN);
         }
 
-        tt.GlobalTT.do_age();
-        self.searcher.reset_heuristics(true);
-        @atomicStore(bool, &self.searcher.stop, false, .monotonic);
-        self.searcher.force_thinking = false;
+        self.resetSearchStateForGame(&pos);
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
@@ -334,25 +462,18 @@ pub const DatagenSingle = struct {
         var ply: usize = 0;
         const cfg = self.config;
 
-        const random_plies: u64 = if (using_book)
-            (cfg.random_plies_min -| 6) + (self.prng.rand64() % cfg.random_plies_range)
-        else
-            cfg.random_plies_min + (self.prng.rand64() % cfg.random_plies_range);
+        const random_plies = self.randomPlyCount(using_book);
 
         var initial_board: ?ViriPackedBoard = null;
 
         while (true) : (ply += 1) {
-            if (self.searcher.is_draw(pos, true)) {
+            if (self.isCurrentPositionDraw(&pos)) {
                 white_result = 1;
                 break;
             }
 
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
-            if (pos.turn == types.Color.White) {
-                pos.generate_legal_moves(types.Color.White, &movelist);
-            } else {
-                pos.generate_legal_moves(types.Color.Black, &movelist);
-            }
+            generateLegalMoves(&pos, &movelist);
             const move_size = movelist.items.len;
             if (move_size == 0) {
                 if (pos.turn == types.Color.White) {
@@ -366,12 +487,9 @@ pub const DatagenSingle = struct {
 
             // Random opening moves
             if (ply < random_plies) {
-                const move = movelist.items[self.prng.rand64() % move_size];
-                if (pos.turn == types.Color.White) {
-                    pos.play_move(types.Color.White, move);
-                } else {
-                    pos.play_move(types.Color.Black, move);
-                }
+                const move = self.pickRandomOpeningMove(&pos, movelist.items);
+                playMove(&pos, move);
+                self.noteGamePosition(&pos);
                 movelist.deinit();
                 continue;
             }
@@ -380,27 +498,19 @@ pub const DatagenSingle = struct {
             // Capture initial board state (once, after random moves)
             if (initial_board == null) {
                 // Do a quick search to check if position is playable
-                const init_score: i32 = if (pos.turn == types.Color.White)
-                    self.searcher.iterative_deepening(pos, types.Color.White, null)
-                else
-                    -self.searcher.iterative_deepening(pos, types.Color.Black, null);
+                const initial_search = self.searchPosition(&pos);
+                const init_score = initial_search.score;
 
                 if (init_score > cfg.opening_reject_threshold or init_score < -cfg.opening_reject_threshold) {
                     return; // discard unbalanced opening
                 }
-                initial_board = pos_to_viri_packed_board(pos, init_score);
-                @atomicStore(bool, &self.searcher.stop, false, .monotonic);
+                initial_board = pos_to_viri_packed_board(&pos, init_score);
             }
 
             // Search
-            const res: i32 = if (pos.turn == types.Color.White)
-                self.searcher.iterative_deepening(pos, types.Color.White, null)
-            else
-                -self.searcher.iterative_deepening(pos, types.Color.Black, null);
-
-            @atomicStore(bool, &self.searcher.stop, false, .monotonic);
-
-            const best_move = self.searcher.best_move;
+            const result = self.searchPosition(&pos);
+            const res = result.score;
+            const best_move = result.best_move;
 
             // Record move+score pair
             const viri_move = encode_viri_move(best_move);
@@ -410,11 +520,8 @@ pub const DatagenSingle = struct {
             });
 
             // Play the move
-            if (pos.turn == types.Color.White) {
-                pos.play_move(types.Color.White, best_move);
-            } else {
-                pos.play_move(types.Color.Black, best_move);
-            }
+            playMove(&pos, best_move);
+            self.noteGamePosition(&pos);
 
             // Win/loss adjudication
             if (res > cfg.win_adj_threshold) {
@@ -478,8 +585,7 @@ pub const DatagenSingle = struct {
     }
 
     pub fn playGame(self: *DatagenSingle) !void {
-        self.searcher.root_board = position.Position.new();
-        var pos = &self.searcher.root_board;
+        var pos = position.Position.new();
 
         const using_book = self.openings != null;
         if (self.openings) |book| {
@@ -489,10 +595,7 @@ pub const DatagenSingle = struct {
             pos.set_fen(types.DEFAULT_FEN);
         }
 
-        tt.GlobalTT.do_age();
-        self.searcher.reset_heuristics(true);
-        @atomicStore(bool, &self.searcher.stop, false, .monotonic);
-        self.searcher.force_thinking = false;
+        self.resetSearchStateForGame(&pos);
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
@@ -506,22 +609,15 @@ pub const DatagenSingle = struct {
         var black_win_count: usize = 0;
         var ply: usize = 0;
         const cfg = self.config;
-        const random_plies: u64 = if (using_book)
-            (cfg.random_plies_min -| 6) + (self.prng.rand64() % cfg.random_plies_range)
-        else
-            cfg.random_plies_min + (self.prng.rand64() % cfg.random_plies_range);
+        const random_plies = self.randomPlyCount(using_book);
 
         while (true) : (ply += 1) {
-            if (self.searcher.is_draw(pos, true)) {
+            if (self.isCurrentPositionDraw(&pos)) {
                 white_result = 1;
                 break;
             }
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
-            if (pos.turn == types.Color.White) {
-                pos.generate_legal_moves(types.Color.White, &movelist);
-            } else {
-                pos.generate_legal_moves(types.Color.Black, &movelist);
-            }
+            generateLegalMoves(&pos, &movelist);
             const move_size = movelist.items.len;
             if (move_size == 0) {
                 if (pos.turn == types.Color.White) {
@@ -534,29 +630,22 @@ pub const DatagenSingle = struct {
             }
 
             if (ply < random_plies) {
-                const move = movelist.items[self.prng.rand64() % move_size];
-                if (pos.turn == types.Color.White) {
-                    pos.play_move(types.Color.White, move);
-                } else {
-                    pos.play_move(types.Color.Black, move);
-                }
+                const move = self.pickRandomOpeningMove(&pos, movelist.items);
+                playMove(&pos, move);
+                self.noteGamePosition(&pos);
                 movelist.deinit();
                 continue;
             }
             movelist.deinit();
 
-            const res: i32 = if (pos.turn == types.Color.White)
-                self.searcher.iterative_deepening(pos, types.Color.White, null)
-            else
-                -self.searcher.iterative_deepening(pos, types.Color.Black, null);
-
-            @atomicStore(bool, &self.searcher.stop, false, .monotonic);
+            const result = self.searchPosition(&pos);
+            const res = result.score;
 
             if (ply == random_plies and (res > cfg.opening_reject_threshold or res < -cfg.opening_reject_threshold)) {
                 break;
             }
 
-            const best_move = self.searcher.best_move;
+            const best_move = result.best_move;
             const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
             const min_record_ply: usize = if (using_book) 8 else 16;
@@ -566,14 +655,11 @@ pub const DatagenSingle = struct {
 
             var pending: ?PendingRecord = null;
             if (should_record) {
-                pending = pos_to_chessboard(pos, res);
+                pending = pos_to_chessboard(&pos, res);
             }
 
-            if (pos.turn == types.Color.White) {
-                pos.play_move(types.Color.White, best_move);
-            } else {
-                pos.play_move(types.Color.Black, best_move);
-            }
+            playMove(&pos, best_move);
+            self.noteGamePosition(&pos);
 
             const gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
             if (pending != null and !gave_check) {
@@ -719,10 +805,14 @@ pub const Datagen = struct {
     pub fn start(self: *Datagen, num_threads: usize) !void {
         const ext = if (self.config.format == .viri) ".viribin" else ".bin";
         const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}{s}", .{ std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds(), ext });
+        const random_plies_max = self.config.random_plies_min + if (self.config.random_plies_range == 0) 0 else self.config.random_plies_range - 1;
+        const book_random_plies_max = self.config.book_random_plies_min + if (self.config.book_random_plies_range == 0) 0 else self.config.book_random_plies_range - 1;
 
         std.debug.print("=== Avalanche Datagen ===\n", .{});
         std.debug.print("Format:  {s}\n", .{if (self.config.format == .viri) "viriformat binpack" else "bulletformat"});
         std.debug.print("Nodes:   {} soft, {} hard\n", .{ self.config.soft_nodes, self.config.soft_nodes * self.config.hard_node_multiplier });
+        std.debug.print("Opening: {}-{} plies, book {}-{} plies, SEE >= {}\n", .{ self.config.random_plies_min, random_plies_max, self.config.book_random_plies_min, book_random_plies_max, self.config.random_move_see_threshold });
+        std.debug.print("TT:      {} MB per side per worker\n", .{self.config.datagen_tt_mb});
         std.debug.print("Threads: {}\n", .{num_threads});
         std.debug.print("Output:  {s}\n", .{path});
         std.debug.print("=========================\n\n", .{});

@@ -1,5 +1,16 @@
 # v3.1.0
 
+- New net: Qinyuanchun
+
+LTC (60+0.60):
+```
+Elo   | 36.47 +- 8.68 (95%)
+SPRT  | 60.0+0.6s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 1874 W: 522 L: 326 D: 1026
+Penta | [4, 161, 433, 313, 26]
+```
+
 - Tuning
 
 LTC (60+0.60):

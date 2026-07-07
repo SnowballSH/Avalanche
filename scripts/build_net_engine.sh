@@ -26,12 +26,12 @@ esac
 [ -f "$REPO/$NET_REL" ] || { echo "error: net not found: $NET_REL" >&2; exit 1; }
 
 restore_hidden() { :; }
-if [ "$HIDDEN" != "512" ]; then
-  # Patch the compile-time hidden size, build, then restore.
+CURRENT_HIDDEN=$(grep -oP 'HIDDEN_SIZE: usize = \K[0-9]+' src/engine/weights.zig)
+if [ "$HIDDEN" != "$CURRENT_HIDDEN" ]; then
   cp src/engine/weights.zig /tmp/weights.zig.bak
   cp src/tests.zig /tmp/tests.zig.bak
-  sed -i "s/pub const HIDDEN_SIZE: usize = 512;/pub const HIDDEN_SIZE: usize = $HIDDEN;/" src/engine/weights.zig
-  sed -i "s/weights.HIDDEN_SIZE == 512/weights.HIDDEN_SIZE == $HIDDEN/" src/tests.zig
+  sed -i "s/pub const HIDDEN_SIZE: usize = $CURRENT_HIDDEN;/pub const HIDDEN_SIZE: usize = $HIDDEN;/" src/engine/weights.zig
+  sed -i "s/weights.HIDDEN_SIZE == $CURRENT_HIDDEN/weights.HIDDEN_SIZE == $HIDDEN/" src/tests.zig
   restore_hidden() { mv /tmp/weights.zig.bak src/engine/weights.zig; mv /tmp/tests.zig.bak src/tests.zig; }
   trap restore_hidden EXIT
 fi

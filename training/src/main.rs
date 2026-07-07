@@ -143,6 +143,12 @@ fn main() {
         final_superbatch: superbatches,
     };
 
+    // Resume from a previous checkpoint (for multi-stage training)
+    if let Ok(resume_path) = std::env::var("TRAIN_RESUME_FROM") {
+        println!("Resuming from checkpoint: {resume_path}");
+        trainer.load_from_checkpoint(&resume_path);
+    }
+
     let settings = LocalSettings {
         threads,
         test_set: None,

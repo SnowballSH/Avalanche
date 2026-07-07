@@ -56,7 +56,7 @@ STC_TC="${STC_TC:-10.0+0.1}" ; STC_OPTS="${STC_OPTS:-Threads=1 Hash=8}"  ; STC_W
 LTC_TC="${LTC_TC:-60.0+0.6}" ; LTC_OPTS="${LTC_OPTS:-Threads=1 Hash=64}" ; LTC_WL="${LTC_WL:-8}"  ; LTC_PRIO="${LTC_PRIO:-100}" ; LTC_PGNS="${LTC_PGNS:-FALSE}"
 
 # Base (reference) net. Set BASE_TOKEN to reuse an existing engine row/binary.
-BASE_NAME="${BASE_NAME:-bingshan}" ; BASE_NET="${BASE_NET:-$REPO/nets/bingshan.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
+BASE_NAME="${BASE_NAME:-qinyuanchun}" ; BASE_NET="${BASE_NET:-$REPO/nets/qinyuanchun.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
 
 # Candidates to test. Pass them as CLI args, or list them here. Format as above, e.g.
 #   CANDIDATES=( "mynet:$REPO/nets/mynet.nnue" )
