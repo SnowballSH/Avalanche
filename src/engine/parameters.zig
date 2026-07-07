@@ -34,6 +34,10 @@ pub var LMRCutnode: i32 = 2;
 pub var SEDoubleMargin: i32 = 28;
 pub var SETripleMargin: i32 = 82;
 
+pub var ProbCutMargin: i32 = 200;
+pub var ProbCutDepth: usize = 5;
+pub var ProbCutReduction: usize = 4;
+
 pub const Tunable = struct {
     name: []const u8,
     value: []const u8,
@@ -70,4 +74,7 @@ pub const TunableParams = [_]Tunable{
     Tunable{ .name = "LMRCutnode", .value = "2", .min_value = "0", .max_value = "3", .c_end = "0.5", .r_end = "0.002", .id = 22 },
     Tunable{ .name = "SEDoubleMargin", .value = "28", .min_value = "2", .max_value = "60", .c_end = "3", .r_end = "0.002", .id = 23 },
     Tunable{ .name = "SETripleMargin", .value = "82", .min_value = "30", .max_value = "200", .c_end = "8", .r_end = "0.002", .id = 24 },
+    Tunable{ .name = "ProbCutMargin", .value = "200", .min_value = "100", .max_value = "350", .c_end = "12", .r_end = "0.002", .id = 25 },
+    Tunable{ .name = "ProbCutDepth", .value = "5", .min_value = "3", .max_value = "8", .c_end = "0.5", .r_end = "0.002", .id = 26 },
+    Tunable{ .name = "ProbCutReduction", .value = "4", .min_value = "3", .max_value = "6", .c_end = "0.5", .r_end = "0.002", .id = 27 },
 };

@@ -3,6 +3,7 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
+const cuckoo = @import("../chess/cuckoo.zig");
 const hce = @import("hce.zig");
 const tt = @import("tt.zig");
 const movepick = @import("movepick.zig");
@@ -119,19 +120,21 @@ pub const Searcher = struct {
 
     // Store a quiescence-search result in the TT at depth 0, ply-normalizing mate
     // scores the same way the main search does.
-    inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, move: types.Move, flag: tt.Bound) void {
+    inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
         var stored = score;
         if (stored > SCORE_PLY_ADJ and stored <= hce.MateScore) {
             stored += @as(i32, @intCast(self.ply));
         } else if (stored < -SCORE_PLY_ADJ and stored >= -hce.MateScore) {
             stored -= @as(i32, @intCast(self.ply));
         }
-        self.ttable.set(tt.Item{
+        self.ttable.set(pos.hash, tt.Item{
             .eval = stored,
+            .static_eval = @as(i16, @intCast(@min(@as(i32, 32767), @max(@as(i32, -32768), static_eval_val)))),
             .bestmove = move,
             .flag = flag,
             .depth = 0,
-            .hash = pos.hash,
+            .was_pv = 0,
+            .key = @as(u32, @truncate(pos.hash)),
             .age = self.ttable.age,
         });
     }
@@ -619,6 +622,14 @@ pub const Searcher = struct {
             return 0;
         }
 
+        // Step 1.7: Upcoming repetition detection (cuckoo)
+        if (!is_root and alpha < 0 and cuckoo.has_upcoming_repetition(pos, self.hash_history.items, self.ply)) {
+            alpha = 0;
+            if (alpha >= beta) {
+                return alpha;
+            }
+        }
+
         // >> Step 2: TT Probe
         var hashmove = types.Move.empty();
         var tthit = false;
@@ -688,12 +699,14 @@ pub const Searcher = struct {
                     } else if (stored_tb < -SCORE_PLY_ADJ) {
                         stored_tb -= @as(i32, @intCast(self.ply));
                     }
-                    self.ttable.set(tt.Item{
+                    self.ttable.set(pos.hash, tt.Item{
                         .eval = stored_tb,
+                        .static_eval = 0,
                         .bestmove = types.Move.empty(),
                         .flag = tb_flag,
                         .depth = @as(u8, @intCast(depth)),
-                        .hash = pos.hash,
+                        .was_pv = 0,
+                        .key = @as(u32, @truncate(pos.hash)),
                         .age = self.ttable.age,
                     });
                     return tb_score;
@@ -707,7 +720,7 @@ pub const Searcher = struct {
             }
         }
 
-        const static_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit) entry.?.eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
+        const static_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit) entry.?.static_eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
 
         var best_score: i32 = static_eval;
 
@@ -731,7 +744,7 @@ pub const Searcher = struct {
 
         // >> Step 4: Prunings
         if (!in_check and !on_pv and self.exclude_move[self.ply].to_u16() == 0) {
-            low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else entry.?.eval;
+            low_estimate = if (!tthit or entry.?.flag == tt.Bound.Lower) static_eval else tt_eval;
 
             // Step 4.1: Reverse Futility Pruning
             if (@as(i32, @intCast(@abs(beta))) < hce.MateScore - hce.MaxMate and depth <= parameters.RFPDepth) {
@@ -793,6 +806,67 @@ pub const Searcher = struct {
             // Step 4.3: Razoring
             if (depth <= 3 and static_eval - parameters.RazoringBase + parameters.RazoringMargin * @as(i32, @intCast(depth)) < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
+            }
+
+            // Step 4.4: ProbCut
+            // On non-PV nodes with a high eval, if a capture can beat a raised beta
+            // under a shallow verification search, prune the entire subtree.
+            if (!is_null and depth >= parameters.ProbCutDepth and
+                @as(i32, @intCast(@abs(beta))) < hce.MateScore - hce.MaxMate)
+            {
+                const probcut_beta = beta + parameters.ProbCutMargin;
+
+                // Skip if TT already refutes at sufficient depth
+                if (!(tthit and entry.?.depth >= depth - 3 and entry.?.eval < probcut_beta)) {
+                    // Generate captures only
+                    var pc_movelist = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+                    defer pc_movelist.deinit();
+                    pos.generate_q_moves(color, &pc_movelist);
+
+                    for (pc_movelist.items) |move| {
+                        // SEE filter: only try captures that could plausibly gain enough
+                        if (!see.see_threshold(pos, move, probcut_beta - static_eval)) {
+                            continue;
+                        }
+
+                        self.move_history[self.ply] = move;
+                        self.moved_piece_history[self.ply] = pos.mailbox[move.from];
+                        self.ply += 1;
+                        pos.play_move(color, move);
+                        self.hash_history.append(pos.hash) catch {};
+                        self.ttable.prefetch(pos.hash);
+
+                        // Quick qsearch verification
+                        var qscore = -self.quiescence_search(pos, opp_color, -probcut_beta, -probcut_beta + 1);
+
+                        // Full shallow verification if qsearch passes
+                        if (qscore >= probcut_beta) {
+                            qscore = -self.negamax(pos, opp_color, depth - parameters.ProbCutReduction, -probcut_beta, -probcut_beta + 1, false, NodeType.NonPV, !cutnode);
+                        }
+
+                        self.ply -= 1;
+                        pos.undo_move(color, move);
+                        _ = self.hash_history.pop();
+
+                        if (self.time_stop) {
+                            return 0;
+                        }
+
+                        if (qscore >= probcut_beta) {
+                            self.ttable.set(pos.hash, tt.Item{
+                                .eval = qscore,
+                                .static_eval = @as(i16, @intCast(@min(@as(i32, 32767), @max(@as(i32, -32768), static_eval)))),
+                                .bestmove = move,
+                                .flag = tt.Bound.Lower,
+                                .depth = @as(u8, @intCast(depth - parameters.ProbCutReduction + 1)),
+                                .was_pv = 0,
+                                .key = @as(u32, @truncate(pos.hash)),
+                                .age = self.ttable.age,
+                            });
+                            return qscore;
+                        }
+                    }
+                }
             }
         }
 
@@ -1101,7 +1175,7 @@ pub const Searcher = struct {
         }
 
         // >> Step 7: Transposition Table Update
-        if (!skip_quiet and self.exclude_move[self.ply].to_u16() == 0) {
+        if (self.exclude_move[self.ply].to_u16() == 0) {
             const tt_flag = if (best_score >= beta) tt.Bound.Lower else if (alpha != alpha_) tt.Bound.Exact else tt.Bound.Upper;
 
             // Store mate/TB scores node-relative (the exact inverse of the probe
@@ -1115,12 +1189,14 @@ pub const Searcher = struct {
                 stored_eval -= @as(i32, @intCast(self.ply));
             }
 
-            self.ttable.set(tt.Item{
+            self.ttable.set(pos.hash, tt.Item{
                 .eval = stored_eval,
+                .static_eval = @as(i16, @intCast(@min(@as(i32, 32767), @max(@as(i32, -32768), static_eval)))),
                 .bestmove = best_move,
                 .flag = tt_flag,
                 .depth = @as(u8, @intCast(depth)),
-                .hash = pos.hash,
+                .was_pv = if (on_pv) @as(u1, 1) else @as(u1, 0),
+                .key = @as(u32, @truncate(pos.hash)),
                 .age = self.ttable.age,
             });
         }
@@ -1252,7 +1328,7 @@ pub const Searcher = struct {
                 if (score > alpha) {
                     best_move = move;
                     if (score >= beta) {
-                        self.qsearch_store(pos, best_score, best_move, tt.Bound.Lower);
+                        self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Lower);
                         return beta;
                     }
 
@@ -1262,7 +1338,7 @@ pub const Searcher = struct {
         }
 
         if (best_move.to_u16() != 0) {
-            self.qsearch_store(pos, best_score, best_move, tt.Bound.Exact);
+            self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Exact);
         }
 
         return best_score;
