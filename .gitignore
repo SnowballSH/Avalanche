@@ -22,6 +22,7 @@ testing/
 cutechess-cli
 
 *.json
+!scripts/datagen_a_lot.json
 
 .zig-cache
 **/zig-**

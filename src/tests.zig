@@ -695,13 +695,10 @@ test "see: pawn captures undefended pawn is winning" {
     try expect(!see.see_threshold(pos, mv, 100));
 }
 
-// Evaluation: NNUE incremental-vs-fresh correctness + HCE material draws
-
 test "eval: nnue weights load and dimensions" {
     weights.do_nnue();
-    // do_nnue() panics unless @sizeOf(NNUEWeights) == embedded net length.
-    try expect(@sizeOf(weights.NNUEWeights) == 1205824);
-    try expect(weights.HIDDEN_SIZE == 768);
+    try expect(@sizeOf(weights.NNUEWeights) == 1607744);
+    try expect(weights.HIDDEN_SIZE == 1024);
     try expect(weights.OUTPUT_SIZE == 8);
     try expect(weights.INPUT_SIZE == 768);
 }

@@ -50,6 +50,11 @@ pub fn deinit() void {
 
 pub const Wdl = enum { win, draw, loss };
 
+/// Full 5-valued WDL outcome, preserving the 50-move-rule-dependent
+/// `cursed_win` / `blessed_loss` distinctions that `probe_wdl` collapses via
+/// `use_rule50`.
+pub const WdlResult = enum { loss, blessed_loss, draw, cursed_win, win };
+
 pub const PromoKind = enum(u8) { none = 0, knight, bishop, rook, queen };
 
 pub const RootMove = struct {
@@ -138,6 +143,37 @@ pub fn probe_wdl(pos: *const position.Position) ?Wdl {
         c.TB_DRAW => Wdl.draw,
         c.TB_CURSED_WIN => if (use_rule50) Wdl.draw else Wdl.win,
         c.TB_BLESSED_LOSS => if (use_rule50) Wdl.draw else Wdl.loss,
+        else => null, // TB_RESULT_FAILED
+    };
+}
+
+/// Raw 5-valued WDL probe taking the Pyrrhic bitboard arguments directly,
+/// bypassing `Position`. `white`/`black` are the occupancy of White/Black and
+/// `turn` is true when White is to move; the piece-type bitboards are
+/// colour-agnostic. `ep` is the en-passant square, or 0 when there is none.
+/// Returns null on probe failure or a missing table. The WDL tables are
+/// independent of the 50-move counter, so the caller interprets `cursed_win` /
+/// `blessed_loss` itself.
+pub fn probe_wdl_bb(
+    white: u64,
+    black: u64,
+    kings: u64,
+    queens: u64,
+    rooks: u64,
+    bishops: u64,
+    knights: u64,
+    pawns: u64,
+    ep: c_uint,
+    turn: bool,
+) ?WdlResult {
+    if (!enabled) return null;
+    const r = c.tb_probe_wdl(white, black, kings, queens, rooks, bishops, knights, pawns, ep, turn);
+    return switch (r) {
+        c.TB_WIN => WdlResult.win,
+        c.TB_CURSED_WIN => WdlResult.cursed_win,
+        c.TB_DRAW => WdlResult.draw,
+        c.TB_BLESSED_LOSS => WdlResult.blessed_loss,
+        c.TB_LOSS => WdlResult.loss,
         else => null, // TB_RESULT_FAILED
     };
 }

@@ -43,9 +43,18 @@ Run `scripts/sprt.py --help` for full option reference.
 |--------|---------|
 | `train.sh` | Launch NNUE training (external `bullet` trainer) |
 | `datagen.sh` | Run self-play data generation |
+| `datagen_a_lot.sh` | Launch a bulk datagen schedule from `datagen_a_lot.json` |
 | `prepare_data.sh` | Preprocess raw self-play data for training |
 | `install_net.sh` | Install a trained `.nnue` file into `nets/` |
 | `update_bench.sh` | Rebuild and update `bench.nodes` after a search change |
+
+Tune bulk datagen book composition by editing `scripts/datagen_a_lot.json`.
+Each job's `count` is the number of workers to launch for that book; missing
+`threads`, `duration`, and `engine_args` values inherit from `defaults`.
+
+Useful datagen engine args include `plies=8-10` for no-book opening plies,
+`bookplies=0-2` for extra plies after book positions, `randsee=-200` for the
+opening move SEE filter, and `ttmb=4` for per-side TT memory per worker.
 
 ## Legacy
 

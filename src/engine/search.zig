@@ -91,6 +91,7 @@ pub const Searcher = struct {
     continuation: *[12][64][64][64]i32,
 
     root_board: position.Position = undefined,
+    ttable: *tt.TranspositionTable = &tt.GlobalTT,
     thread_id: usize = 0,
     silent_output: bool = false,
 
@@ -125,13 +126,13 @@ pub const Searcher = struct {
         } else if (stored < -SCORE_PLY_ADJ and stored >= -hce.MateScore) {
             stored -= @as(i32, @intCast(self.ply));
         }
-        tt.GlobalTT.set(tt.Item{
+        self.ttable.set(tt.Item{
             .eval = stored,
             .bestmove = move,
             .flag = flag,
             .depth = 0,
             .hash = pos.hash,
-            .age = tt.GlobalTT.age,
+            .age = self.ttable.age,
         });
     }
 
@@ -338,7 +339,7 @@ pub const Searcher = struct {
                     self.seldepth,
                     total_nodes,
                     nps,
-                    tt.GlobalTT.hashfull(),
+                    self.ttable.hashfull(),
                     total_tbhits,
                     elapsed_ms,
                 }) catch {};
@@ -422,7 +423,7 @@ pub const Searcher = struct {
 
         self.is_searching = false;
 
-        tt.GlobalTT.do_age();
+        self.ttable.do_age();
 
         return score;
     }
@@ -512,6 +513,7 @@ pub const Searcher = struct {
                 depth += 1;
             }
             helper_searchers.items[i].max_millis = self.max_millis;
+            helper_searchers.items[i].ttable = self.ttable;
             helper_searchers.items[i].thread_id = id;
             helper_searchers.items[i].root_board = pos.*;
             helper_searchers.items[i].hash_history.clearRetainingCapacity();
@@ -621,7 +623,7 @@ pub const Searcher = struct {
         var hashmove = types.Move.empty();
         var tthit = false;
         var tt_eval: i32 = 0;
-        const entry = tt.GlobalTT.get(pos.hash);
+        const entry = self.ttable.get(pos.hash);
 
         if (entry != null) {
             tthit = true;
@@ -686,13 +688,13 @@ pub const Searcher = struct {
                     } else if (stored_tb < -SCORE_PLY_ADJ) {
                         stored_tb -= @as(i32, @intCast(self.ply));
                     }
-                    tt.GlobalTT.set(tt.Item{
+                    self.ttable.set(tt.Item{
                         .eval = stored_tb,
                         .bestmove = types.Move.empty(),
                         .flag = tb_flag,
                         .depth = @as(u8, @intCast(depth)),
                         .hash = pos.hash,
-                        .age = tt.GlobalTT.age,
+                        .age = self.ttable.age,
                     });
                     return tb_score;
                 }
@@ -955,7 +957,7 @@ pub const Searcher = struct {
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
 
-            tt.GlobalTT.prefetch(pos.hash);
+            self.ttable.prefetch(pos.hash);
 
             var score: i32 = 0;
             const min_lmr_move: usize = if (on_pv) 5 else 3;
@@ -1113,13 +1115,13 @@ pub const Searcher = struct {
                 stored_eval -= @as(i32, @intCast(self.ply));
             }
 
-            tt.GlobalTT.set(tt.Item{
+            self.ttable.set(tt.Item{
                 .eval = stored_eval,
                 .bestmove = best_move,
                 .flag = tt_flag,
                 .depth = @as(u8, @intCast(depth)),
                 .hash = pos.hash,
-                .age = tt.GlobalTT.age,
+                .age = self.ttable.age,
             });
         }
 
@@ -1175,7 +1177,7 @@ pub const Searcher = struct {
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
         var best_move = types.Move.empty();
-        const entry = tt.GlobalTT.get(pos.hash);
+        const entry = self.ttable.get(pos.hash);
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
@@ -1235,7 +1237,7 @@ pub const Searcher = struct {
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
-            tt.GlobalTT.prefetch(pos.hash);
+            self.ttable.prefetch(pos.hash);
             const score = -self.quiescence_search(pos, opp_color, -beta, -alpha);
             self.ply -= 1;
             pos.undo_move(color, move);
