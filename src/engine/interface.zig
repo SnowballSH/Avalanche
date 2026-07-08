@@ -297,6 +297,15 @@ pub const UciInterface = struct {
                                     24 => {
                                         parameters.SETripleMargin = @as(i32, @intCast(value));
                                     },
+                                    25 => {
+                                        parameters.ProbCutMargin = @as(i32, @intCast(value));
+                                    },
+                                    26 => {
+                                        parameters.ProbCutDepth = value;
+                                    },
+                                    27 => {
+                                        parameters.ProbCutReduction = value;
+                                    },
                                     else => unreachable,
                                 }
                                 // std.debug.print("info string {s} set to {d}\n", .{ tunable.name, value });

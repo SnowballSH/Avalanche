@@ -77,6 +77,8 @@ pub fn bench() !void {
         pos.set_fen(fen);
         @atomicStore(bool, &searcher.stop, false, .monotonic);
         searcher.reset_heuristics(true);
+        searcher.hash_history.clearRetainingCapacity();
+        searcher.hash_history.append(pos.hash) catch {};
         if (pos.turn == types.Color.White) {
             _ = searcher.iterative_deepening(&pos, types.Color.White, depth);
         } else {

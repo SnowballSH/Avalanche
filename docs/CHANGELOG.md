@@ -1,5 +1,27 @@
 # v3.1.0
 
+- TT static eval separation + lockless XOR verification
+- Cuckoo upcoming-repetition detection
+- ProbCut
+
+STC (10+0.10):
+```
+Elo   | 24.87 +- 7.73 (95%)
+SPRT  | 10.0+0.1s Threads=1 Hash=8MB
+LLR   | 2.96 (-2.94, 2.94) [-3.00, 0.50]
+Games | N: 2670 W: 711 L: 545 D: 1414
+Penta | [22, 263, 618, 391, 41]
+```
+
+LTC (60+0.60):
+```
+Elo   | 25.29 +- 7.42 (95%)
+SPRT  | 60.0+0.6s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [-3.00, 0.50]
+Games | N: 2894 W: 691 L: 508 D: 1695
+Penta | [2, 278, 714, 441, 12]
+```
+
 - New net: Qinyuanchun
 
 LTC (60+0.60):

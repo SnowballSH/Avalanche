@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("chess/types.zig");
 const tables = @import("chess/tables.zig");
 const zobrist = @import("chess/zobrist.zig");
+const cuckoo = @import("chess/cuckoo.zig");
 const position = @import("chess/position.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
@@ -41,6 +42,7 @@ pub fn main(init: std.process.Init) anyerror!void {
 
     tables.init_all();
     zobrist.init_zobrist();
+    cuckoo.init();
     tt.GlobalTT.reset(16);
     defer tt.GlobalTT.data.deinit();
     weights.do_nnue();
