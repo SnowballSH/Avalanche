@@ -53,15 +53,60 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
 }
 
 // Logic https://github.com/TerjeKir/weiss
+fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
+    const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
+    const king_piece = types.Piece.new_comptime(color, types.PieceType.King);
+    const king_bb = pos.piece_bitboards[king_piece.index()] & occ;
+    if (king_bb == 0) return 0;
+
+    const king_sq = @as(types.Square, @enumFromInt(types.lsb(king_bb)));
+    const us = pos.all_pieces(color) & occ;
+    const them = pos.all_pieces(opp) & occ;
+    var candidates = tables.get_rook_attacks(king_sq, them) & pos.orthogonal_sliders(opp) & occ;
+    candidates |= tables.get_bishop_attacks(king_sq, them) & pos.diagonal_sliders(opp) & occ;
+
+    var pinned: types.Bitboard = 0;
+    while (candidates != 0) {
+        const pinner = types.pop_lsb(&candidates);
+        const between = tables.SquaresBetween[king_sq.index()][pinner.index()] & us;
+        if (between != 0 and (between & (between - 1)) == 0) {
+            pinned |= between;
+        }
+    }
+    return pinned;
+}
+
+fn legalAttackers(pos: *position.Position, comptime color: types.Color, target: types.Square, occ: types.Bitboard, attackers: types.Bitboard) types.Bitboard {
+    var legal = attackers;
+    var pinned = pinnedPieces(pos, color, occ) & attackers;
+    if (pinned == 0) return legal;
+
+    const king_piece = types.Piece.new_comptime(color, types.PieceType.King);
+    const king_sq = @as(types.Square, @enumFromInt(types.lsb(pos.piece_bitboards[king_piece.index()] & occ)));
+    const target_bb = types.SquareIndexBB[target.index()];
+    while (pinned != 0) {
+        const sq = types.pop_lsb(&pinned);
+        // A pinned piece may only recapture along its king-pinner line.
+        if (tables.LineOf[king_sq.index()][sq.index()] & target_bb == 0) {
+            legal &= ~types.SquareIndexBB[sq.index()];
+        }
+    }
+    return legal;
+}
+
 pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) bool {
     const from = move.from;
     const to = move.to;
     const attacker = pos.mailbox[from].piece_type().index();
-    // Quiet moves (used by main-search SEE pruning) land on an empty square, so
-    // there is no captured victim — value 0. Capture callers always have a piece
-    // on `to`, so their behaviour is unchanged.
-    const victim_piece = pos.mailbox[to];
-    const victim_value: i32 = if (victim_piece == types.Piece.NO_PIECE) 0 else SeeWeight[victim_piece.piece_type().index()];
+    const is_ep = move.get_flags() == types.MoveFlags.EN_PASSANT;
+    // Quiet moves land on an empty square (victim 0). En passant captures a pawn
+    // that is not on `to`. Ordinary captures take the piece on `to`.
+    const victim_value: i32 = if (is_ep)
+        SeeWeight[types.PieceType.Pawn.index()]
+    else blk: {
+        const victim_piece = pos.mailbox[to];
+        break :blk if (victim_piece == types.Piece.NO_PIECE) 0 else SeeWeight[victim_piece.piece_type().index()];
+    };
     var swap = victim_value - threshold;
     if (swap < 0) {
         return false;
@@ -75,7 +120,14 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     const black_pieces = pos.all_pieces(types.Color.Black);
     const all = white_pieces | black_pieces;
 
-    var occ = (all ^ types.SquareIndexBB[from]) | types.SquareIndexBB[to];
+    var occ = all ^ types.SquareIndexBB[from];
+    if (is_ep) {
+        const stm = pos.mailbox[from].color();
+        // Captured pawn sits one square behind the EP target from the capturer's perspective.
+        const cap_idx: usize = if (stm == types.Color.White) @as(usize, to) - 8 else @as(usize, to) + 8;
+        occ ^= types.SquareIndexBB[cap_idx];
+    }
+    occ |= types.SquareIndexBB[to];
     var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @enumFromInt(to)), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @enumFromInt(to)), occ)) & occ;
 
     const bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
@@ -85,7 +137,11 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
 
     while (true) {
         attackers &= occ;
-        const my_attackers = attackers & (if (stm == types.Color.White) white_pieces else black_pieces);
+        const pseudo_attackers = attackers & (if (stm == types.Color.White) white_pieces else black_pieces);
+        const my_attackers = if (stm == types.Color.White)
+            legalAttackers(pos, types.Color.White, @as(types.Square, @enumFromInt(to)), occ, pseudo_attackers)
+        else
+            legalAttackers(pos, types.Color.Black, @as(types.Square, @enumFromInt(to)), occ, pseudo_attackers);
         if (my_attackers == 0) {
             break;
         }

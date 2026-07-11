@@ -113,7 +113,7 @@ pub fn has_upcoming_repetition(pos: anytype, hash_history: []const u64, ply: u32
             continue;
         }
 
-        if (idx >= root_index) {
+        if (idx > root_index) {
             return true;
         }
 

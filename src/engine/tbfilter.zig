@@ -177,7 +177,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
         }
     }
 
-    if (bad or @popCount(kings) != 2 or white == 0 or black == 0) {
+    if (bad or @popCount(kings) != 2 or @popCount(kings & white) != 1 or @popCount(kings & black) != 1 or white == 0 or black == 0) {
         st.anomalies += 1;
         return true;
     }
@@ -409,6 +409,18 @@ pub fn run(args: []const []const u8) u8 {
         std.debug.print("tbfilter: input and output must differ\n", .{});
         return 1;
     }
+    // Also reject path aliases that resolve to the same basename after normalization.
+    {
+        const in_base = std.fs.path.basename(cfg.input);
+        const out_base = std.fs.path.basename(cfg.output);
+        if (std.mem.eql(u8, in_base, out_base) and (std.mem.eql(u8, cfg.input, out_base) or std.mem.eql(u8, cfg.output, in_base) or std.mem.endsWith(u8, cfg.input, cfg.output) or std.mem.endsWith(u8, cfg.output, cfg.input))) {
+            // Conservative: same basename with relative/absolute mix is unsafe.
+            if (std.mem.indexOfScalar(u8, cfg.input, '/') == null or std.mem.indexOfScalar(u8, cfg.output, '/') == null) {
+                std.debug.print("tbfilter: refusing potentially aliased input/output paths\n", .{});
+                return 1;
+            }
+        }
+    }
 
     // Discover the input size / record count.
     const in_file = std.Io.Dir.cwd().openFile(io, cfg.input, .{}) catch {
@@ -485,10 +497,13 @@ pub fn run(args: []const []const u8) u8 {
     };
     defer std.heap.page_allocator.free(workers);
 
-    // Part files "<output>.partN"; a single thread writes straight to output.
-    const single = threads == 1;
+    // Always write to uniquely named part files, then rename/concat into the
+    // final output. Never truncate the destination (or a same-inode alias) first.
     var part_paths = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
-    defer part_paths.deinit();
+    defer {
+        for (part_paths.items) |p| std.heap.page_allocator.free(p);
+        part_paths.deinit();
+    }
     part_paths.ensureTotalCapacity(threads) catch {
         std.debug.print("tbfilter: out of memory (part paths)\n", .{});
         return 1;
@@ -500,14 +515,11 @@ pub fn run(args: []const []const u8) u8 {
     for (0..threads) |t| {
         const extra: u64 = if (t < remainder) 1 else 0;
         const count = base_records + extra;
-        const path = if (single)
-            cfg.output
-        else
-            std.fmt.allocPrint(std.heap.page_allocator, "{s}.part{}", .{ cfg.output, t }) catch {
-                std.debug.print("tbfilter: out of memory (part path)\n", .{});
-                return 1;
-            };
-        if (!single) part_paths.appendAssumeCapacity(path);
+        const path = std.fmt.allocPrint(std.heap.page_allocator, "{s}.part{}.tmp", .{ cfg.output, t }) catch {
+            std.debug.print("tbfilter: out of memory (part path)\n", .{});
+            return 1;
+        };
+        part_paths.appendAssumeCapacity(path);
         workers[t] = Worker{
             .input = cfg.input,
             .out_path = path,
@@ -565,15 +577,13 @@ pub fn run(args: []const []const u8) u8 {
     }
 
     var out_bytes: u64 = 0;
-    if (single) {
-        out_bytes = workers[0].bytes_written;
-    } else {
-        out_bytes = concatParts(cfg.output, part_paths.items) catch |e| {
-            std.debug.print("tbfilter: concatenation failed: {} -- output deleted\n", .{e});
-            std.Io.Dir.cwd().deleteFile(io, cfg.output) catch {};
-            return 1;
-        };
-    }
+    out_bytes = concatParts(cfg.output, part_paths.items) catch |e| {
+        std.debug.print("tbfilter: concatenation failed: {} -- output deleted\n", .{e});
+        std.Io.Dir.cwd().deleteFile(io, cfg.output) catch {};
+        for (part_paths.items) |p| std.Io.Dir.cwd().deleteFile(io, p) catch {};
+        return 1;
+    };
+    for (part_paths.items) |p| std.Io.Dir.cwd().deleteFile(io, p) catch {};
 
     // Final integrity gate: the output must hold exactly the kept records.
     if (out_bytes / RECORD_SIZE != total.kept()) {

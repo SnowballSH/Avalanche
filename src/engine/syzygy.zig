@@ -204,8 +204,27 @@ pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult
         has_repeated,
         &tb,
     );
-    const size: usize = @intCast(tb.size);
-    if (ret == 0 or size == 0) return null;
+    var size: usize = @intCast(tb.size);
+    if (ret == 0 or size == 0) {
+        // Fall back to WDL-only root ranking when DTZ files are missing/incomplete.
+        const wdl_ret = c.tb_probe_root_wdl(
+            p.white,
+            p.black,
+            p.kings,
+            p.queens,
+            p.rooks,
+            p.bishops,
+            p.knights,
+            p.pawns,
+            rule50,
+            p.ep,
+            p.turn,
+            use_rule50,
+            &tb,
+        );
+        size = @intCast(tb.size);
+        if (wdl_ret == 0 or size == 0) return null;
+    }
 
     // tbRank: positive for wins (larger = closer to a guaranteed win), 0 for
     // draws, negative for losses. The DTZ-optimal moves are those with the
