@@ -184,13 +184,12 @@ pub const NNUE = struct {
             sum += (pv * pv) * pwt;
         }
 
-        var res = @as(i32, weights.MODEL.layer_2_bias[bucket]);
-        res += @reduce(.Add, sum);
+        const res = @reduce(.Add, sum);
 
         if (SQUARED_ACTIVATION) {
-            return @divTrunc(@divTrunc(res, QA) * SCALE, QAB);
+            return @divTrunc((@divTrunc(res, QA) + @as(i32, weights.MODEL.layer_2_bias[bucket])) * SCALE, QAB);
         } else {
-            return @divTrunc(res * SCALE, QAB);
+            return @divTrunc((res + @as(i32, weights.MODEL.layer_2_bias[bucket])) * SCALE, QAB);
         }
     }
 };

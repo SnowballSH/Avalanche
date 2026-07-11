@@ -565,7 +565,6 @@ test "fen: basic_fen board round-trips" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    // Starting position: basic_fen ignores castling/ep and emits " w - - 0 1".
     pos.set_fen(types.DEFAULT_FEN[0..]);
     {
         const out = pos.basic_fen(arena.allocator());
@@ -573,8 +572,9 @@ test "fen: basic_fen board round-trips" {
         var it = std.mem.tokenizeScalar(u8, out, ' ');
         const board = it.next().?;
         try expect(std.mem.eql(u8, board, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"));
-        // Side-to-move field is preserved.
         try expect(std.mem.eql(u8, it.next().?, "w"));
+        try expect(std.mem.eql(u8, it.next().?, "KQkq"));
+        try expect(std.mem.eql(u8, it.next().?, "-"));
     }
 
     // A black-to-move middlegame position; board portion must round-trip exactly,
@@ -983,4 +983,103 @@ test "search: deterministic node counts and score" {
     try expect(score1 == score2);
     try expect(nodes1 == nodes2);
     try expect(nodes1 > 0);
+}
+
+test "zobrist: castling rights are part of the position key" {
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+
+    pos.* = position.Position.new();
+    pos.set_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
+    const with_rights = pos.hash;
+
+    pos.set_fen("r3k2r/8/8/8/8/8/8/R3K2R w - - 0 1");
+    try expect(pos.hash != with_rights);
+}
+
+test "fen: halfmove clock is preserved" {
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.* = position.Position.new();
+    pos.set_fen("7k/8/8/8/8/8/8/KR6 w - - 99 1");
+    try expect(pos.history[pos.game_ply].fifty == 99);
+}
+
+test "see: absolutely pinned pawn cannot recapture" {
+    const pos = see_make_pos("4k3/4p3/3p4/8/8/8/7Q/4R1K1 w - -");
+    defer std.testing.allocator.destroy(pos);
+
+    const mv = types.Move.new_from_string(pos, "h2d6");
+    try expect(mv.is_capture());
+    try expect(see.see_threshold(pos, mv, 0));
+}
+
+test "search: maximum-mobility position exceeds 128 quiet moves safely" {
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    types.GLOBAL_IO = io_threaded.io();
+
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+    search.init_lmr();
+    tt.GlobalTT.reset(16);
+    tt.GlobalTT.clear();
+    search.NUM_THREADS = 0;
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.* = position.Position.new();
+    pos.set_fen("R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1");
+
+    var moves = std.array_list.Managed(types.Move).initCapacity(std.testing.allocator, 256) catch unreachable;
+    defer moves.deinit();
+    pos.generate_legal_moves(types.Color.White, &moves);
+    var quiets: usize = 0;
+    for (moves.items) |move| {
+        if (!move.is_capture()) quiets += 1;
+    }
+    try expect(quiets > 128);
+
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    s.silent_output = true;
+    s.hash_history.append(pos.hash) catch unreachable;
+    _ = s.iterative_deepening(pos, types.Color.White, 1);
+}
+
+test "qsearch: checkmate takes precedence over fifty-move draw" {
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    types.GLOBAL_IO = io_threaded.io();
+
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+    search.init_lmr();
+    tt.GlobalTT.reset(16);
+    tt.GlobalTT.clear();
+    search.NUM_THREADS = 0;
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.* = position.Position.new();
+    pos.set_fen("7k/6Q1/6K1/8/8/8/8/8 b - - 100 1");
+
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    s.silent_output = true;
+    s.hash_history.append(pos.hash) catch unreachable;
+    const score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, hce.MateScore);
+    try expect(score <= -hce.MateScore + hce.MaxMate);
 }

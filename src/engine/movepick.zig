@@ -16,8 +16,8 @@ pub const SortKiller1: i32 = 900_000;
 pub const SortKiller2: i32 = 800_000;
 pub const SortCounterMove: i32 = 600_000;
 
-pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.array_list.Managed(types.Move), hashmove: types.Move, comptime is_null: bool) std.array_list.Managed(i32) {
-    var res: std.array_list.Managed(i32) = std.array_list.Managed(i32).initCapacity(std.heap.c_allocator, list.items.len) catch unreachable;
+pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *std.array_list.Managed(types.Move), hashmove: types.Move, comptime is_null: bool, allocator: std.mem.Allocator) std.array_list.Managed(i32) {
+    var res: std.array_list.Managed(i32) = std.array_list.Managed(i32).initCapacity(allocator, list.items.len) catch unreachable;
 
     const hm = hashmove.to_u16();
 
