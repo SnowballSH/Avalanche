@@ -409,12 +409,10 @@ pub fn run(args: []const []const u8) u8 {
         std.debug.print("tbfilter: input and output must differ\n", .{});
         return 1;
     }
-    // Also reject path aliases that resolve to the same basename after normalization.
     {
         const in_base = std.fs.path.basename(cfg.input);
         const out_base = std.fs.path.basename(cfg.output);
         if (std.mem.eql(u8, in_base, out_base) and (std.mem.eql(u8, cfg.input, out_base) or std.mem.eql(u8, cfg.output, in_base) or std.mem.endsWith(u8, cfg.input, cfg.output) or std.mem.endsWith(u8, cfg.output, cfg.input))) {
-            // Conservative: same basename with relative/absolute mix is unsafe.
             if (std.mem.indexOfScalar(u8, cfg.input, '/') == null or std.mem.indexOfScalar(u8, cfg.output, '/') == null) {
                 std.debug.print("tbfilter: refusing potentially aliased input/output paths\n", .{});
                 return 1;
@@ -497,8 +495,6 @@ pub fn run(args: []const []const u8) u8 {
     };
     defer std.heap.page_allocator.free(workers);
 
-    // Always write to uniquely named part files, then rename/concat into the
-    // final output. Never truncate the destination (or a same-inode alias) first.
     var part_paths = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
     defer {
         for (part_paths.items) |p| std.heap.page_allocator.free(p);

@@ -565,7 +565,6 @@ test "fen: basic_fen board round-trips" {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 
-    // Starting position: basic_fen now emits full castling/ep/clock fields.
     pos.set_fen(types.DEFAULT_FEN[0..]);
     {
         const out = pos.basic_fen(arena.allocator());
@@ -573,7 +572,6 @@ test "fen: basic_fen board round-trips" {
         var it = std.mem.tokenizeScalar(u8, out, ' ');
         const board = it.next().?;
         try expect(std.mem.eql(u8, board, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"));
-        // Side-to-move field is preserved.
         try expect(std.mem.eql(u8, it.next().?, "w"));
         try expect(std.mem.eql(u8, it.next().?, "KQkq"));
         try expect(std.mem.eql(u8, it.next().?, "-"));

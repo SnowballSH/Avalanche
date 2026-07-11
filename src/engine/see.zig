@@ -86,7 +86,6 @@ fn legalAttackers(pos: *position.Position, comptime color: types.Color, target: 
     const target_bb = types.SquareIndexBB[target.index()];
     while (pinned != 0) {
         const sq = types.pop_lsb(&pinned);
-        // A pinned piece may only recapture along its king-pinner line.
         if (tables.LineOf[king_sq.index()][sq.index()] & target_bb == 0) {
             legal &= ~types.SquareIndexBB[sq.index()];
         }
@@ -99,8 +98,6 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     const to = move.to;
     const attacker = pos.mailbox[from].piece_type().index();
     const is_ep = move.get_flags() == types.MoveFlags.EN_PASSANT;
-    // Quiet moves land on an empty square (victim 0). En passant captures a pawn
-    // that is not on `to`. Ordinary captures take the piece on `to`.
     const victim_value: i32 = if (is_ep)
         SeeWeight[types.PieceType.Pawn.index()]
     else blk: {
@@ -123,7 +120,6 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     var occ = all ^ types.SquareIndexBB[from];
     if (is_ep) {
         const stm = pos.mailbox[from].color();
-        // Captured pawn sits one square behind the EP target from the capturer's perspective.
         const cap_idx: usize = if (stm == types.Color.White) @as(usize, to) - 8 else @as(usize, to) + 8;
         occ ^= types.SquareIndexBB[cap_idx];
     }

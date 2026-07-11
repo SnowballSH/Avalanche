@@ -206,7 +206,6 @@ pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult
     );
     var size: usize = @intCast(tb.size);
     if (ret == 0 or size == 0) {
-        // Fall back to WDL-only root ranking when DTZ files are missing/incomplete.
         const wdl_ret = c.tb_probe_root_wdl(
             p.white,
             p.black,

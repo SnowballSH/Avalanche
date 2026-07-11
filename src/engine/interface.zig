@@ -27,9 +27,6 @@ pub const UciInterface = struct {
         };
     }
 
-    // Wait for the background search thread (if any) to finish, then drop the
-    // handle. A caller that wants to interrupt an in-flight search sets
-    // self.searcher.stop = true first so the worker terminates promptly.
     fn join_search(self: *UciInterface) void {
         if (self.search_thread) |t| {
             t.join();
@@ -498,7 +495,6 @@ pub const UciInterface = struct {
                         }
 
                         if (mytime.? <= overhead) {
-                            // Never allocate more than the remaining clock.
                             const budget = @max(@as(u64, 1), mytime.?);
                             self.searcher.ideal_time = budget;
                             movetime = budget;
@@ -629,8 +625,6 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
         pos.generate_legal_moves(types.Color.Black, &movelist);
     }
     const move_size = movelist.items.len;
-    // Only force depth 1 for a single reply under finite timed searches — never
-    // for `go infinite` / force_thinking analysis.
     if (move_size == 1 and !searcher.force_thinking) {
         depth = 1;
     }

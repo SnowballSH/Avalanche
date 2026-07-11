@@ -122,8 +122,6 @@ pub const Searcher = struct {
         std.heap.c_allocator.destroy(self.continuation);
     }
 
-    // Store a quiescence-search result in the TT at depth 0, ply-normalizing mate
-    // scores the same way the main search does.
     inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
         var stored = score;
         if (stored > SCORE_PLY_ADJ and stored <= hce.MateScore) {
@@ -178,9 +176,6 @@ pub const Searcher = struct {
                                 if (total_reset) {
                                     self.continuation[j][k][i][o] = 0;
                                 } else {
-                                    // Decay across iterative searches instead of a 12MiB wipe
-                                    // every go — preserves history and avoids stalling UCI
-                                    // before the first node (stdin EOF race).
                                     self.continuation[j][k][i][o] = @divTrunc(self.continuation[j][k][i][o], 2);
                                 }
                             }
@@ -234,7 +229,6 @@ pub const Searcher = struct {
 
     pub inline fn should_stop(self: *Searcher) bool {
         if (self.stop_requested()) return true;
-        // Hard limits: always enforced (no min_depth gate).
         if (self.max_nodes != null and self.total_nodes() >= self.max_nodes.?) return true;
         if (self.thread_id != 0) return false;
         if (!self.force_thinking and self.max_millis > 0 and self.timer.read() / std.time.ns_per_ms >= self.max_millis) return true;
@@ -253,7 +247,6 @@ pub const Searcher = struct {
     fn draw_score(self: *Searcher, pos: *position.Position, comptime color: types.Color, in_check: bool, threefold: bool) ?i32 {
         if (!self.is_draw(pos, threefold)) return null;
 
-        // Checkmate takes precedence over a fifty-move/repetition claim.
         if (in_check) {
             var move_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&move_bytes);
@@ -305,7 +298,6 @@ pub const Searcher = struct {
             }
         }
 
-        // Terminal root: no legal moves → emit null bestmove and skip search.
         {
             var root_moves = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 64) catch unreachable;
             defer root_moves.deinit();
@@ -369,7 +361,6 @@ pub const Searcher = struct {
             var depth = tdepth;
 
             if (depth >= 6) {
-                // Avoid zero-width / saturated aspiration that cannot fail-low/high.
                 const window = @max(parameters.AspirationWindow, 1);
                 if (@as(i32, @intCast(@abs(score))) < hce.MateScore - hce.MaxMate) {
                     alpha = @max(score - window, -hce.MateScore);
@@ -509,10 +500,6 @@ pub const Searcher = struct {
             tdepth += 1;
         }
 
-        // If `stop` arrived before even depth 1 completed, `bm` is still empty.
-        // Fall back to the first legal move so we always emit a legal bestmove
-        // rather than the null `a1a1`. Only reachable on an immediate stop — the
-        // depth-limited callers (bench/datagen/tests) always finish depth 1.
         if (bm.to_u16() == 0) {
             var fallback = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
             defer fallback.deinit();
@@ -639,8 +626,6 @@ pub const Searcher = struct {
             helper_searchers.items[i].root_board = pos.*;
             helper_searchers.items[i].hash_history.clearRetainingCapacity();
             helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
-            // Clear stop before spawn so a late-starting helper cannot overwrite a
-            // cancellation published between spawn and thread entry.
             @atomicStore(bool, &helper_searchers.items[i].stop, false, .monotonic);
             threads.items[i] = std.Thread.spawn(
                 .{ .stack_size = 64 * 1024 * 1024 },
@@ -654,7 +639,6 @@ pub const Searcher = struct {
     }
 
     pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
-        // Do not clear stop here — cancellation may already be published.
         @atomicStore(bool, &self.is_searching, true, .release);
         self.time_stop = false;
         self.best_move = types.Move.empty();
@@ -722,15 +706,12 @@ pub const Searcher = struct {
             depth += 1;
         }
 
-        // Step 1.5: Draw check before horizon (qsearch must not miss fifty/repetition).
-        // Checkmate still takes precedence over a draw claim.
         if (!is_root) {
             if (self.draw_score(pos, color, in_check, on_pv)) |draw| {
                 return draw;
             }
         }
 
-        // Step 1.6: Go to Quiescence Search at Horizon
         if (depth == 0) {
             return self.quiescence_search(pos, color, alpha, beta);
         }
@@ -839,7 +820,6 @@ pub const Searcher = struct {
                     });
                     return tb_score;
                 }
-                // Narrow the search window and retain proven TB bounds for clamping.
                 if (tb_flag == tt.Bound.Lower) {
                     alpha = @max(alpha, tb_score);
                     tb_min = @max(tb_min, tb_score);
@@ -1011,7 +991,7 @@ pub const Searcher = struct {
 
         // >> Step 5: Search
 
-        // Step 5.1: Move Generation (stack-backed — no per-node heap traffic)
+        // Step 5.1: Move Generation
         var ml_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
         var ml_fba = std.heap.FixedBufferAllocator.init(&ml_bytes);
         var movelist = std.array_list.Managed(types.Move).initCapacity(ml_fba.allocator(), 218) catch unreachable;
@@ -1320,8 +1300,6 @@ pub const Searcher = struct {
         }
 
         // >> Step 7: Transposition Table Update
-        // Clamp to any non-cutting Syzygy bound so a quieter child cannot replace
-        // a proven TB win/loss with a weaker centipawn score.
         best_score = std.math.clamp(best_score, tb_min, tb_max);
 
         if (self.exclude_move[self.ply].to_u16() == 0) {
@@ -1384,7 +1362,6 @@ pub const Searcher = struct {
 
         const in_check = pos.in_check(color);
 
-        // Full draw detection inside qsearch, with checkmate precedence.
         if (self.draw_score(pos, color, in_check, true)) |draw| {
             return draw;
         }
@@ -1415,7 +1392,6 @@ pub const Searcher = struct {
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
-            // Convert a node-relative stored mate/TB score back to root-relative
             var tt_eval = entry.?.eval;
             if (tt_eval > SCORE_PLY_ADJ and tt_eval <= hce.MateScore) {
                 tt_eval -= @as(i32, @intCast(self.ply));
@@ -1462,7 +1438,6 @@ pub const Searcher = struct {
             var move = movepick.getNextBest(&movelist, &evallist, index);
             const is_capture = move.is_capture();
 
-            // SEE pruning of losing captures — never for check evasions.
             if (!in_check and is_capture and index > 0) {
                 const see_score = evallist.items[index];
                 if (see_score < movepick.SortWinningCapture - 2048) {
@@ -1503,11 +1478,7 @@ pub const Searcher = struct {
             }
         }
 
-        // No tactical moves and not in check: if generate_q_moves found nothing,
-        // verify it is not a quiet stalemate (no legal moves at all).
         if (move_size == 0 and !in_check) {
-            // One retained move is enough to disprove stalemate. The move
-            // generator safely ignores later appends once this tiny FBA is full.
             var legal_bytes: [@sizeOf(types.Move)]u8 = undefined;
             var legal_fba = std.heap.FixedBufferAllocator.init(&legal_bytes);
             var legal = std.array_list.Managed(types.Move).initCapacity(legal_fba.allocator(), 1) catch unreachable;

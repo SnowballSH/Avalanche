@@ -75,8 +75,6 @@ pub const Position = struct {
         @memset(pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         pos.history[0] = UndoInfo.new();
         pos.evaluator = hce.DynamicEvaluator{};
-        // Ensure the active accumulator is defined before any incremental toggle
-        // during FEN parsing (full_refresh still runs afterward).
         pos.evaluator.nnue_evaluator.stack_index = 0;
         pos.evaluator.nnue_evaluator.accumulator_stack[0].clear();
 
@@ -172,18 +170,15 @@ pub const Position = struct {
             }
         }
 
-        // Optional standard FEN fields: halfmove clock and fullmove number.
         if (tokens.next()) |fifty_tok| {
             self.history[self.game_ply].fifty = std.fmt.parseUnsigned(u16, fifty_tok, 10) catch 0;
         }
-        // Fullmove number is informational only (no prior undo history exists).
 
         self.hash ^= zobrist.CastlingHash[zobrist.castling_rights_index(self.history[self.game_ply].entry)];
 
         self.evaluator.full_refresh(self);
     }
 
-    // Full FEN including castling, EP, halfmove, and fullmove.
     pub fn basic_fen(self: Position, allocator: std.mem.Allocator) []u8 {
         var fen: []u8 = allocator.alloc(u8, 128) catch unreachable;
         var index: usize = 0;
@@ -276,7 +271,6 @@ pub const Position = struct {
         fen[index] = ' ';
         index += 1;
 
-        // Approximate fullmove from ply (1-based, increments after Black moves).
         const fullmove: u32 = @max(@as(u32, 1), self.game_ply / 2 + 1);
         var fm_buf: [8]u8 = undefined;
         const fm_str = std.fmt.bufPrint(&fm_buf, "{}", .{fullmove}) catch "1";
@@ -736,7 +730,6 @@ pub const Position = struct {
                         }
 
                         // If checker is a pawn, then we can only move or capture.
-                        // Exclude the king: its captures are already emitted via the danger set.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned & ~types.SquareIndexBB[our_king.index()];
                         while (b1 != 0) {
                             list.append(types.Move.new_from_to_flag(types.pop_lsb(&b1), checker_sq, types.MoveFlags.CAPTURE)) catch {};
@@ -1064,7 +1057,6 @@ pub const Position = struct {
                         }
 
                         // If checker is a pawn, then we can only move or capture.
-                        // Exclude the king: its captures are already emitted via the danger set.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned & ~types.SquareIndexBB[our_king.index()];
                         while (b1 != 0) {
                             list.append(types.Move.new_from_to_flag(types.pop_lsb(&b1), checker_sq, types.MoveFlags.CAPTURE)) catch {};
@@ -1217,7 +1209,6 @@ pub const Position = struct {
                 list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
             }
 
-            // Quiet promotions (critical for qsearch horizon accuracy).
             b2 = types.shift_bitboard(b1, rel_north) & quiet_mask;
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);

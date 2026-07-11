@@ -8,8 +8,6 @@ pub var EnPassantHash: [8]u64 = std.mem.zeroes([8]u64);
 pub var CastlingHash: [16]u64 = std.mem.zeroes([16]u64);
 pub var DepthHash: [64]u64 = std.mem.zeroes([64]u64);
 
-/// Canonical 4-bit castling-rights index from the cumulative `entry` bitboard.
-/// A right is available when its mask bits are clear in `entry`.
 pub inline fn castling_rights_index(entry: types.Bitboard) u4 {
     var idx: u4 = 0;
     if (entry & types.WhiteOOMask == 0) idx |= 1;

@@ -98,10 +98,8 @@ pub const TranspositionTable = struct {
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
-        // Allocate the replacement first so a failed resize keeps the old table usable.
         const bytes = mb *% MB;
         if (mb != 0 and bytes / MB != mb) {
-            // Overflow: refuse the resize and keep the existing table.
             return;
         }
         const requested_size = @max(@as(usize, 1), bytes / @sizeOf(Item));
@@ -127,7 +125,6 @@ pub const TranspositionTable = struct {
         self.data.deinit();
         self.data = new_data;
         self.size = new_size;
-        // Keep age so existing search generation continues to make sense.
     }
 
     pub inline fn clear(self: *TranspositionTable) void {
@@ -171,9 +168,7 @@ pub const TranspositionTable = struct {
         const idx = self.index(hash);
         const p = &self.data.items[idx];
 
-        // The high padding bit is a writer lock; the remaining padding bits are
-        // a sequence number. Writers serialize per slot and readers accept only
-        // snapshots whose sequence word is unchanged around the payload load.
+        // Slot lock in the high bit of word1; remaining padding bits are a sequence.
         const w1_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p) + 8));
         const old_w1 = @atomicRmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
         if (old_w1 & LOCK_BIT != 0) return;
@@ -197,7 +192,6 @@ pub const TranspositionTable = struct {
             @atomicStore(i64, w0_ptr, words[0], .monotonic);
             @atomicStore(i64, w1_ptr, words[1], .release);
         } else {
-            // No replacement: release the slot without changing its sequence.
             @atomicStore(i64, w1_ptr, old_w1, .release);
         }
     }

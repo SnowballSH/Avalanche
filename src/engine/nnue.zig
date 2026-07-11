@@ -187,8 +187,6 @@ pub const NNUE = struct {
         const res = @reduce(.Add, sum);
 
         if (SQUARED_ACTIVATION) {
-            // Dot product is in QA^2*QB; bias is quantized at QA*QB.
-            // Correct: (sum/QA + bias) * SCALE / (QA*QB)
             return @divTrunc((@divTrunc(res, QA) + @as(i32, weights.MODEL.layer_2_bias[bucket])) * SCALE, QAB);
         } else {
             return @divTrunc((res + @as(i32, weights.MODEL.layer_2_bias[bucket])) * SCALE, QAB);
