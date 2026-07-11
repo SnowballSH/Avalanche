@@ -20,6 +20,11 @@ const c = @cImport({
 });
 
 pub const MAX_TB_MOVES: usize = 256; // == Pyrrhic TB_MAX_MOVES
+// Pyrrhic assigns ranks at least MAX-100 to wins under the 50-move rule and
+// ranks at most -MAX+100 to losses. Ranks between those bands are cursed wins,
+// draws, or blessed losses. These values mirror root_probe_dtz/root_probe_wdl.
+const TB_MAX_DTZ_RANK: i32 = 0x40000;
+const TB_RULE50_WIN_RANK: i32 = TB_MAX_DTZ_RANK - 100;
 
 pub var enabled: bool = false;
 pub var probe_depth: i32 = 1;
@@ -68,6 +73,19 @@ pub const RootResult = struct {
     count: usize = 0,
     moves: [MAX_TB_MOVES]RootMove = undefined,
 };
+
+fn root_wdl_from_rank(best_rank: i32, respect_rule50: bool) Wdl {
+    if (!respect_rule50) {
+        return if (best_rank > 0) .win else if (best_rank < 0) .loss else .draw;
+    }
+
+    return if (best_rank >= TB_RULE50_WIN_RANK)
+        .win
+    else if (best_rank <= -TB_RULE50_WIN_RANK)
+        .loss
+    else
+        .draw;
+}
 
 // ---------------------------------------------------------------------------
 // Position -> Pyrrhic argument decomposition.
@@ -236,7 +254,7 @@ pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult
         }
     }
 
-    var result = RootResult{ .wdl = if (best_rank > 0) .win else if (best_rank < 0) .loss else .draw };
+    var result = RootResult{ .wdl = root_wdl_from_rank(best_rank, use_rule50) };
     var i: usize = 0;
     while (i < size) : (i += 1) {
         if (tb.moves[i].tbRank != best_rank) continue;
@@ -303,4 +321,17 @@ pub export fn rookAttacks(sq: u8, occ: u64) u64 {
 pub export fn queenAttacks(sq: u8, occ: u64) u64 {
     return tables.get_attacks(types.PieceType.Bishop, @enumFromInt(sq), occ) |
         tables.get_attacks(types.PieceType.Rook, @enumFromInt(sq), occ);
+}
+
+test "root WDL respects the 50-move rule" {
+    try std.testing.expectEqual(Wdl.win, root_wdl_from_rank(TB_MAX_DTZ_RANK, true));
+    try std.testing.expectEqual(Wdl.loss, root_wdl_from_rank(-TB_MAX_DTZ_RANK, true));
+    try std.testing.expectEqual(Wdl.win, root_wdl_from_rank(TB_RULE50_WIN_RANK, true));
+    try std.testing.expectEqual(Wdl.loss, root_wdl_from_rank(-TB_RULE50_WIN_RANK, true));
+    try std.testing.expectEqual(Wdl.draw, root_wdl_from_rank(TB_RULE50_WIN_RANK - 1, true));
+    try std.testing.expectEqual(Wdl.draw, root_wdl_from_rank(-TB_RULE50_WIN_RANK + 1, true));
+    try std.testing.expectEqual(Wdl.draw, root_wdl_from_rank(0, true));
+
+    try std.testing.expectEqual(Wdl.win, root_wdl_from_rank(TB_MAX_DTZ_RANK - 1, false));
+    try std.testing.expectEqual(Wdl.loss, root_wdl_from_rank(-TB_MAX_DTZ_RANK + 1, false));
 }

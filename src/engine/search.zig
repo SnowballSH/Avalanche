@@ -36,6 +36,16 @@ pub const MAX_GAMEPLY = 1024;
 // at ply p scores TB_WIN_SCORE - p (shallower wins preferred); a loss negates it.
 pub const TB_WIN_SCORE: i32 = hce.MateScore - hce.MaxMate - MAX_PLY;
 
+fn score_from_root_tb(wdl: syzygy.Wdl, search_score: i32) i32 {
+    if (hce.is_near_mate(search_score)) return search_score;
+
+    return switch (wdl) {
+        .win => TB_WIN_SCORE,
+        .draw => 0,
+        .loss => -TB_WIN_SCORE,
+    };
+}
+
 // Threshold for ply-normalizing scores stored in the TT. Covers both mate
 // scores (above MateScore - MaxMate) and TB win/loss scores (above TB_WIN_SCORE - MAX_PLY).
 const SCORE_PLY_ADJ: i32 = TB_WIN_SCORE - MAX_PLY;
@@ -436,6 +446,10 @@ pub const Searcher = struct {
             }
 
             if (!self.silent_output) {
+                const reported_score = if (self.syzygy_root_active)
+                    score_from_root_tb(self.syzygy_root.wdl, score)
+                else
+                    score;
                 const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
                 const nps = total_nodes_all * 1000 / @max(@as(u64, 1), elapsed_ms);
                 outW.print("info depth {} seldepth {} nodes {} nps {} hashfull {} tbhits {} time {} score ", .{
@@ -448,16 +462,16 @@ pub const Searcher = struct {
                     elapsed_ms,
                 }) catch {};
 
-                if ((@as(i32, @intCast(@abs(score)))) >= (hce.MateScore - hce.MaxMate)) {
+                if (hce.is_near_mate(reported_score)) {
                     outW.print("mate {} pv", .{
-                        (@divTrunc(hce.MateScore - (@as(i32, @intCast(@abs(score)))) + 1, 2)) * @as(i32, if (score > 0) 1 else -1),
+                        (@divTrunc(hce.MateScore - (@as(i32, @intCast(@abs(reported_score)))) + 1, 2)) * @as(i32, if (reported_score > 0) 1 else -1),
                     }) catch {};
                     if (max_depth == null and bound == MAX_PLY - 2) {
                         bound = depth + 2;
                     }
                 } else {
                     outW.print("cp {} pv", .{
-                        score,
+                        reported_score,
                     }) catch {};
                 }
 
@@ -528,7 +542,10 @@ pub const Searcher = struct {
         self.ttable.do_age();
         @atomicStore(bool, &self.is_searching, false, .release);
 
-        return score;
+        return if (self.syzygy_root_active)
+            score_from_root_tb(self.syzygy_root.wdl, score)
+        else
+            score;
     }
 
     pub fn is_draw(self: *Searcher, pos: *position.Position, threefold: bool) bool {
@@ -624,6 +641,10 @@ pub const Searcher = struct {
             helper_searchers.items[i].parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
             helper_searchers.items[i].root_history_len = self.root_history_len;
             helper_searchers.items[i].root_board = pos.*;
+            helper_searchers.items[i].syzygy_root_active = self.syzygy_root_active;
+            if (self.syzygy_root_active) {
+                helper_searchers.items[i].syzygy_root = self.syzygy_root;
+            }
             helper_searchers.items[i].hash_history.clearRetainingCapacity();
             helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
             @atomicStore(bool, &helper_searchers.items[i].stop, false, .monotonic);
@@ -1496,3 +1517,13 @@ pub const Searcher = struct {
         return best_score;
     }
 };
+
+test "root tablebase score replaces evaluation but preserves mate" {
+    try std.testing.expectEqual(@as(i32, 0), score_from_root_tb(.draw, 37));
+    try std.testing.expectEqual(TB_WIN_SCORE, score_from_root_tb(.win, -12));
+    try std.testing.expectEqual(-TB_WIN_SCORE, score_from_root_tb(.loss, 18));
+
+    const mate_score = hce.MateScore - 3;
+    try std.testing.expectEqual(mate_score, score_from_root_tb(.draw, mate_score));
+    try std.testing.expectEqual(-mate_score, score_from_root_tb(.win, -mate_score));
+}
