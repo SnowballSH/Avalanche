@@ -1,0 +1,23 @@
+[
+  {
+    "command": "./Avalanche",
+    "name": "Avalanche 3.1.0 dev",
+    "restart": "on",
+    "options": [
+      {
+        "name": "Threads",
+        "value": "512"
+      },
+      {
+        "name": "Hash",
+        "value": "262144"
+      },
+      {
+        "name": "SyzygyPath",
+        "value": "/home/syzygy7"
+      }
+    ],
+    "protocol": "uci",
+    "workingDirectory": "/home/tcec/Engines/Avalanche/"
+  }
+]

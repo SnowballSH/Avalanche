@@ -487,7 +487,7 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
-                    const overhead: u64 = 25 + @min(@as(u64, search.NUM_THREADS) * 5, 25);
+                    const overhead: u64 = 35 + @min(@as(u64, search.NUM_THREADS) * 4, 150);
                     if (mytime != null) {
                         var inc: u64 = 0;
                         if (myinc != null) {

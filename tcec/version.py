@@ -1,0 +1,1 @@
+"dev-" + git_hash
