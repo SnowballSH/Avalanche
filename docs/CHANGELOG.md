@@ -1,5 +1,37 @@
 # v3.1.0
 
+- Fixes undefined piece_bitboards / NNUE accumulator on Position.new
+- Fixes an issue where Zobrist omitted castling rights, which caused false TT hits / repetitions
+- Support FEN halfmove clock
+- Fixes an issue where UCI quit ignored while searching
+- Fixes an issue where hard node/time limits not enforced
+- Fixes an issue where terminal roots could hang and emit illegal bestmove a1a1
+- Fixes an issue where Cuckoo upcoming-repetition root boundary off-by-one
+- Fixes an SEE bug for EP / missing kings / pinned recaptures
+- Qsearch now accepts quiet promotions, draws, and quiet stalemate
+- Adjusted mate vs fifty-move draw precedence
+- Fixes an issue where Syzygy non-cutting WDL bounds was discarded
+- Fixes an issue where NNUE SCReLU output bias was scaled incorrectly
+- Fixes quiet_moves buffer overflow
+
+LTC (60+0.60):
+```
+Elo   | 34.03 +- 9.12 (95%)
+SPRT  | 60.0+0.60s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [-3.00, 0.50]
+Games | N: 1598 W: 432 L: 276 D: 890
+Penta | [2, 136, 383, 260, 18]
+```
+
+SMP (10+0.10):
+```
+Elo   | 34.18 +- 9.27 (95%)
+SPRT  | 10.0+0.10s Threads=4 Hash=128MB
+LLR   | 2.97 (-2.94, 2.94) [-3.00, 0.50]
+Games | N: 1652 W: 463 L: 301 D: 888
+Penta | [4, 147, 380, 273, 22]
+```
+
 - TT static eval separation + lockless XOR verification
 - Cuckoo upcoming-repetition detection
 - ProbCut

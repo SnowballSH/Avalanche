@@ -98,35 +98,37 @@ pub const TranspositionTable = struct {
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
-        self.data.deinit();
-        const requested_size = @max(1, mb * MB / @sizeOf(Item));
-        var new_tt = TranspositionTable{
-            .data = std.array_list.Managed(i128).init(tt_allocator),
-            .size = requested_size,
-            .age = 0,
+        const bytes = mb *% MB;
+        if (mb != 0 and bytes / MB != mb) {
+            return;
+        }
+        const requested_size = @max(@as(usize, 1), bytes / @sizeOf(Item));
+
+        var new_data = std.array_list.Managed(i128).init(tt_allocator);
+        new_data.ensureTotalCapacityPrecise(requested_size) catch {
+            new_data.deinit();
+            return;
         };
-
-        new_tt.data.ensureTotalCapacityPrecise(requested_size) catch {};
-        new_tt.data.expandToCapacity();
-
-        if (new_tt.data.items.len == 0) {
-            new_tt.size = 0;
-            self.* = new_tt;
+        new_data.expandToCapacity();
+        if (new_data.items.len == 0) {
+            new_data.deinit();
             return;
         }
 
-        new_tt.size = new_tt.data.items.len;
-
-        const byte_len = new_tt.size * @sizeOf(i128);
-        adviseHugePages(@as([*]u8, @ptrCast(new_tt.data.items.ptr)), byte_len);
+        const new_size = new_data.items.len;
+        const byte_len = new_size * @sizeOf(i128);
+        adviseHugePages(@as([*]u8, @ptrCast(new_data.items.ptr)), byte_len);
 
         const num_threads = search.NUM_THREADS + 1;
-        parallelMemset(new_tt.data.items, num_threads);
+        parallelMemset(new_data.items, num_threads);
 
-        self.* = new_tt;
+        self.data.deinit();
+        self.data = new_data;
+        self.size = new_size;
     }
 
     pub inline fn clear(self: *TranspositionTable) void {
+        if (self.size == 0) return;
         const num_threads = search.NUM_THREADS + 1;
         parallelMemset(self.data.items, num_threads);
     }
@@ -139,17 +141,41 @@ pub const TranspositionTable = struct {
         return @as(u64, @intCast(@as(u128, @intCast(hash)) * @as(u128, @intCast(self.size)) >> 64));
     }
 
+    const LOCK_BIT: i64 = @bitCast(@as(u64, 1) << 63);
+
+    const Snapshot = struct {
+        item: Item,
+        w1: i64,
+    };
+
+    inline fn loadSnapshot(p: *i128) ?Snapshot {
+        const w1_before = @atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        if (w1_before & LOCK_BIT != 0) return null;
+
+        const w0 = @atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
+        const w1_after = @atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        if (w1_before != w1_after or w1_after & LOCK_BIT != 0) return null;
+
+        const combined: i128 = @as(i128, @bitCast([2]i64{ w0, w1_after }));
+        return .{
+            .item = @as(Item, @bitCast(combined)),
+            .w1 = w1_after,
+        };
+    }
+
     pub inline fn set(self: *TranspositionTable, hash: u64, entry: Item) void {
+        if (self.size == 0) return;
         const idx = self.index(hash);
         const p = &self.data.items[idx];
 
-        // Read existing entry to check replacement policy
-        const w0_raw = @as(*const i64, @ptrFromInt(@intFromPtr(p))).*;
-        const w1_raw = @as(*const i64, @ptrFromInt(@intFromPtr(p) + 8)).*;
-        // Reconstruct existing item from XOR scheme: stored_w0 = W0^W1, stored_w1 = W1
-        // So W0 = stored_w0 ^ stored_w1
-        const existing_w0 = w0_raw ^ w1_raw;
-        const existing_combined: i128 = @as(i128, @bitCast([2]i64{ existing_w0, w1_raw }));
+        // Slot lock in the high bit of word1; remaining padding bits are a sequence.
+        const w1_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p) + 8));
+        const old_w1 = @atomicRmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
+        if (old_w1 & LOCK_BIT != 0) return;
+
+        const w0_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p)));
+        const old_w0 = @atomicLoad(i64, w0_ptr, .acquire);
+        const existing_combined: i128 = @as(i128, @bitCast([2]i64{ old_w0, old_w1 }));
         const p_val: Item = @as(Item, @bitCast(existing_combined));
 
         // We overwrite entry if:
@@ -158,18 +184,20 @@ pub const TranspositionTable = struct {
         // 3. Previous entry is from older search
         // 4. It is a different position
         // 5. Previous entry has lower depth (with +4 margin)
-        if ((w0_raw == 0 and w1_raw == 0) or entry.flag == Bound.Exact or p_val.age != self.age or p_val.key != entry.key or p_val.depth <= entry.depth + 4) {
-            // Lockless XOR store: slot[0] = W0^W1, slot[1] = W1
-            const entry_as_i128: i128 = @as(i128, @bitCast(entry));
+        if ((old_w0 == 0 and old_w1 == 0) or entry.flag == Bound.Exact or p_val.age != self.age or p_val.key != entry.key or p_val.depth <= entry.depth + 4) {
+            var stored_entry = entry;
+            stored_entry._padding = (p_val._padding +% 1) & 0x7fff;
+            const entry_as_i128: i128 = @as(i128, @bitCast(stored_entry));
             const words: [2]i64 = @as([2]i64, @bitCast(entry_as_i128));
-            const w0 = words[0];
-            const w1 = words[1];
-            _ = @atomicRmw(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .Xchg, w0 ^ w1, .release);
-            _ = @atomicRmw(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .Xchg, w1, .release);
+            @atomicStore(i64, w0_ptr, words[0], .monotonic);
+            @atomicStore(i64, w1_ptr, words[1], .release);
+        } else {
+            @atomicStore(i64, w1_ptr, old_w1, .release);
         }
     }
 
     pub inline fn prefetch(self: *TranspositionTable, hash: u64) void {
+        if (self.size == 0) return;
         @prefetch(&self.data.items[self.index(hash)], .{
             .rw = .read,
             .locality = 1,
@@ -184,13 +212,9 @@ pub const TranspositionTable = struct {
         var i: usize = 0;
         while (i < sample) : (i += 1) {
             const p = &self.data.items[i];
-            const w0_raw = @as(*const i64, @ptrFromInt(@intFromPtr(p))).*;
-            const w1_raw = @as(*const i64, @ptrFromInt(@intFromPtr(p) + 8)).*;
-            if (w0_raw != 0 or w1_raw != 0) {
-                const existing_w0 = w0_raw ^ w1_raw;
-                const combined: i128 = @as(i128, @bitCast([2]i64{ existing_w0, w1_raw }));
-                const entry: Item = @as(Item, @bitCast(combined));
-                if (entry.age == self.age) {
+            if (loadSnapshot(p)) |snapshot| {
+                const entry = snapshot.item;
+                if (entry.flag != .None and entry.age == self.age) {
                     count += 1;
                 }
             }
@@ -199,15 +223,10 @@ pub const TranspositionTable = struct {
     }
 
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
+        if (self.size == 0) return null;
         const p = &self.data.items[self.index(hash)];
-        // Lockless XOR read: stored slot[0] = W0^W1, slot[1] = W1
-        // Reconstruct: W0 = slot[0] ^ slot[1]
-        const w0_stored = @as(*const i64, @ptrFromInt(@intFromPtr(p))).*;
-        const w1 = @as(*const i64, @ptrFromInt(@intFromPtr(p) + 8)).*;
-        const w0 = w0_stored ^ w1;
-
-        const combined: i128 = @as(i128, @bitCast([2]i64{ w0, w1 }));
-        const entry: Item = @as(Item, @bitCast(combined));
+        const snapshot = loadSnapshot(p) orelse return null;
+        const entry = snapshot.item;
 
         if (entry.flag != Bound.None and entry.key == @as(u32, @truncate(hash))) {
             return entry;

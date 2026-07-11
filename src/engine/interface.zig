@@ -27,15 +27,12 @@ pub const UciInterface = struct {
         };
     }
 
-    // Wait for the background search thread (if any) to finish, then drop the
-    // handle. A caller that wants to interrupt an in-flight search sets
-    // self.searcher.stop = true first so the worker terminates promptly.
     fn join_search(self: *UciInterface) void {
         if (self.search_thread) |t| {
             t.join();
             self.search_thread = null;
         }
-        self.searcher.is_searching = false;
+        @atomicStore(bool, &self.searcher.is_searching, false, .release);
     }
 
     pub fn main_loop(self: *UciInterface) !void {
@@ -78,15 +75,17 @@ pub const UciInterface = struct {
                 try stdout.writeAll("readyok\n");
                 try stdout.flush();
                 continue;
+            } else if (std.mem.eql(u8, token.?, "quit")) {
+                @atomicStore(bool, &self.searcher.stop, true, .monotonic);
+                self.join_search();
+                break :out;
             }
 
-            if (self.searcher.is_searching) {
+            if (@atomicLoad(bool, &self.searcher.is_searching, .acquire)) {
                 continue;
             }
 
-            if (std.mem.eql(u8, token.?, "quit")) {
-                break :out;
-            } else if (std.mem.eql(u8, token.?, "genfens")) {
+            if (std.mem.eql(u8, token.?, "genfens")) {
                 // OpenBench datagen: tokenize the rest of the line and generate FENs
                 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
                 defer arena.deinit();
@@ -102,8 +101,8 @@ pub const UciInterface = struct {
                 try stdout.writeAll(build_options.version);
                 try stdout.writeByte('\n');
                 try stdout.writeAll("id author Yinuo Huang\n\n");
-                try stdout.writeAll("option name Hash type spin default 16 min 1 max 1048576\n");
-                try stdout.writeAll("option name Threads type spin default 1 min 1 max 2048\n");
+                try stdout.writeAll("option name Hash type spin default 16 min 1 max 65536\n");
+                try stdout.print("option name Threads type spin default 1 min 1 max {}\n", .{search.MAX_THREADS});
                 try stdout.writeAll("option name SyzygyPath type string default <empty>\n");
                 try stdout.writeAll("option name SyzygyProbeDepth type spin default 1 min 1 max 100\n");
                 try stdout.writeAll("option name SyzygyProbeLimit type spin default 7 min 1 max 7\n");
@@ -143,7 +142,8 @@ pub const UciInterface = struct {
                         }
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
-                        tt.GlobalTT.reset(value);
+                        const clamped = std.math.clamp(value, 1, 65536);
+                        tt.GlobalTT.reset(clamped);
                     } else if (std.mem.eql(u8, token.?, "Threads")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {
@@ -156,7 +156,8 @@ pub const UciInterface = struct {
                         }
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
-                        search.NUM_THREADS = @max(value, 1) - 1;
+                        const total = std.math.clamp(value, 1, search.MAX_THREADS);
+                        search.NUM_THREADS = total - 1;
                     } else if (std.mem.eql(u8, token.?, "SyzygyPath")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {
@@ -218,7 +219,10 @@ pub const UciInterface = struct {
                                     break;
                                 }
 
-                                const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
+                                const raw = std.fmt.parseUnsigned(usize, token.?, 10) catch continue;
+                                const min_v = std.fmt.parseUnsigned(usize, tunable.min_value, 10) catch 0;
+                                const max_v = std.fmt.parseUnsigned(usize, tunable.max_value, 10) catch raw;
+                                const value = std.math.clamp(raw, min_v, max_v);
                                 switch (tunable.id) {
                                     0 => {
                                         parameters.LMRWeight = @as(f64, @floatFromInt(value)) / 1000.0;
@@ -491,8 +495,9 @@ pub const UciInterface = struct {
                         }
 
                         if (mytime.? <= overhead) {
-                            self.searcher.ideal_time = overhead - 5;
-                            movetime = overhead - 5;
+                            const budget = @max(@as(u64, 1), mytime.?);
+                            self.searcher.ideal_time = budget;
+                            movetime = budget;
                         } else {
                             if (movestogo == null) {
                                 self.searcher.ideal_time = inc + (mytime.? - overhead) / 28;
@@ -516,7 +521,7 @@ pub const UciInterface = struct {
                 // Mark searching BEFORE spawning so a second `go` arriving before
                 // the worker starts cannot pass the is_searching guard and
                 // double-spawn onto the same searcher/position.
-                self.searcher.is_searching = true;
+                @atomicStore(bool, &self.searcher.is_searching, true, .release);
 
                 self.search_thread = std.Thread.spawn(
                     .{ .stack_size = 64 * 1024 * 1024 },
@@ -620,7 +625,7 @@ fn startSearch(searcher: *search.Searcher, pos: *position.Position, movetime: us
         pos.generate_legal_moves(types.Color.Black, &movelist);
     }
     const move_size = movelist.items.len;
-    if (move_size == 1) {
+    if (move_size == 1 and !searcher.force_thinking) {
         depth = 1;
     }
     movelist.deinit();

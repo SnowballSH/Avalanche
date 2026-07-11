@@ -804,7 +804,12 @@ pub const Datagen = struct {
 
     pub fn start(self: *Datagen, num_threads: usize) !void {
         const ext = if (self.config.format == .viri) ".viribin" else ".bin";
-        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}{s}", .{ std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds(), ext });
+        const now_ns = std.Io.Clock.real.now(types.GLOBAL_IO).nanoseconds;
+        const path = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "data_{d}_{d}_{d}{s}",
+            .{ now_ns, std.os.linux.getpid(), self.seed, ext },
+        );
         const random_plies_max = self.config.random_plies_min + if (self.config.random_plies_range == 0) 0 else self.config.random_plies_range - 1;
         const book_random_plies_max = self.config.book_random_plies_min + if (self.config.book_random_plies_range == 0) 0 else self.config.book_random_plies_range - 1;
 
@@ -861,9 +866,14 @@ pub const Datagen = struct {
     }
 
     pub fn startSingleThreaded(self: *Datagen) !void {
-        const id: u64 = @as(u64, @intCast(std.Io.Clock.real.now(types.GLOBAL_IO).toSeconds()));
+        const now_ns = std.Io.Clock.real.now(types.GLOBAL_IO).nanoseconds;
+        const id: u64 = @as(u64, @truncate(@as(u96, @bitCast(now_ns))));
         const ext = if (self.config.format == .viri) ".viribin" else ".bin";
-        const path = try std.fmt.allocPrint(std.heap.page_allocator, "data_{}{s}", .{ id, ext });
+        const path = try std.fmt.allocPrint(
+            std.heap.page_allocator,
+            "data_{d}_{d}_{d}{s}",
+            .{ now_ns, std.os.linux.getpid(), self.seed, ext },
+        );
         std.debug.print("Writing data to {s} (single-threaded, {s})\n", .{ path, if (self.config.format == .viri) "viriformat" else "bulletformat" });
         const file = std.Io.Dir.cwd().createFile(
             types.GLOBAL_IO,
