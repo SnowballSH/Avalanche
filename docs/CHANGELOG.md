@@ -1,5 +1,25 @@
 # v3.1.0
 
+- New net: Molihua
+
+STC (10+0.10):
+```
+Elo   | 28.15 +- 7.81 (95%)
+SPRT  | 10.0+0.1s Threads=1 Hash=8MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 2536 W: 720 L: 515 D: 1301
+Penta | [15, 239, 585, 384, 45]
+```
+
+LTC (60+0.60):
+```
+Elo   | 25.62 +- 6.98 (95%)
+SPRT  | 60.0+0.6s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 2432 W: 624 L: 445 D: 1363
+Penta | [1, 213, 621, 368, 13]
+```
+
 - Fixes undefined piece_bitboards / NNUE accumulator on Position.new
 - Fixes an issue where Zobrist omitted castling rights, which caused false TT hits / repetitions
 - Support FEN halfmove clock
