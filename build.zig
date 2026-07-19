@@ -65,6 +65,10 @@ pub fn build(b: *std.Build) void {
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
     // It is imported under the name "nnue", which weights.zig @embedFile's.
     const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/molihua.nnue";
+    const inputBuckets = b.option(usize, "buckets", "King input buckets (1=Chess768, 16=buckets+HM)") orelse 1;
+    if (inputBuckets != 1 and inputBuckets != 16) {
+        @panic("-Dbuckets must be 1 (Chess768) or 16 (ChessBucketsMirrored)");
+    }
 
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
@@ -76,6 +80,7 @@ pub fn build(b: *std.Build) void {
     defer io_threaded.deinit();
     const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
     build_options.addOption([]const u8, "version", dtToString(timestamp2DateTime(now_seconds), &buf));
+    build_options.addOption(usize, "input_buckets", inputBuckets);
 
     const exe = b.addExecutable(.{
         .name = targetName,
@@ -104,18 +109,16 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
-    // Build tests optimized: Position is passed by value into inline helpers,
-    // and a Debug build's un-elided copies overflow the test thread's stack.
-    const test_optimize: std.builtin.OptimizeMode = if (optimize == .Debug) .ReleaseSafe else optimize;
     const exe_tests = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tests.zig"),
             .target = target,
-            .optimize = test_optimize,
+            .optimize = optimize,
             .link_libc = true,
         }),
     });
 
+    exe_tests.root_module.addOptions("build_options", build_options);
     exe_tests.root_module.addAnonymousImport("nnue", .{
         .root_source_file = b.path(netPath),
     });

@@ -2,19 +2,25 @@
 # build_net_engine.sh — build an Avalanche binary embedding a specific .nnue,
 # without disturbing the working tree (uses build.zig's -Dnet option).
 #
-# Usage: scripts/build_net_engine.sh <net_file.nnue> <out_name> [hidden]
+# Usage: scripts/build_net_engine.sh <net_file.nnue> <out_name> [hidden] [buckets]
 #   net_file : path to a .nnue (relative to repo root or absolute)
 #   out_name : output binary name -> engines_built/Avalanche-<out_name>
-#   hidden   : optional hidden size (512 default; 768 patches weights.zig + tests)
+#   hidden   : optional hidden size (1024 default; patches weights.zig + tests if different)
+#   buckets  : optional king input buckets (1=Chess768 default, 16=ChessBucketsMirrored)
 #
 # Output: engines_built/Avalanche-<out_name>
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-NET="${1:?usage: build_net_engine.sh <net_file> <out_name> [hidden]}"
-NAME="${2:?usage: build_net_engine.sh <net_file> <out_name> [hidden]}"
-HIDDEN="${3:-512}"
+NET="${1:?usage: build_net_engine.sh <net_file> <out_name> [hidden] [buckets]}"
+NAME="${2:?usage: build_net_engine.sh <net_file> <out_name> [hidden] [buckets]}"
+HIDDEN="${3:-1024}"
+BUCKETS="${4:-1}"
+case "$BUCKETS" in
+  1|16) ;;
+  *) echo "error: buckets must be 1 or 16 (got $BUCKETS)" >&2; exit 1 ;;
+esac
 OUT="$REPO/engines_built/Avalanche-$NAME"
 mkdir -p "$REPO/engines_built"
 
@@ -36,14 +42,18 @@ if [ "$HIDDEN" != "$CURRENT_HIDDEN" ]; then
   trap restore_hidden EXIT
 fi
 
-echo ":: Building Avalanche-$NAME  (net=$NET_REL hidden=$HIDDEN)" >&2
+echo ":: Building Avalanche-$NAME  (net=$NET_REL hidden=$HIDDEN buckets=$BUCKETS)" >&2
 TMPPREFIX="$(mktemp -d)"
-zig build --release=fast -Dnet="$NET_REL" -Dtarget-name="Avalanche-$NAME" --prefix "$TMPPREFIX" >&2
+zig build --release=fast \
+  -Dnet="$NET_REL" \
+  -Dbuckets="$BUCKETS" \
+  -Dtarget-name="Avalanche-$NAME" \
+  --prefix "$TMPPREFIX" >&2
 cp "$TMPPREFIX/bin/Avalanche-$NAME" "$OUT"
 rm -rf "$TMPPREFIX"
 restore_hidden
 trap - EXIT
 
 echo ":: built $OUT" >&2
-echo ":: bench: $("$OUT" bench 2>&1 | head -1)" >&2
+echo ":: bench: $("$OUT" bench 2>&1 | sed -n '1p')" >&2
 echo "$OUT"

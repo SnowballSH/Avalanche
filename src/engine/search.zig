@@ -95,7 +95,7 @@ pub const Searcher = struct {
     counter_moves: [2][64][64]types.Move = undefined,
     continuation: *[12][64][64][64]i32,
 
-    root_board: position.Position = undefined,
+    root_board: *position.Position,
     ttable: *tt.TranspositionTable = &tt.GlobalTT,
     thread_id: usize = 0,
     silent_output: bool = false,
@@ -106,20 +106,27 @@ pub const Searcher = struct {
     syzygy_root_active: bool = false,
     syzygy_root: syzygy.RootResult = undefined,
 
-    pub fn new() Searcher {
-        var s = Searcher{
+    pub fn init(self: *Searcher) void {
+        const board = std.heap.c_allocator.create(position.Position) catch unreachable;
+        board.init();
+        self.* = .{
             .continuation = std.heap.c_allocator.create([12][64][64][64]i32) catch unreachable,
+            .root_board = board,
         };
+        self.hash_history = std.array_list.Managed(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
+        self.reset_heuristics(true);
+    }
 
-        s.hash_history = std.array_list.Managed(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
-        s.reset_heuristics(true);
-
+    pub fn new() Searcher {
+        var s: Searcher = undefined;
+        s.init();
         return s;
     }
 
     pub fn deinit(self: *Searcher) void {
         self.hash_history.deinit();
         std.heap.c_allocator.destroy(self.continuation);
+        std.heap.c_allocator.destroy(self.root_board);
     }
 
     inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
@@ -623,7 +630,7 @@ pub const Searcher = struct {
             helper_searchers.items[i].parent_stop = &self.stop;
             helper_searchers.items[i].parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
             helper_searchers.items[i].root_history_len = self.root_history_len;
-            helper_searchers.items[i].root_board = pos.*;
+            helper_searchers.items[i].root_board.* = pos.*;
             helper_searchers.items[i].hash_history.clearRetainingCapacity();
             helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
             @atomicStore(bool, &helper_searchers.items[i].stop, false, .monotonic);
@@ -647,9 +654,9 @@ pub const Searcher = struct {
         self.ply = 0;
         self.seldepth = 0;
         if (color == types.Color.White) {
-            _ = self.negamax(&self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root, false);
+            _ = self.negamax(self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root, false);
         } else {
-            _ = self.negamax(&self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root, false);
+            _ = self.negamax(self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root, false);
         }
         @atomicStore(bool, &self.is_searching, false, .release);
     }

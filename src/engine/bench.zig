@@ -59,31 +59,53 @@ const FENS = [_][:0]const u8{
 };
 // zig fmt: on
 
+const BenchJob = struct {
+    searcher: *search.Searcher,
+    pos: *position.Position,
+    depth: u8,
+};
+
+fn runBenchSearch(job: BenchJob) void {
+    if (job.pos.turn == types.Color.White) {
+        _ = job.searcher.iterative_deepening(job.pos, types.Color.White, job.depth);
+    } else {
+        _ = job.searcher.iterative_deepening(job.pos, types.Color.Black, job.depth);
+    }
+}
+
 pub fn bench() !void {
     var out_buf: [256]u8 = undefined;
     var stdout_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
     const stdout = &stdout_file.interface;
 
-    const depth = 15;
+    const depth: u8 = 14;
     var nodes: u64 = 0;
     const timer = types.Timer.start();
-    var searcher = search.Searcher.new();
-    defer searcher.deinit();
+    const searcher = std.heap.c_allocator.create(search.Searcher) catch unreachable;
+    defer {
+        searcher.deinit();
+        std.heap.c_allocator.destroy(searcher);
+    }
+    searcher.init();
     searcher.force_thinking = true;
     searcher.silent_output = true;
 
+    const pos = std.heap.c_allocator.create(position.Position) catch unreachable;
+    defer std.heap.c_allocator.destroy(pos);
+
     for (FENS) |fen| {
-        var pos = position.Position.new();
+        pos.init();
         pos.set_fen(fen);
         @atomicStore(bool, &searcher.stop, false, .monotonic);
         searcher.reset_heuristics(true);
         searcher.hash_history.clearRetainingCapacity();
         searcher.hash_history.append(pos.hash) catch {};
-        if (pos.turn == types.Color.White) {
-            _ = searcher.iterative_deepening(&pos, types.Color.White, depth);
-        } else {
-            _ = searcher.iterative_deepening(&pos, types.Color.Black, depth);
-        }
+        const thread = std.Thread.spawn(
+            .{ .stack_size = 256 * 1024 * 1024 },
+            runBenchSearch,
+            .{BenchJob{ .searcher = searcher, .pos = pos, .depth = depth }},
+        ) catch unreachable;
+        thread.join();
         nodes += searcher.nodes;
     }
 

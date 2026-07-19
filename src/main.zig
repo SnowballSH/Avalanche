@@ -119,6 +119,8 @@ pub fn main(init: std.process.Init) anyerror!void {
         }
     }
 
-    var inter = interface.UciInterface.new();
+    const inter = std.heap.c_allocator.create(interface.UciInterface) catch unreachable;
+    inter.init();
+    defer std.heap.c_allocator.destroy(inter);
     return inter.main_loop();
 }

@@ -5,13 +5,13 @@
 #   data_file: Path(s) to training data in bulletformat (default: data/training.bin)
 #
 # Tunables (env vars, all optional — defaults are the current best recipe):
-#   TRAIN_NET_ID (net), TRAIN_HIDDEN (512), TRAIN_SUPERBATCHES (40),
+#   TRAIN_NET_ID (net), TRAIN_HIDDEN (1024), TRAIN_SUPERBATCHES (40),
 #   TRAIN_WDL (0.25), TRAIN_WDL_END (=WDL; set != WDL for LinearWDL),
 #   TRAIN_LR_INITIAL (0.001), TRAIN_LR_FINAL (1e-7),
 #   TRAIN_BATCH_SIZE (16384), TRAIN_BATCHES_PER_SB (12208),
 #   TRAIN_SAVE_RATE (10), TRAIN_THREADS (all cores).
 #   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh
-#   (HIDDEN is runtime here; the Zig engine's weights.zig is compile-time for 512 vs 768.)
+#   (HIDDEN is runtime here; the Zig engine's weights.zig must match at build time.)
 #
 # Output: training/checkpoints/ directory with saved networks
 # The quantised.bin file from a checkpoint can be directly used as an .nnue file.
