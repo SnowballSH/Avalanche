@@ -14,11 +14,11 @@ June 2026 update: **Avalanche now builds with Zig 0.16.0.**
 
 ## Strength
 
-**Latest (3.1.0 dev): estimated 3460-3520**
+**Latest (3.1.0 dev): estimated 3500**
 
-**Official [40/15 CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3346**
+**Official [40/15 CCRL ELO (v3.0.0)](https://computerchess.org.uk/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%203.0.0%2064-bit#Avalanche_3_0_0_64-bit): 3384**
 
-**Official [Blitz CCRL ELO (v2.1.0)](https://computerchess.org.uk/ccrl/404/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%202.1.0%2064-bit#Avalanche_2_1_0_64-bit): 3400**
+**Official [Blitz CCRL ELO (v3.0.0)](https://computerchess.org.uk/404/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%203.0.0%2064-bit#Avalanche_3_0_0_64-bit): 3420**
 
 Version 2.1.0 participated in TCEC Swiss 6.
 
@@ -87,7 +87,43 @@ Avalanche follows the UCI protocol and is not a full chess application. You shou
 - UCI Interface/Communication code
   - 100% original
 
+## Neural Networks
+
+All Neural Networks used by Avalanche are trained through self-play. There have been several generations of reinforcement learning, listed below by codenames:
+
+- Huangpujiang 黄浦江
+  - `768x16 -> 1024 -> 8`
+  - Dual-perspective, mirrored input buckets basedon king position
+  - First net with input buckets
+  - Trained from scratch on the same 2 billion positions from Qinyuanchun
+- Molihua 茉莉花
+  - `768 -> 1024x2 -> 8`
+  - Final iteration of "flat" net
+  - Fine-tuned Qinyuanchun on 2 billion positions from Qinyuanchun
+- Qinyuanchun 沁园春
+  - `768 -> 1024x2 -> 8`
+  - Trained from scratch on 2 billion positions from Shuang
+- Shuang 霜
+  - `768 -> 768x2 -> 8`
+  - Trained from scratch on 1.3 billion positions from Jihan
+- Jihan 极寒
+  - `768 -> 512x2 -> 8`
+  - Trained from scratch on 1 billion positions from Bingshan
+- Bingshan 冰山
+  - `768 -> 512x2 -> 8`
+  - First net with output buckets
+  - Trained from scratch on Xuebeng data
+- Xuebeng 雪崩
+  - `768 -> 512x2 -> 1`
+  - Trained on 512 million positions from earlier nets
+- net008b, net007b
+  - Basic attempts of RL on base net
+- base
+  - `768 -> 128x2 -> 1`
+  - Trained on HCE labeling of a few thousands of TCEC games
+
 ## Alternative Square Logos
+
 <img src="https://github.com/SnowballSH/Avalanche/assets/66022611/cf099f87-91ad-4fd9-a2c3-177b790cd59e" alt="Logo 2" width=400 height=400/>
 <img src="https://github.com/SnowballSH/Avalanche/assets/66022611/6ece76d4-ce7c-43e7-8321-27e368b12760" alt="Logo 3" width=400 height=400/>
 <img src="https://github.com/SnowballSH/Avalanche/assets/66022611/ef77edf1-9f8d-45dc-867f-533a4c84d22f" alt="Logo 4" width=400 height=400/>
