@@ -130,7 +130,7 @@ fn main() {
         }
     }
 
-    let input_mode = env_string("TRAIN_INPUT", "chess768");
+    let input_mode = env_string("TRAIN_INPUT", "buckets16");
     let hidden_size = env_usize("TRAIN_HIDDEN", 1024);
     if matches!(input_mode.as_str(), "buckets16" | "buckets") && hidden_size != 1024 {
         eprintln!(
@@ -171,7 +171,7 @@ fn main() {
         "buckets16" | "buckets" => run_buckets16(cfg),
         other => {
             eprintln!("Error: unknown TRAIN_INPUT={other:?}");
-            eprintln!("Supported: chess768 (default), buckets16");
+            eprintln!("Supported: buckets16 (default), chess768");
             std::process::exit(1);
         }
     }

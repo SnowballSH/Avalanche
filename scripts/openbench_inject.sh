@@ -18,7 +18,7 @@
 #   scripts/openbench_inject.sh codename:net.nnue [codename:net.nnue ...]
 #   scripts/openbench_inject.sh                 # uses the CANDIDATES list below
 #   DRY_RUN=1 scripts/openbench_inject.sh ...   # build and seed only, no DB write
-#   HIDDEN=768 scripts/openbench_inject.sh ...  # for 768-wide nets
+#   HIDDEN=768 BUCKETS=1 scripts/openbench_inject.sh ...  # override architecture
 #
 # Candidate format "codename:netfile[:token]": codename is the name shown in the UI,
 # netfile is the .nnue path, token is an optional 8-char id (default sha256(net)[:8];
@@ -37,7 +37,8 @@ SOURCE_REPO="${SOURCE_REPO:-https://github.com/SnowballSH/Avalanche}" # placehol
 OB_DIR="${OB_DIR:-$REPO/OpenBench}"
 OB_PY="${OB_PY:-$OB_DIR/.venv/bin/python}"
 ENGINES_CACHE="${ENGINES_CACHE:-$OB_DIR/Client/Engines}"
-HIDDEN="${HIDDEN:-512}"                               # hidden size for build_net_engine.sh
+HIDDEN="${HIDDEN:-1024}"                              # hidden size for build_net_engine.sh
+BUCKETS="${BUCKETS:-16}"                              # king input buckets for build_net_engine.sh
 
 # Reference nps for time scaling: default = "nps" from Engines/<Engine>.json.
 REF_NPS="${REF_NPS:-$(python3 -c "import json;print(json.load(open('$OB_DIR/Engines/$ENGINE.json'))['nps'])" 2>/dev/null || echo 1500000)}"
@@ -56,7 +57,7 @@ STC_TC="${STC_TC:-10.0+0.1}" ; STC_OPTS="${STC_OPTS:-Threads=1 Hash=8}"  ; STC_W
 LTC_TC="${LTC_TC:-60.0+0.6}" ; LTC_OPTS="${LTC_OPTS:-Threads=1 Hash=64}" ; LTC_WL="${LTC_WL:-8}"  ; LTC_PRIO="${LTC_PRIO:-100}" ; LTC_PGNS="${LTC_PGNS:-FALSE}"
 
 # Base (reference) net. Set BASE_TOKEN to reuse an existing engine row/binary.
-BASE_NAME="${BASE_NAME:-molihua}" ; BASE_NET="${BASE_NET:-$REPO/nets/molihua.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
+BASE_NAME="${BASE_NAME:-huangpujiang}" ; BASE_NET="${BASE_NET:-$REPO/nets/huangpujiang.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
 
 # Candidates to test. Pass them as CLI args, or list them here. Format as above, e.g.
 #   CANDIDATES=( "mynet:$REPO/nets/mynet.nnue" )
@@ -88,7 +89,7 @@ prepare_engine() { # name net explicit_token
   cache_bin="$ENGINES_CACHE/$ENGINE-$token"
   if [ ! -x "$cache_bin" ]; then
     built="$REPO/engines_built/$ENGINE-$name"
-    [ -x "$built" ] || "$REPO/scripts/build_net_engine.sh" "$net" "$name" "$HIDDEN" >&2
+    [ -x "$built" ] || "$REPO/scripts/build_net_engine.sh" "$net" "$name" "$HIDDEN" "$BUCKETS" >&2
     cp -f "$built" "$cache_bin"; chmod +x "$cache_bin"
     bold ":: seeded $ENGINE-$token  <- $name ($net)"
   else

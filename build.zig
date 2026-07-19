@@ -64,8 +64,8 @@ pub fn build(b: *std.Build) void {
     const targetName = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
     // It is imported under the name "nnue", which weights.zig @embedFile's.
-    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/molihua.nnue";
-    const inputBuckets = b.option(usize, "buckets", "King input buckets (1=Chess768, 16=buckets+HM)") orelse 1;
+    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/huangpujiang.nnue";
+    const inputBuckets = b.option(usize, "buckets", "King input buckets (1=Chess768, 16=buckets+HM)") orelse 16;
     if (inputBuckets != 1 and inputBuckets != 16) {
         @panic("-Dbuckets must be 1 (Chess768) or 16 (ChessBucketsMirrored)");
     }

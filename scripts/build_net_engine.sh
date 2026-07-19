@@ -6,7 +6,7 @@
 #   net_file : path to a .nnue (relative to repo root or absolute)
 #   out_name : output binary name -> engines_built/Avalanche-<out_name>
 #   hidden   : optional hidden size (1024 default; patches weights.zig + tests if different)
-#   buckets  : optional king input buckets (1=Chess768 default, 16=ChessBucketsMirrored)
+#   buckets  : optional king input buckets (1=Chess768, 16=ChessBucketsMirrored; default 16)
 #
 # Output: engines_built/Avalanche-<out_name>
 set -euo pipefail
@@ -16,7 +16,7 @@ cd "$REPO"
 NET="${1:?usage: build_net_engine.sh <net_file> <out_name> [hidden] [buckets]}"
 NAME="${2:?usage: build_net_engine.sh <net_file> <out_name> [hidden] [buckets]}"
 HIDDEN="${3:-1024}"
-BUCKETS="${4:-1}"
+BUCKETS="${4:-16}"
 case "$BUCKETS" in
   1|16) ;;
   *) echo "error: buckets must be 1 or 16 (got $BUCKETS)" >&2; exit 1 ;;
