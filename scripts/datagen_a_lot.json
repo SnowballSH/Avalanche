@@ -24,7 +24,7 @@
       "book": "books/2moves_v1.epd"
     },
     {
-      "count": 3,
+      "count": 4,
       "book": "books/noob_3moves.epd"
     },
     {
@@ -32,7 +32,7 @@
       "book": "books/noob_4moves.epd"
     },
     {
-      "count": 2,
+      "count": 1,
       "book": "books/stalemates_200d30_v1.epd"
     },
     {
@@ -44,7 +44,7 @@
       "book": "books/Drawkiller_balanced_big.epd"
     },
     {
-      "count": 4,
+      "count": 5,
       "book": "books/UHO_4060_v4.epd"
     },
     {
@@ -52,7 +52,7 @@
       "book": "books/hybrid_book_beta.epd"
     },
     {
-      "count": 3,
+      "count": 4,
       "book": "books/UHO_Lichess_4852_v1.epd"
     },
     {
@@ -60,11 +60,11 @@
       "book": "books/popularpos_lichess_v3.epd"
     },
     {
-      "count": 2,
+      "count": 1,
       "book": "books/endgames.epd"
     },
     {
-      "count": 2,
+      "count": 1,
       "book": "books/endgames_cdb95105.epd"
     },
     {

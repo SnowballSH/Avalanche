@@ -1096,6 +1096,42 @@ test "search: mate in 1 (black back-rank)" {
     try expect(s.best_move.to_u16() == mating.to_u16());
 }
 
+test "search: forced unbounded search continues after reporting mate" {
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    types.GLOBAL_IO = io_threaded.io();
+
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+    search.init_lmr();
+    tt.GlobalTT.reset(16);
+    search.NUM_THREADS = 0;
+    tt.GlobalTT.clear();
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.init();
+    pos.set_fen("rnbq1rk1/pp3ppp/8/2b1P3/1pP1P1n1/5N2/P3B1PP/RNBQRK2 b - - 4 13"[0..]);
+
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    // Keep output enabled: the old bug imposed its depth cap while reporting
+    // the first mate score (M9 in this position).
+    s.silent_output = false;
+    s.max_nodes = 200_000;
+    s.stop = false;
+    s.reset_heuristics(true);
+
+    const score = s.iterative_deepening(pos, types.Color.Black, null);
+    const mate_moves = @divTrunc(hce.MateScore - @as(i32, @intCast(@abs(score))) + 1, 2);
+
+    try expect(s.total_nodes() >= s.max_nodes.?);
+    try expect(score > 0);
+    try expect(mate_moves == 4);
+}
+
 test "search: stalemate scores as draw" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();

@@ -459,7 +459,10 @@ pub const Searcher = struct {
                     outW.print("mate {} pv", .{
                         (@divTrunc(hce.MateScore - (@as(i32, @intCast(@abs(score)))) + 1, 2)) * @as(i32, if (score > 0) 1 else -1),
                     }) catch {};
-                    if (max_depth == null and bound == MAX_PLY - 2) {
+                    // Timed searches may wind down once a mate is found, but
+                    // forced searches (`go infinite` and explicit hard limits)
+                    // must keep going until their caller-provided stop condition.
+                    if (!self.force_thinking and max_depth == null and bound == MAX_PLY - 2) {
                         bound = depth + 2;
                     }
                 } else {
