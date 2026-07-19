@@ -68,20 +68,22 @@ pub const Position = struct {
     // Classical Evaluator
     evaluator: hce.DynamicEvaluator = undefined,
 
+    pub fn init(self: *Position) void {
+        self.* = .{};
+        @memset(self.piece_bitboards[0..types.N_PIECES], 0);
+        @memset(self.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
+        self.history[0] = UndoInfo.new();
+        self.evaluator = hce.DynamicEvaluator{};
+        self.evaluator.nnue_evaluator.accumulator.clear();
+    }
+
     pub fn new() Position {
-        var pos = Position{};
-
-        @memset(pos.piece_bitboards[0..types.N_PIECES], 0);
-        @memset(pos.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
-        pos.history[0] = UndoInfo.new();
-        pos.evaluator = hce.DynamicEvaluator{};
-        pos.evaluator.nnue_evaluator.stack_index = 0;
-        pos.evaluator.nnue_evaluator.accumulator_stack[0].clear();
-
+        var pos: Position = undefined;
+        pos.init();
         return pos;
     }
 
-    pub fn debug_print(self: Position) void {
+    pub fn debug_print(self: *const Position) void {
         const line = "   +---+---+---+---+---+---+---+---+\n";
         const letters = "     A   B   C   D   E   F   G   H\n";
         std.debug.print("{s}", .{letters});
@@ -104,7 +106,7 @@ pub const Position = struct {
     }
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
-        self.* = Position.new();
+        self.init();
         var sq: i32 = @as(i32, @intCast(@intFromEnum(types.Square.a8)));
         var tokens = std.mem.tokenizeScalar(u8, fen, ' ');
         const bd = tokens.next().?;
@@ -179,7 +181,7 @@ pub const Position = struct {
         self.evaluator.full_refresh(self);
     }
 
-    pub fn basic_fen(self: Position, allocator: std.mem.Allocator) []u8 {
+    pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
         var fen: []u8 = allocator.alloc(u8, 128) catch unreachable;
         var index: usize = 0;
 
@@ -280,7 +282,7 @@ pub const Position = struct {
         return fen[0..index];
     }
 
-    pub inline fn phase(self: *Position) usize {
+    pub inline fn phase(self: *const Position) usize {
         var val: usize = 0;
         val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]);
         val += 2 * types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()]);
@@ -288,7 +290,7 @@ pub const Position = struct {
         return val;
     }
 
-    pub inline fn phase_material(self: *Position) i32 {
+    pub inline fn phase_material(self: *const Position) i32 {
         var val: i32 = 0;
         val += see.SeeWeight[1] * types.popcount(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()]);
         val += see.SeeWeight[2] * types.popcount(self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]);
@@ -343,32 +345,32 @@ pub const Position = struct {
         self.mailbox[from.index()] = types.Piece.NO_PIECE;
     }
 
-    pub inline fn diagonal_sliders(self: Position, comptime color: types.Color) types.Bitboard {
+    pub inline fn diagonal_sliders(self: *const Position, comptime color: types.Color) types.Bitboard {
         return if (color == types.Color.White)
             self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()]
         else
             self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()];
     }
 
-    pub inline fn orthogonal_sliders(self: Position, comptime color: types.Color) types.Bitboard {
+    pub inline fn orthogonal_sliders(self: *const Position, comptime color: types.Color) types.Bitboard {
         return if (color == types.Color.White)
             self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()]
         else
             self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()];
     }
 
-    pub inline fn all_pieces(self: Position, comptime color: types.Color) types.Bitboard {
+    pub inline fn all_pieces(self: *const Position, comptime color: types.Color) types.Bitboard {
         return if (color == types.Color.White)
             self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()]
         else
             self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()];
     }
 
-    pub inline fn all_all_pieces(self: Position) types.Bitboard {
+    pub inline fn all_all_pieces(self: *const Position) types.Bitboard {
         return self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black);
     }
 
-    pub inline fn attackers_from(self: Position, comptime color: types.Color, sq: types.Square, occ: types.Bitboard) types.Bitboard {
+    pub inline fn attackers_from(self: *const Position, comptime color: types.Color, sq: types.Square, occ: types.Bitboard) types.Bitboard {
         if (color == types.Color.White) {
             const p = (tables.BlackPawnAttacks[sq.index()] & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]);
             const n = (tables.get_attacks(types.PieceType.Knight, sq, occ) & self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()]);
@@ -386,23 +388,23 @@ pub const Position = struct {
         }
     }
 
-    pub inline fn in_check(self: Position, comptime color: types.Color) bool {
+    pub inline fn in_check(self: *const Position, comptime color: types.Color) bool {
         comptime var king: types.Piece = types.Piece.new_comptime(color, types.PieceType.King);
         const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
         return self.attackers_from(opp, @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[king.index()]))), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
     }
 
-    pub inline fn has_non_pawns(self: Position) bool {
+    pub inline fn has_non_pawns(self: *const Position) bool {
         return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()] != self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black);
     }
 
-    pub inline fn has_non_pawns_color(self: Position, comptime color: types.Color) bool {
+    pub inline fn has_non_pawns_color(self: *const Position, comptime color: types.Color) bool {
         const king = types.Piece.new_comptime(color, types.PieceType.King);
         const pawn = types.Piece.new_comptime(color, types.PieceType.Pawn);
         return (self.all_pieces(color) & ~(self.piece_bitboards[king.index()] | self.piece_bitboards[pawn.index()])) != 0;
     }
 
-    pub inline fn has_pawns(self: Position) bool {
+    pub inline fn has_pawns(self: *const Position) bool {
         return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] != 0;
     }
 
@@ -528,6 +530,12 @@ pub const Position = struct {
                 }
             },
         }
+
+        if (comptime @import("../engine/weights.zig").NUM_INPUT_BUCKETS > 1) {
+            if (pt == types.PieceType.King) {
+                self.evaluator.nnue_evaluator.reconcile_king_buckets(self, color);
+            }
+        }
     }
 
     pub fn undo_move(self: *Position, comptime color: types.Color, move: types.Move) void {
@@ -604,6 +612,13 @@ pub const Position = struct {
         // The DOUBLE_PUSH branch above already removed this move's own EP key.
         if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
             self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
+        }
+
+        if (comptime @import("../engine/weights.zig").NUM_INPUT_BUCKETS > 1) {
+            const restored_pt = self.mailbox[move.from].piece_type();
+            if (restored_pt == types.PieceType.King or flags == types.MoveFlags.OO or flags == types.MoveFlags.OOO) {
+                self.evaluator.nnue_evaluator.reconcile_king_buckets(self, color);
+            }
         }
     }
 

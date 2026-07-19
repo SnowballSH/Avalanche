@@ -1,5 +1,16 @@
 # v3.1.0
 
+- New net: Huangpujiang (king buckets)
+
+LTC (60+0.60):
+```
+Elo   | 38.81 +- 8.73 (95%)
+SPRT  | 60.0+0.6s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 1798 W: 520 L: 320 D: 958
+Penta | [8, 137, 419, 317, 18]
+```
+
 - New net: Molihua
 
 STC (10+0.10):

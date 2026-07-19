@@ -403,7 +403,7 @@ pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i
 }
 
 pub inline fn evaluate_nnue(pos: *position.Position) i32 {
-    return pos.evaluator.nnue_evaluator.evaluate(pos.turn);
+    return pos.evaluator.nnue_evaluator.evaluate(pos.turn, pos);
 }
 
 pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: types.Color) i32 {

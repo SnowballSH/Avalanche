@@ -18,13 +18,16 @@ pub const UciInterface = struct {
     searcher: search.Searcher,
 
     pub fn new() UciInterface {
-        var p = position.Position.new();
-        p.set_fen(types.DEFAULT_FEN[0..]);
-        return UciInterface{
-            .position = p,
-            .search_thread = null,
-            .searcher = search.Searcher.new(),
-        };
+        var ui: UciInterface = undefined;
+        ui.init();
+        return ui;
+    }
+
+    pub fn init(self: *UciInterface) void {
+        self.position.init();
+        self.position.set_fen(types.DEFAULT_FEN[0..]);
+        self.search_thread = null;
+        self.searcher.init();
     }
 
     fn join_search(self: *UciInterface) void {
@@ -43,8 +46,14 @@ pub const UciInterface = struct {
         var out_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
         const stdout = &out_file.interface;
 
-        self.searcher.deinit();
-        self.searcher = search.Searcher.new();
+        defer {
+            @atomicStore(bool, &self.searcher.stop, true, .monotonic);
+            self.join_search();
+            self.searcher.deinit();
+            search.helper_searchers.deinit();
+            search.threads.deinit();
+            syzygy.deinit();
+        }
 
         self.position.set_fen(types.DEFAULT_FEN[0..]);
 
@@ -601,16 +610,6 @@ pub const UciInterface = struct {
                 }
             }
         }
-
-        // EOF/quit can break the loop mid-search; stop and join the worker
-        // before freeing the searcher/position/TT it still references.
-        @atomicStore(bool, &self.searcher.stop, true, .monotonic);
-        self.join_search();
-
-        self.searcher.deinit();
-        search.helper_searchers.deinit();
-        search.threads.deinit();
-        syzygy.deinit();
     }
 };
 

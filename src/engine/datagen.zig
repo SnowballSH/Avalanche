@@ -345,7 +345,6 @@ pub const DatagenSingle = struct {
 
     fn resetSearchStateForGame(self: *DatagenSingle, pos: *position.Position) void {
         for (&self.searchers) |*s| {
-            s.root_board = pos.*;
             s.reset_heuristics(true);
             @atomicStore(bool, &s.stop, false, .monotonic);
             s.time_stop = false;
@@ -368,7 +367,6 @@ pub const DatagenSingle = struct {
 
     fn searchPosition(self: *DatagenSingle, pos: *position.Position) SearchResult {
         var s = self.activeSearcher(pos.turn);
-        s.root_board = pos.*;
         s.time_stop = false;
         s.force_thinking = false;
         @atomicStore(bool, &s.stop, false, .monotonic);
@@ -437,7 +435,8 @@ pub const DatagenSingle = struct {
     }
 
     pub fn playGameViri(self: *DatagenSingle) !void {
-        var pos = position.Position.new();
+        var pos: position.Position = undefined;
+        pos.init();
 
         const using_book = self.openings != null;
         if (self.openings) |book| {
@@ -585,7 +584,8 @@ pub const DatagenSingle = struct {
     }
 
     pub fn playGame(self: *DatagenSingle) !void {
-        var pos = position.Position.new();
+        var pos: position.Position = undefined;
+        pos.init();
 
         const using_book = self.openings != null;
         if (self.openings) |book| {
