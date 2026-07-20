@@ -442,6 +442,15 @@ pub const Searcher = struct {
                 }
             }
 
+            const is_mate_score = @as(i32, @intCast(@abs(score))) >= hce.MateScore - hce.MaxMate;
+            // Timed searches may wind down once a mate is found, but forced
+            // searches (`go infinite` and explicit hard limits) must keep going
+            // until their caller-provided stop condition. This search policy
+            // must not depend on whether UCI output is enabled.
+            if (is_mate_score and !self.force_thinking and max_depth == null and bound == MAX_PLY - 2) {
+                bound = depth + 2;
+            }
+
             if (!self.silent_output) {
                 const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
                 const nps = total_nodes_all * 1000 / @max(@as(u64, 1), elapsed_ms);
@@ -455,16 +464,10 @@ pub const Searcher = struct {
                     elapsed_ms,
                 }) catch {};
 
-                if ((@as(i32, @intCast(@abs(score)))) >= (hce.MateScore - hce.MaxMate)) {
+                if (is_mate_score) {
                     outW.print("mate {} pv", .{
                         (@divTrunc(hce.MateScore - (@as(i32, @intCast(@abs(score)))) + 1, 2)) * @as(i32, if (score > 0) 1 else -1),
                     }) catch {};
-                    // Timed searches may wind down once a mate is found, but
-                    // forced searches (`go infinite` and explicit hard limits)
-                    // must keep going until their caller-provided stop condition.
-                    if (!self.force_thinking and max_depth == null and bound == MAX_PLY - 2) {
-                        bound = depth + 2;
-                    }
                 } else {
                     outW.print("cp {} pv", .{
                         score,

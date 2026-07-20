@@ -1096,7 +1096,7 @@ test "search: mate in 1 (black back-rank)" {
     try expect(s.best_move.to_u16() == mating.to_u16());
 }
 
-test "search: forced unbounded search continues after reporting mate" {
+test "search: forced node-limited search continues after reporting mate" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
     types.GLOBAL_IO = io_threaded.io();
@@ -1117,10 +1117,11 @@ test "search: forced unbounded search continues after reporting mate" {
     var s = search.Searcher.new();
     defer s.deinit();
     s.force_thinking = true;
-    // Keep output enabled: the old bug imposed its depth cap while reporting
-    // the first mate score (M9 in this position).
-    s.silent_output = false;
-    s.max_nodes = 200_000;
+    // A finite node limit keeps the test bounded while still requiring the
+    // search to continue beyond the old mate cutoff (which stopped after fewer
+    // than 50,000 nodes). Search policy is deliberately independent of output.
+    s.silent_output = true;
+    s.max_nodes = 60_000;
     s.stop = false;
     s.reset_heuristics(true);
 
@@ -1129,7 +1130,7 @@ test "search: forced unbounded search continues after reporting mate" {
 
     try expect(s.total_nodes() >= s.max_nodes.?);
     try expect(score > 0);
-    try expect(mate_moves == 4);
+    try expect(mate_moves == 8);
 }
 
 test "search: stalemate scores as draw" {
