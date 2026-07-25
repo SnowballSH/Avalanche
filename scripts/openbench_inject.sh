@@ -53,11 +53,13 @@ SCALE_METHOD="${SCALE_METHOD:-BOTH}"                 # DEV | BASE | BOTH
 
 # STC / LTC presets — keep in sync with Engines/<Engine>.json test_presets.
 # STC is given higher priority so workers exhaust all STC before any LTC.
+# SKIP_LTC=1 creates STC SPRTs only (no LTC rows).
 STC_TC="${STC_TC:-10.0+0.1}" ; STC_OPTS="${STC_OPTS:-Threads=1 Hash=8}"  ; STC_WL="${STC_WL:-32}" ; STC_PRIO="${STC_PRIO:-200}" ; STC_PGNS="${STC_PGNS:-FALSE}"
 LTC_TC="${LTC_TC:-60.0+0.6}" ; LTC_OPTS="${LTC_OPTS:-Threads=1 Hash=64}" ; LTC_WL="${LTC_WL:-8}"  ; LTC_PRIO="${LTC_PRIO:-100}" ; LTC_PGNS="${LTC_PGNS:-FALSE}"
+SKIP_LTC="${SKIP_LTC:-0}"
 
 # Base (reference) net. Set BASE_TOKEN to reuse an existing engine row/binary.
-BASE_NAME="${BASE_NAME:-huangpujiang}" ; BASE_NET="${BASE_NET:-$REPO/nets/huangpujiang.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
+BASE_NAME="${BASE_NAME:-zidingxiang}" ; BASE_NET="${BASE_NET:-$REPO/nets/zidingxiang.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
 
 # Candidates to test. Pass them as CLI args, or list them here. Format as above, e.g.
 #   CANDIDATES=( "mynet:$REPO/nets/mynet.nnue" )
@@ -87,8 +89,11 @@ prepare_engine() { # name net explicit_token
   [ -f "$net" ] || die "net file not found: $net"
   token="$(derive_token "$net" "$explicit")"
   cache_bin="$ENGINES_CACHE/$ENGINE-$token"
+  built="$REPO/engines_built/$ENGINE-$name"
+  if [ "${FORCE_REBUILD:-0}" = "1" ]; then
+    rm -f "$cache_bin" "$built"
+  fi
   if [ ! -x "$cache_bin" ]; then
-    built="$REPO/engines_built/$ENGINE-$name"
     [ -x "$built" ] || "$REPO/scripts/build_net_engine.sh" "$net" "$name" "$HIDDEN" "$BUCKETS" >&2
     cp -f "$built" "$cache_bin"; chmod +x "$cache_bin"
     bold ":: seeded $ENGINE-$token  <- $name ($net)"
@@ -101,7 +106,7 @@ prepare_engine() { # name net explicit_token
 }
 
 bold "== OpenBench injector =="
-bold "   engine=$ENGINE  ref_nps=$REF_NPS  bounds=[$BOUNDS_LOWER,$BOUNDS_UPPER]  STC prio=$STC_PRIO  LTC prio=$LTC_PRIO"
+bold "   engine=$ENGINE  ref_nps=$REF_NPS  bounds=[$BOUNDS_LOWER,$BOUNDS_UPPER]  STC prio=$STC_PRIO  LTC prio=$LTC_PRIO  skip_ltc=$SKIP_LTC"
 
 BASE_TRIPLE="$(prepare_engine "$BASE_NAME" "$BASE_NET" "$BASE_TOKEN")"
 CAND_TRIPLES=()
@@ -113,7 +118,7 @@ done
 # Serialize the whole plan to JSON for the Django step (env avoids quoting pain).
 export ENGINE SOURCE_REPO REF_NPS AUTHOR BOOK BOUNDS_LOWER BOUNDS_UPPER ALPHA BETA \
        WIN_ADJ DRAW_ADJ SCALE_METHOD STC_TC STC_OPTS STC_WL STC_PRIO STC_PGNS \
-       LTC_TC LTC_OPTS LTC_WL LTC_PRIO LTC_PGNS
+       LTC_TC LTC_OPTS LTC_WL LTC_PRIO LTC_PGNS SKIP_LTC
 export BASE_TRIPLE
 export CAND_TRIPLES_STR="$(printf '%s\n' "${CAND_TRIPLES[@]}")"
 OB_INJECT_CONFIG="$(python3 - <<'PYJSON'
@@ -130,6 +135,7 @@ cfg = {
   "alpha": float(os.environ["ALPHA"]), "beta": float(os.environ["BETA"]),
   "win_adj": os.environ["WIN_ADJ"], "draw_adj": os.environ["DRAW_ADJ"],
   "scale_method": os.environ["SCALE_METHOD"], "stc": leg("STC"), "ltc": leg("LTC"),
+  "skip_ltc": os.environ.get("SKIP_LTC", "0") in ("1", "true", "TRUE", "yes", "YES"),
   "base": trip(os.environ["BASE_TRIPLE"]),
   "candidates": [trip(x) for x in os.environ["CAND_TRIPLES_STR"].splitlines() if x.strip()],
 }
@@ -199,10 +205,11 @@ with transaction.atomic():
     for spec in cfg["candidates"]:
         dev = upsert_engine(spec)
         stc = make_test(dev, cfg["stc"], "STC")
-        ltc = make_test(dev, cfg["ltc"], "LTC")
+        ltc = None if cfg.get("skip_ltc") else make_test(dev, cfg["ltc"], "LTC")
         msg = "%-12s bench=%-9d" % (spec["name"], spec["bench"])
         if stc: msg += "  STC id=%d(prio %d)" % (stc.id, stc.priority)
         if ltc: msg += "  LTC id=%d(prio %d)" % (ltc.id, ltc.priority)
+        if cfg.get("skip_ltc"): msg += "  (STC only)"
         print(msg)
 
 active = Test.objects.filter(approved=True, finished=False, deleted=False, awaiting=False)

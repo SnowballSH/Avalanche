@@ -103,6 +103,7 @@ struct TrainConfig {
     batches_per_superbatch: usize,
     wdl_proportion: f32,
     wdl_end: f32,
+    lr_schedule: String,
     lr_initial: f32,
     lr_final: f32,
     net_id: String,
@@ -143,12 +144,22 @@ fn main() {
     let batches_per_superbatch = env_usize("TRAIN_BATCHES_PER_SB", 12208);
     let wdl_proportion = env_f32("TRAIN_WDL", 0.25);
     let wdl_end = env_f32("TRAIN_WDL_END", wdl_proportion);
+    let lr_schedule = env_string("TRAIN_LR_SCHEDULE", "cosine");
     let lr_initial = env_f32("TRAIN_LR_INITIAL", 0.001);
     let lr_final = env_f32("TRAIN_LR_FINAL", 0.0000001);
     let net_id = env_string("TRAIN_NET_ID", "net");
     let save_rate = env_usize("TRAIN_SAVE_RATE", 10);
     let threads = env_usize("TRAIN_THREADS", num_cpus());
     let use_factoriser = env_bool("TRAIN_FACTORISER", true);
+
+    match lr_schedule.as_str() {
+        "cosine" | "constant" => {}
+        other => {
+            eprintln!("Error: unknown TRAIN_LR_SCHEDULE={other:?}");
+            eprintln!("Supported: cosine (default), constant");
+            std::process::exit(1);
+        }
+    }
 
     let cfg = TrainConfig {
         hidden_size,
@@ -157,6 +168,7 @@ fn main() {
         batches_per_superbatch,
         wdl_proportion,
         wdl_end,
+        lr_schedule,
         lr_initial,
         lr_final,
         net_id,
@@ -195,10 +207,13 @@ fn print_banner(cfg: &TrainConfig, arch: &str) {
     );
     println!("Threads: {}", cfg.threads);
     println!("WDL: {} -> {}", cfg.wdl_proportion, cfg.wdl_end);
-    println!(
-        "LR: cosine {} -> {} over {} sb",
-        cfg.lr_initial, cfg.lr_final, cfg.superbatches
-    );
+    match cfg.lr_schedule.as_str() {
+        "constant" => println!("LR: constant {}", cfg.lr_initial),
+        _ => println!(
+            "LR: cosine {} -> {} over {} sb",
+            cfg.lr_initial, cfg.lr_final, cfg.superbatches
+        ),
+    }
     println!("==============================");
     println!();
 }
@@ -215,11 +230,6 @@ macro_rules! run_trainer {
             start_superbatch: 1,
             end_superbatch: cfg.superbatches,
         };
-        let lr_scheduler = lr::CosineDecayLR {
-            initial_lr: cfg.lr_initial,
-            final_lr: cfg.lr_final,
-            final_superbatch: cfg.superbatches,
-        };
 
         let settings = LocalSettings {
             threads: cfg.threads,
@@ -233,17 +243,21 @@ macro_rules! run_trainer {
         let net_id = cfg.net_id.clone();
         let wdl_proportion = cfg.wdl_proportion;
         let wdl_end = cfg.wdl_end;
+        let lr_schedule = cfg.lr_schedule.clone();
+        let lr_initial = cfg.lr_initial;
+        let lr_final = cfg.lr_final;
+        let superbatches = cfg.superbatches;
         let save_rate = cfg.save_rate;
         let threads = cfg.threads;
 
         macro_rules! run_with_schedule {
-            ($wdl_sched:expr) => {{
+            ($wdl_sched:expr, $lr_sched:expr) => {{
                 let schedule = TrainingSchedule {
                     net_id: net_id.clone(),
                     eval_scale: EVAL_SCALE,
                     steps,
                     wdl_scheduler: $wdl_sched,
-                    lr_scheduler,
+                    lr_scheduler: $lr_sched,
                     save_rate,
                 };
                 if use_viri {
@@ -263,15 +277,42 @@ macro_rules! run_trainer {
             }};
         }
 
-        if (wdl_end - wdl_proportion).abs() > 1e-6 {
-            run_with_schedule!(wdl::LinearWDL {
-                start: wdl_proportion,
-                end: wdl_end
-            });
-        } else {
-            run_with_schedule!(wdl::ConstantWDL {
-                value: wdl_proportion
-            });
+        let linear_wdl = (wdl_end - wdl_proportion).abs() > 1e-6;
+        match (linear_wdl, lr_schedule.as_str()) {
+            (true, "constant") => run_with_schedule!(
+                wdl::LinearWDL {
+                    start: wdl_proportion,
+                    end: wdl_end
+                },
+                lr::ConstantLR { value: lr_initial }
+            ),
+            (false, "constant") => run_with_schedule!(
+                wdl::ConstantWDL {
+                    value: wdl_proportion
+                },
+                lr::ConstantLR { value: lr_initial }
+            ),
+            (true, _) => run_with_schedule!(
+                wdl::LinearWDL {
+                    start: wdl_proportion,
+                    end: wdl_end
+                },
+                lr::CosineDecayLR {
+                    initial_lr: lr_initial,
+                    final_lr: lr_final,
+                    final_superbatch: superbatches,
+                }
+            ),
+            (false, _) => run_with_schedule!(
+                wdl::ConstantWDL {
+                    value: wdl_proportion
+                },
+                lr::CosineDecayLR {
+                    initial_lr: lr_initial,
+                    final_lr: lr_final,
+                    final_superbatch: superbatches,
+                }
+            ),
         }
 
         println!("Training complete. net_id={net_id}");

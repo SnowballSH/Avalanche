@@ -1,5 +1,16 @@
 # v3.1.0
 
+- New net: Zidingxiang (FT from Huangpujiang kb16; `zidingxiang04-20`)
+
+STC (10+0.10) vs Huangpujiang:
+```
+Elo   | 35.83 +- 8.5 (95%)
+SPRT  | 10.0+0.1s Threads=1 Hash=8MB
+LLR   | passed [0.00, 3.00]
+Games | N: 1946 W: 541 L: 341 D: 1064
+Penta | [4, 172, 447, 320, 30]
+```
+
 - New net: Huangpujiang (king buckets)
 
 LTC (60+0.60):
