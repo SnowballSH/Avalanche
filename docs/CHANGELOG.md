@@ -1,6 +1,6 @@
 # v3.1.0
 
-- New net: Zidingxiang (FT from Huangpujiang kb16; `zidingxiang04-20`)
+- New net: Zidingxiang
 
 STC (10+0.10) vs Huangpujiang:
 ```
