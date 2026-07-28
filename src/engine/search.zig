@@ -9,6 +9,7 @@ const tt = @import("tt.zig");
 const movepick = @import("movepick.zig");
 const see = @import("see.zig");
 const syzygy = @import("syzygy.zig");
+const wdl_model = @import("wdl.zig");
 
 const parameters = @import("parameters.zig");
 
@@ -48,6 +49,13 @@ pub const NodeType = enum {
 
 pub const MAX_THREADS = 512;
 pub var NUM_THREADS: usize = 0;
+
+pub const DEFAULT_MOVE_OVERHEAD: u64 = 25;
+pub const MAX_MOVE_OVERHEAD: u64 = 5000;
+pub var MOVE_OVERHEAD: u64 = DEFAULT_MOVE_OVERHEAD;
+
+pub var CONTEMPT: i32 = 0;
+pub const MAX_CONTEMPT: i32 = 100;
 
 pub const STABILITY_MULTIPLIER = [5]f32{ 2.50, 1.20, 0.90, 0.80, 0.75 };
 
@@ -130,6 +138,8 @@ pub const Searcher = struct {
     }
 
     inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
+        if (self.tt_store_is_ambiguous(score, flag)) return;
+
         var stored = score;
         if (stored > SCORE_PLY_ADJ and stored <= hce.MateScore) {
             stored += @as(i32, @intCast(self.ply));
@@ -251,6 +261,29 @@ pub const Searcher = struct {
         return false;
     }
 
+    // Root-relative: negate on even plies. Store draws as 0 in the TT and
+    // re-apply on Exact-0 probe — the live value is ply-parity dependent.
+    inline fn contempt_score(self: *Searcher) i32 {
+        return if (self.ply % 2 == 0) -CONTEMPT else CONTEMPT;
+    }
+
+    inline fn tt_score(self: *Searcher, eval: i32, flag: tt.Bound) i32 {
+        if (CONTEMPT != 0 and flag == tt.Bound.Exact and eval == 0) {
+            return self.contempt_score();
+        }
+        return eval;
+    }
+
+    inline fn tt_draw_store(_: *Searcher) i32 {
+        return 0;
+    }
+
+    // Skip TT stores that could be a live draw value or Exact 0 under contempt.
+    inline fn tt_store_is_ambiguous(self: *Searcher, score: i32, flag: tt.Bound) bool {
+        return CONTEMPT != 0 and
+            (score == self.contempt_score() or (flag == tt.Bound.Exact and score == 0));
+    }
+
     fn draw_score(self: *Searcher, pos: *position.Position, comptime color: types.Color, in_check: bool, threefold: bool) ?i32 {
         if (!self.is_draw(pos, threefold)) return null;
 
@@ -265,7 +298,7 @@ pub const Searcher = struct {
             }
         }
 
-        return 0;
+        return self.contempt_score();
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) i32 {
@@ -313,16 +346,24 @@ pub const Searcher = struct {
                 self.filter_root_moves(&root_moves);
             }
             if (root_moves.items.len == 0) {
-                const terminal = if (pos.in_check(color))
+                const in_check = pos.in_check(color);
+                const terminal: i32 = if (in_check)
                     -hce.MateScore
                 else
-                    @as(i32, 0);
+                    self.contempt_score();
                 if (!self.silent_output) {
                     outW.print("info depth 0 score ", .{}) catch {};
-                    if (terminal < 0) {
+                    if (in_check) {
                         outW.writeAll("mate 0") catch {};
                     } else {
-                        outW.writeAll("cp 0") catch {};
+                        outW.print("cp {}", .{terminal}) catch {};
+                    }
+                    if (wdl_model.show_wdl) {
+                        const p = if (in_check)
+                            wdl_model.decisive(terminal)
+                        else
+                            wdl_model.Prediction{ .win = 0, .draw = 1000, .loss = 0 };
+                        outW.print(" wdl {} {} {}", .{ p.win, p.draw, p.loss }) catch {};
                     }
                     outW.writeAll("\nbestmove 0000\n") catch {};
                     outW.flush() catch {};
@@ -367,7 +408,7 @@ pub const Searcher = struct {
 
             var depth = tdepth;
 
-            if (depth >= 6) {
+            if (depth >= parameters.AspirationDepth) {
                 const window = @max(parameters.AspirationWindow, 1);
                 if (@as(i32, @intCast(@abs(score))) < hce.MateScore - hce.MaxMate) {
                     alpha = @max(score - window, -hce.MateScore);
@@ -414,7 +455,7 @@ pub const Searcher = struct {
                     break;
                 }
 
-                delta += @max(@divTrunc(delta, 4), 1);
+                delta += @max(@divTrunc(delta * parameters.AspirationDeltaPercent, 100), 1);
             }
 
             if (self.best_move.to_u16() != bm.to_u16()) {
@@ -443,10 +484,7 @@ pub const Searcher = struct {
             }
 
             const is_mate_score = @as(i32, @intCast(@abs(score))) >= hce.MateScore - hce.MaxMate;
-            // Timed searches may wind down once a mate is found, but forced
-            // searches (`go infinite` and explicit hard limits) must keep going
-            // until their caller-provided stop condition. This search policy
-            // must not depend on whether UCI output is enabled.
+            const is_decisive_score = @as(i32, @intCast(@abs(score))) >= SCORE_PLY_ADJ;
             if (is_mate_score and !self.force_thinking and max_depth == null and bound == MAX_PLY - 2) {
                 bound = depth + 2;
             }
@@ -465,14 +503,24 @@ pub const Searcher = struct {
                 }) catch {};
 
                 if (is_mate_score) {
-                    outW.print("mate {} pv", .{
+                    outW.print("mate {}", .{
                         (@divTrunc(hce.MateScore - (@as(i32, @intCast(@abs(score)))) + 1, 2)) * @as(i32, if (score > 0) 1 else -1),
                     }) catch {};
                 } else {
-                    outW.print("cp {} pv", .{
+                    outW.print("cp {}", .{
                         score,
                     }) catch {};
                 }
+
+                if (wdl_model.show_wdl) {
+                    const p = if (is_decisive_score)
+                        wdl_model.decisive(score)
+                    else
+                        wdl_model.predict(score, pos.absolute_ply());
+                    outW.print(" wdl {} {} {}", .{ p.win, p.draw, p.loss }) catch {};
+                }
+
+                outW.writeAll(" pv") catch {};
 
                 if (self.pv_size[0] > 0) {
                     var i: usize = 0;
@@ -489,18 +537,26 @@ pub const Searcher = struct {
                 outW.flush() catch {};
             }
 
-            var factor: f32 = @max(0.5, 1.1 - 0.03 * @as(f32, @floatFromInt(stability)));
+            var factor: f32 = @max(
+                @as(f32, @floatFromInt(parameters.TmStabilityMin)) / 100.0,
+                @as(f32, @floatFromInt(parameters.TmStabilityBase)) / 100.0 -
+                    (@as(f32, @floatFromInt(parameters.TmStabilityMultiplier)) / 100.0) * @as(f32, @floatFromInt(stability)),
+            );
 
             if (score - prev_score > parameters.AspirationWindow) {
-                factor *= 1.1;
+                factor *= @as(f32, @floatFromInt(parameters.TmScoreJumpMultiplier)) / 100.0;
             }
 
-            if (tdepth >= 4 and self.nodes > 0) {
+            if (tdepth >= parameters.NodeTmDepth and self.nodes > 0) {
                 const bm_nodes = self.node_spent_table[bm.from][bm.to];
                 const frac = @as(f32, @floatFromInt(bm_nodes)) / @as(f32, @floatFromInt(self.nodes));
                 const node_base = @as(f32, @floatFromInt(parameters.NodeTmBase)) / 100.0;
                 const node_mult = @as(f32, @floatFromInt(parameters.NodeTmMultiplier)) / 100.0;
-                const node_scale = std.math.clamp((node_base - frac) * node_mult, 0.5, 2.0);
+                const node_scale = std.math.clamp(
+                    (node_base - frac) * node_mult,
+                    @as(f32, @floatFromInt(parameters.NodeTmMin)) / 100.0,
+                    @as(f32, @floatFromInt(parameters.NodeTmMax)) / 100.0,
+                );
                 factor *= node_scale;
             }
 
@@ -743,8 +799,11 @@ pub const Searcher = struct {
 
         // Step 1.7: Upcoming repetition detection (cuckoo)
         const repetition_ply = self.hash_history.items.len -| self.root_history_len;
-        if (!is_root and alpha < 0 and cuckoo.has_upcoming_repetition(pos, self.hash_history.items, @as(u32, @intCast(repetition_ply)))) {
-            alpha = 0;
+        const upcoming_draw = self.contempt_score();
+        if (!is_root and alpha < upcoming_draw and
+            cuckoo.has_upcoming_repetition(pos, self.hash_history.items, @as(u32, @intCast(repetition_ply))))
+        {
+            alpha = upcoming_draw;
             if (alpha >= beta) {
                 return alpha;
             }
@@ -764,6 +823,7 @@ pub const Searcher = struct {
             } else if (tt_eval < -SCORE_PLY_ADJ and tt_eval >= -hce.MateScore) {
                 tt_eval += @as(i32, @intCast(self.ply));
             }
+            tt_eval = self.tt_score(tt_eval, entry.?.flag);
             hashmove = entry.?.bestmove;
             if (is_root) {
                 self.best_move = hashmove;
@@ -805,7 +865,7 @@ pub const Searcher = struct {
                 const tb_flag: tt.Bound, const tb_score: i32 = switch (wdl) {
                     .win => .{ tt.Bound.Lower, TB_WIN_SCORE - @as(i32, @intCast(self.ply)) },
                     .loss => .{ tt.Bound.Upper, @as(i32, @intCast(self.ply)) - TB_WIN_SCORE },
-                    .draw => .{ tt.Bound.Exact, @as(i32, 0) },
+                    .draw => .{ tt.Bound.Exact, self.contempt_score() },
                 };
                 const cutoff = switch (tb_flag) {
                     tt.Bound.Exact => true,
@@ -814,8 +874,7 @@ pub const Searcher = struct {
                     else => false,
                 };
                 if (cutoff) {
-                    // Store ply-normalized (same convention as mate scores in Step 7).
-                    var stored_tb = tb_score;
+                    var stored_tb = if (wdl == .draw) self.tt_draw_store() else tb_score;
                     if (stored_tb > SCORE_PLY_ADJ) {
                         stored_tb += @as(i32, @intCast(self.ply));
                     } else if (stored_tb < -SCORE_PLY_ADJ) {
@@ -861,7 +920,7 @@ pub const Searcher = struct {
         // >> Step 3: Extensions/Reductions
         // Step 3.1: IIR
         // http://talkchess.com/forum3/viewtopic.php?f=7&t=74769&sid=85d340ce4f4af0ed413fba3188189cd1
-        if (depth >= 3 and !in_check and !tthit and self.exclude_move[self.ply].to_u16() == 0 and (on_pv or cutnode)) {
+        if (depth >= parameters.IIRDepth and !in_check and !tthit and self.exclude_move[self.ply].to_u16() == 0 and (on_pv or cutnode)) {
             depth -= 1;
         }
 
@@ -886,9 +945,9 @@ pub const Searcher = struct {
             }
 
             // Step 4.2: Null move pruning
-            if (!is_null and depth >= 3 and self.ply >= self.nmp_min_ply and nmp_static_eval >= beta and has_non_pawns) {
-                var r = parameters.NMPBase + depth / parameters.NMPDepthDivisor;
-                r += @as(usize, @intCast(@min(4, @divTrunc((static_eval - beta), parameters.NMPBetaDivisor))));
+            if (!is_null and depth >= parameters.NMPDepth and self.ply >= self.nmp_min_ply and nmp_static_eval >= beta and has_non_pawns) {
+                var r = parameters.NMPBase + ((depth * parameters.NMPDepthFactor) >> 8);
+                r += @as(usize, @intCast(@max(@as(i32, 0), @min(parameters.NMPBetaMax, @divTrunc((static_eval - beta), parameters.NMPBetaDivisor)))));
                 r = @min(r, depth);
 
                 self.ply += 1;
@@ -906,11 +965,11 @@ pub const Searcher = struct {
                         null_score = beta;
                     }
 
-                    if (depth < 12 or self.nmp_min_ply > 0) {
+                    if (depth < parameters.NMPVerifyDepth or self.nmp_min_ply > 0) {
                         return null_score;
                     }
 
-                    self.nmp_min_ply = self.ply + @as(u32, @intCast((depth - r) * 3 / 4));
+                    self.nmp_min_ply = self.ply + @as(u32, @intCast((depth - r) * parameters.NMPVerifyPlyFactor / 100));
 
                     const verif_score = self.negamax(pos, color, depth - r, beta - 1, beta, false, NodeType.NonPV, false);
 
@@ -927,7 +986,7 @@ pub const Searcher = struct {
             }
 
             // Step 4.3: Razoring
-            if (depth <= 3 and static_eval - parameters.RazoringBase + parameters.RazoringMargin * @as(i32, @intCast(depth)) < alpha) {
+            if (depth <= parameters.RazoringDepth and static_eval - parameters.RazoringBase + parameters.RazoringMargin * @as(i32, @intCast(depth)) < alpha) {
                 return self.quiescence_search(pos, color, alpha, beta);
             }
 
@@ -941,7 +1000,9 @@ pub const Searcher = struct {
                 const probcut_beta = beta + parameters.ProbCutMargin;
 
                 // Skip if TT already refutes at sufficient depth
-                if (!(tthit and entry.?.depth >= depth - 3 and entry.?.eval < probcut_beta)) {
+                if (!(tthit and entry.?.depth >= depth -| parameters.ProbCutTTDepthMargin and
+                    self.tt_score(entry.?.eval, entry.?.flag) < probcut_beta))
+                {
                     // Generate captures only
                     var pc_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
                     var pc_fba = std.heap.FixedBufferAllocator.init(&pc_bytes);
@@ -979,22 +1040,24 @@ pub const Searcher = struct {
                         }
 
                         if (qscore >= probcut_beta) {
-                            var stored = qscore;
-                            if (stored > SCORE_PLY_ADJ and stored <= hce.MateScore) {
-                                stored += @as(i32, @intCast(self.ply));
-                            } else if (stored < -SCORE_PLY_ADJ and stored >= -hce.MateScore) {
-                                stored -= @as(i32, @intCast(self.ply));
+                            if (!self.tt_store_is_ambiguous(qscore, tt.Bound.Lower)) {
+                                var stored = qscore;
+                                if (stored > SCORE_PLY_ADJ and stored <= hce.MateScore) {
+                                    stored += @as(i32, @intCast(self.ply));
+                                } else if (stored < -SCORE_PLY_ADJ and stored >= -hce.MateScore) {
+                                    stored -= @as(i32, @intCast(self.ply));
+                                }
+                                self.ttable.set(pos.hash, tt.Item{
+                                    .eval = stored,
+                                    .static_eval = @as(i16, @intCast(@min(@as(i32, 32767), @max(@as(i32, -32768), static_eval)))),
+                                    .bestmove = move,
+                                    .flag = tt.Bound.Lower,
+                                    .depth = @as(u8, @intCast(depth - parameters.ProbCutReduction + 1)),
+                                    .was_pv = 0,
+                                    .key = @as(u32, @truncate(pos.hash)),
+                                    .age = self.ttable.age,
+                                });
                             }
-                            self.ttable.set(pos.hash, tt.Item{
-                                .eval = stored,
-                                .static_eval = @as(i16, @intCast(@min(@as(i32, 32767), @max(@as(i32, -32768), static_eval)))),
-                                .bestmove = move,
-                                .flag = tt.Bound.Lower,
-                                .depth = @as(u8, @intCast(depth - parameters.ProbCutReduction + 1)),
-                                .was_pv = 0,
-                                .key = @as(u32, @truncate(pos.hash)),
-                                .age = self.ttable.age,
-                            });
                             return qscore;
                         }
                     }
@@ -1029,7 +1092,7 @@ pub const Searcher = struct {
                 return -hce.MateScore + @as(i32, @intCast(self.ply));
             } else {
                 // Stalemate
-                return 0;
+                return self.contempt_score();
             }
         }
 
@@ -1070,9 +1133,7 @@ pub const Searcher = struct {
             }
 
             if (!DATAGEN and !is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
-                // Step 5.4d: SEE Pruning (main search). Skip moves that lose too
-                // much material by static exchange evaluation; quiets get a margin
-                // linear in depth, captures a more lenient quadratic margin.
+                // Step 5.4d: SEE Pruning
                 if (!is_important and depth <= parameters.SEEPruningDepth) {
                     const see_margin = if (is_capture)
                         -parameters.SEENoisyMargin * @as(i32, @intCast(depth)) * @as(i32, @intCast(depth))
@@ -1083,26 +1144,26 @@ pub const Searcher = struct {
                     }
                 }
 
-                if (!is_important and !is_capture and depth <= 5) {
+                if (!is_important and !is_capture and depth <= parameters.LMPDepth) {
                     // Step 5.4a: Late Move Pruning
-                    var late = 4 + depth * depth;
+                    var late = parameters.LMPBase + parameters.LMPMultiplier * depth * depth / 100;
                     if (improving) {
-                        late += 1 + depth / 2;
+                        late += parameters.LMPImprovingBase + depth * parameters.LMPImprovingPercent / 100;
                     }
 
                     if (quiet_count > late) {
                         skip_quiet = true;
                     }
 
-                    // Step 5.4c: History Pruning: late quiets with strongly
-                    // negative history are skipped.
-                    if (depth <= parameters.HistPruningDepth and self.history[@intFromEnum(color)][move.from][move.to] < -parameters.HistPruningMargin * @as(i32, @intCast(depth))) {
+                    // Step 5.4c: History Pruning
+                    if (depth <= parameters.HistPruningDepth and
+                        self.history[@intFromEnum(color)][move.from][move.to] < -parameters.HistPruningMargin * @as(i32, @intCast(depth)))
+                    {
                         skip_quiet = true;
                     }
                 }
 
-                // Step 5.4b: Futility Pruning: if even a generous margin over the
-                // static eval cannot reach alpha, the remaining quiets are hopeless.
+                // Step 5.4b: Futility Pruning
                 if (!is_important and !is_capture and depth <= parameters.FPDepth and
                     @as(i32, @intCast(@abs(alpha))) < hce.MateScore - hce.MaxMate and
                     static_eval + parameters.FPBase + parameters.FPMargin * @as(i32, @intCast(depth)) <= alpha)
@@ -1120,15 +1181,15 @@ pub const Searcher = struct {
             if (self.ply > 0
                 and !is_root
                 and self.ply < depth * 2
-                and depth >= 7
+                and depth >= parameters.SEDepth
                 and tthit
                 and entry.?.flag != tt.Bound.Upper
                 and !hce.is_near_mate(entry.?.eval)
                 and hashmove.to_u16() == move.to_u16()
-                and entry.?.depth >= depth - 3
+                and entry.?.depth >= depth -| parameters.SETTDepthMargin
             ) {
             // zig fmt: on
-                const margin = @as(i32, @intCast(depth));
+                const margin = @as(i32, @intCast(depth * parameters.SEBetaMultiplier / 100));
                 const singular_beta = @max(tt_eval - margin, -hce.MateScore + hce.MaxMate);
 
                 self.exclude_move[self.ply] = hashmove;
@@ -1136,9 +1197,7 @@ pub const Searcher = struct {
                 self.exclude_move[self.ply] = types.Move.empty();
                 if (singular_score < singular_beta) {
                     extension = 1;
-                    // Double / triple extension: the more the TT move's score beats
-                    // the rest, the more singular it is. Triple is reserved for
-                    // quiet TT moves.
+                    // Double / triple extension
                     if (singular_score < singular_beta - parameters.SEDoubleMargin) {
                         extension = 2;
                         if (!move.is_capture() and singular_score < singular_beta - parameters.SETripleMargin) {
@@ -1148,9 +1207,9 @@ pub const Searcher = struct {
                 } else if (singular_beta >= beta) {
                     return singular_beta;
                 } else if (tt_eval >= beta) {
-                    extension = -2;
+                    extension = -parameters.SEFailHighReduction;
                 } else if (cutnode) {
-                    extension = -1;
+                    extension = -parameters.SECutnodeReduction;
                 }
             } else if (on_pv and !is_root and self.ply < depth * 2) {
                 // Recapture Extension
@@ -1172,13 +1231,13 @@ pub const Searcher = struct {
             self.ttable.prefetch(pos.hash);
 
             var score: i32 = 0;
-            const min_lmr_move: usize = if (on_pv) 5 else 3;
+            const min_lmr_move: usize = if (on_pv) parameters.LMRMinMovePV else parameters.LMRMinMoveNonPV;
             const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 200;
             var do_full_search = false;
             if (on_pv and legals == 1) {
                 score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV, false);
             } else {
-                if (!in_check and depth >= 3 and index >= min_lmr_move and (!is_capture or !is_winning_capture)) {
+                if (!in_check and depth >= parameters.LMRDepth and index >= min_lmr_move and (!is_capture or !is_winning_capture)) {
                     // Step 5.6: Late-Move Reduction
                     var reduction: i32 = QuietLMR[@min(depth, 63)][@min(index, 63)];
 
@@ -1187,11 +1246,11 @@ pub const Searcher = struct {
                     }
 
                     if (improving) {
-                        reduction -= 1;
+                        reduction -= parameters.LMRImproving;
                     }
 
                     if (!on_pv) {
-                        reduction += 1;
+                        reduction += parameters.LMRNonPV;
                     }
 
                     // Expected fail-high (cut) nodes: reduce more.
@@ -1201,15 +1260,15 @@ pub const Searcher = struct {
 
                     // A deep TT entry already vetted this subtree; reduce less.
                     if (tthit and @as(usize, @intCast(entry.?.depth)) >= depth) {
-                        reduction -= 1;
+                        reduction -= parameters.LMRTTDepth;
                     }
 
                     // Moves that give check are forcing; reduce less.
                     if (pos.in_check(opp_color)) {
-                        reduction -= 1;
+                        reduction -= parameters.LMRCheck;
                     }
 
-                    reduction -= @divTrunc(self.history[@intFromEnum(color)][move.from][move.to], 6144);
+                    reduction -= @divTrunc(self.history[@intFromEnum(color)][move.from][move.to], parameters.LMRHistoryDivisor);
 
                     const rd: usize = @as(usize, @intCast(std.math.clamp(@as(i32, @intCast(new_depth)) - reduction, 1, new_depth + 1)));
 
@@ -1274,7 +1333,7 @@ pub const Searcher = struct {
                 self.killer[self.ply][1] = temp;
             }
 
-            const adj = @min(1536, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * 384 - 384);
+            const adj: i32 = @max(@as(i32, 0), @min(parameters.HistoryBonusMax, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * parameters.HistoryBonusMultiplier - parameters.HistoryBonusOffset));
 
             if (!is_null and self.ply >= 1) {
                 const last = self.move_history[self.ply - 1];
@@ -1282,7 +1341,7 @@ pub const Searcher = struct {
             }
 
             const b = best_move.to_u16();
-            const max_history: i32 = 16384;
+            const max_history: i32 = parameters.HistoryGravityMax;
             for (quiet_moves.items) |m| {
                 const is_best = m.to_u16() == b;
                 const hist = self.history[@intFromEnum(color)][m.from][m.to] * adj;
@@ -1327,10 +1386,10 @@ pub const Searcher = struct {
             else
                 tt.Bound.Exact;
 
-            // Store mate/TB scores node-relative (the exact inverse of the probe
-            // adjustment above), so a score found at one ply reads back correctly
-            // when the entry is probed at a different ply. best_score itself stays
-            // root-relative for the return value below.
+            if (self.tt_store_is_ambiguous(best_score, tt_flag)) {
+                return best_score;
+            }
+
             var stored_eval = best_score;
             if (stored_eval > SCORE_PLY_ADJ and stored_eval <= hce.MateScore) {
                 stored_eval += @as(i32, @intCast(self.ply));
@@ -1381,6 +1440,29 @@ pub const Searcher = struct {
 
         self.record_node();
 
+        var qml_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
+        var qml_fba = std.heap.FixedBufferAllocator.init(&qml_bytes);
+        var movelist = std.array_list.Managed(types.Move).initCapacity(qml_fba.allocator(), 218) catch unreachable;
+        defer movelist.deinit();
+        if (in_check) {
+            pos.generate_legal_moves(color, &movelist);
+            if (movelist.items.len == 0) {
+                return -hce.MateScore + @as(i32, @intCast(self.ply));
+            }
+        } else {
+            pos.generate_q_moves(color, &movelist);
+            if (movelist.items.len == 0) {
+                var legal_bytes: [@sizeOf(types.Move)]u8 = undefined;
+                var legal_fba = std.heap.FixedBufferAllocator.init(&legal_bytes);
+                var legal = std.array_list.Managed(types.Move).initCapacity(legal_fba.allocator(), 1) catch unreachable;
+                defer legal.deinit();
+                pos.generate_legal_moves(color, &legal);
+                if (legal.items.len == 0) {
+                    return self.contempt_score();
+                }
+            }
+        }
+
         // >> Step 2: Prunings
 
         var best_score = -hce.MateScore + @as(i32, @intCast(self.ply));
@@ -1411,31 +1493,19 @@ pub const Searcher = struct {
             } else if (tt_eval < -SCORE_PLY_ADJ and tt_eval >= -hce.MateScore) {
                 tt_eval += @as(i32, @intCast(self.ply));
             }
+            const scored = self.tt_score(tt_eval, entry.?.flag);
             if (entry.?.flag == tt.Bound.Exact) {
-                return tt_eval;
-            } else if (entry.?.flag == tt.Bound.Lower and tt_eval >= beta) {
-                return tt_eval;
-            } else if (entry.?.flag == tt.Bound.Upper and tt_eval <= alpha) {
-                return tt_eval;
+                return scored;
+            } else if (entry.?.flag == tt.Bound.Lower and scored >= beta) {
+                return scored;
+            } else if (entry.?.flag == tt.Bound.Upper and scored <= alpha) {
+                return scored;
             }
         }
 
         // >> Step 4: QSearch
 
         // Step 4.1: Q Move Generation
-        var qml_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-        var qml_fba = std.heap.FixedBufferAllocator.init(&qml_bytes);
-        var movelist = std.array_list.Managed(types.Move).initCapacity(qml_fba.allocator(), 218) catch unreachable;
-        defer movelist.deinit();
-        if (in_check) {
-            pos.generate_legal_moves(color, &movelist);
-            if (movelist.items.len == 0) {
-                // Checkmated
-                return -hce.MateScore + @as(i32, @intCast(self.ply));
-            }
-        } else {
-            pos.generate_q_moves(color, &movelist);
-        }
         const move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
@@ -1456,7 +1526,7 @@ pub const Searcher = struct {
                 if (see_score < movepick.SortWinningCapture - 2048) {
                     continue;
                 }
-                if (!see.see_threshold(pos, move, -parameters.SEENoisyMargin)) {
+                if (!see.see_threshold(pos, move, -parameters.QSSEEMargin)) {
                     continue;
                 }
             }
@@ -1483,22 +1553,14 @@ pub const Searcher = struct {
                     best_move = move;
                     if (score >= beta) {
                         self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Lower);
-                        return beta;
+                        return if (self.tt_store_is_ambiguous(best_score, tt.Bound.Lower))
+                            best_score
+                        else
+                            beta;
                     }
 
                     alpha = score;
                 }
-            }
-        }
-
-        if (move_size == 0 and !in_check) {
-            var legal_bytes: [@sizeOf(types.Move)]u8 = undefined;
-            var legal_fba = std.heap.FixedBufferAllocator.init(&legal_bytes);
-            var legal = std.array_list.Managed(types.Move).initCapacity(legal_fba.allocator(), 1) catch unreachable;
-            defer legal.deinit();
-            pos.generate_legal_moves(color, &legal);
-            if (legal.items.len == 0) {
-                return 0;
             }
         }
 
@@ -1509,3 +1571,33 @@ pub const Searcher = struct {
         return best_score;
     }
 };
+
+test "contempt only reinterprets exact TT zero" {
+    const old_contempt = CONTEMPT;
+    defer CONTEMPT = old_contempt;
+    CONTEMPT = 100;
+
+    var s: Searcher = undefined;
+    s.ply = 0;
+    try std.testing.expectEqual(@as(i32, -100), s.tt_score(0, tt.Bound.Exact));
+    try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Lower));
+    try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Upper));
+    try std.testing.expectEqual(@as(i32, 23), s.tt_score(23, tt.Bound.Exact));
+
+    s.ply = 1;
+    try std.testing.expectEqual(@as(i32, 100), s.tt_score(0, tt.Bound.Exact));
+}
+
+test "contempt skips numerically ambiguous generic TT stores" {
+    const old_contempt = CONTEMPT;
+    defer CONTEMPT = old_contempt;
+    CONTEMPT = 100;
+
+    var s: Searcher = undefined;
+    s.ply = 0;
+    try std.testing.expect(s.tt_store_is_ambiguous(-100, tt.Bound.Exact));
+    try std.testing.expect(s.tt_store_is_ambiguous(-100, tt.Bound.Lower));
+    try std.testing.expect(s.tt_store_is_ambiguous(0, tt.Bound.Exact));
+    try std.testing.expect(!s.tt_store_is_ambiguous(0, tt.Bound.Lower));
+    try std.testing.expect(!s.tt_store_is_ambiguous(23, tt.Bound.Exact));
+}

@@ -5,6 +5,7 @@ const position = @import("../chess/position.zig");
 const hce = @import("hce.zig");
 const search = @import("search.zig");
 const see = @import("see.zig");
+const parameters = @import("parameters.zig");
 
 pub const MVV_LVA = [6][6]i32{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 303, 302, 301, 300 }, .{ 405, 404, 403, 402, 401, 400 }, .{ 505, 504, 503, 502, 501, 500 }, .{ 605, 604, 603, 602, 601, 600 }, .{ 705, 704, 703, 702, 701, 700 } };
 
@@ -37,7 +38,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
                 score += SortWinningCapture + MVV_LVA[0][0];
             } else {
-                const see_value = see.see_threshold(pos, move.*, -90);
+                const see_value = see.see_threshold(pos, move.*, -parameters.MovepickSEEMargin);
 
                 score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
 
@@ -69,13 +70,13 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                 score += searcher.history[@intFromEnum(pos.turn)][move.from][move.to];
                 if (!is_null and searcher.ply >= 1) {
                     const plies: [3]usize = .{ 0, 1, 3 };
-                    for (plies) |plies_ago| {
-                        const divider: i32 = 1;
+                    const weights: [3]i32 = .{ parameters.ContHistWeight1, parameters.ContHistWeight2, parameters.ContHistWeight4 };
+                    for (plies, weights) |plies_ago, weight| {
                         if (searcher.ply >= plies_ago + 1) {
                             const prev = searcher.move_history[searcher.ply - plies_ago - 1];
                             if (prev.to_u16() == 0) continue;
 
-                            score += @divTrunc(searcher.continuation[searcher.moved_piece_history[searcher.ply - plies_ago - 1].pure_index()][prev.to][move.from][move.to], divider);
+                            score += @divTrunc(searcher.continuation[searcher.moved_piece_history[searcher.ply - plies_ago - 1].pure_index()][prev.to][move.from][move.to] * weight, 128);
                         }
                     }
                 }

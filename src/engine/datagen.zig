@@ -145,7 +145,7 @@ fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) 
     const halfmove: u8 = @as(u8, @intCast(@min(pos.history[pos.game_ply].fifty, 255)));
 
     // Fullmove counter
-    const fullmove: u16 = @as(u16, @intCast(pos.game_ply / 2 + 1));
+    const fullmove: u16 = @as(u16, @intCast(pos.absolute_ply() / 2 + 1));
 
     // Eval: white-relative, clamped
     const clamped = std.math.clamp(white_relative_score, -32000, 32000);

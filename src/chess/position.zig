@@ -49,8 +49,10 @@ pub const Position = struct {
     mailbox: [types.N_SQUARES]types.Piece = undefined,
     // Current player
     turn: types.Color = types.Color.White,
-    // Ply since game started
+    // Ply since the last `set_fen` / `init` (indexes `history[]`).
     game_ply: u32 = 0,
+    // Half-moves implied by FEN fullmove + side to move at `set_fen`.
+    start_ply: u32 = 0,
     // Zobrist Hash
     hash: u64 = 0,
 
@@ -176,9 +178,21 @@ pub const Position = struct {
             self.history[self.game_ply].fifty = std.fmt.parseUnsigned(u16, fifty_tok, 10) catch 0;
         }
 
+        if (tokens.next()) |fullmove_tok| {
+            const fullmove = std.fmt.parseUnsigned(u32, fullmove_tok, 10) catch 1;
+            const fm = @max(fullmove, 1);
+            self.start_ply = (fm - 1) * 2 + @as(u32, if (self.turn == types.Color.Black) 1 else 0);
+        } else {
+            self.start_ply = 0;
+        }
+
         self.hash ^= zobrist.CastlingHash[zobrist.castling_rights_index(self.history[self.game_ply].entry)];
 
         self.evaluator.full_refresh(self);
+    }
+
+    pub inline fn absolute_ply(self: *const Position) u32 {
+        return self.start_ply + self.game_ply;
     }
 
     pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
@@ -273,7 +287,7 @@ pub const Position = struct {
         fen[index] = ' ';
         index += 1;
 
-        const fullmove: u32 = @max(@as(u32, 1), self.game_ply / 2 + 1);
+        const fullmove: u32 = @max(@as(u32, 1), self.absolute_ply() / 2 + 1);
         var fm_buf: [8]u8 = undefined;
         const fm_str = std.fmt.bufPrint(&fm_buf, "{}", .{fullmove}) catch "1";
         @memcpy(fen[index..][0..fm_str.len], fm_str);
@@ -441,13 +455,7 @@ pub const Position = struct {
             types.MoveFlags.DOUBLE_PUSH => {
                 self.move_piece_quiet(move.get_from(), move.get_to());
 
-                // Only record/hash the en-passant square when an enemy pawn can
-                // actually capture en passant. A "phantom" EP square (no possible
-                // capture) would make this position hash differently from the
-                // identical one reached once the EP right silently expires, which
-                // breaks threefold-repetition detection and TT transposition. This
-                // matches the FIDE/Zobrist definition of EP equality (and Stockfish,
-                // which sets the EP square only when the capture is pseudo-legal).
+                // Only record/hash EP when an enemy pawn can actually capture.
                 const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
                 const ep_target = move.get_from().add(types.Direction.North.relative_dir(color));
                 if (tables.get_pawn_attacks(color, ep_target) & self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()] != 0) {

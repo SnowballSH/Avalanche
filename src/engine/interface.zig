@@ -11,6 +11,7 @@ const parameters = @import("parameters.zig");
 const build_options = @import("build_options");
 const genfens = @import("genfens.zig");
 const syzygy = @import("syzygy.zig");
+const wdl = @import("wdl.zig");
 
 pub const UciInterface = struct {
     position: position.Position,
@@ -112,20 +113,24 @@ pub const UciInterface = struct {
                 try stdout.writeAll("id author Yinuo Huang\n\n");
                 try stdout.writeAll("option name Hash type spin default 16 min 1 max 65536\n");
                 try stdout.print("option name Threads type spin default 1 min 1 max {}\n", .{search.MAX_THREADS});
+                try stdout.print("option name MoveOverhead type spin default {} min 0 max {}\n", .{ search.DEFAULT_MOVE_OVERHEAD, search.MAX_MOVE_OVERHEAD });
                 try stdout.writeAll("option name SyzygyPath type string default <empty>\n");
                 try stdout.writeAll("option name SyzygyProbeDepth type spin default 1 min 1 max 100\n");
                 try stdout.writeAll("option name SyzygyProbeLimit type spin default 7 min 1 max 7\n");
                 try stdout.writeAll("option name Syzygy50MoveRule type check default true\n");
+                try stdout.writeAll("option name UCI_ShowWDL type check default false\n");
+                try stdout.print("option name Contempt type spin default 0 min {} max {}\n", .{ -search.MAX_CONTEMPT, search.MAX_CONTEMPT });
                 for (parameters.TunableParams) |tunable| {
-                    try stdout.print("option name {s} type spin default {s} min {s} max {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
+                    try stdout.print("option name {s} type spin default {d} min {d} max {d}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
                 }
                 try stdout.writeAll("uciok\n");
                 try stdout.flush();
-            } else if (std.mem.eql(u8, token.?, "spsa")) {
-                // Print tunables in OpenBench's SPSA input format:
-                // name, int, value, min, max, c_end, r_end
+            } else if (std.mem.eql(u8, token.?, "spsa") or std.mem.eql(u8, token.?, "spsa++")) {
+                const focused = std.mem.eql(u8, token.?, "spsa++");
                 for (parameters.TunableParams) |tunable| {
-                    try stdout.print("{s}, int, {s}, {s}, {s}, {s}, {s}\n", .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
+                    if (focused and !tunable.worth_tuning) continue;
+                    const live = parameters.live_uci_value(tunable.name) orelse tunable.value;
+                    try stdout.print("{s}, int, {d}, {d}, {d}, {d}, {d}\n", .{ tunable.name, live, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
                 }
                 try stdout.flush();
             } else if (std.mem.eql(u8, token.?, "setoption")) {
@@ -167,6 +172,19 @@ pub const UciInterface = struct {
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
                         const total = std.math.clamp(value, 1, search.MAX_THREADS);
                         search.NUM_THREADS = total - 1;
+                    } else if (std.mem.eql(u8, token.?, "MoveOverhead")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+
+                        const value = std.fmt.parseUnsigned(u64, token.?, 10) catch search.DEFAULT_MOVE_OVERHEAD;
+                        search.MOVE_OVERHEAD = std.math.clamp(value, 0, search.MAX_MOVE_OVERHEAD);
                     } else if (std.mem.eql(u8, token.?, "SyzygyPath")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {
@@ -215,114 +233,47 @@ pub const UciInterface = struct {
                             break;
                         }
                         syzygy.use_rule50 = std.ascii.eqlIgnoreCase(token.?, "true");
+                    } else if (std.mem.eql(u8, token.?, "Contempt")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        const value = std.fmt.parseInt(i32, token.?, 10) catch break;
+                        const contempt = std.math.clamp(value, -search.MAX_CONTEMPT, search.MAX_CONTEMPT);
+                        if (contempt != search.CONTEMPT) {
+                            search.CONTEMPT = contempt;
+                            tt.GlobalTT.clear();
+                        }
+                    } else if (std.mem.eql(u8, token.?, "UCI_ShowWDL")) {
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
+                        wdl.show_wdl = std.ascii.eqlIgnoreCase(token.?, "true");
                     } else {
-                        for (parameters.TunableParams) |tunable| {
-                            if (std.mem.eql(u8, token.?, tunable.name)) {
-                                token = tokens.next();
-                                if (token == null or !std.mem.eql(u8, token.?, "value")) {
-                                    break;
-                                }
+                        const opt_name = token.?;
+                        token = tokens.next();
+                        if (token == null or !std.mem.eql(u8, token.?, "value")) {
+                            break;
+                        }
 
-                                token = tokens.next();
-                                if (token == null) {
-                                    break;
-                                }
+                        token = tokens.next();
+                        if (token == null) {
+                            break;
+                        }
 
-                                const raw = std.fmt.parseUnsigned(usize, token.?, 10) catch continue;
-                                const min_v = std.fmt.parseUnsigned(usize, tunable.min_value, 10) catch 0;
-                                const max_v = std.fmt.parseUnsigned(usize, tunable.max_value, 10) catch raw;
-                                const value = std.math.clamp(raw, min_v, max_v);
-                                switch (tunable.id) {
-                                    0 => {
-                                        parameters.LMRWeight = @as(f64, @floatFromInt(value)) / 1000.0;
-                                        search.init_lmr();
-                                    },
-                                    1 => {
-                                        parameters.LMRBias = @as(f64, @floatFromInt(value)) / 1000.0;
-                                        search.init_lmr();
-                                    },
-                                    2 => {
-                                        parameters.RFPDepth = @as(i32, @intCast(value));
-                                    },
-                                    3 => {
-                                        parameters.RFPMultiplier = @as(i32, @intCast(value));
-                                    },
-                                    4 => {
-                                        parameters.RFPImprovingDeduction = @as(i32, @intCast(value));
-                                    },
-                                    5 => {
-                                        parameters.NMPImprovingMargin = @as(i32, @intCast(value));
-                                    },
-                                    6 => {
-                                        parameters.NMPBase = @as(usize, @intCast(value));
-                                    },
-                                    7 => {
-                                        parameters.NMPDepthDivisor = @as(usize, @intCast(value));
-                                    },
-                                    8 => {
-                                        parameters.NMPBetaDivisor = @as(i32, @intCast(value));
-                                    },
-                                    9 => {
-                                        parameters.RazoringBase = @as(i32, @intCast(value));
-                                    },
-                                    10 => {
-                                        parameters.RazoringMargin = @as(i32, @intCast(value));
-                                    },
-                                    11 => {
-                                        parameters.AspirationWindow = @as(i32, @intCast(value));
-                                    },
-                                    12 => {
-                                        parameters.NodeTmBase = @as(i32, @intCast(value));
-                                    },
-                                    13 => {
-                                        parameters.NodeTmMultiplier = @as(i32, @intCast(value));
-                                    },
-                                    14 => {
-                                        parameters.HistPruningDepth = @as(i32, @intCast(value));
-                                    },
-                                    15 => {
-                                        parameters.HistPruningMargin = @as(i32, @intCast(value));
-                                    },
-                                    16 => {
-                                        parameters.FPDepth = @as(i32, @intCast(value));
-                                    },
-                                    17 => {
-                                        parameters.FPBase = @as(i32, @intCast(value));
-                                    },
-                                    18 => {
-                                        parameters.FPMargin = @as(i32, @intCast(value));
-                                    },
-                                    19 => {
-                                        parameters.SEEPruningDepth = @as(i32, @intCast(value));
-                                    },
-                                    20 => {
-                                        parameters.SEEQuietMargin = @as(i32, @intCast(value));
-                                    },
-                                    21 => {
-                                        parameters.SEENoisyMargin = @as(i32, @intCast(value));
-                                    },
-                                    22 => {
-                                        parameters.LMRCutnode = @as(i32, @intCast(value));
-                                    },
-                                    23 => {
-                                        parameters.SEDoubleMargin = @as(i32, @intCast(value));
-                                    },
-                                    24 => {
-                                        parameters.SETripleMargin = @as(i32, @intCast(value));
-                                    },
-                                    25 => {
-                                        parameters.ProbCutMargin = @as(i32, @intCast(value));
-                                    },
-                                    26 => {
-                                        parameters.ProbCutDepth = value;
-                                    },
-                                    27 => {
-                                        parameters.ProbCutReduction = value;
-                                    },
-                                    else => unreachable,
-                                }
-                                // std.debug.print("info string {s} set to {d}\n", .{ tunable.name, value });
-                                break;
+                        const raw = std.fmt.parseInt(i64, token.?, 10) catch break;
+                        if (parameters.set(opt_name, raw)) |tunable| {
+                            if (tunable.reinit_lmr) {
+                                search.init_lmr();
                             }
                         }
                     }
@@ -496,7 +447,7 @@ pub const UciInterface = struct {
                 }
 
                 if (movetime != null) {
-                    const overhead: u64 = 25 + @min(@as(u64, search.NUM_THREADS) * 5, 25);
+                    const overhead = search.MOVE_OVERHEAD + @min(@as(u64, search.NUM_THREADS) * 5, 25);
                     if (mytime != null) {
                         var inc: u64 = 0;
                         if (myinc != null) {
@@ -509,8 +460,9 @@ pub const UciInterface = struct {
                             movetime = budget;
                         } else {
                             if (movestogo == null) {
-                                self.searcher.ideal_time = inc + (mytime.? - overhead) / 28;
-                                movetime = 2 * inc + (mytime.? - overhead) / 16;
+                                const budget = mytime.? - overhead;
+                                self.searcher.ideal_time = inc + ((budget * parameters.TmSoftFactor) >> 10);
+                                movetime = 2 * inc + ((budget * parameters.TmHardFactor) >> 10);
                             } else {
                                 self.searcher.ideal_time = inc + (2 * (mytime.? - overhead)) / (2 * movestogo.? + 1);
                                 movetime = 2 * self.searcher.ideal_time;

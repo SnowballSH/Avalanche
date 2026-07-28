@@ -1237,6 +1237,28 @@ test "fen: halfmove clock is preserved" {
     try expect(pos.history[pos.game_ply].fifty == 99);
 }
 
+test "fen: start_ply follows fullmove and side to move" {
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.init();
+
+    pos.set_fen("8/5k2/8/8/3P4/8/5K2/8 w - - 0 1");
+    try expect(pos.start_ply == 0);
+    try expect(pos.absolute_ply() == 0);
+
+    pos.set_fen("8/5k2/8/8/3P4/8/5K2/8 w - - 0 60");
+    try expect(pos.start_ply == 118); // (60-1)*2
+    try expect(pos.game_ply == 0);
+    try expect(pos.absolute_ply() == 118);
+
+    pos.set_fen("8/5k2/8/8/3P4/8/5K2/8 b - - 0 60");
+    try expect(pos.start_ply == 119); // (60-1)*2 + 1
+}
+
 test "see: absolutely pinned pawn cannot recapture" {
     const pos = see_make_pos("4k3/4p3/3p4/8/8/8/7Q/4R1K1 w - -");
     defer std.testing.allocator.destroy(pos);
@@ -1286,6 +1308,10 @@ test "qsearch: checkmate takes precedence over fifty-move draw" {
     defer io_threaded.deinit();
     types.GLOBAL_IO = io_threaded.io();
 
+    const old_contempt = search.CONTEMPT;
+    defer search.CONTEMPT = old_contempt;
+    search.CONTEMPT = 100;
+
     tables.init_all();
     zobrist.init_zobrist();
     weights.do_nnue();
@@ -1306,4 +1332,88 @@ test "qsearch: checkmate takes precedence over fifty-move draw" {
     s.hash_history.append(pos.hash) catch unreachable;
     const score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, hce.MateScore);
     try expect(score <= -hce.MateScore + hce.MaxMate);
+}
+
+test "qsearch: stalemate precedes stand-pat and TT cutoffs" {
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    types.GLOBAL_IO = io_threaded.io();
+
+    const old_contempt = search.CONTEMPT;
+    defer search.CONTEMPT = old_contempt;
+    search.CONTEMPT = 100;
+
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+    search.init_lmr();
+    tt.GlobalTT.reset(16);
+    tt.GlobalTT.clear();
+    search.NUM_THREADS = 0;
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.init();
+    pos.set_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
+
+    tt.GlobalTT.set(pos.hash, tt.Item{
+        .eval = 37,
+        .static_eval = 0,
+        .bestmove = types.Move.empty(),
+        .flag = tt.Bound.Exact,
+        .depth = 0,
+        .was_pv = 0,
+        .key = @as(u32, @truncate(pos.hash)),
+        .age = tt.GlobalTT.age,
+    });
+
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    s.silent_output = true;
+    s.hash_history.append(pos.hash) catch unreachable;
+
+    const tt_score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, hce.MateScore);
+    try expect(tt_score == -100);
+
+    tt.GlobalTT.clear();
+    const stand_pat_score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, -hce.MateScore + 1);
+    try expect(stand_pat_score == -100);
+}
+
+test "qsearch: contempt draw keeps fail-soft provenance" {
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    types.GLOBAL_IO = io_threaded.io();
+
+    const old_contempt = search.CONTEMPT;
+    defer search.CONTEMPT = old_contempt;
+    search.CONTEMPT = -100;
+
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+    search.init_lmr();
+    tt.GlobalTT.reset(16);
+    tt.GlobalTT.clear();
+    search.NUM_THREADS = 0;
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.init();
+    // Bxc6+ removes Black's last non-king piece, reaching the known KBvK draw.
+    pos.set_fen("4k3/8/2q5/1B6/8/8/8/4K3 w - - 0 1");
+
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    s.silent_output = true;
+    s.hash_history.append(pos.hash) catch unreachable;
+
+    const static_eval = hce.evaluate_comptime(pos, types.Color.White);
+    try expect(static_eval < 100);
+    const beta = @divTrunc(static_eval + 100, 2);
+    const score = s.quiescence_search(pos, types.Color.White, beta - 1, beta);
+    try expect(score == 100);
+    try expect(tt.GlobalTT.get(pos.hash) == null);
 }
