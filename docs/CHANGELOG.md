@@ -1,12 +1,23 @@
 # v3.1.0
 
+- New net: Zidingxiang 2
+
+STC (10+0.10) vs Zidingxiang:
+```
+Elo   | 6.85 +- 3.57 (95%)
+SPRT  | 10.0+0.1s Threads=1 Hash=8MB
+LLR   | 2.97 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 10812 W: 2553 L: 2340 D: 5919
+Penta | [62, 1229, 2637, 1390, 88]
+```
+
 - New net: Zidingxiang
 
 STC (10+0.10) vs Huangpujiang:
 ```
-Elo   | 35.83 +- 8.5 (95%)
+Elo   | 35.83 +- 8.60 (95%)
 SPRT  | 10.0+0.1s Threads=1 Hash=8MB
-LLR   | passed [0.00, 3.00]
+LLR   | 3.00 (-2.94, 2.94) [0.00, 3.00]
 Games | N: 1946 W: 541 L: 341 D: 1064
 Penta | [4, 172, 447, 320, 30]
 ```
