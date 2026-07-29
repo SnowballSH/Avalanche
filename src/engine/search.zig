@@ -1442,23 +1442,26 @@ pub const Searcher = struct {
 
         var qml_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
         var qml_fba = std.heap.FixedBufferAllocator.init(&qml_bytes);
-        var movelist = std.array_list.Managed(types.Move).initCapacity(qml_fba.allocator(), 218) catch unreachable;
+        var movelist = std.array_list.Managed(types.Move).init(qml_fba.allocator());
         defer movelist.deinit();
-        if (in_check) {
-            pos.generate_legal_moves(color, &movelist);
-            if (movelist.items.len == 0) {
-                return -hce.MateScore + @as(i32, @intCast(self.ply));
-            }
-        } else {
-            pos.generate_q_moves(color, &movelist);
-            if (movelist.items.len == 0) {
-                var legal_bytes: [@sizeOf(types.Move)]u8 = undefined;
-                var legal_fba = std.heap.FixedBufferAllocator.init(&legal_bytes);
-                var legal = std.array_list.Managed(types.Move).initCapacity(legal_fba.allocator(), 1) catch unreachable;
-                defer legal.deinit();
-                pos.generate_legal_moves(color, &legal);
-                if (legal.items.len == 0) {
-                    return self.contempt_score();
+        if (CONTEMPT != 0) {
+            movelist.ensureTotalCapacityPrecise(218) catch unreachable;
+            if (in_check) {
+                pos.generate_legal_moves(color, &movelist);
+                if (movelist.items.len == 0) {
+                    return -hce.MateScore + @as(i32, @intCast(self.ply));
+                }
+            } else {
+                pos.generate_q_moves(color, &movelist);
+                if (movelist.items.len == 0) {
+                    var legal_storage: [1]types.Move = undefined;
+                    var legal_fba = std.heap.FixedBufferAllocator.init(std.mem.asBytes(&legal_storage));
+                    var legal = std.array_list.Managed(types.Move).initCapacity(legal_fba.allocator(), 1) catch unreachable;
+                    defer legal.deinit();
+                    pos.generate_legal_moves(color, &legal);
+                    if (legal.items.len == 0) {
+                        return self.contempt_score();
+                    }
                 }
             }
         }
@@ -1506,6 +1509,17 @@ pub const Searcher = struct {
         // >> Step 4: QSearch
 
         // Step 4.1: Q Move Generation
+        if (CONTEMPT == 0) {
+            movelist.ensureTotalCapacityPrecise(218) catch unreachable;
+            if (in_check) {
+                pos.generate_legal_moves(color, &movelist);
+                if (movelist.items.len == 0) {
+                    return -hce.MateScore + @as(i32, @intCast(self.ply));
+                }
+            } else {
+                pos.generate_q_moves(color, &movelist);
+            }
+        }
         const move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
@@ -1575,10 +1589,14 @@ pub const Searcher = struct {
 test "contempt only reinterprets exact TT zero" {
     const old_contempt = CONTEMPT;
     defer CONTEMPT = old_contempt;
-    CONTEMPT = 100;
 
     var s: Searcher = undefined;
     s.ply = 0;
+
+    CONTEMPT = 0;
+    try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Exact));
+
+    CONTEMPT = 100;
     try std.testing.expectEqual(@as(i32, -100), s.tt_score(0, tt.Bound.Exact));
     try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Lower));
     try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Upper));
@@ -1591,10 +1609,15 @@ test "contempt only reinterprets exact TT zero" {
 test "contempt skips numerically ambiguous generic TT stores" {
     const old_contempt = CONTEMPT;
     defer CONTEMPT = old_contempt;
-    CONTEMPT = 100;
 
     var s: Searcher = undefined;
     s.ply = 0;
+
+    CONTEMPT = 0;
+    try std.testing.expect(!s.tt_store_is_ambiguous(-100, tt.Bound.Exact));
+    try std.testing.expect(!s.tt_store_is_ambiguous(0, tt.Bound.Exact));
+
+    CONTEMPT = 100;
     try std.testing.expect(s.tt_store_is_ambiguous(-100, tt.Bound.Exact));
     try std.testing.expect(s.tt_store_is_ambiguous(-100, tt.Bound.Lower));
     try std.testing.expect(s.tt_store_is_ambiguous(0, tt.Bound.Exact));
