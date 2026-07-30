@@ -941,6 +941,8 @@ pub const Searcher = struct {
                 r += @as(usize, @intCast(@max(@as(i32, 0), @min(parameters.NMPBetaMax, @divTrunc((static_eval - beta), parameters.NMPBetaDivisor)))));
                 r = @min(r, depth);
 
+                self.move_history[self.ply] = types.Move.empty();
+                self.moved_piece_history[self.ply] = types.Piece.NO_PIECE;
                 self.ply += 1;
                 pos.play_null_move();
                 var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV, !cutnode);
@@ -1113,7 +1115,6 @@ pub const Searcher = struct {
             const is_killer = move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16();
 
             if (!is_capture) {
-                quiet_moves.append(move) catch unreachable;
                 quiet_count += 1;
             }
 
@@ -1281,6 +1282,10 @@ pub const Searcher = struct {
             self.ply -= 1;
             pos.undo_move(color, move);
             _ = self.hash_history.pop();
+
+            if (!is_capture) {
+                quiet_moves.append(move) catch unreachable;
+            }
 
             if (is_root and self.thread_id == 0) {
                 self.node_spent_table[move.from][move.to] += self.nodes - nodes_before;
@@ -1568,7 +1573,7 @@ pub const Searcher = struct {
         }
 
         if (best_move.to_u16() != 0) {
-            self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Exact);
+            self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Upper);
         }
 
         return best_score;
