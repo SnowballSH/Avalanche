@@ -17,6 +17,8 @@ pub const Bound = enum(u2) {
     Upper, // All Nodes
 };
 
+pub const EVAL_NONE: i16 = -32768;
+
 pub const Item = packed struct {
     key: u32, // verification = @truncate(hash)
     eval: i32, // SEARCH score - used ONLY for alpha/beta cutoff
