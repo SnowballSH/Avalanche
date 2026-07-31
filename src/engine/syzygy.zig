@@ -2,7 +2,7 @@
 //
 // Thin Zig wrapper around the vendored Pyrrhic C library (Andrew Grant's
 // maintained fork of Ronald de Man's Fathom / `tbprobe`). Pyrrhic is compiled
-// into the binary by build.zig (`Pyrrhic/tbprobe.c`); the attack / popcount
+// into the binary by build.zig (`src/pyrrhic/tbprobe.c`); the attack / popcount
 // primitives it needs are exported with C ABI at the bottom of this file and
 // routed through Avalanche's own tables, so there is no duplicated movegen.
 //

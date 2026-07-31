@@ -157,7 +157,7 @@ test "Position" {
     zobrist.init_zobrist();
     weights.do_nnue();
 
-    // Position is large (NNUE accumulator stack); keep it off the test stack.
+    // Position is ~174 KiB; keep it off the test stack.
     const pos = try std.testing.allocator.create(position.Position);
     defer std.testing.allocator.destroy(pos);
     pos.init();

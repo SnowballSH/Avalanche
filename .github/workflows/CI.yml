@@ -1,45 +1,26 @@
-# CI for Avalanche (Zig 0.16.0 port).
-#
-# On every push to master/modernize, every pull request into master, a daily
-# schedule, and manual dispatch it:
-#   * builds Debug AND Release on all 3 host OSes (Linux, macOS, Windows),
-#   * runs the unit-test suite (zig build test),
-#   * runs the fixed benchmark and asserts the exact node count, and
-#   * drives the UCI frontend with a mock user session and checks the responses.
-# After the matrix succeeds (on push/dispatch, not PRs) it cross-compiles
-# optimized release binaries for the standard platforms and uploads them.
-#
-# Platform notes (see MIGRATION.md):
-#   * The engine links libc (build.zig sets .link_libc = true) and uses the
-#     std.Io runtime introduced in Zig 0.16. Native host builds use the system
-#     libc; cross builds use Zig's bundled libc (musl/mingw), so NO system SDKs
-#     or sysroots are needed on any runner.
-#   * Windows needed one source fix during the port (CLI args are read via
-#     std.process.Init.minimal.args.toSlice, since the bare Args.Iterator.init
-#     is a compile error on Windows) -- already applied, so the native
-#     windows-latest build/run works unmodified.
-#   * GitHub's windows-latest runner ships Git-Bash, so `shell: bash` is
-#     available on all three runners. The bench + UCI steps use it so there is
-#     one canonical script everywhere; only the binary path gets a .exe suffix.
+# CI for Avalanche.
 
 name: CI
 
 on:
   push:
-    branches: [master, modernize]
+    branches: ["**"]
   pull_request:
     branches: [master]
   workflow_dispatch:
   schedule:
     - cron: "0 0 * * 1" # weekly regression guard against master (Monday)
 
-# Cancel superseded runs on the same ref (e.g. rapid PR pushes).
+# Cancel superseded runs on the same branch (e.g. rapid PR pushes).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 permissions:
   contents: read
+
+env:
+  ZIG_VERSION: "0.16.0"
 
 jobs:
   build:
@@ -49,18 +30,19 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Setup Zig 0.16.0
+      - name: Setup Zig ${{ env.ZIG_VERSION }}
         # mlugg/setup-zig@v2 is the maintained successor to goto-bus-stop/setup-zig:
         # it knows the 0.16.0 release channel and current ziglang.org download
         # layout, verifies the release minisign signature, and caches the global
         # zig cache (~/.cache/zig) keyed on build.zig[.zon] across runs.
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Zig version / env
         run: |
@@ -132,22 +114,23 @@ jobs:
   artifacts:
     name: release artifacts
     needs: build
-    if: github.event_name != 'pull_request'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Setup Zig 0.16.0
+      - name: Setup Zig ${{ env.ZIG_VERSION }}
         uses: mlugg/setup-zig@v2
         with:
-          version: 0.16.0
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Cross-compile release binaries
         run: bash build_all_v3.sh
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Avalanche-${{ github.sha }}
           # Ship the runnable binaries only; drop the Windows .pdb debug symbols.

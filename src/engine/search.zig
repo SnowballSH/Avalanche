@@ -28,7 +28,7 @@ pub fn init_lmr() void {
     }
 }
 
-pub const MAX_PLY = 128;
+pub const MAX_PLY = 200;
 pub const MAX_GAMEPLY = 1024;
 
 // Tablebase win/loss score band, kept just below the mate band
@@ -40,6 +40,15 @@ pub const TB_WIN_SCORE: i32 = hce.MateScore - hce.MaxMate - MAX_PLY;
 // Threshold for ply-normalizing scores stored in the TT. Covers both mate
 // scores (above MateScore - MaxMate) and TB win/loss scores (above TB_WIN_SCORE - MAX_PLY).
 const SCORE_PLY_ADJ: i32 = TB_WIN_SCORE - MAX_PLY;
+
+comptime {
+    if (hce.MaxMate < 2 * @as(i32, MAX_PLY)) {
+        @compileError("hce.MaxMate must be >= 2 * MAX_PLY: TT mate-score normalization adds ply on store and subtracts ply on probe, so a round-tripped mate loses up to two plies of magnitude and the mate band must cover twice the maximum ply");
+    }
+    if (MAX_PLY > 256) {
+        @compileError("MAX_PLY must be <= 256: position.Position.history has exactly 256 entries of slack above MAX_HISTORY_PLY (src/chess/position.zig:9,62) for search play_move calls, and position.zig cannot import search.zig to enforce this locally");
+    }
+}
 
 pub const NodeType = enum {
     Root,
@@ -61,6 +70,13 @@ pub const STABILITY_MULTIPLIER = [5]f32{ 2.50, 1.20, 0.90, 0.80, 0.75 };
 
 pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(std.heap.c_allocator);
 pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(std.heap.c_allocator);
+
+pub fn reset_helper_heuristics() void {
+    for (helper_searchers.items) |*helper| {
+        helper.age_pending = false;
+        helper.reset_heuristics(true);
+    }
+}
 
 pub const Searcher = struct {
     min_depth: usize = 1,
@@ -107,6 +123,7 @@ pub const Searcher = struct {
     ttable: *tt.TranspositionTable = &tt.GlobalTT,
     thread_id: usize = 0,
     silent_output: bool = false,
+    age_pending: bool = false,
 
     node_spent_table: [64][64]u64 = undefined,
 
@@ -386,11 +403,12 @@ pub const Searcher = struct {
         var stability: usize = 0;
 
         const extra = if (NUM_THREADS > helper_searchers.items.len) NUM_THREADS - helper_searchers.items.len else 0;
+        const existing_helpers = NUM_THREADS - extra;
         helper_searchers.ensureTotalCapacity(NUM_THREADS) catch unreachable;
         helper_searchers.appendNTimesAssumeCapacity(undefined, extra);
         threads.ensureTotalCapacity(NUM_THREADS) catch unreachable;
         threads.appendNTimesAssumeCapacity(null, extra);
-        var ti: usize = NUM_THREADS - extra;
+        var ti: usize = existing_helpers;
         while (ti < NUM_THREADS) : (ti += 1) {
             helper_searchers.items[ti] = Searcher.new();
         }
@@ -398,6 +416,8 @@ pub const Searcher = struct {
         ti = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
             helper_searchers.items[ti].nodes = 0;
+            helper_searchers.items[ti].tbhits = 0;
+            helper_searchers.items[ti].age_pending = ti < existing_helpers;
         }
 
         var tdepth: usize = 1;
@@ -474,14 +494,8 @@ pub const Searcher = struct {
             var total_tbhits: u64 = self.tbhits;
 
             if (depth > 1) {
-                outW.print("info string thread 0 nodes {}\n", .{
-                    self.nodes,
-                }) catch {};
                 var thread_index: usize = 0;
                 while (thread_index < NUM_THREADS) : (thread_index += 1) {
-                    outW.print("info string thread {} nodes {}\n", .{
-                        thread_index + 1, helper_searchers.items[thread_index].nodes,
-                    }) catch {};
                     total_nodes_all += helper_searchers.items[thread_index].nodes;
                     total_tbhits += helper_searchers.items[thread_index].tbhits;
                 }
@@ -696,6 +710,10 @@ pub const Searcher = struct {
             helper_searchers.items[i].parent_stop = &self.stop;
             helper_searchers.items[i].parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
             helper_searchers.items[i].root_history_len = self.root_history_len;
+            helper_searchers.items[i].syzygy_root_active = self.syzygy_root_active;
+            if (self.syzygy_root_active) {
+                helper_searchers.items[i].syzygy_root = self.syzygy_root;
+            }
             helper_searchers.items[i].root_board.* = pos.*;
             helper_searchers.items[i].hash_history.clearRetainingCapacity();
             helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
@@ -713,6 +731,10 @@ pub const Searcher = struct {
 
     pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &self.is_searching, true, .release);
+        if (self.age_pending) {
+            self.age_pending = false;
+            self.reset_heuristics(false);
+        }
         self.time_stop = false;
         self.best_move = types.Move.empty();
         self.timer = types.Timer.start();

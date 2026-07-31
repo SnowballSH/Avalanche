@@ -58,7 +58,7 @@ pub const Position = struct {
 
     // History of Undo information.
     // Sized to accommodate the longest game the UCI position parser will replay
-    // (MAX_HISTORY_PLY moves) plus the deepest search (128 plies of play_move).
+    // (MAX_HISTORY_PLY moves) plus the deepest search (MAX_PLY plies of play_move).
     history: [MAX_HISTORY_PLY + 256]UndoInfo = undefined,
 
     // Stores the enemy pieces that are attacking the king

@@ -516,7 +516,8 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
     return false;
 }
 
-pub const MaxMate: i32 = 256;
+// Must satisfy MaxMate >= 2 * search.MAX_PLY
+pub const MaxMate: i32 = 400;
 
 pub inline fn is_near_mate(score: i32) bool {
     return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;

@@ -111,7 +111,7 @@ pub const UciInterface = struct {
                 try stdout.writeAll(build_options.version);
                 try stdout.writeByte('\n');
                 try stdout.writeAll("id author Yinuo Huang\n\n");
-                try stdout.writeAll("option name Hash type spin default 16 min 1 max 65536\n");
+                try stdout.print("option name Hash type spin default 16 min 1 max {}\n", .{tt.MAX_HASH_MB});
                 try stdout.print("option name Threads type spin default 1 min 1 max {}\n", .{search.MAX_THREADS});
                 try stdout.print("option name MoveOverhead type spin default {} min 0 max {}\n", .{ search.DEFAULT_MOVE_OVERHEAD, search.MAX_MOVE_OVERHEAD });
                 try stdout.writeAll("option name SyzygyPath type string default <empty>\n");
@@ -156,8 +156,13 @@ pub const UciInterface = struct {
                         }
 
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 16;
-                        const clamped = std.math.clamp(value, 1, 65536);
+                        const clamped = std.math.clamp(value, 1, tt.MAX_HASH_MB);
                         tt.GlobalTT.reset(clamped);
+                        const installed_mb = tt.GlobalTT.size * @sizeOf(tt.Item) / tt.MB;
+                        if (installed_mb < clamped) {
+                            try stdout.print("info string Hash: failed to allocate {} MB, still using {} MB\n", .{ clamped, installed_mb });
+                            try stdout.flush();
+                        }
                     } else if (std.mem.eql(u8, token.?, "Threads")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {
@@ -285,6 +290,7 @@ pub const UciInterface = struct {
                 self.join_search();
                 self.searcher.deinit();
                 self.searcher = search.Searcher.new();
+                search.reset_helper_heuristics();
                 tt.GlobalTT.clear();
                 self.position.set_fen(types.DEFAULT_FEN[0..]);
             } else if (std.mem.eql(u8, token.?, "d")) {
