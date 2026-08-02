@@ -19,9 +19,18 @@ pub const NNUEWeights = struct {
     layer_2_bias: [OUTPUT_SIZE]i16 align(64),
 };
 
-pub var MODEL: NNUEWeights = undefined;
+pub var MODEL: NNUEWeights align(2 * 1024 * 1024) = undefined;
+
+fn adviseHugePages() void {
+    if (@import("builtin").os.tag != .linux) return;
+    const MADV_HUGEPAGE = 14;
+    const bytes = std.mem.asBytes(&MODEL);
+    const ptr: [*]align(2 * 1024 * 1024) u8 = @alignCast(bytes.ptr);
+    std.posix.madvise(ptr, bytes.len, MADV_HUGEPAGE) catch {};
+}
 
 pub fn do_nnue() void {
+    adviseHugePages();
     // Quantised bullet checkpoints match @sizeOf(NNUEWeights), including any
     // trailing alignment padding (bullet writes a short "bullet" footer there).
     if (@sizeOf(NNUEWeights) != NNUE_SOURCE.len) {
