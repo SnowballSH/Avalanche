@@ -74,6 +74,11 @@ fn memsetWorker(slice: []i128) void {
     @memset(slice, 0);
 }
 
+fn memsetThreadCount() usize {
+    const cpus = std.Thread.getCpuCount() catch 1;
+    return @max(search.NUM_THREADS + 1, cpus);
+}
+
 pub const TT_ALIGN: usize = 2 << 20;
 
 fn adviseHugePages(data: []align(TT_ALIGN) i128) void {
@@ -114,7 +119,7 @@ pub const TranspositionTable = struct {
         const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
         adviseHugePages(new_data);
 
-        const num_threads = search.NUM_THREADS + 1;
+        const num_threads = memsetThreadCount();
         parallelMemset(new_data, num_threads);
 
         self.deinit();
@@ -124,7 +129,7 @@ pub const TranspositionTable = struct {
 
     pub inline fn clear(self: *TranspositionTable) void {
         if (self.size == 0) return;
-        const num_threads = search.NUM_THREADS + 1;
+        const num_threads = memsetThreadCount();
         parallelMemset(self.data, num_threads);
     }
 
@@ -179,7 +184,7 @@ pub const TranspositionTable = struct {
         // 3. Previous entry is from older search
         // 4. It is a different position
         // 5. Previous entry has lower depth (with +4 margin)
-        if ((old_w0 == 0 and old_w1 == 0) or entry.flag == Bound.Exact or p_val.age != self.age or p_val.key != entry.key or p_val.depth <= entry.depth + 4) {
+        if ((old_w0 == 0 and old_w1 == 0) or entry.flag == Bound.Exact or p_val.age != self.age or p_val.key != entry.key or @as(u16, p_val.depth) <= @as(u16, entry.depth) + 4) {
             var stored_entry = entry;
             stored_entry._padding = (p_val._padding +% 1) & 0x7fff;
             const entry_as_i128: i128 = @as(i128, @bitCast(stored_entry));

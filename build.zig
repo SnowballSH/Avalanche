@@ -50,7 +50,7 @@ fn dtToString(dt: DateTime, buf: []u8) []const u8 {
 fn addPyrrhic(b: *std.Build, compile: *std.Build.Step.Compile) void {
     compile.root_module.addCSourceFile(.{
         .file = b.path("src/pyrrhic/tbprobe.c"),
-        .flags = &.{ "-O3", "-std=c11" },
+        .flags = &.{ "-O3", "-std=gnu11" },
     });
     compile.root_module.addIncludePath(b.path("src/pyrrhic"));
 }
