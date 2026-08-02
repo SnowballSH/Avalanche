@@ -163,8 +163,9 @@ pub const UciInterface = struct {
                         const installed_mb = tt.GlobalTT.size * @sizeOf(tt.Item) / tt.MB;
                         if (installed_mb < clamped) {
                             try stdout.print("info string Hash: failed to allocate {} MB, still using {} MB\n", .{ clamped, installed_mb });
-                            try stdout.flush();
                         }
+                        try stdout.print("info string Hash: {} MB, huge pages {s}\n", .{ installed_mb, if (tt.GlobalTT.huge_pages) "on" else "off" });
+                        try stdout.flush();
                     } else if (std.mem.eql(u8, token.?, "Threads")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {

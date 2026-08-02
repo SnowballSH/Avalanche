@@ -79,23 +79,28 @@ fn memsetThreadCount() usize {
     return @max(search.NUM_THREADS + 1, cpus);
 }
 
-pub const TT_ALIGN: usize = 2 << 20;
+pub const TT_ALIGN: usize = 2 * MB;
 
-fn adviseHugePages(data: []align(TT_ALIGN) i128) void {
-    if (builtin.os.tag != .linux) return;
+// `&.{}` would carry @alignOf(i128), contradicting the declared alignment.
+var empty_table: [0]i128 align(TT_ALIGN) = .{};
+
+fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
+    if (builtin.os.tag != .linux) return false;
     const MADV_HUGEPAGE = 14;
     const ptr: [*]align(TT_ALIGN) u8 = @ptrCast(data.ptr);
-    std.posix.madvise(ptr, data.len * @sizeOf(i128), MADV_HUGEPAGE) catch {};
+    std.posix.madvise(ptr, data.len * @sizeOf(i128), MADV_HUGEPAGE) catch return false;
+    return true;
 }
 
 pub const TranspositionTable = struct {
     data: []align(TT_ALIGN) i128,
     size: usize,
     age: u5,
+    huge_pages: bool = false,
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
-            .data = &.{},
+            .data = &empty_table,
             .size = 0,
             .age = 0,
         };
@@ -105,7 +110,7 @@ pub const TranspositionTable = struct {
         if (self.data.len != 0) {
             tt_allocator.free(self.data);
         }
-        self.data = &.{};
+        self.data = &empty_table;
         self.size = 0;
     }
 
@@ -117,7 +122,7 @@ pub const TranspositionTable = struct {
         const requested_size = @max(@as(usize, 1), bytes / @sizeOf(Item));
 
         const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
-        adviseHugePages(new_data);
+        const advised = adviseHugePages(new_data);
 
         const num_threads = memsetThreadCount();
         parallelMemset(new_data, num_threads);
@@ -125,6 +130,7 @@ pub const TranspositionTable = struct {
         self.deinit();
         self.data = new_data;
         self.size = new_data.len;
+        self.huge_pages = advised;
     }
 
     pub inline fn clear(self: *TranspositionTable) void {
