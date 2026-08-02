@@ -166,7 +166,7 @@ fn reset_helper_range(start: usize, end: usize) void {
 }
 
 pub fn ensure_helpers(n: usize) void {
-    std.debug.assert(!helpers_are_live());
+    if (helpers_are_live()) return;
     const old_len = helper_searchers.items.len;
     if (n <= old_len) return;
 

@@ -92,11 +92,40 @@ fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
     return true;
 }
 
+fn hugePageBytes(addr: usize) u64 {
+    if (builtin.os.tag != .linux) return 0;
+    const file = std.Io.Dir.cwd().openFile(types.GLOBAL_IO, "/proc/self/smaps", .{}) catch return 0;
+    defer file.close(types.GLOBAL_IO);
+
+    var buf: [1 << 15]u8 = undefined;
+    var stream = file.readerStreaming(types.GLOBAL_IO, &buf);
+    const reader = &stream.interface;
+    var in_range = false;
+    while (reader.takeDelimiterInclusive('\n') catch null) |line| {
+        if (std.mem.indexOfScalar(u8, line, '-')) |dash| {
+            if (std.mem.indexOfScalar(u8, line, ' ')) |space| {
+                if (dash < space) {
+                    const start = std.fmt.parseInt(usize, line[0..dash], 16) catch continue;
+                    const end = std.fmt.parseInt(usize, line[dash + 1 .. space], 16) catch continue;
+                    in_range = addr >= start and addr < end;
+                    continue;
+                }
+            }
+        }
+        if (in_range and std.mem.startsWith(u8, line, "AnonHugePages:")) {
+            var it = std.mem.tokenizeAny(u8, line["AnonHugePages:".len..], " \tkB\r\n");
+            const kb = it.next() orelse return 0;
+            return (std.fmt.parseInt(u64, kb, 10) catch 0) * KB;
+        }
+    }
+    return 0;
+}
+
 pub const TranspositionTable = struct {
     data: []align(TT_ALIGN) i128,
     size: usize,
     age: u5,
-    huge_pages: bool = false,
+    huge_page_bytes: u64 = 0,
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
@@ -122,7 +151,7 @@ pub const TranspositionTable = struct {
         const requested_size = @max(@as(usize, 1), bytes / @sizeOf(Item));
 
         const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
-        const advised = adviseHugePages(new_data);
+        _ = adviseHugePages(new_data);
 
         const num_threads = memsetThreadCount();
         parallelMemset(new_data, num_threads);
@@ -130,7 +159,7 @@ pub const TranspositionTable = struct {
         self.deinit();
         self.data = new_data;
         self.size = new_data.len;
-        self.huge_pages = advised;
+        self.huge_page_bytes = hugePageBytes(@intFromPtr(new_data.ptr));
     }
 
     pub inline fn clear(self: *TranspositionTable) void {
