@@ -1369,13 +1369,13 @@ pub const Searcher = struct {
 
             const nodes_before = self.nodes;
 
+            self.ttable.prefetch(pos.prefetch_key_after(move));
+
             self.move_history[self.ply] = move;
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
-
-            self.ttable.prefetch(pos.hash);
 
             var score: i32 = 0;
             const min_lmr_move: usize = if (on_pv) parameters.LMRMinMovePV else parameters.LMRMinMoveNonPV;
@@ -1694,12 +1694,13 @@ pub const Searcher = struct {
                 }
             }
 
+            self.ttable.prefetch(pos.prefetch_key_after(move));
+
             self.move_history[self.ply] = move;
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
-            self.ttable.prefetch(pos.hash);
             const score = -self.quiescence_search(pos, opp_color, -beta, -alpha);
             self.ply -= 1;
             pos.undo_move(color, move);

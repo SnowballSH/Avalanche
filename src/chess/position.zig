@@ -313,6 +313,18 @@ pub const Position = struct {
         return val;
     }
 
+    pub inline fn prefetch_key_after(self: *const Position, move: types.Move) u64 {
+        const from = move.from;
+        const to = move.to;
+        const pc = self.mailbox[from];
+        const captured = self.mailbox[to];
+        var k = self.hash ^ zobrist.TurnHash;
+        if (captured != types.Piece.NO_PIECE) {
+            k ^= zobrist.ZobristTable[captured.index()][to];
+        }
+        return k ^ zobrist.ZobristTable[pc.index()][from] ^ zobrist.ZobristTable[pc.index()][to];
+    }
+
     pub inline fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
         self.evaluator.add_piece(pc, sq, self);
         self.mailbox[sq.index()] = pc;
