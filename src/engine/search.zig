@@ -115,6 +115,7 @@ pub const MAX_CONTEMPT: i32 = 100;
 
 pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(std.heap.c_allocator);
 pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(std.heap.c_allocator);
+pub var helpers_live: bool = false;
 
 fn parallel_range(start: usize, end: usize, comptime f: fn (usize, usize) void) void {
     if (end <= start) return;
@@ -150,11 +151,13 @@ fn reset_helper_range(start: usize, end: usize) void {
     var i = start;
     while (i < end) : (i += 1) {
         helper_searchers.items[i].age_pending = false;
+        helper_searchers.items[i].has_searched = false;
         helper_searchers.items[i].reset_heuristics(true);
     }
 }
 
 pub fn ensure_helpers(n: usize) void {
+    std.debug.assert(!helpers_live);
     const old_len = helper_searchers.items.len;
     if (n <= old_len) return;
 
@@ -170,6 +173,10 @@ pub fn ensure_helpers(n: usize) void {
     threads.appendNTimesAssumeCapacity(null, n - old_len);
 
     parallel_range(old_len, n, init_helper_range);
+}
+
+pub fn helper_count() usize {
+    return helper_searchers.items.len;
 }
 
 pub fn reset_helper_heuristics() void {
@@ -222,6 +229,7 @@ pub const Searcher = struct {
     thread_id: usize = 0,
     silent_output: bool = false,
     age_pending: bool = false,
+    has_searched: bool = false,
 
     node_spent_table: [64][64]u64 = undefined,
 
@@ -511,7 +519,7 @@ pub const Searcher = struct {
         while (ti < NUM_THREADS) : (ti += 1) {
             helper_searchers.items[ti].nodes = 0;
             helper_searchers.items[ti].tbhits = 0;
-            helper_searchers.items[ti].age_pending = true;
+            helper_searchers.items[ti].age_pending = helper_searchers.items[ti].has_searched;
         }
 
         var tdepth: usize = 1;
@@ -808,6 +816,7 @@ pub const Searcher = struct {
     }
 
     pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
+        helpers_live = true;
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
             const id: usize = i + 1;
@@ -847,6 +856,7 @@ pub const Searcher = struct {
 
     pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &self.is_searching, true, .release);
+        self.has_searched = true;
         if (self.age_pending) {
             self.age_pending = false;
             self.reset_heuristics(false);
@@ -867,6 +877,7 @@ pub const Searcher = struct {
 
     pub fn stop_helpers(self: *Searcher) void {
         _ = self;
+        defer helpers_live = false;
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
             @atomicStore(bool, &helper_searchers.items[i].stop, true, .monotonic);

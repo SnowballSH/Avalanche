@@ -181,6 +181,10 @@ pub const UciInterface = struct {
                         const total = std.math.clamp(value, 1, search.MAX_THREADS);
                         search.NUM_THREADS = total - 1;
                         search.ensure_helpers(search.NUM_THREADS);
+                        if (search.helper_count() < total - 1) {
+                            try stdout.print("info string Threads: failed to allocate {} helpers, using {}\n", .{ total - 1, search.helper_count() + 1 });
+                            try stdout.flush();
+                        }
                     } else if (std.mem.eql(u8, token.?, "MoveOverhead")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {
