@@ -437,6 +437,7 @@ pub const DatagenSingle = struct {
     pub fn playGameViri(self: *DatagenSingle) !void {
         var pos: position.Position = undefined;
         pos.init();
+        defer pos.deinit();
 
         const using_book = self.openings != null;
         if (self.openings) |book| {
@@ -586,6 +587,7 @@ pub const DatagenSingle = struct {
     pub fn playGame(self: *DatagenSingle) !void {
         var pos: position.Position = undefined;
         pos.init();
+        defer pos.deinit();
 
         const using_book = self.openings != null;
         if (self.openings) |book| {

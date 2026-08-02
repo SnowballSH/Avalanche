@@ -71,12 +71,24 @@ pub const Position = struct {
     evaluator: hce.DynamicEvaluator = undefined,
 
     pub fn init(self: *Position) void {
+        self.evaluator.nnue_evaluator.stack = null;
+        self.evaluator.nnue_evaluator.ensure_stack();
+        self.reset();
+    }
+
+    pub fn deinit(self: *Position) void {
+        self.evaluator.nnue_evaluator.release_stack();
+    }
+
+    pub fn reset(self: *Position) void {
+        const stack = self.evaluator.nnue_evaluator.stack;
         self.* = .{};
         @memset(self.piece_bitboards[0..types.N_PIECES], 0);
         @memset(self.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         self.history[0] = UndoInfo.new();
         self.evaluator = hce.DynamicEvaluator{};
-        self.evaluator.nnue_evaluator.accumulator.clear();
+        self.evaluator.nnue_evaluator.stack = stack;
+        self.evaluator.nnue_evaluator.current().clear();
     }
 
     pub fn new() Position {
@@ -108,7 +120,7 @@ pub const Position = struct {
     }
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
-        self.init();
+        self.reset();
         var sq: i32 = @as(i32, @intCast(@intFromEnum(types.Square.a8)));
         var tokens = std.mem.tokenizeScalar(u8, fen, ' ');
         const bd = tokens.next().?;
@@ -437,6 +449,7 @@ pub const Position = struct {
     // Moving pieces
 
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
+        self.evaluator.nnue_evaluator.push();
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply += 1;
@@ -559,6 +572,11 @@ pub const Position = struct {
     }
 
     pub fn undo_move(self: *Position, comptime color: types.Color, move: types.Move) void {
+        self.evaluator.nnue_evaluator.in_undo = true;
+        defer {
+            self.evaluator.nnue_evaluator.in_undo = false;
+            self.evaluator.nnue_evaluator.pop();
+        }
         const flags = move.get_flags();
         const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
@@ -632,13 +650,6 @@ pub const Position = struct {
         // The DOUBLE_PUSH branch above already removed this move's own EP key.
         if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
             self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
-        }
-
-        if (comptime @import("../engine/weights.zig").NUM_INPUT_BUCKETS > 1) {
-            const restored_pt = self.mailbox[move.from].piece_type();
-            if (restored_pt == types.PieceType.King or flags == types.MoveFlags.OO or flags == types.MoveFlags.OOO) {
-                self.evaluator.nnue_evaluator.reconcile_king_buckets(self, color);
-            }
         }
     }
 

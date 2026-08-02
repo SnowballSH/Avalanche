@@ -51,6 +51,7 @@ pub const UciInterface = struct {
             @atomicStore(bool, &self.searcher.stop, true, .monotonic);
             self.join_search();
             self.searcher.deinit();
+            self.position.deinit();
             for (search.helper_searchers.items) |*helper| {
                 helper.deinit();
             }

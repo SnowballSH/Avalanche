@@ -716,7 +716,7 @@ test "eval: nnue weights load and dimensions" {
 }
 
 fn evaluate_nnue_scalar(pos: *position.Position, comptime turn: types.Color) i32 {
-    const accumulator = &pos.evaluator.nnue_evaluator.accumulator;
+    const accumulator = pos.evaluator.nnue_evaluator.current();
     const pieces = types.popcount_usize(pos.all_all_pieces());
     const bucket = @min((pieces -| 2) / 4, weights.OUTPUT_SIZE - 1);
     const output_weights = &weights.MODEL.layer_2[bucket];
@@ -846,15 +846,18 @@ fn expect_nnue_matches_fresh(pos: *position.Position) !void {
     // Build the reference with a brand-new NNUE/Finny cache. Refreshing `pos`
     // itself would mutate the cache under test and could hide revisit bugs.
     const reference = try std.testing.allocator.create(position.Position);
-    defer std.testing.allocator.destroy(reference);
+    defer {
+        reference.deinit();
+        std.testing.allocator.destroy(reference);
+    }
     reference.init();
     reference.piece_bitboards = pos.piece_bitboards;
     reference.mailbox = pos.mailbox;
     reference.turn = pos.turn;
     reference.evaluator.full_refresh(reference);
 
-    const actual = &pos.evaluator.nnue_evaluator.accumulator;
-    const expected = &reference.evaluator.nnue_evaluator.accumulator;
+    const actual = pos.evaluator.nnue_evaluator.current();
+    const expected = reference.evaluator.nnue_evaluator.current();
     try std.testing.expectEqualSlices(i16, expected.white[0..], actual.white[0..]);
     try std.testing.expectEqualSlices(i16, expected.black[0..], actual.black[0..]);
 }

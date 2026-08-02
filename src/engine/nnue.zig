@@ -164,13 +164,13 @@ pub const Accumulator = struct {
         self.black = weights.MODEL.layer_1_bias;
     }
 
-    fn update_weights(self: *Accumulator, comptime on: bool, data: FeaturePair) void {
+    fn update_weights(self: *Accumulator, src: *const Accumulator, comptime on: bool, data: FeaturePair) void {
         const V = @Vector(UPDATE_LANES, i16);
         const m1 = &weights.MODEL.layer_1;
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-            const ww: V = self.white[i..][0..UPDATE_LANES].*;
-            const wb: V = self.black[i..][0..UPDATE_LANES].*;
+            const ww: V = src.white[i..][0..UPDATE_LANES].*;
+            const wb: V = src.black[i..][0..UPDATE_LANES].*;
             const mw: V = m1[data.white + i ..][0..UPDATE_LANES].*;
             const mb: V = m1[data.black + i ..][0..UPDATE_LANES].*;
             if (on) {
@@ -183,7 +183,7 @@ pub const Accumulator = struct {
         }
     }
 
-    fn exchange_weights(self: *Accumulator, from: FeaturePair, to: FeaturePair) void {
+    fn exchange_weights(self: *Accumulator, src: *const Accumulator, from: FeaturePair, to: FeaturePair) void {
         const V = @Vector(UPDATE_LANES, i16);
         const m1 = &weights.MODEL.layer_1;
         var i: usize = 0;
@@ -192,14 +192,14 @@ pub const Accumulator = struct {
             const tw: V = m1[to.white + i ..][0..UPDATE_LANES].*;
             const fb: V = m1[from.black + i ..][0..UPDATE_LANES].*;
             const tb: V = m1[to.black + i ..][0..UPDATE_LANES].*;
-            const ww: V = self.white[i..][0..UPDATE_LANES].*;
-            const wb: V = self.black[i..][0..UPDATE_LANES].*;
+            const ww: V = src.white[i..][0..UPDATE_LANES].*;
+            const wb: V = src.black[i..][0..UPDATE_LANES].*;
             self.white[i..][0..UPDATE_LANES].* = ww + tw - fw;
             self.black[i..][0..UPDATE_LANES].* = wb + tb - fb;
         }
     }
 
-    fn capture_weights(self: *Accumulator, captured: FeaturePair, from: FeaturePair, to: FeaturePair) void {
+    fn capture_weights(self: *Accumulator, src: *const Accumulator, captured: FeaturePair, from: FeaturePair, to: FeaturePair) void {
         const V = @Vector(UPDATE_LANES, i16);
         const m1 = &weights.MODEL.layer_1;
         var i: usize = 0;
@@ -210,8 +210,8 @@ pub const Accumulator = struct {
             const cb: V = m1[captured.black + i ..][0..UPDATE_LANES].*;
             const fb: V = m1[from.black + i ..][0..UPDATE_LANES].*;
             const tb: V = m1[to.black + i ..][0..UPDATE_LANES].*;
-            const ww: V = self.white[i..][0..UPDATE_LANES].*;
-            const wb: V = self.black[i..][0..UPDATE_LANES].*;
+            const ww: V = src.white[i..][0..UPDATE_LANES].*;
+            const wb: V = src.black[i..][0..UPDATE_LANES].*;
             self.white[i..][0..UPDATE_LANES].* = ww - cw - fw + tw;
             self.black[i..][0..UPDATE_LANES].* = wb - cb - fb + tb;
         }
@@ -234,8 +234,20 @@ const FinnyTable = if (weights.NUM_INPUT_BUCKETS > 1)
 else
     void;
 
+const STACK_CAP = 256;
+
+pub const Stack = struct {
+    frames: [STACK_CAP]Accumulator,
+    kings: [STACK_CAP][2]KingBucketState,
+};
+
+const UpdateTarget = struct { dst: *Accumulator, src: *const Accumulator };
+
 pub const NNUE = struct {
-    accumulator: Accumulator = undefined,
+    stack: ?*Stack = null,
+    depth: u16 = 0,
+    frame_written: bool = true,
+    in_undo: bool = false,
     piece_count: u8 = 0,
     king_state: [2]KingBucketState = .{ .{}, .{} },
     king_state_ready: bool = weights.NUM_INPUT_BUCKETS == 1,
@@ -244,6 +256,53 @@ pub const NNUE = struct {
 
     pub fn new() NNUE {
         return .{};
+    }
+
+    pub fn ensure_stack(self: *NNUE) void {
+        if (self.stack == null) {
+            self.stack = std.heap.c_allocator.create(Stack) catch unreachable;
+        }
+    }
+
+    pub fn release_stack(self: *NNUE) void {
+        if (self.stack) |s| std.heap.c_allocator.destroy(s);
+        self.stack = null;
+    }
+
+    pub inline fn current(self: *const NNUE) *Accumulator {
+        return &self.stack.?.frames[self.depth];
+    }
+
+    inline fn update_target(self: *NNUE) UpdateTarget {
+        const stack = self.stack.?;
+        const dst = &stack.frames[self.depth];
+        if (self.frame_written) return .{ .dst = dst, .src = dst };
+        self.frame_written = true;
+        return .{ .dst = dst, .src = &stack.frames[self.depth - 1] };
+    }
+
+    pub inline fn push(self: *NNUE) void {
+        if (self.depth + 1 == STACK_CAP) self.rebase();
+        self.stack.?.kings[self.depth] = self.king_state;
+        self.depth += 1;
+        self.frame_written = false;
+    }
+
+    pub inline fn pop(self: *NNUE) void {
+        self.depth -= 1;
+        self.king_state = self.stack.?.kings[self.depth];
+        self.frame_written = true;
+    }
+
+    fn rebase(self: *NNUE) void {
+        const stack = self.stack.?;
+        stack.frames[0] = stack.frames[self.depth];
+        self.depth = 0;
+    }
+
+    pub fn reset_depth(self: *NNUE) void {
+        if (self.depth != 0) self.rebase();
+        self.frame_written = true;
     }
 
     inline fn index_cached(self: *const NNUE, piece: types.Piece, sq: types.Square) FeaturePair {
@@ -261,19 +320,23 @@ pub const NNUE = struct {
         } else {
             self.piece_count -= 1;
         }
+        if (self.in_undo) return;
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
             if (!self.king_state_ready) return;
         }
-        self.accumulator.update_weights(on, self.index_cached(piece, sq));
+        const t = self.update_target();
+        t.dst.update_weights(t.src, on, self.index_cached(piece, sq));
     }
 
     pub fn refresh_accumulator(self: *NNUE, pos: *position.Position) void {
+        self.frame_written = true;
         self.piece_count = @intCast(types.popcount_usize(pos.all_all_pieces()));
         if (comptime weights.NUM_INPUT_BUCKETS == 1) {
-            self.accumulator.clear();
+            const acc = self.current();
+            acc.clear();
             for (pos.mailbox, 0..) |pc, i| {
                 if (pc == types.Piece.NO_PIECE) continue;
-                self.accumulator.update_weights(true, nnue_index_flat(pc, @as(types.Square, @enumFromInt(i))));
+                acc.update_weights(acc, true, nnue_index_flat(pc, @as(types.Square, @enumFromInt(i))));
             }
         } else {
             self.ensure_finny();
@@ -307,11 +370,11 @@ pub const NNUE = struct {
         if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
         self.ensure_finny();
         const kp = perspective_king_sq(pos, color);
-        const current = KingBucketState.from_king(kp);
+        const now = KingBucketState.from_king(kp);
         const prev = self.king_state[@intFromEnum(color)];
-        if (!prev.same_slot(current)) {
+        if (!prev.same_slot(now)) {
             self.refresh_perspective(pos, color);
-            self.king_state[@intFromEnum(color)] = current;
+            self.king_state[@intFromEnum(color)] = now;
         }
     }
 
@@ -389,25 +452,29 @@ pub const NNUE = struct {
         }
 
         if (perspective == types.Color.White) {
-            self.accumulator.white = entry.acc;
+            self.current().white = entry.acc;
         } else {
-            self.accumulator.black = entry.acc;
+            self.current().black = entry.acc;
         }
     }
 
     pub inline fn move(self: *NNUE, pc: types.Piece, from: types.Square, to: types.Square) void {
+        if (self.in_undo) return;
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
             if (!self.king_state_ready) return;
         }
-        self.accumulator.exchange_weights(self.index_cached(pc, from), self.index_cached(pc, to));
+        const t = self.update_target();
+        t.dst.exchange_weights(t.src, self.index_cached(pc, from), self.index_cached(pc, to));
     }
 
     pub inline fn capture(self: *NNUE, captured: types.Piece, pc: types.Piece, from: types.Square, to: types.Square) void {
         self.piece_count -= 1;
+        if (self.in_undo) return;
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
             if (!self.king_state_ready) return;
         }
-        self.accumulator.capture_weights(self.index_cached(captured, to), self.index_cached(pc, from), self.index_cached(pc, to));
+        const t = self.update_target();
+        t.dst.capture_weights(t.src, self.index_cached(captured, to), self.index_cached(pc, from), self.index_cached(pc, to));
     }
 
     pub inline fn evaluate(self: *const NNUE, turn: types.Color, pos: *const position.Position) i32 {
@@ -415,7 +482,7 @@ pub const NNUE = struct {
     }
 
     pub inline fn evaluate_comptime(self: *const NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
-        const acc = &self.accumulator;
+        const acc = self.current();
         if (comptime builtin.mode == .Debug) {
             std.debug.assert(self.piece_count == types.popcount_usize(pos.all_all_pieces()));
         }

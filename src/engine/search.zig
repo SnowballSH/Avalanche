@@ -262,6 +262,7 @@ pub const Searcher = struct {
     pub fn deinit(self: *Searcher) void {
         self.hash_history.deinit();
         std.heap.c_allocator.destroy(self.continuation);
+        self.root_board.deinit();
         std.heap.c_allocator.destroy(self.root_board);
     }
 
@@ -442,6 +443,7 @@ pub const Searcher = struct {
         self.parent_nodes = null;
         self.shared_nodes.store(0, .monotonic);
         self.root_history_len = self.hash_history.items.len;
+        pos.evaluator.nnue_evaluator.reset_depth();
         self.time_stop = false;
         self.reset_heuristics(false);
         self.nodes = 0;
@@ -844,7 +846,15 @@ pub const Searcher = struct {
             if (self.syzygy_root_active) {
                 helper_searchers.items[i].syzygy_root = self.syzygy_root;
             }
-            helper_searchers.items[i].root_board.* = pos.*;
+            const helper_board = helper_searchers.items[i].root_board;
+            const helper_stack = helper_board.evaluator.nnue_evaluator.stack;
+            const root_accumulator = pos.evaluator.nnue_evaluator.current().*;
+            helper_board.* = pos.*;
+            const helper_nnue = &helper_board.evaluator.nnue_evaluator;
+            helper_nnue.stack = helper_stack;
+            helper_nnue.depth = 0;
+            helper_nnue.frame_written = true;
+            helper_nnue.current().* = root_accumulator;
             helper_searchers.items[i].hash_history.clearRetainingCapacity();
             helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
             @atomicStore(bool, &helper_searchers.items[i].stop, false, .monotonic);
@@ -872,6 +882,7 @@ pub const Searcher = struct {
         self.force_thinking = true;
         self.ply = 0;
         self.seldepth = 0;
+
         if (color == types.Color.White) {
             _ = self.negamax(self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root, false);
         } else {

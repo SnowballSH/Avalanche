@@ -113,6 +113,7 @@ pub fn run(args_in: []const []const u8) !void {
     while (generated < n_fens) {
         var pos: position.Position = undefined;
         pos.init();
+        defer pos.deinit();
 
         if (book_lines.len > 0) {
             const line = book_lines[prng.rand64() % book_lines.len];

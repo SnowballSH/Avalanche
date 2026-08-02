@@ -91,10 +91,13 @@ pub fn bench() !void {
     searcher.silent_output = true;
 
     const pos = std.heap.c_allocator.create(position.Position) catch unreachable;
-    defer std.heap.c_allocator.destroy(pos);
+    defer {
+        pos.deinit();
+        std.heap.c_allocator.destroy(pos);
+    }
 
+    pos.init();
     for (FENS) |fen| {
-        pos.init();
         pos.set_fen(fen);
         @atomicStore(bool, &searcher.stop, false, .monotonic);
         searcher.reset_heuristics(true);
