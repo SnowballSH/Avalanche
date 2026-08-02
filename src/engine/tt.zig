@@ -200,7 +200,7 @@ pub const TranspositionTable = struct {
         if (self.size == 0) return;
         @prefetch(&self.data[self.index(hash)], .{
             .rw = .read,
-            .locality = 1,
+            .locality = 3,
             .cache = .data,
         });
     }

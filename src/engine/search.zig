@@ -1083,6 +1083,7 @@ pub const Searcher = struct {
                 self.moved_piece_history[self.ply] = types.Piece.NO_PIECE;
                 self.ply += 1;
                 pos.play_null_move();
+                self.ttable.prefetch(pos.hash);
                 var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV, !cutnode);
                 self.ply -= 1;
                 pos.undo_null_move();
