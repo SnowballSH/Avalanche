@@ -179,6 +179,7 @@ pub const UciInterface = struct {
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
                         const total = std.math.clamp(value, 1, search.MAX_THREADS);
                         search.NUM_THREADS = total - 1;
+                        search.ensure_helpers(search.NUM_THREADS);
                     } else if (std.mem.eql(u8, token.?, "MoveOverhead")) {
                         token = tokens.next();
                         if (token == null or !std.mem.eql(u8, token.?, "value")) {

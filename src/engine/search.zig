@@ -116,11 +116,64 @@ pub const MAX_CONTEMPT: i32 = 100;
 pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(std.heap.c_allocator);
 pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(std.heap.c_allocator);
 
-pub fn reset_helper_heuristics() void {
-    for (helper_searchers.items) |*helper| {
-        helper.age_pending = false;
-        helper.reset_heuristics(true);
+fn parallel_range(start: usize, end: usize, comptime f: fn (usize, usize) void) void {
+    if (end <= start) return;
+    const count = end - start;
+    const cpus = std.Thread.getCpuCount() catch 1;
+    const workers = @max(1, @min(count, @min(cpus, MAX_THREADS)));
+    if (workers == 1) {
+        f(start, end);
+        return;
     }
+
+    var handles: [MAX_THREADS]?std.Thread = undefined;
+    const chunk = count / workers;
+    for (0..workers) |w| {
+        const s = start + w * chunk;
+        const e = if (w == workers - 1) end else start + (w + 1) * chunk;
+        handles[w] = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, f, .{ s, e }) catch null;
+        if (handles[w] == null) f(s, e);
+    }
+    for (0..workers) |w| {
+        if (handles[w]) |t| t.join();
+    }
+}
+
+fn init_helper_range(start: usize, end: usize) void {
+    var i = start;
+    while (i < end) : (i += 1) {
+        helper_searchers.items[i].init();
+    }
+}
+
+fn reset_helper_range(start: usize, end: usize) void {
+    var i = start;
+    while (i < end) : (i += 1) {
+        helper_searchers.items[i].age_pending = false;
+        helper_searchers.items[i].reset_heuristics(true);
+    }
+}
+
+pub fn ensure_helpers(n: usize) void {
+    const old_len = helper_searchers.items.len;
+    if (n <= old_len) return;
+
+    helper_searchers.ensureTotalCapacity(n) catch {
+        NUM_THREADS = @min(NUM_THREADS, old_len);
+        return;
+    };
+    threads.ensureTotalCapacity(n) catch {
+        NUM_THREADS = @min(NUM_THREADS, old_len);
+        return;
+    };
+    helper_searchers.appendNTimesAssumeCapacity(undefined, n - old_len);
+    threads.appendNTimesAssumeCapacity(null, n - old_len);
+
+    parallel_range(old_len, n, init_helper_range);
+}
+
+pub fn reset_helper_heuristics() void {
+    parallel_range(0, helper_searchers.items.len, reset_helper_range);
 }
 
 pub const Searcher = struct {
@@ -453,22 +506,12 @@ pub const Searcher = struct {
         var previous_iteration_nodes: u64 = 0;
         var previous_iteration_node_cost: u64 = 0;
 
-        const extra = if (NUM_THREADS > helper_searchers.items.len) NUM_THREADS - helper_searchers.items.len else 0;
-        const existing_helpers = NUM_THREADS - extra;
-        helper_searchers.ensureTotalCapacity(NUM_THREADS) catch unreachable;
-        helper_searchers.appendNTimesAssumeCapacity(undefined, extra);
-        threads.ensureTotalCapacity(NUM_THREADS) catch unreachable;
-        threads.appendNTimesAssumeCapacity(null, extra);
-        var ti: usize = existing_helpers;
-        while (ti < NUM_THREADS) : (ti += 1) {
-            helper_searchers.items[ti] = Searcher.new();
-        }
-
-        ti = 0;
+        ensure_helpers(NUM_THREADS);
+        var ti: usize = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
             helper_searchers.items[ti].nodes = 0;
             helper_searchers.items[ti].tbhits = 0;
-            helper_searchers.items[ti].age_pending = ti < existing_helpers;
+            helper_searchers.items[ti].age_pending = true;
         }
 
         var tdepth: usize = 1;
