@@ -10,6 +10,7 @@ const movepick = @import("movepick.zig");
 const see = @import("see.zig");
 const syzygy = @import("syzygy.zig");
 const wdl_model = @import("wdl.zig");
+const nnue = @import("nnue.zig");
 
 const parameters = @import("parameters.zig");
 
@@ -91,6 +92,9 @@ const SCORE_PLY_ADJ: i32 = TB_WIN_SCORE - MAX_PLY;
 comptime {
     if (hce.MaxMate < 2 * @as(i32, MAX_PLY)) {
         @compileError("hce.MaxMate must be >= 2 * MAX_PLY: TT mate-score normalization adds ply on store and subtracts ply on probe, so a round-tripped mate loses up to two plies of magnitude and the mate band must cover twice the maximum ply");
+    }
+    if (MAX_PLY + 2 > nnue.STACK_CAP) {
+        @compileError("nnue.STACK_CAP must exceed MAX_PLY: a search that rebased the accumulator stack would pop into the wrong frame");
     }
     if (MAX_PLY > 256) {
         @compileError("MAX_PLY must be <= 256: position.Position.history has exactly 256 entries of slack above MAX_HISTORY_PLY (src/chess/position.zig:9,62) for search play_move calls, and position.zig cannot import search.zig to enforce this locally");

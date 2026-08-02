@@ -234,7 +234,7 @@ const FinnyTable = if (weights.NUM_INPUT_BUCKETS > 1)
 else
     void;
 
-const STACK_CAP = 256;
+pub const STACK_CAP = 256;
 
 pub const Stack = struct {
     frames: [STACK_CAP]Accumulator,
