@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const build_options = @import("build_options");
 
 const NNUE_SOURCE = @embedFile("nnue");
@@ -19,10 +20,11 @@ pub const NNUEWeights = struct {
     layer_2_bias: [OUTPUT_SIZE]i16 align(64),
 };
 
-pub var MODEL: NNUEWeights align(2 * 1024 * 1024) = undefined;
+const MODEL_ALIGN = if (builtin.os.tag == .linux) 2 * 1024 * 1024 else std.atomic.cache_line;
+pub var MODEL: NNUEWeights align(MODEL_ALIGN) = undefined;
 
 fn adviseHugePages() void {
-    if (@import("builtin").os.tag != .linux) return;
+    if (builtin.os.tag != .linux) return;
     const MADV_HUGEPAGE = 14;
     const bytes = std.mem.asBytes(&MODEL);
     const ptr: [*]align(2 * 1024 * 1024) u8 = @alignCast(bytes.ptr);

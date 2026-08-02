@@ -79,7 +79,7 @@ fn memsetThreadCount() usize {
     return std.Thread.getCpuCount() catch 1;
 }
 
-pub const TT_ALIGN: usize = 2 * MB;
+pub const TT_ALIGN: usize = if (builtin.os.tag == .linux) 2 * MB else std.atomic.cache_line;
 
 // `&.{}` would carry @alignOf(i128), contradicting the declared alignment.
 var empty_table: [0]i128 align(TT_ALIGN) = .{};
