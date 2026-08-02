@@ -310,7 +310,7 @@ pub const DatagenSingle = struct {
             s.deinit();
         }
         for (self.ttables) |table| {
-            table.data.deinit();
+            table.deinit();
             std.heap.c_allocator.destroy(table);
         }
     }

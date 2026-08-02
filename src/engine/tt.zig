@@ -74,28 +74,34 @@ fn memsetWorker(slice: []i128) void {
     @memset(slice, 0);
 }
 
-fn adviseHugePages(ptr: [*]u8, len: usize) void {
-    if (builtin.os.tag == .linux) {
-        const MADV_HUGEPAGE = 14;
-        const addr = @intFromPtr(ptr);
-        if (addr & 4095 == 0) {
-            const aligned_ptr: [*]align(4096) u8 = @ptrFromInt(addr);
-            std.posix.madvise(aligned_ptr, len, MADV_HUGEPAGE) catch {};
-        }
-    }
+pub const TT_ALIGN: usize = 2 << 20;
+
+fn adviseHugePages(data: []align(TT_ALIGN) i128) void {
+    if (builtin.os.tag != .linux) return;
+    const MADV_HUGEPAGE = 14;
+    const ptr: [*]align(TT_ALIGN) u8 = @ptrCast(data.ptr);
+    std.posix.madvise(ptr, data.len * @sizeOf(i128), MADV_HUGEPAGE) catch {};
 }
 
 pub const TranspositionTable = struct {
-    data: std.array_list.Managed(i128),
+    data: []align(TT_ALIGN) i128,
     size: usize,
     age: u5,
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
-            .data = std.array_list.Managed(i128).init(tt_allocator),
+            .data = &.{},
             .size = 0,
             .age = 0,
         };
+    }
+
+    pub fn deinit(self: *TranspositionTable) void {
+        if (self.data.len != 0) {
+            tt_allocator.free(self.data);
+        }
+        self.data = &.{};
+        self.size = 0;
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
@@ -105,33 +111,21 @@ pub const TranspositionTable = struct {
         }
         const requested_size = @max(@as(usize, 1), bytes / @sizeOf(Item));
 
-        var new_data = std.array_list.Managed(i128).init(tt_allocator);
-        new_data.ensureTotalCapacityPrecise(requested_size) catch {
-            new_data.deinit();
-            return;
-        };
-        new_data.expandToCapacity();
-        if (new_data.items.len == 0) {
-            new_data.deinit();
-            return;
-        }
-
-        const new_size = new_data.items.len;
-        const byte_len = new_size * @sizeOf(i128);
-        adviseHugePages(@as([*]u8, @ptrCast(new_data.items.ptr)), byte_len);
+        const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
+        adviseHugePages(new_data);
 
         const num_threads = search.NUM_THREADS + 1;
-        parallelMemset(new_data.items, num_threads);
+        parallelMemset(new_data, num_threads);
 
-        self.data.deinit();
+        self.deinit();
         self.data = new_data;
-        self.size = new_size;
+        self.size = new_data.len;
     }
 
     pub inline fn clear(self: *TranspositionTable) void {
         if (self.size == 0) return;
         const num_threads = search.NUM_THREADS + 1;
-        parallelMemset(self.data.items, num_threads);
+        parallelMemset(self.data, num_threads);
     }
 
     pub inline fn do_age(self: *TranspositionTable) void {
@@ -167,7 +161,7 @@ pub const TranspositionTable = struct {
     pub inline fn set(self: *TranspositionTable, hash: u64, entry: Item) void {
         if (self.size == 0) return;
         const idx = self.index(hash);
-        const p = &self.data.items[idx];
+        const p = &self.data[idx];
 
         // Slot lock in the high bit of word1; remaining padding bits are a sequence.
         const w1_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p) + 8));
@@ -199,7 +193,7 @@ pub const TranspositionTable = struct {
 
     pub inline fn prefetch(self: *TranspositionTable, hash: u64) void {
         if (self.size == 0) return;
-        @prefetch(&self.data.items[self.index(hash)], .{
+        @prefetch(&self.data[self.index(hash)], .{
             .rw = .read,
             .locality = 1,
             .cache = .data,
@@ -212,7 +206,7 @@ pub const TranspositionTable = struct {
         var count: u64 = 0;
         var i: usize = 0;
         while (i < sample) : (i += 1) {
-            const p = &self.data.items[i];
+            const p = &self.data[i];
             if (loadSnapshot(p)) |snapshot| {
                 const entry = snapshot.item;
                 if (entry.flag != .None and entry.age == self.age) {
@@ -225,7 +219,7 @@ pub const TranspositionTable = struct {
 
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
         if (self.size == 0) return null;
-        const p = &self.data.items[self.index(hash)];
+        const p = &self.data[self.index(hash)];
         const snapshot = loadSnapshot(p) orelse return null;
         const entry = snapshot.item;
 

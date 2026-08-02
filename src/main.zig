@@ -44,7 +44,7 @@ pub fn main(init: std.process.Init) anyerror!void {
     zobrist.init_zobrist();
     cuckoo.init();
     tt.GlobalTT.reset(16);
-    defer tt.GlobalTT.data.deinit();
+    defer tt.GlobalTT.deinit();
     weights.do_nnue();
     search.init_lmr();
 
