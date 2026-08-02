@@ -105,6 +105,7 @@ pub const NodeType = enum {
 
 pub const MAX_THREADS = 512;
 pub var NUM_THREADS: usize = 0;
+pub var THREADS_CONFIGURED: bool = false;
 
 pub const DEFAULT_MOVE_OVERHEAD: u64 = 25;
 pub const MAX_MOVE_OVERHEAD: u64 = 5000;
@@ -116,6 +117,10 @@ pub const MAX_CONTEMPT: i32 = 100;
 pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(std.heap.c_allocator);
 pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(std.heap.c_allocator);
 pub var helpers_live: bool = false;
+
+pub fn helpers_are_live() bool {
+    return @atomicLoad(bool, &helpers_live, .acquire);
+}
 
 fn parallel_range(start: usize, end: usize, comptime f: fn (usize, usize) void) void {
     if (end <= start) return;
@@ -157,7 +162,7 @@ fn reset_helper_range(start: usize, end: usize) void {
 }
 
 pub fn ensure_helpers(n: usize) void {
-    std.debug.assert(!helpers_live);
+    std.debug.assert(!helpers_are_live());
     const old_len = helper_searchers.items.len;
     if (n <= old_len) return;
 
@@ -816,7 +821,7 @@ pub const Searcher = struct {
     }
 
     pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
-        helpers_live = true;
+        @atomicStore(bool, &helpers_live, true, .release);
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
             const id: usize = i + 1;
@@ -877,7 +882,7 @@ pub const Searcher = struct {
 
     pub fn stop_helpers(self: *Searcher) void {
         _ = self;
-        defer helpers_live = false;
+        defer @atomicStore(bool, &helpers_live, false, .release);
         var i: usize = 0;
         while (i < NUM_THREADS) : (i += 1) {
             @atomicStore(bool, &helper_searchers.items[i].stop, true, .monotonic);

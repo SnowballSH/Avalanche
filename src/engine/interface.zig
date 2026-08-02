@@ -180,6 +180,7 @@ pub const UciInterface = struct {
                         const value = std.fmt.parseUnsigned(usize, token.?, 10) catch 1;
                         const total = std.math.clamp(value, 1, search.MAX_THREADS);
                         search.NUM_THREADS = total - 1;
+                        search.THREADS_CONFIGURED = true;
                         search.ensure_helpers(search.NUM_THREADS);
                         if (search.helper_count() < total - 1) {
                             try stdout.print("info string Threads: failed to allocate {} helpers, using {}\n", .{ total - 1, search.helper_count() + 1 });

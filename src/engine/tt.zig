@@ -75,7 +75,7 @@ fn memsetWorker(slice: []i128) void {
 }
 
 fn memsetThreadCount() usize {
-    if (search.NUM_THREADS > 0) return search.NUM_THREADS + 1;
+    if (search.THREADS_CONFIGURED) return search.NUM_THREADS + 1;
     return std.Thread.getCpuCount() catch 1;
 }
 
