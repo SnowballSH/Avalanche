@@ -75,8 +75,8 @@ fn memsetWorker(slice: []i128) void {
 }
 
 fn memsetThreadCount() usize {
-    const cpus = std.Thread.getCpuCount() catch 1;
-    return @max(search.NUM_THREADS + 1, cpus);
+    if (search.NUM_THREADS > 0) return search.NUM_THREADS + 1;
+    return std.Thread.getCpuCount() catch 1;
 }
 
 pub const TT_ALIGN: usize = 2 * MB;
