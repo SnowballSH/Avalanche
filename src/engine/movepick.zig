@@ -90,6 +90,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
 }
 
 pub inline fn getNextBest(list: *std.array_list.Managed(types.Move), evals: *std.array_list.Managed(i32), i: usize) types.Move {
+    // Callers depend on this producing the same permutation as a swap-on-improvement scan.
     const moves = list.items;
     const scores = evals.items;
     const move_size = moves.len;

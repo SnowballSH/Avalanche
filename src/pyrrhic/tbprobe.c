@@ -522,7 +522,8 @@ static void *map_tb(const char *name, const char *suffix, map_t *mapping) {
     void *data = map_file(fd, mapping);
     if (data == NULL) {
         fprintf(stderr, "Could not map %s%s into memory.\n", name, suffix);
-        exit(EXIT_FAILURE);
+        close_tb(fd);
+        return NULL;
     }
 
     close_tb(fd);
