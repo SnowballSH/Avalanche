@@ -90,13 +90,23 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
 }
 
 pub inline fn getNextBest(list: *std.array_list.Managed(types.Move), evals: *std.array_list.Managed(i32), i: usize) types.Move {
-    const move_size = list.items.len;
+    const moves = list.items;
+    const scores = evals.items;
+    const move_size = moves.len;
+    var cur_move = moves[i];
+    var cur_score = scores[i];
     var j = i + 1;
     while (j < move_size) : (j += 1) {
-        if (evals.items[i] < evals.items[j]) {
-            std.mem.swap(types.Move, &list.items[i], &list.items[j]);
-            std.mem.swap(i32, &evals.items[i], &evals.items[j]);
+        const sj = scores[j];
+        if (cur_score < sj) {
+            const mj = moves[j];
+            moves[j] = cur_move;
+            scores[j] = cur_score;
+            cur_move = mj;
+            cur_score = sj;
         }
     }
-    return list.items[i];
+    moves[i] = cur_move;
+    scores[i] = cur_score;
+    return cur_move;
 }
