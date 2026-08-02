@@ -227,7 +227,7 @@ pub const Searcher = struct {
     history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
-    continuation: *[12][64][64][64]i32,
+    continuation: *[12][64][64][64]i16,
 
     root_board: *position.Position,
     ttable: *tt.TranspositionTable = &tt.GlobalTT,
@@ -246,7 +246,7 @@ pub const Searcher = struct {
         const board = std.heap.c_allocator.create(position.Position) catch unreachable;
         board.init();
         self.* = .{
-            .continuation = std.heap.c_allocator.create([12][64][64][64]i32) catch unreachable,
+            .continuation = std.heap.c_allocator.create([12][64][64][64]i16) catch unreachable,
             .root_board = board,
         };
         self.hash_history = std.array_list.Managed(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
@@ -1519,12 +1519,10 @@ pub const Searcher = struct {
                             const prev = self.move_history[self.ply - plies_ago - 1];
                             if (prev.to_u16() == 0) continue;
 
-                            const cont_hist = self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] * adj;
-                            if (is_best) {
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += adj - @divTrunc(cont_hist, max_history);
-                            } else {
-                                self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to] += -adj - @divTrunc(cont_hist, max_history);
-                            }
+                            const slot = &self.continuation[self.moved_piece_history[self.ply - plies_ago - 1].pure_index()][prev.to][m.from][m.to];
+                            const cont_hist = @as(i32, slot.*) * adj;
+                            const bonus = if (is_best) adj else -adj;
+                            slot.* += @intCast(bonus - @divTrunc(cont_hist, max_history));
                         }
                     }
                 }

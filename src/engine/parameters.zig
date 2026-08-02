@@ -107,7 +107,7 @@ pub const TunableParams = [_]Tunable{
     .{ .name = "HistoryBonusMultiplier", .value = 404, .min_value = 160, .max_value = 700, .c_end = 27, .worth_tuning = true },
     .{ .name = "HistoryBonusOffset", .value = 329, .min_value = 0, .max_value = 768, .c_end = 38, .worth_tuning = true },
     .{ .name = "HistoryBonusMax", .value = 1997, .min_value = 768, .max_value = 3072, .c_end = 115, .worth_tuning = true },
-    .{ .name = "HistoryGravityMax", .value = 15649, .min_value = 8192, .max_value = 32768, .c_end = 1200, .worth_tuning = true },
+    .{ .name = "HistoryGravityMax", .value = 15649, .min_value = 8192, .max_value = 29000, .c_end = 1200, .worth_tuning = true },
 
     // -- Move ordering and quiescence --
     .{ .name = "MovepickSEEMargin", .value = 97, .min_value = 0, .max_value = 220, .c_end = 11, .worth_tuning = true },

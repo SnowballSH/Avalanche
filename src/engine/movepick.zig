@@ -76,7 +76,7 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                             const prev = searcher.move_history[searcher.ply - plies_ago - 1];
                             if (prev.to_u16() == 0) continue;
 
-                            score += @divTrunc(searcher.continuation[searcher.moved_piece_history[searcher.ply - plies_ago - 1].pure_index()][prev.to][move.from][move.to] * weight, 128);
+                            score += @divTrunc(@as(i32, searcher.continuation[searcher.moved_piece_history[searcher.ply - plies_ago - 1].pure_index()][prev.to][move.from][move.to]) * weight, 128);
                         }
                     }
                 }
