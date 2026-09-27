@@ -116,7 +116,8 @@ All of these are comptime-resolved, so native builds compile to the same code as
 - Release builds are stripped: ~300 KB of code next to the 25 MB network. The network is referenced at
   runtime only through the in-place `embedded_model`; touching the `@embedFile` bytes at runtime would
   emit a second copy (a web test asserts the module stays under 1.1x the network size).
-- `build_all_v3.sh` (and the tagged-release CI job) ships the module as `Avalanche-<version>-wasm.wasm`.
+- `build_all_v3.sh` (and the tagged-release CI job) ships the module as `Avalanche-<version>-wasm.wasm`. It needs a
+  host: build the `web/` package (`npm run build`) or implement the small ABI above.
 - The network is read in place from the data segment rather than copied into a second 25 MB buffer,
   which saves 25 MB of linear memory (~87 MB total at the default 16 MB hash).
 - `TranspositionTable.index` uses three 64-bit multiplies on 32-bit targets. The `u128` product would lower

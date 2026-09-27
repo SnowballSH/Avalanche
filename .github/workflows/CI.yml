@@ -52,6 +52,11 @@ jobs:
           zig version
           zig env
 
+      # Unit tests do not compile the UCI frontend; one Debug build covers it.
+      - name: Debug build
+        if: runner.os == 'Linux'
+        run: zig build
+
       - name: Release build
         run: zig build --release=fast
 

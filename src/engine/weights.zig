@@ -43,7 +43,7 @@ pub const EMBEDDED_NAME = "<embedded>";
 /// Shown to users, e.g. "768x16->1024->8".
 pub const ARCHITECTURE = std.fmt.comptimePrint("768x{d}->{d}->{d}", .{ NUM_INPUT_BUCKETS, HIDDEN_SIZE, OUTPUT_SIZE });
 
-var active_name_buf: [128]u8 = undefined;
+var active_name_buf: [std.fs.max_name_bytes]u8 = undefined;
 var active_name: []const u8 = build_options.net_name;
 
 /// Name of the network in use: the embedded network's name (the stem of the
@@ -105,7 +105,6 @@ pub fn load(path: []const u8) !void {
     @memcpy(std.mem.asBytes(&model_storage), bytes);
 
     const file_name = std.fs.path.basename(path);
-    const kept = file_name[0..@min(file_name.len, active_name_buf.len)];
-    @memcpy(active_name_buf[0..kept.len], kept);
-    active_name = active_name_buf[0..kept.len];
+    @memcpy(active_name_buf[0..file_name.len], file_name);
+    active_name = active_name_buf[0..file_name.len];
 }

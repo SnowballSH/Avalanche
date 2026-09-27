@@ -4,6 +4,7 @@ set -euo pipefail
 # Release builds pass e.g. VERSION=4.1.0; everything else is a dev build.
 VERSION="${VERSION:-dev}"
 VERSION="${VERSION#v}"
+[ -n "$VERSION" ] || VERSION=dev
 # Dev builds keep the build-timestamp version string; releases report VERSION.
 VERSION_FLAG=()
 if [ "$VERSION" != "dev" ]; then

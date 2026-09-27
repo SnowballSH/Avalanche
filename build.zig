@@ -44,7 +44,7 @@ pub fn timestamp2DateTime(timestamp: i64) DateTime {
 // End of Simple DateTime lib
 
 fn dtToString(dt: DateTime, buf: []u8) []const u8 {
-    return std.fmt.bufPrint(buf, "Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2}", .{ dt.year, dt.month, dt.day, dt.hour, dt.minute }) catch unreachable;
+    return std.fmt.bufPrint(buf, "Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2} UTC", .{ dt.year, dt.month, dt.day, dt.hour, dt.minute }) catch unreachable;
 }
 
 fn addPyrrhic(b: *std.Build, compile: *std.Build.Step.Compile) void {
