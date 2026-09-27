@@ -7,6 +7,7 @@ const search = @import("../engine/search.zig");
 const weights = @import("../engine/weights.zig");
 const options = @import("../engine/uci/options.zig");
 const support = @import("support.zig");
+const build_options = @import("build_options");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 
@@ -128,9 +129,11 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "altered.nnue", .data = altered });
     const altered_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "altered.nnue", &path_buf)];
     try f.set(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{altered_path}));
-    try expect(std.mem.indexOf(u8, f.output(), "using") != null);
+    try expect(std.mem.indexOf(u8, f.output(), "using altered.nnue") != null);
+    try std.testing.expectEqualStrings("altered.nnue", weights.active_network());
     try expect(hce.evaluate_nnue(f.pos) != embedded_eval);
 
     try f.set("name EvalFile value " ++ weights.EMBEDDED_NAME);
     try expectEqual(embedded_eval, hce.evaluate_nnue(f.pos));
+    try std.testing.expectEqualStrings(build_options.net_name, weights.active_network());
 }

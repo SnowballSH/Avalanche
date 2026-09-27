@@ -2,9 +2,12 @@
 
 name: CI
 
+# Tests run on master, on pull requests into it, and weekly. Feature branches
+# are tested through their pull request instead of on every push.
 on:
   push:
-    branches: ["**"]
+    branches: [master]
+    tags: ["v*"]
   pull_request:
     branches: [master]
   workflow_dispatch:
@@ -48,9 +51,6 @@ jobs:
         run: |
           zig version
           zig env
-
-      - name: Debug build
-        run: zig build
 
       - name: Release build
         run: zig build --release=fast
@@ -149,13 +149,13 @@ jobs:
       - name: UCI protocol tests on wasm
         run: python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalanche.wasm
 
-  # Cross-compile optimized release binaries for the standard platforms and
-  # upload them. Runs only after the matrix passes, on push-to-master and manual
-  # dispatch -- never on pull requests (so forks cannot trigger artifact builds).
+  # Cross-compile release binaries (native + wasm) and upload them. This is the
+  # slowest job, so it runs only for version tags (v*) and manual dispatch, never
+  # per commit or on pull requests (so forks cannot trigger artifact builds).
   artifacts:
     name: release artifacts
-    needs: build
-    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+    needs: [build, wasm]
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -168,6 +168,9 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Cross-compile release binaries
+        env:
+          # Tag builds report the tag's version (v4.1.0 -> 4.1.0); manual runs are dev builds.
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
         run: bash build_all_v3.sh
 
       - name: Upload artifacts

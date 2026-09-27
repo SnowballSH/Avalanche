@@ -50,6 +50,10 @@ python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalan
 zig build wasm --release=fast # WebAssembly build -> zig-out/web/avalanche.wasm (see docs/WASM.md)
 ```
 
+Development builds report their build time as the version (`Avalanche Compiled at ...`). Release binaries are built
+with `VERSION=4.1.0 bash build_all_v3.sh` (one binary per supported CPU level plus the wasm module, in `artifacts/`),
+which passes `-Dversion`; CI does the same for pushed `v*` tags.
+
 Older Zig 0.10.x is no longer required.
 
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine

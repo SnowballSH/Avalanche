@@ -9,7 +9,7 @@
 | `position startpos\|fen <fen> [moves ...]` | FEN accepts X-FEN and Shredder castling fields |
 | `go ...` | `wtime btime winc binc movestogo depth nodes movetime mate infinite ponder searchmoves`, in any combination |
 | `stop`, `ponderhit` | accepted while searching |
-| `eval` | static evaluation of the current position (network output and final score, White's view) |
+| `eval` | names the network, then prints the static evaluation of the current position (network output and final score, White's view) |
 | `d`, `perft N`, `perftdiv N`, `spsa`, `spsa++`, `genfens ...` | engine-specific |
 
 ## Options
@@ -60,6 +60,10 @@ Tunable search parameters are also exposed as spin options for SPSA.
   move, and, with a single PV line, `lowerbound`/`upperbound` lines when an
   aspiration window fails high/low. Shorter searches print only one line per
   completed iteration (and MultiPV line).
+- **Network name**: every `go` (and `eval`) starts with
+  `info string NNUE evaluation using <name> (<architecture>, <size> MiB)`,
+  where `<name>` is the stem of the `-Dnet` file the binary embeds (e.g.
+  `nezha`) or the file name of the network loaded with `EvalFile`.
 - **EvalFile**: a file is validated (exact size, output-weight range) into a
   temporary buffer before it replaces the active network, so a bad file never
   leaves the engine without a network; cached accumulators are then refreshed.

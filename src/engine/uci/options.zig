@@ -258,7 +258,7 @@ fn set_eval_file(ctx: Context, value: Value) !void {
         return;
     };
     ctx.position.refresh_evaluation();
-    try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{path});
+    try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{weights.active_network()});
 }
 
 fn set_show_wdl(_: Context, value: Value) !void {

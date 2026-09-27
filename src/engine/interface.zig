@@ -5,6 +5,7 @@ const position = @import("../chess/position.zig");
 const perft = @import("../chess/perft.zig");
 const tt = @import("tt.zig");
 const hce = @import("hce.zig");
+const weights = @import("weights.zig");
 const search = @import("search.zig");
 const parameters = @import("parameters.zig");
 const build_options = @import("build_options");
@@ -125,7 +126,7 @@ pub const UciInterface = struct {
         } else if (eql(command, "position")) {
             self.set_position(&tokens);
         } else if (eql(command, "go")) {
-            self.start_search(&tokens);
+            try self.start_search(&tokens, out);
         } else if (eql(command, "d")) {
             self.position.debug_print();
         } else if (eql(command, "eval")) {
@@ -167,6 +168,7 @@ pub const UciInterface = struct {
             .White => hce.evaluate_comptime(pos, .White),
             .Black => hce.evaluate_comptime(pos, .Black),
         };
+        try print_network(out);
         try out.print("info string NNUE evaluation {d} cp (white side)" ++ nl, .{white_sign * hce.evaluate_nnue(pos)});
         try out.print("info string Final evaluation {d} cp (white side)" ++ nl, .{white_sign * final});
     }
@@ -206,10 +208,13 @@ pub const UciInterface = struct {
         }
     }
 
-    fn start_search(self: *UciInterface, tokens: *Tokens) void {
+    fn start_search(self: *UciInterface, tokens: *Tokens, out: *std.Io.Writer) !void {
         const cmd = go.GoCommand.parse(tokens, &self.position);
         const overhead = search.MOVE_OVERHEAD + @min(@as(u64, search.NUM_THREADS) * 5, 25);
         const budget = go.allocate_time(&cmd, self.position.turn, overhead);
+
+        try print_network(out);
+        try out.flush();
 
         const s = &self.searcher;
         s.force_thinking = !budget.managed;
@@ -244,6 +249,16 @@ pub const UciInterface = struct {
         }
     }
 };
+
+/// Like Stockfish, every search starts by naming the network, so logs and GUIs
+/// show which evaluation produced the analysis (relevant with EvalFile).
+fn print_network(out: *std.Io.Writer) !void {
+    try out.print("info string NNUE evaluation using {s} ({s}, {d} MiB)" ++ nl, .{
+        weights.active_network(),
+        weights.ARCHITECTURE,
+        @sizeOf(weights.NNUEWeights) >> 20,
+    });
+}
 
 fn run_search(searcher: *search.Searcher, pos: *position.Position, max_depth: ?u8, instant_single_reply: bool) void {
     numa.place_current_thread(0);

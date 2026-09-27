@@ -16,6 +16,7 @@ strength-limiting options. Uses only the Python standard library.
 from __future__ import annotations
 
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -148,7 +149,15 @@ def test_eval_file_rejects_bad_network(engine: Engine) -> None:
     line = engine.read_until("info string EvalFile", 5)[-1]
     assert "failed to load" in line, line
     engine.send("setoption name EvalFile value <embedded>")
-    assert "using <embedded>" in engine.read_until("info string EvalFile", 5)[-1]
+    restored = engine.read_until("info string EvalFile", 5)[-1]
+    assert restored.startswith("info string EvalFile: using ") and "<embedded>" not in restored, restored
+
+
+def test_search_names_the_network(engine: Engine) -> None:
+    output, _ = engine.search("position startpos", "go depth 2")
+    announcements = [line for line in output if line.startswith("info string NNUE evaluation using ")]
+    assert len(announcements) == 1, output
+    assert re.search(r"using \S+ \(768x\d+->\d+->\d+, \d+ MiB\)$", announcements[0]), announcements[0]
 
 
 def test_live_currmove_after_delay(engine: Engine) -> None:

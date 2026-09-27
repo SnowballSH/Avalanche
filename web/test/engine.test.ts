@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { stat } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { createCapturingEngine, nativeBenchSignature, parseBenchNodes } from "./fixtures.ts";
+import { createCapturingEngine, nativeBenchSignature, parseBenchNodes, wasmUrl } from "./fixtures.ts";
 
 const KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
 
@@ -81,6 +82,25 @@ describe("wasm engine", () => {
     const options = run("uci").filter((line) => line.startsWith("option name "));
     assert.ok(options.includes("option name Threads type spin default 1 min 1 max 1"));
     assert.ok(!options.some((line) => line.includes("Syzygy")));
+  });
+
+  it("embeds the network exactly once", async () => {
+    const [module, network] = await Promise.all([
+      stat(wasmUrl),
+      stat(new URL("../../nets/nezha.nnue", import.meta.url)),
+    ]);
+    assert.ok(module.size > network.size, "network missing from the module");
+    assert.ok(
+      module.size < network.size * 1.1,
+      `module is ${String(module.size)} bytes for a ${String(network.size)}-byte network`,
+    );
+  });
+
+  it("names the network when a search starts", async () => {
+    const { run } = await createCapturingEngine();
+    run("position startpos");
+    const output = run("go depth 1");
+    assert.match(output[0] ?? "", /^info string NNUE evaluation using nezha \(768x\d+->\d+->\d+, \d+ MiB\)$/);
   });
 
   it("reports quit to the host", async () => {

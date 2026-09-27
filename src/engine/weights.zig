@@ -40,6 +40,18 @@ fn adviseHugePages() void {
 
 pub const EMBEDDED_NAME = "<embedded>";
 
+/// Shown to users, e.g. "768x16->1024->8".
+pub const ARCHITECTURE = std.fmt.comptimePrint("768x{d}->{d}->{d}", .{ NUM_INPUT_BUCKETS, HIDDEN_SIZE, OUTPUT_SIZE });
+
+var active_name_buf: [128]u8 = undefined;
+var active_name: []const u8 = build_options.net_name;
+
+/// Name of the network in use: the embedded network's name (the stem of the
+/// `-Dnet` file it was built from) or the file name of the loaded EvalFile.
+pub fn active_network() []const u8 {
+    return active_name;
+}
+
 /// Whether a network can be loaded from a file at runtime. Wasm has no file
 /// system and reads the embedded network in place.
 pub const supports_eval_file = !platform.is_wasm;
@@ -59,19 +71,22 @@ pub fn validate(bytes: []const u8) NetworkError!void {
     }
 }
 
+comptime {
+    if (NNUE_SOURCE.len != @sizeOf(NNUEWeights)) {
+        @compileError(std.fmt.comptimePrint("Embedded network has {d} bytes but this build's architecture ({s}) needs {d}; check -Dnet and -Dbuckets", .{ NNUE_SOURCE.len, ARCHITECTURE, @sizeOf(NNUEWeights) }));
+    }
+}
+
 pub fn do_nnue() void {
     adviseHugePages();
-    validate(NNUE_SOURCE) catch |err| std.debug.panic("Embedded network is unusable: {s} (Model={} bytes, Net={} bytes, buckets={})", .{
-        @errorName(err),
-        @sizeOf(NNUEWeights),
-        NNUE_SOURCE.len,
-        NUM_INPUT_BUCKETS,
-    });
     // Copy straight into the global. Do NOT assign through a by-value temporary.
     // A 25 MB MODEL on the stack may cause overflow.
     if (!platform.is_wasm) {
         @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
     }
+    // Validate the network in use rather than NNUE_SOURCE: on wasm, referencing
+    // the embedded bytes at runtime would emit a second 25 MB copy of them.
+    validate(std.mem.asBytes(MODEL)) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
 }
 
 /// Replaces the active network with the file at `path`, or with the embedded
@@ -81,10 +96,16 @@ pub fn load(path: []const u8) !void {
     if (comptime !supports_eval_file) return error.Unsupported;
     if (std.mem.eql(u8, path, EMBEDDED_NAME)) {
         @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
+        active_name = build_options.net_name;
         return;
     }
     const bytes = try std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(@sizeOf(NNUEWeights) + 1));
     defer platform.allocator.free(bytes);
     try validate(bytes);
     @memcpy(std.mem.asBytes(&model_storage), bytes);
+
+    const file_name = std.fs.path.basename(path);
+    const kept = file_name[0..@min(file_name.len, active_name_buf.len)];
+    @memcpy(active_name_buf[0..kept.len], kept);
+    active_name = active_name_buf[0..kept.len];
 }
