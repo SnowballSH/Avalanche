@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../../platform.zig");
 const search = @import("../search.zig");
 const tt = @import("../tt.zig");
 const syzygy = @import("../syzygy.zig");
@@ -41,6 +42,8 @@ const Option = struct {
     name: []const u8,
     kind: Kind,
     apply: *const fn (ctx: Context, value: Value) anyerror!void,
+    // Options the current build target cannot honour are neither advertised nor accepted.
+    available: bool = true,
 };
 
 const Value = union(enum) {
@@ -52,7 +55,7 @@ const Value = union(enum) {
 
 const OPTIONS = [_]Option{
     .{ .name = "Hash", .kind = .{ .spin = .{ .default = 16, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
-    .{ .name = "Threads", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_THREADS } }, .apply = set_threads },
+    .{ .name = "Threads", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_SEARCH_THREADS } }, .apply = set_threads },
     .{ .name = "MoveOverhead", .kind = .{ .spin = .{ .default = search.DEFAULT_MOVE_OVERHEAD, .min = 0, .max = search.MAX_MOVE_OVERHEAD } }, .apply = set_move_overhead },
     .{ .name = "MultiPV", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_MULTI_PV } }, .apply = set_multi_pv },
     .{ .name = "Ponder", .kind = .{ .check = false }, .apply = set_ponder },
@@ -61,16 +64,17 @@ const OPTIONS = [_]Option{
     .{ .name = "UCI_LimitStrength", .kind = .{ .check = false }, .apply = set_limit_strength },
     .{ .name = "UCI_Elo", .kind = .{ .spin = .{ .default = strength.DEFAULT_ELO, .min = strength.MIN_ELO, .max = strength.MAX_ELO } }, .apply = set_elo },
     .{ .name = "Skill Level", .kind = .{ .spin = .{ .default = strength.MAX_LEVEL, .min = 0, .max = strength.MAX_LEVEL } }, .apply = set_skill_level },
-    .{ .name = "SyzygyPath", .kind = .{ .string = "<empty>" }, .apply = set_syzygy_path },
-    .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = 100 } }, .apply = set_syzygy_probe_depth },
-    .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = 7, .min = 1, .max = 7 } }, .apply = set_syzygy_probe_limit },
-    .{ .name = "Syzygy50MoveRule", .kind = .{ .check = true }, .apply = set_syzygy_rule50 },
+    .{ .name = "SyzygyPath", .kind = .{ .string = "<empty>" }, .apply = set_syzygy_path, .available = syzygy.supported },
+    .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = 100 } }, .apply = set_syzygy_probe_depth, .available = syzygy.supported },
+    .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = 7, .min = 1, .max = 7 } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
+    .{ .name = "Syzygy50MoveRule", .kind = .{ .check = true }, .apply = set_syzygy_rule50, .available = syzygy.supported },
     .{ .name = "UCI_ShowWDL", .kind = .{ .check = false }, .apply = set_show_wdl },
     .{ .name = "Contempt", .kind = .{ .spin = .{ .default = 0, .min = -search.MAX_CONTEMPT, .max = search.MAX_CONTEMPT } }, .apply = set_contempt },
 };
 
 pub fn print_all(out: *std.Io.Writer) !void {
     for (OPTIONS) |option| {
+        if (!option.available) continue;
         try out.print("option name {s} type ", .{option.name});
         switch (option.kind) {
             .check => |default| try out.print("check default {}", .{default}),
@@ -93,7 +97,7 @@ pub fn set_option(args: []const u8, settings: *Settings, out: *std.Io.Writer) !v
     const ctx = Context{ .settings = settings, .out = out };
 
     for (OPTIONS) |option| {
-        if (!std.ascii.eqlIgnoreCase(option.name, request.name)) continue;
+        if (!option.available or !std.ascii.eqlIgnoreCase(option.name, request.name)) continue;
         const value: Value = switch (option.kind) {
             .check => .{ .check = parse_bool(request.value) orelse return SetOptionError.InvalidValue },
             .spin => |spin| .{ .spin = std.math.clamp(
@@ -191,8 +195,8 @@ fn set_syzygy_path(ctx: Context, value: Value) !void {
         syzygy.deinit();
         return;
     }
-    const cpath = try std.heap.c_allocator.dupeZ(u8, path);
-    defer std.heap.c_allocator.free(cpath);
+    const cpath = try platform.allocator.dupeZ(u8, path);
+    defer platform.allocator.free(cpath);
     if (syzygy.init(cpath.ptr)) {
         try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.line_ending, .{ syzygy.max_pieces(), path });
     } else {

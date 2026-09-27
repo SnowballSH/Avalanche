@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const builtin = @import("builtin");
 pub const weights = @import("weights.zig");
 const types = @import("../chess/types.zig");
@@ -147,6 +148,9 @@ inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
             return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.sse2.pmadd.wd" }).*(a, b);
         }
     }
+    if (comptime builtin.mode != .Debug and builtin.cpu.arch.isWasm() and OUTPUT_LANES == 8) {
+        return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.wasm.dot" }).*(a, b);
+    }
 
     const a_parts = std.simd.deinterlace(2, a);
     const b_parts = std.simd.deinterlace(2, b);
@@ -260,12 +264,12 @@ pub const NNUE = struct {
 
     pub fn ensure_stack(self: *NNUE) void {
         if (self.stack == null) {
-            self.stack = std.heap.c_allocator.create(Stack) catch unreachable;
+            self.stack = platform.allocator.create(Stack) catch unreachable;
         }
     }
 
     pub fn release_stack(self: *NNUE) void {
-        if (self.stack) |s| std.heap.c_allocator.destroy(s);
+        if (self.stack) |s| platform.allocator.destroy(s);
         self.stack = null;
     }
 

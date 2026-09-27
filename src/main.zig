@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("chess/types.zig");
+const platform = @import("platform.zig");
 const tables = @import("chess/tables.zig");
 const zobrist = @import("chess/zobrist.zig");
 const cuckoo = @import("chess/cuckoo.zig");
@@ -38,7 +39,7 @@ fn parsePlySpan(value: []const u8, min_out: *u64, range_out: *u64) void {
 }
 
 pub fn main(init: std.process.Init) anyerror!void {
-    types.GLOBAL_IO = init.io;
+    platform.io = init.io;
 
     tables.init_all();
     zobrist.init_zobrist();

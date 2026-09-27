@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const perft = @import("../chess/perft.zig");
@@ -36,9 +37,11 @@ pub const UciInterface = struct {
     }
 
     fn join_search(self: *UciInterface) void {
-        if (self.search_thread) |t| {
-            t.join();
-            self.search_thread = null;
+        if (comptime platform.has_threads) {
+            if (self.search_thread) |t| {
+                t.join();
+                self.search_thread = null;
+            }
         }
         @atomicStore(bool, &self.searcher.is_searching, false, .release);
     }
@@ -50,11 +53,11 @@ pub const UciInterface = struct {
 
     pub fn main_loop(self: *UciInterface) !void {
         var in_buf: [1 << 16]u8 = undefined;
-        var in_file = std.Io.File.stdin().readerStreaming(types.GLOBAL_IO, &in_buf);
+        var in_file = std.Io.File.stdin().readerStreaming(platform.io, &in_buf);
         const stdin = &in_file.interface;
         var out_buf: [1 << 16]u8 = undefined;
-        var out_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
-        const stdout = &out_file.interface;
+        var out_file = platform.Stdout.init(&out_buf);
+        const stdout = out_file.writer();
 
         defer {
             self.stop_search();
@@ -143,7 +146,7 @@ pub const UciInterface = struct {
                 const live = parameters.live_uci_value(tunable.name) orelse tunable.value;
                 try out.print("{s}, int, {d}, {d}, {d}, {d}, {d}" ++ nl, .{ tunable.name, live, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
             }
-        } else if (eql(command, "genfens")) {
+        } else if (!platform.is_wasm and eql(command, "genfens")) {
             // OpenBench datagen: generate FENs for the rest of the line, then exit.
             var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             defer arena.deinit();
@@ -217,11 +220,15 @@ pub const UciInterface = struct {
         // worker starts cannot pass the is_searching guard and double-spawn.
         @atomicStore(bool, &s.is_searching, true, .release);
 
-        self.search_thread = std.Thread.spawn(
-            .{ .stack_size = 64 * 1024 * 1024 },
-            run_search,
-            .{ s, &self.position, cmd.depth, instant_single_reply },
-        ) catch |e| std.debug.panic("Could not spawn main thread!\n{}", .{e});
+        if (comptime platform.has_threads) {
+            self.search_thread = std.Thread.spawn(
+                .{ .stack_size = 64 * 1024 * 1024 },
+                run_search,
+                .{ s, &self.position, cmd.depth, instant_single_reply },
+            ) catch |e| std.debug.panic("Could not spawn main thread!\n{}", .{e});
+        } else {
+            run_search(s, &self.position, cmd.depth, instant_single_reply);
+        }
     }
 };
 

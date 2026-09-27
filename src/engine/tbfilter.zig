@@ -5,6 +5,7 @@
 // position whose self-play WDL result contradicts the Syzygy tablebase.
 
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const syzygy = @import("syzygy.zig");
 
@@ -214,7 +215,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
 }
 
 fn workerRun(w: *Worker) void {
-    const io = types.GLOBAL_IO;
+    const io = platform.io;
 
     const in_file = std.Io.Dir.cwd().openFile(io, w.input, .{}) catch {
         w.ok = false;
@@ -301,7 +302,7 @@ fn workerRun(w: *Worker) void {
 /// returning the number of bytes copied. Errors (incl. a short read) leave the
 /// part on disk for inspection; the handle is always closed.
 fn copyPart(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 {
-    const io = types.GLOBAL_IO;
+    const io = platform.io;
     const pf = try std.Io.Dir.cwd().openFile(io, part, .{});
     defer pf.close(io);
     const plen = try pf.length(io);
@@ -320,7 +321,7 @@ fn copyPart(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 
 /// Concatenate `parts` in order into a freshly created `output`, deleting each
 /// part once fully copied. Returns total bytes written.
 fn concatParts(output: []const u8, parts: []const []const u8) !u64 {
-    const io = types.GLOBAL_IO;
+    const io = platform.io;
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{ .read = true });
     defer out_file.close(io);
 
@@ -365,7 +366,7 @@ fn printUsage() void {
 /// Entry point for the `tbfilter` subcommand. Returns a process exit code
 /// (0 = success, non-zero = failure) so callers and scripts can detect errors.
 pub fn run(args: []const []const u8) u8 {
-    const io = types.GLOBAL_IO;
+    const io = platform.io;
 
     var cfg = Config{};
     var input: ?[]const u8 = null;

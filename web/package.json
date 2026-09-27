@@ -1,0 +1,39 @@
+{
+  "name": "avalanche-wasm",
+  "version": "4.0.0",
+  "description": "WebAssembly build and host bindings for the Avalanche chess engine",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/src/index.js",
+    "./worker": "./dist/src/worker.js",
+    "./node": "./dist/src/node/client.js"
+  },
+  "bin": {
+    "avalanche-wasm": "./dist/src/node/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build:wasm": "cd .. && zig build wasm --release=fast",
+    "build:native": "cd .. && zig build --release=fast",
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "pretest": "npm run build:wasm && npm run build:native",
+    "test": "node --test --test-timeout=300000 test/*.test.ts",
+    "uci": "node src/node/cli.ts ../zig-out/web/avalanche.wasm",
+    "demo": "npm run build:wasm && npm run build && node demo/serve.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.14",
+    "@types/node": "^26.6.3",
+    "typescript": "^7.0.2"
+  }
+}

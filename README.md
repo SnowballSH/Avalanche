@@ -46,6 +46,7 @@ zig build                     # debug build
 zig build test                # unit tests
 python3 scripts/uci_protocol_test.py  # end-to-end UCI checks (needs the release build)
 ./zig-out/bin/Avalanche bench # fixed-position benchmark
+zig build wasm --release=fast # WebAssembly build -> zig-out/web/avalanche.wasm (see docs/WASM.md)
 ```
 
 Older Zig 0.10.x is no longer required.

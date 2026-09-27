@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const support = @import("support.zig");
@@ -15,7 +16,7 @@ const Fixture = struct {
 
     fn init(self: *Fixture, fen: []const u8) !void {
         self.io_threaded = .init(std.heap.page_allocator, .{});
-        types.GLOBAL_IO = self.io_threaded.io();
+        platform.io = self.io_threaded.io();
         support.init_tables();
         search.init_lmr();
         tt.GlobalTT.reset(16);

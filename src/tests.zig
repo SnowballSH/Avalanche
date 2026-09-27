@@ -1,5 +1,6 @@
 const std = @import("std");
 const types = @import("chess/types.zig");
+const platform = @import("platform.zig");
 const tables = @import("chess/tables.zig");
 const position = @import("chess/position.zig");
 const castling = @import("chess/castling.zig");
@@ -1038,7 +1039,7 @@ test "eval: hce material draw classification" {
 test "search: mate in 1 (white back-rank)" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     tables.init_all();
     zobrist.init_zobrist();
@@ -1073,7 +1074,7 @@ test "search: mate in 1 (white back-rank)" {
 test "search: mate in 1 (black back-rank)" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     tables.init_all();
     zobrist.init_zobrist();
@@ -1107,7 +1108,7 @@ test "search: mate in 1 (black back-rank)" {
 test "search: forced node-limited search continues after reporting mate" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     tables.init_all();
     zobrist.init_zobrist();
@@ -1144,7 +1145,7 @@ test "search: forced node-limited search continues after reporting mate" {
 test "search: stalemate scores as draw" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     tables.init_all();
     zobrist.init_zobrist();
@@ -1174,7 +1175,7 @@ test "search: stalemate scores as draw" {
 test "search: deterministic node counts and score" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     tables.init_all();
     zobrist.init_zobrist();
@@ -1279,7 +1280,7 @@ test "see: absolutely pinned pawn cannot recapture" {
 test "search: maximum-mobility position exceeds 128 quiet moves safely" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     tables.init_all();
     zobrist.init_zobrist();
@@ -1314,7 +1315,7 @@ test "search: maximum-mobility position exceeds 128 quiet moves safely" {
 test "qsearch: checkmate takes precedence over fifty-move draw" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     const old_contempt = search.CONTEMPT;
     defer search.CONTEMPT = old_contempt;
@@ -1345,7 +1346,7 @@ test "qsearch: checkmate takes precedence over fifty-move draw" {
 test "qsearch: stalemate precedes stand-pat and TT cutoffs" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     const old_contempt = search.CONTEMPT;
     defer search.CONTEMPT = old_contempt;
@@ -1392,7 +1393,7 @@ test "qsearch: stalemate precedes stand-pat and TT cutoffs" {
 test "qsearch: contempt draw keeps fail-soft provenance" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     const old_contempt = search.CONTEMPT;
     defer search.CONTEMPT = old_contempt;
@@ -1424,4 +1425,8 @@ test "qsearch: contempt draw keeps fail-soft provenance" {
     const score = s.quiescence_search(pos, types.Color.White, beta - 1, beta);
     try expect(score == 100);
     try expect(tt.GlobalTT.get(pos.hash) == null);
+}
+
+test {
+    _ = platform;
 }

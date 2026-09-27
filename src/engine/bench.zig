@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
@@ -75,25 +76,25 @@ fn runBenchSearch(job: BenchJob) void {
 
 pub fn bench() !void {
     var out_buf: [256]u8 = undefined;
-    var stdout_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
-    const stdout = &stdout_file.interface;
+    var stdout_file = platform.Stdout.init(&out_buf);
+    const stdout = stdout_file.writer();
 
     const depth: u8 = 14;
     var nodes: u64 = 0;
     const timer = types.Timer.start();
-    const searcher = std.heap.c_allocator.create(search.Searcher) catch unreachable;
+    const searcher = platform.allocator.create(search.Searcher) catch unreachable;
     defer {
         searcher.deinit();
-        std.heap.c_allocator.destroy(searcher);
+        platform.allocator.destroy(searcher);
     }
     searcher.init();
     searcher.force_thinking = true;
     searcher.silent_output = true;
 
-    const pos = std.heap.c_allocator.create(position.Position) catch unreachable;
+    const pos = platform.allocator.create(position.Position) catch unreachable;
     defer {
         pos.deinit();
-        std.heap.c_allocator.destroy(pos);
+        platform.allocator.destroy(pos);
     }
 
     pos.init();
@@ -103,12 +104,13 @@ pub fn bench() !void {
         searcher.reset_heuristics(true);
         searcher.hash_history.clearRetainingCapacity();
         searcher.hash_history.append(pos.hash) catch {};
-        const thread = std.Thread.spawn(
-            .{ .stack_size = 256 * 1024 * 1024 },
-            runBenchSearch,
-            .{BenchJob{ .searcher = searcher, .pos = pos, .depth = depth }},
-        ) catch unreachable;
-        thread.join();
+        const job = BenchJob{ .searcher = searcher, .pos = pos, .depth = depth };
+        if (comptime platform.has_threads) {
+            const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 * 1024 }, runBenchSearch, .{job}) catch unreachable;
+            thread.join();
+        } else {
+            runBenchSearch(job);
+        }
         nodes += searcher.nodes;
     }
 

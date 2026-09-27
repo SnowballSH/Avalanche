@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const castling = @import("../chess/castling.zig");
@@ -293,7 +294,7 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
 test "frc: search returns a legal move from a double fischer random position" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
-    types.GLOBAL_IO = io_threaded.io();
+    platform.io = io_threaded.io();
 
     init_tables();
     search.init_lmr();

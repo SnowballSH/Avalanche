@@ -12,6 +12,7 @@
 //   - ensuring the position is not in check and is not drawn
 
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
@@ -62,7 +63,7 @@ fn positionIsUsable(pos: *position.Position) bool {
 }
 
 pub fn run(args_in: []const []const u8) !void {
-    const io = types.GLOBAL_IO;
+    const io = platform.io;
     var out_buf: [4096]u8 = undefined;
     var out_file = std.Io.File.stdout().writerStreaming(io, &out_buf);
     const out = &out_file.interface;
