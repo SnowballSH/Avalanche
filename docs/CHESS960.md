@@ -29,7 +29,8 @@ occupancy and the enemy attack map that legal movegen already computes.
 
 The only Chess960-specific check: when the castling rook is not on an edge
 file, removing it can uncover a rank attack on the king's destination (e.g.
-white king b1, rook c1, enemy queen a1 castling queenside). `Rule.rook_may_shield`
+white king c1 castling queenside with the rook on b1 while an enemy rook sits
+on a1: the king stays on c1 but loses the rook's shield). `Rule.rook_may_shield`
 flags those rules so standard chess never pays for the extra rook-attack lookup.
 
 ## Move encoding

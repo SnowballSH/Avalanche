@@ -280,24 +280,23 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
     init_tables();
     const pos = try new_position();
     defer destroy_position(pos);
-    defer castling.uci_chess960 = false;
 
     pos.set_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
     var buf: [8]u8 = undefined;
 
-    castling.uci_chess960 = false;
+    pos.uci_chess960 = false;
     const standard = types.Move.new_from_string(pos, "e1g1");
     try expect(standard.is_castle());
     try expectEqualStrings("e1g1", format_move(standard, pos.chess960_notation(), &buf));
     try expectEqual(standard.to_u16(), types.Move.new_from_string(pos, "e1h1").to_u16());
 
-    castling.uci_chess960 = true;
+    pos.uci_chess960 = true;
     const king_takes_rook = types.Move.new_from_string(pos, "e1a1");
     try expect(king_takes_rook.is_castle());
     try expectEqualStrings("e1a1", format_move(king_takes_rook, pos.chess960_notation(), &buf));
     try expectEqual(@as(u16, 0), types.Move.new_from_string(pos, "e1c1").to_u16());
 
-    castling.uci_chess960 = false;
+    pos.uci_chess960 = false;
     pos.set_fen("4k3/8/8/8/8/8/8/1R3K2 w B - 0 1");
     try expect(pos.chess960_notation());
     const b_file_castle = types.Move.new_from_string(pos, "f1b1");

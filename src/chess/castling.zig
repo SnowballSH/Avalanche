@@ -23,10 +23,6 @@ pub inline fn color_rights(color: types.Color) Rights {
     return right(color, .King) | right(color, .Queen);
 }
 
-/// UCI_Chess960: castling moves are written king-captures-rook instead of
-/// king-to-destination.
-pub var uci_chess960: bool = false;
-
 /// Geometry of one castling move. Every square set is precomputed so movegen
 /// only performs mask tests.
 pub const Rule = struct {

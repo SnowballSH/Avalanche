@@ -101,6 +101,7 @@ pub const UciInterface = struct {
         }
 
         if (@atomicLoad(bool, &self.searcher.is_searching, .acquire)) {
+            try out.print("info string ignored while searching: {s}" ++ nl, .{command});
             return true;
         }
         self.join_search();
@@ -114,6 +115,7 @@ pub const UciInterface = struct {
             options.set_option(tokens.rest(), &self.settings, out) catch |err| {
                 try out.print("info string setoption failed ({s}): {s}" ++ nl, .{ @errorName(err), tokens.rest() });
             };
+            self.position.uci_chess960 = self.settings.chess960;
         } else if (eql(command, "ucinewgame")) {
             self.searcher.deinit();
             self.searcher = search.Searcher.new();

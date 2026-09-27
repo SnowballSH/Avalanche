@@ -317,6 +317,8 @@ pub const Searcher = struct {
     lines: [MAX_MULTI_PV]RootLine = undefined,
     line_count: usize = 0,
     ponder_move: types.Move = types.Move.empty(),
+    rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(0),
+    rng_seeded: bool = false,
 
     pub fn init(self: *Searcher) void {
         const board = std.heap.c_allocator.create(position.Position) catch unreachable;
@@ -604,17 +606,23 @@ pub const Searcher = struct {
         }
         outer: while (tdepth <= bound) {
             var pv_index: usize = 0;
+            var interrupted = false;
             while (pv_index < pv_target) : (pv_index += 1) {
                 self.root_excluded_count = pv_index;
                 const line_seed = if (pv_index < self.line_count) self.lines[pv_index].score else score;
                 const line_score = self.search_root_line(pos, color, tdepth, line_seed) orelse {
-                    if (pv_index == 0) break :outer;
+                    interrupted = true;
                     break;
                 };
                 self.record_line(pv_index, line_score, tdepth);
                 self.root_excluded[pv_index] = self.lines[pv_index].pv[0];
             }
             self.root_excluded_count = 0;
+            if (interrupted) {
+                if (pv_index == 0) break :outer;
+                // Lines not re-searched at this depth carry incomparable scores.
+                self.line_count = pv_index;
+            }
             self.sort_lines();
 
             score = self.lines[0].score;
@@ -656,6 +664,8 @@ pub const Searcher = struct {
                 }
                 outW.flush() catch {};
             }
+
+            if (interrupted) break;
 
             if (self.mate_in) |moves| {
                 if (score > 0 and is_mate_score and mate_distance(score) <= moves) break;
@@ -721,12 +731,13 @@ pub const Searcher = struct {
             bm = chosen_line.?.pv[0];
         }
 
-        if (bm.to_u16() == 0) {
+        const searched = bm.to_u16() != 0;
+        if (!searched) {
             bm = self.root_moves[0];
         }
 
         self.best_move = bm;
-        if (!self.silent_output) {
+        if (searched and !self.silent_output) {
             self.ponder_move = self.find_ponder_move(pos, color, bm, chosen_line);
         }
 
@@ -830,9 +841,12 @@ pub const Searcher = struct {
         const count = @min(self.line_count, self.strength.candidate_count());
         var scores: [MAX_MOVES]i32 = undefined;
         for (self.lines[0..count], scores[0..count]) |line, *s| s.* = line.score;
-        const seed: u96 = @bitCast(self.timer.start_ns);
-        var prng = std.Random.DefaultPrng.init(@truncate(seed));
-        return self.strength.pick(scores[0..count], prng.random());
+        if (!self.rng_seeded) {
+            const seed: u96 = @bitCast(self.timer.start_ns);
+            self.rng = std.Random.DefaultPrng.init(@truncate(seed));
+            self.rng_seeded = true;
+        }
+        return self.strength.pick(scores[0..count], self.rng.random());
     }
 
     fn find_ponder_move(self: *Searcher, pos: *position.Position, comptime color: types.Color, bm: types.Move, line: ?*const RootLine) types.Move {

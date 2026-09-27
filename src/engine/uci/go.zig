@@ -37,13 +37,13 @@ pub const GoCommand = struct {
                 cmd.moves_to_go = parse_number(u64, tokens.next());
                 if (cmd.moves_to_go == 0) cmd.moves_to_go = null;
             } else if (eql(token, "depth")) {
-                cmd.depth = parse_number(u8, tokens.next());
+                cmd.depth = parse_limit(u8, tokens.next());
             } else if (eql(token, "nodes")) {
-                cmd.nodes = parse_number(u64, tokens.next());
+                cmd.nodes = parse_limit(u64, tokens.next());
             } else if (eql(token, "movetime")) {
-                cmd.move_time = parse_number(u64, tokens.next());
+                cmd.move_time = parse_limit(u64, tokens.next());
             } else if (eql(token, "mate")) {
-                cmd.mate = parse_number(i32, tokens.next());
+                cmd.mate = parse_limit(i32, tokens.next());
             } else if (eql(token, "searchmoves")) {
                 cmd.parse_search_moves(tokens, pos);
             }
@@ -62,10 +62,6 @@ pub const GoCommand = struct {
                 self.search_move_count += 1;
             }
         }
-    }
-
-    pub fn has_clock(self: *const GoCommand, turn: types.Color) bool {
-        return self.time[@intFromEnum(turn)] != null;
     }
 };
 
@@ -121,6 +117,14 @@ fn parse_number(comptime T: type, token: ?[]const u8) ?T {
     return std.fmt.parseInt(T, token orelse return null, 10) catch null;
 }
 
+// A search limit that is present but malformed or non-positive becomes the
+// smallest meaningful limit, so it can never turn into an unbounded search.
+fn parse_limit(comptime T: type, token: ?[]const u8) ?T {
+    const raw = token orelse return null;
+    const value = std.fmt.parseInt(i64, raw, 10) catch return 1;
+    return @intCast(std.math.clamp(value, 1, std.math.maxInt(T)));
+}
+
 // Clocks can go non-positive under lag; treat that as 1 ms left.
 fn parse_clock(token: ?[]const u8) ?u64 {
     const ms = parse_number(i64, token) orelse return null;
@@ -140,6 +144,15 @@ test "go: limits combine and parse independently of order" {
     try std.testing.expectEqual(@as(?i32, 3), cmd.mate);
     try std.testing.expect(cmd.ponder);
     try std.testing.expect(!cmd.infinite);
+}
+
+test "go: malformed or non-positive limits stay bounded" {
+    var tokens = std.mem.tokenizeScalar(u8, "nodes -5 movetime x depth 0", ' ');
+    var pos: position.Position = undefined;
+    const cmd = GoCommand.parse(&tokens, &pos);
+    try std.testing.expectEqual(@as(?u64, 1), cmd.nodes);
+    try std.testing.expectEqual(@as(?u64, 1), cmd.move_time);
+    try std.testing.expectEqual(@as(?u8, 1), cmd.depth);
 }
 
 test "go: time allocation" {

@@ -68,12 +68,16 @@ pub const Position = struct {
     pinned: types.Bitboard = 0,
 
     castling: castling.Setup = .{},
+    // UCI_Chess960: write castling king-captures-rook. A UCI preference, so
+    // it survives `reset`/`set_fen`.
+    uci_chess960: bool = false,
 
     // Classical Evaluator
     evaluator: hce.DynamicEvaluator = undefined,
 
     pub fn init(self: *Position) void {
         self.evaluator.nnue_evaluator.stack = null;
+        self.uci_chess960 = false;
         self.evaluator.nnue_evaluator.ensure_stack();
         self.reset();
     }
@@ -84,7 +88,8 @@ pub const Position = struct {
 
     pub fn reset(self: *Position) void {
         const stack = self.evaluator.nnue_evaluator.stack;
-        self.* = .{};
+        const uci_chess960 = self.uci_chess960;
+        self.* = .{ .uci_chess960 = uci_chess960 };
         @memset(self.piece_bitboards[0..types.N_PIECES], 0);
         @memset(self.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         self.history[0] = UndoInfo.new();
@@ -203,12 +208,12 @@ pub const Position = struct {
             const king_file = king_sq.file().index();
             const rook_sq: types.Square = switch (std.ascii.toLower(ch)) {
                 'k' => blk: {
-                    const outer = rooks & ~(types.SquareIndexBB[king_sq.index()] *% 2 -% 1);
+                    const outer = rooks & squares_beyond(king_sq, .King);
                     if (outer == 0) continue;
                     break :blk @enumFromInt(63 - @clz(outer));
                 },
                 'q' => blk: {
-                    const outer = rooks & (types.SquareIndexBB[king_sq.index()] -% 1);
+                    const outer = rooks & squares_beyond(king_sq, .Queen);
                     if (outer == 0) continue;
                     break :blk @enumFromInt(types.lsb(outer));
                 },
@@ -224,6 +229,15 @@ pub const Position = struct {
             rights |= self.castling.add(color, side, king_sq, rook_sq);
         }
         self.history[self.game_ply].castling = rights;
+    }
+
+    // Squares on the given wing's side of `sq` (higher indices for the king side).
+    fn squares_beyond(sq: types.Square, side: castling.Side) types.Bitboard {
+        const bit = types.SquareIndexBB[sq.index()];
+        return switch (side) {
+            .King => ~(bit *% 2 -% 1),
+            .Queen => bit -% 1,
+        };
     }
 
     pub inline fn castling_rights(self: *const Position) castling.Rights {
@@ -244,16 +258,14 @@ pub const Position = struct {
     }
 
     pub inline fn chess960_notation(self: *const Position) bool {
-        return castling.uci_chess960 or self.castling.is_chess960;
+        return self.uci_chess960 or self.castling.is_chess960;
     }
 
     fn castling_symbol(self: *const Position, color: types.Color, side: castling.Side) u8 {
         const rule = self.castling.rule(color, side);
         const back_rank = rule.rook_from.rank();
         const rooks = self.piece_bitboards[types.Piece.new(color, .Rook).index()] & types.MaskRank[back_rank.index()];
-        const rook_bb = types.SquareIndexBB[rule.rook_from.index()];
-        const beyond = if (side == .King) ~(rook_bb *% 2 -% 1) else rook_bb -% 1;
-        const symbol: u8 = if (rooks & beyond == 0)
+        const symbol: u8 = if (rooks & squares_beyond(rule.rook_from, side) == 0)
             (if (side == .King) 'k' else 'q')
         else
             'a' + rule.rook_from.file().index();

@@ -1,5 +1,4 @@
 const std = @import("std");
-const castling = @import("../../chess/castling.zig");
 const search = @import("../search.zig");
 const tt = @import("../tt.zig");
 const syzygy = @import("../syzygy.zig");
@@ -11,6 +10,7 @@ const strength = @import("../strength.zig");
 pub const Settings = struct {
     multi_pv: usize = 1,
     ponder: bool = false,
+    chess960: bool = false,
     limit_strength: bool = false,
     elo: u32 = strength.DEFAULT_ELO,
     skill_level: u8 = strength.MAX_LEVEL,
@@ -169,8 +169,8 @@ fn clear_hash(_: Context, _: Value) !void {
     tt.GlobalTT.clear();
 }
 
-fn set_chess960(_: Context, value: Value) !void {
-    castling.uci_chess960 = value.check;
+fn set_chess960(ctx: Context, value: Value) !void {
+    ctx.settings.chess960 = value.check;
 }
 
 fn set_limit_strength(ctx: Context, value: Value) !void {
@@ -244,10 +244,9 @@ test "options: names with spaces, case-insensitive matching and clamping" {
 }
 
 test "options: UCI_Chess960 toggles castling notation" {
-    defer castling.uci_chess960 = false;
     var settings = Settings{};
     var buf: [64]u8 = undefined;
     var out = std.Io.Writer.fixed(&buf);
     try set_option("name UCI_Chess960 value true", &settings, &out);
-    try std.testing.expect(castling.uci_chess960);
+    try std.testing.expect(settings.chess960);
 }

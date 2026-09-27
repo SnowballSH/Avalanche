@@ -21,7 +21,7 @@ pub const Strength = struct {
     pub fn from_elo(elo: u32) Strength {
         const clamped = std.math.clamp(elo, MIN_ELO, MAX_ELO);
         const fraction = @as(f32, @floatFromInt(clamped - MIN_ELO)) / @as(f32, @floatFromInt(MAX_ELO - MIN_ELO));
-        return .{ .level = fraction * @as(f32, @floatFromInt(MAX_LEVEL - 1)) };
+        return .{ .level = fraction * @as(f32, @floatFromInt(MAX_LEVEL)) };
     }
 
     pub inline fn is_limited(self: Strength) bool {
@@ -37,8 +37,10 @@ pub const Strength = struct {
     }
 
     /// Score gap (in centipawns) at which a candidate becomes e times less likely.
+    /// Quadratic so near-full levels rarely concede even small gaps.
     pub fn temperature(self: Strength) f32 {
-        return 10.0 + 12.0 * (@as(f32, @floatFromInt(MAX_LEVEL)) - self.level);
+        const handicap = @as(f32, @floatFromInt(MAX_LEVEL)) - self.level;
+        return 2.0 + 0.6 * handicap * handicap;
     }
 
     /// Samples a candidate index; `scores` must be sorted best first.
@@ -71,7 +73,8 @@ test "strength: full level is unlimited, lower levels are limited" {
     try std.testing.expect(!Strength.from_skill_level(MAX_LEVEL).is_limited());
     try std.testing.expect(!(Strength{}).is_limited());
     try std.testing.expect(Strength.from_skill_level(0).is_limited());
-    try std.testing.expect(Strength.from_elo(MAX_ELO).is_limited());
+    try std.testing.expect(!Strength.from_elo(MAX_ELO).is_limited());
+    try std.testing.expect(Strength.from_elo(MAX_ELO - 1).is_limited());
     try std.testing.expectEqual(@as(usize, 1), Strength.from_skill_level(0).max_depth());
     try std.testing.expectEqual(@as(usize, 20), Strength.from_skill_level(19).max_depth());
 }
@@ -91,10 +94,10 @@ test "strength: strong levels keep the best move, weak levels spread choices" {
     var prng = std.Random.DefaultPrng.init(42);
     const random = prng.random();
 
-    const lopsided = [_]i32{ 300, -200, -250, -400 };
+    const close = [_]i32{ 40, 5, -20 };
     const strong = Strength.from_skill_level(19);
     for (0..200) |_| {
-        try std.testing.expectEqual(@as(usize, 0), strong.pick(&lopsided, random));
+        try std.testing.expectEqual(@as(usize, 0), strong.pick(&close, random));
     }
 
     const level_ties = [_]i32{ 10, 10, 10, 10 };
