@@ -19,7 +19,8 @@ test {
     _ = @import("tests/search_features.zig");
     _ = @import("engine/strength.zig");
     _ = @import("engine/uci/go.zig");
-    _ = @import("engine/uci/options.zig");
+    _ = @import("tests/uci_options.zig");
+    _ = @import("engine/numa.zig");
 }
 
 test "Basic Piece and Color" {

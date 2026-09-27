@@ -38,29 +38,53 @@ fn adviseHugePages() void {
     std.posix.madvise(ptr, bytes.len, MADV_HUGEPAGE) catch {};
 }
 
+pub const EMBEDDED_NAME = "<embedded>";
+
+/// Whether a network can be loaded from a file at runtime. Wasm has no file
+/// system and reads the embedded network in place.
+pub const supports_eval_file = !platform.is_wasm;
+
+pub const NetworkError = error{ WrongSize, OutputWeightOutOfRange };
+
+/// Checks that `bytes` is a network this build can run: the exact quantised
+/// layout (including bullet's trailing padding) with output weights inside the
+/// range the SIMD inference assumes.
+pub fn validate(bytes: []const u8) NetworkError!void {
+    if (bytes.len != @sizeOf(NNUEWeights)) return NetworkError.WrongSize;
+    const layer_2 = bytes[@offsetOf(NNUEWeights, "layer_2")..][0..@sizeOf(@FieldType(NNUEWeights, "layer_2"))];
+    var i: usize = 0;
+    while (i < layer_2.len) : (i += 2) {
+        const weight = std.mem.readInt(i16, layer_2[i..][0..2], .little);
+        if (weight < OUTPUT_WEIGHT_MIN or weight > OUTPUT_WEIGHT_MAX) return NetworkError.OutputWeightOutOfRange;
+    }
+}
+
 pub fn do_nnue() void {
     adviseHugePages();
-    // Quantised bullet checkpoints match @sizeOf(NNUEWeights), including any
-    // trailing alignment padding (bullet writes a short "bullet" footer there).
-    if (@sizeOf(NNUEWeights) != NNUE_SOURCE.len) {
-        std.debug.panic("Incompatible sizes Model={} vs Net={} (INPUT_SIZE={} buckets={})", .{
-            @sizeOf(NNUEWeights),
-            NNUE_SOURCE.len,
-            INPUT_SIZE,
-            NUM_INPUT_BUCKETS,
-        });
-    }
+    validate(NNUE_SOURCE) catch |err| std.debug.panic("Embedded network is unusable: {s} (Model={} bytes, Net={} bytes, buckets={})", .{
+        @errorName(err),
+        @sizeOf(NNUEWeights),
+        NNUE_SOURCE.len,
+        NUM_INPUT_BUCKETS,
+    });
     // Copy straight into the global. Do NOT assign through a by-value temporary.
     // A 25 MB MODEL on the stack may cause overflow.
     if (!platform.is_wasm) {
         @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
     }
+}
 
-    for (&MODEL.layer_2, 0..) |bucket, bucket_idx| {
-        for (bucket, 0..) |weight, weight_idx| {
-            if (weight < OUTPUT_WEIGHT_MIN or weight > OUTPUT_WEIGHT_MAX) {
-                std.debug.panic("NNUE output weight out of range: bucket={} index={} value={}", .{ bucket_idx, weight_idx, weight });
-            }
-        }
+/// Replaces the active network with the file at `path`, or with the embedded
+/// network for `EMBEDDED_NAME`. The active network is untouched on error.
+/// Callers must refresh every position's accumulators afterwards.
+pub fn load(path: []const u8) !void {
+    if (comptime !supports_eval_file) return error.Unsupported;
+    if (std.mem.eql(u8, path, EMBEDDED_NAME)) {
+        @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
+        return;
     }
+    const bytes = try std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(@sizeOf(NNUEWeights) + 1));
+    defer platform.allocator.free(bytes);
+    try validate(bytes);
+    @memcpy(std.mem.asBytes(&model_storage), bytes);
 }

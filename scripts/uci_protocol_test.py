@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """End-to-end UCI protocol checks for Avalanche.
 
-Usage: scripts/uci_protocol_test.py [path/to/Avalanche]
+Usage: scripts/uci_protocol_test.py [engine command...]
+
+The engine command defaults to the native release build. To test the wasm
+build, pass e.g. `node web/src/node/cli.ts zig-out/web/avalanche.wasm`.
+Tests for options the engine does not advertise (Threads > 1, EvalFile on
+wasm) are skipped.
 
 Covers MultiPV, pondering (ponderhit and stop), go infinite, go mate,
 searchmoves, bestmove/ponder output, Chess960 castling notation and the
@@ -21,13 +26,14 @@ from pathlib import Path
 
 @dataclass
 class Engine:
-    path: str
+    command: list[str]
     process: subprocess.Popen = field(init=False)
+    options: dict[str, str] = field(init=False, default_factory=dict)
     lines: "queue.Queue[str]" = field(init=False, default_factory=queue.Queue)
 
     def __post_init__(self) -> None:
         self.process = subprocess.Popen(
-            [self.path],
+            self.command,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
@@ -102,12 +108,72 @@ def bestmove_parts(line: str) -> tuple[str, str | None]:
     return tokens[1], tokens[3] if len(tokens) >= 4 and tokens[2] == "ponder" else None
 
 
+class Skipped(Exception):
+    pass
+
+
+def require_option(engine: Engine, name: str, predicate=lambda spec: True) -> None:
+    spec = engine.options.get(name)
+    if spec is None or not predicate(spec):
+        raise Skipped(f"engine does not offer {name} as needed" + (f" (type {spec})" if spec else ""))
+
+
 def test_uci_advertises_options(engine: Engine) -> None:
-    engine.send("uci")
-    output = engine.read_until("uciok", 10)
-    names = {line.split(" type ")[0].removeprefix("option name ") for line in output if line.startswith("option name")}
-    for required in ("MultiPV", "Ponder", "UCI_Chess960", "UCI_LimitStrength", "UCI_Elo", "Skill Level", "Clear Hash"):
-        assert required in names, f"missing option {required}"
+    for required in ("MultiPV", "Ponder", "UCI_Chess960", "UCI_LimitStrength", "UCI_Elo", "Skill Level", "Clear Hash", "Move Overhead"):
+        assert required in engine.options, f"missing option {required}"
+    assert "MoveOverhead" not in engine.options
+
+
+def test_legacy_move_overhead_name(engine: Engine) -> None:
+    engine.send("setoption name MoveOverhead value 30")
+    engine.expect_silence("info string setoption failed", 0.3)
+    engine.send("setoption name Move Overhead value 25")
+    engine.expect_silence("info string setoption failed", 0.3)
+
+
+def test_eval_command(engine: Engine) -> None:
+    engine.send("position startpos")
+    engine.send("eval")
+    output = engine.read_until("info string Final evaluation", 5)
+    assert any(line.startswith("info string NNUE evaluation ") for line in output), output
+    engine.send("position fen 4k3/8/8/8/8/8/8/QQQ1K3 w - - 0 1")
+    engine.send("eval")
+    final = engine.read_until("info string Final evaluation", 5)[-1]
+    assert int(final.split()[4]) > 500, final
+
+
+def test_eval_file_rejects_bad_network(engine: Engine) -> None:
+    require_option(engine, "EvalFile")
+    engine.send("setoption name EvalFile value /nonexistent/net.nnue")
+    line = engine.read_until("info string EvalFile", 5)[-1]
+    assert "failed to load" in line, line
+    engine.send("setoption name EvalFile value <embedded>")
+    assert "using <embedded>" in engine.read_until("info string EvalFile", 5)[-1]
+
+
+def test_live_currmove_after_delay(engine: Engine) -> None:
+    output, best = engine.search("position startpos moves e2e4 c7c5", "go movetime 4500", 30)
+    currmoves = [line for line in output if " currmove " in line]
+    assert currmoves, "no currmove reported during a 4.5 s search"
+    assert all(" currmovenumber " in line for line in currmoves)
+    assert best.startswith("bestmove ")
+
+
+def test_threads_with_thread_pool(engine: Engine) -> None:
+    require_option(engine, "Threads", lambda spec: " max 1" not in spec)
+    engine.send("setoption name Threads value 4")
+    engine.send("setoption name MultiPV value 2")
+    for _ in range(3):
+        _, best = engine.search("position startpos", "go depth 12")
+        assert best.split()[1] != "0000", best
+    engine.send("setoption name NumaPolicy value none")
+    _, best = engine.search("position startpos moves d2d4", "go movetime 500")
+    engine.send("setoption name NumaPolicy value auto")
+    engine.send("setoption name Threads value 2")
+    _, best = engine.search("position startpos moves c2c4", "go nodes 200000")
+    engine.send("setoption name Threads value 1")
+    engine.send("setoption name MultiPV value 1")
+    assert best.split()[1] != "0000", best
 
 
 def test_multipv_reports_distinct_sorted_lines(engine: Engine) -> None:
@@ -217,15 +283,23 @@ TESTS = [value for name, value in sorted(globals().items()) if name.startswith("
 
 def main() -> int:
     default = Path(__file__).resolve().parent.parent / "zig-out" / "bin" / "Avalanche"
-    engine = Engine(sys.argv[1] if len(sys.argv) > 1 else str(default))
+    engine = Engine(sys.argv[1:] or [str(default)])
     failures = 0
+    skipped = 0
     try:
-        engine.read_until("Avalanche", 10)
+        engine.send("uci")
+        for line in engine.read_until("uciok", 30):
+            if line.startswith("option name "):
+                name, _, spec = line.removeprefix("option name ").partition(" type ")
+                engine.options[name] = spec
         for test in TESTS:
             try:
                 test(engine)
                 engine.sync()
                 print(f"PASS {test.__name__}")
+            except Skipped as reason:
+                skipped += 1
+                print(f"SKIP {test.__name__}: {reason}")
             except AssertionError as error:
                 failures += 1
                 print(f"FAIL {test.__name__}: {error}")
@@ -233,7 +307,7 @@ def main() -> int:
                 engine.sync()
     finally:
         engine.close()
-    print(f"{len(TESTS) - failures}/{len(TESTS)} passed")
+    print(f"{len(TESTS) - failures - skipped}/{len(TESTS)} passed, {skipped} skipped, {failures} failed")
     return 1 if failures else 0
 
 

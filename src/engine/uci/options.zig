@@ -6,12 +6,14 @@ const syzygy = @import("../syzygy.zig");
 const wdl = @import("../wdl.zig");
 const parameters = @import("../parameters.zig");
 const strength = @import("../strength.zig");
+const weights = @import("../weights.zig");
+const position = @import("../../chess/position.zig");
+const numa = @import("../numa.zig");
 
 /// Option values that shape each `go` rather than engine-global state.
 pub const Settings = struct {
     multi_pv: usize = 1,
     ponder: bool = false,
-    chess960: bool = false,
     limit_strength: bool = false,
     elo: u32 = strength.DEFAULT_ELO,
     skill_level: u8 = strength.MAX_LEVEL,
@@ -26,24 +28,38 @@ pub const Settings = struct {
 
 const Spin = struct { default: i64, min: i64, max: i64 };
 
+const Combo = struct { default: []const u8, values: []const []const u8 };
+
 const Kind = union(enum) {
     check: bool,
     spin: Spin,
+    combo: Combo,
     string: []const u8,
     button,
 };
 
-const Context = struct {
+pub const Context = struct {
     settings: *Settings,
+    position: *position.Position,
     out: *std.Io.Writer,
 };
 
 const Option = struct {
     name: []const u8,
+    // Former or common alternative names still accepted by setoption.
+    aliases: []const []const u8 = &.{},
     kind: Kind,
     apply: *const fn (ctx: Context, value: Value) anyerror!void,
     // Options the current build target cannot honour are neither advertised nor accepted.
     available: bool = true,
+
+    fn matches(self: *const Option, name: []const u8) bool {
+        if (std.ascii.eqlIgnoreCase(self.name, name)) return true;
+        for (self.aliases) |alias| {
+            if (std.ascii.eqlIgnoreCase(alias, name)) return true;
+        }
+        return false;
+    }
 };
 
 const Value = union(enum) {
@@ -56,7 +72,8 @@ const Value = union(enum) {
 const OPTIONS = [_]Option{
     .{ .name = "Hash", .kind = .{ .spin = .{ .default = 16, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
     .{ .name = "Threads", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_SEARCH_THREADS } }, .apply = set_threads },
-    .{ .name = "MoveOverhead", .kind = .{ .spin = .{ .default = search.DEFAULT_MOVE_OVERHEAD, .min = 0, .max = search.MAX_MOVE_OVERHEAD } }, .apply = set_move_overhead },
+    .{ .name = "Move Overhead", .aliases = &.{"MoveOverhead"}, .kind = .{ .spin = .{ .default = search.DEFAULT_MOVE_OVERHEAD, .min = 0, .max = search.MAX_MOVE_OVERHEAD } }, .apply = set_move_overhead },
+    .{ .name = "NumaPolicy", .kind = .{ .combo = .{ .default = @tagName(numa.Policy.auto), .values = std.meta.fieldNames(numa.Policy) } }, .apply = set_numa_policy, .available = platform.has_threads },
     .{ .name = "MultiPV", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_MULTI_PV } }, .apply = set_multi_pv },
     .{ .name = "Ponder", .kind = .{ .check = false }, .apply = set_ponder },
     .{ .name = "Clear Hash", .kind = .button, .apply = clear_hash },
@@ -68,6 +85,7 @@ const OPTIONS = [_]Option{
     .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = 100 } }, .apply = set_syzygy_probe_depth, .available = syzygy.supported },
     .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = 7, .min = 1, .max = 7 } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
     .{ .name = "Syzygy50MoveRule", .kind = .{ .check = true }, .apply = set_syzygy_rule50, .available = syzygy.supported },
+    .{ .name = "EvalFile", .kind = .{ .string = weights.EMBEDDED_NAME }, .apply = set_eval_file, .available = weights.supports_eval_file },
     .{ .name = "UCI_ShowWDL", .kind = .{ .check = false }, .apply = set_show_wdl },
     .{ .name = "Contempt", .kind = .{ .spin = .{ .default = 0, .min = -search.MAX_CONTEMPT, .max = search.MAX_CONTEMPT } }, .apply = set_contempt },
 };
@@ -79,6 +97,10 @@ pub fn print_all(out: *std.Io.Writer) !void {
         switch (option.kind) {
             .check => |default| try out.print("check default {}", .{default}),
             .spin => |spin| try out.print("spin default {} min {} max {}", .{ spin.default, spin.min, spin.max }),
+            .combo => |combo| {
+                try out.print("combo default {s}", .{combo.default});
+                for (combo.values) |value| try out.print(" var {s}", .{value});
+            },
             .string => |default| try out.print("string default {s}", .{default}),
             .button => try out.writeAll("button"),
         }
@@ -92,12 +114,11 @@ pub fn print_all(out: *std.Io.Writer) !void {
 pub const SetOptionError = error{ UnknownOption, InvalidValue };
 
 /// Handles the text after `setoption `: `name <name...> [value <value...>]`.
-pub fn set_option(args: []const u8, settings: *Settings, out: *std.Io.Writer) !void {
+pub fn set_option(args: []const u8, ctx: Context) !void {
     const request = parse_request(args) orelse return SetOptionError.UnknownOption;
-    const ctx = Context{ .settings = settings, .out = out };
 
     for (OPTIONS) |option| {
-        if (!option.available or !std.ascii.eqlIgnoreCase(option.name, request.name)) continue;
+        if (!option.available or !option.matches(request.name)) continue;
         const value: Value = switch (option.kind) {
             .check => .{ .check = parse_bool(request.value) orelse return SetOptionError.InvalidValue },
             .spin => |spin| .{ .spin = std.math.clamp(
@@ -105,6 +126,9 @@ pub fn set_option(args: []const u8, settings: *Settings, out: *std.Io.Writer) !v
                 spin.min,
                 spin.max,
             ) },
+            .combo => |combo| .{ .string = for (combo.values) |allowed| {
+                if (std.ascii.eqlIgnoreCase(allowed, request.value)) break allowed;
+            } else return SetOptionError.InvalidValue },
             .string => .{ .string = request.value },
             .button => .button,
         };
@@ -149,12 +173,21 @@ fn set_hash(ctx: Context, value: Value) !void {
 
 fn set_threads(ctx: Context, value: Value) !void {
     const total: usize = @intCast(value.spin);
-    search.NUM_THREADS = total - 1;
     search.THREADS_CONFIGURED = true;
-    search.ensure_helpers(search.NUM_THREADS);
+    search.set_helper_count(total - 1);
     if (search.helper_count() < total - 1) {
         try ctx.out.print("info string Threads: failed to allocate {} helpers, using {}" ++ search.line_ending, .{ total - 1, search.helper_count() + 1 });
     }
+}
+
+fn set_numa_policy(_: Context, value: Value) !void {
+    const chosen = std.meta.stringToEnum(numa.Policy, value.string).?;
+    if (chosen == numa.policy) return;
+    numa.policy = chosen;
+    // Helpers are placed when they start, so restart them under the new policy.
+    const helpers = search.helper_count();
+    search.set_helper_count(0);
+    search.set_helper_count(helpers);
 }
 
 fn set_move_overhead(_: Context, value: Value) !void {
@@ -174,7 +207,7 @@ fn clear_hash(_: Context, _: Value) !void {
 }
 
 fn set_chess960(ctx: Context, value: Value) !void {
-    ctx.settings.chess960 = value.check;
+    ctx.position.uci_chess960 = value.check;
 }
 
 fn set_limit_strength(ctx: Context, value: Value) !void {
@@ -216,6 +249,16 @@ fn set_syzygy_rule50(_: Context, value: Value) !void {
     syzygy.use_rule50 = value.check;
 }
 
+fn set_eval_file(ctx: Context, value: Value) !void {
+    const path = if (value.string.len == 0) weights.EMBEDDED_NAME else value.string;
+    weights.load(path) catch |err| {
+        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}), keeping the current network" ++ search.line_ending, .{ path, @errorName(err) });
+        return;
+    };
+    ctx.position.refresh_evaluation();
+    try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{path});
+}
+
 fn set_show_wdl(_: Context, value: Value) !void {
     wdl.show_wdl = value.check;
 }
@@ -226,31 +269,4 @@ fn set_contempt(_: Context, value: Value) !void {
         search.CONTEMPT = contempt;
         tt.GlobalTT.clear();
     }
-}
-
-test "options: names with spaces, case-insensitive matching and clamping" {
-    var settings = Settings{};
-    var buf: [256]u8 = undefined;
-    var out = std.Io.Writer.fixed(&buf);
-
-    try set_option("name Skill Level value 7", &settings, &out);
-    try std.testing.expectEqual(@as(u8, 7), settings.skill_level);
-
-    try set_option("name multipv value 999", &settings, &out);
-    try std.testing.expectEqual(@as(usize, search.MAX_MULTI_PV), settings.multi_pv);
-
-    try set_option("name UCI_LimitStrength value true", &settings, &out);
-    try set_option("name UCI_Elo value 1500", &settings, &out);
-    try std.testing.expect(settings.playing_strength().is_limited());
-
-    try std.testing.expectError(SetOptionError.InvalidValue, set_option("name Ponder value maybe", &settings, &out));
-    try std.testing.expectError(SetOptionError.UnknownOption, set_option("name NoSuchOption value 1", &settings, &out));
-}
-
-test "options: UCI_Chess960 toggles castling notation" {
-    var settings = Settings{};
-    var buf: [64]u8 = undefined;
-    var out = std.Io.Writer.fixed(&buf);
-    try set_option("name UCI_Chess960 value true", &settings, &out);
-    try std.testing.expect(settings.chess960);
 }

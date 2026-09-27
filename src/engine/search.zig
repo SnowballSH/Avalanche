@@ -15,6 +15,7 @@ const nnue = @import("nnue.zig");
 
 const parameters = @import("parameters.zig");
 const strength_model = @import("strength.zig");
+const thread_pool = @import("thread_pool.zig");
 
 pub const line_ending = if (@import("builtin").os.tag == .windows) "\r\n" else "\n";
 
@@ -98,6 +99,13 @@ pub const RootLine = struct {
     }
 };
 
+/// Searches shorter than this print only per-iteration lines; longer ones also
+/// report the move being searched and aspiration fail-highs/-lows so GUIs do
+/// not look frozen.
+pub const LIVE_INFO_DELAY_MS: u64 = 3000;
+
+pub const ScoreBound = enum { exact, lower, upper };
+
 const InfoStats = struct {
     nodes: u64,
     nps: u64,
@@ -111,7 +119,7 @@ inline fn mate_distance(score: i32) i32 {
 }
 
 // Field order follows Stockfish; some GUIs drop PVs from other orderings.
-fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const RootLine, multipv: usize, stats: InfoStats) void {
+fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const RootLine, multipv: usize, bound: ScoreBound, stats: InfoStats) void {
     const score = line.score;
     w.print("info depth {} seldepth {} multipv {} score ", .{ line.depth, line.seldepth, multipv }) catch {};
     const is_mate_score = @as(i32, @intCast(@abs(score))) >= hce.MateScore - hce.MaxMate;
@@ -119,6 +127,11 @@ fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const Roo
         w.print("mate {}", .{mate_distance(score) * @as(i32, if (score > 0) 1 else -1)}) catch {};
     } else {
         w.print("cp {}", .{score}) catch {};
+    }
+    switch (bound) {
+        .exact => {},
+        .lower => w.writeAll(" lowerbound") catch {},
+        .upper => w.writeAll(" upperbound") catch {},
     }
     if (wdl_model.show_wdl) {
         const p = if (@as(i32, @intCast(@abs(score))) >= SCORE_PLY_ADJ)
@@ -175,79 +188,41 @@ pub var MOVE_OVERHEAD: u64 = DEFAULT_MOVE_OVERHEAD;
 pub var CONTEMPT: i32 = 0;
 pub const MAX_CONTEMPT: i32 = 100;
 
-pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(platform.allocator);
-pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(platform.allocator);
+pub var helper_pool: thread_pool.ThreadPool = .{};
 pub var helpers_live: bool = false;
 
 pub fn helpers_are_live() bool {
     return @atomicLoad(bool, &helpers_live, .acquire);
 }
 
-fn parallel_range(start: usize, end: usize, comptime f: fn (usize, usize) void) void {
-    if (end <= start) return;
-    if (comptime !platform.has_threads) return f(start, end);
-    const count = end - start;
-    const cpus = std.Thread.getCpuCount() catch 1;
-    const workers = @max(1, @min(count, @min(cpus, MAX_THREADS)));
-    if (workers == 1) {
-        f(start, end);
-        return;
-    }
-
-    var handles: [MAX_THREADS]?std.Thread = undefined;
-    const chunk = count / workers;
-    for (0..workers) |w| {
-        const s = start + w * chunk;
-        const e = if (w == workers - 1) end else start + (w + 1) * chunk;
-        handles[w] = std.Thread.spawn(.{ .stack_size = 1024 * 1024 }, f, .{ s, e }) catch null;
-        if (handles[w] == null) f(s, e);
-    }
-    for (0..workers) |w| {
-        if (handles[w]) |t| t.join();
-    }
+inline fn helper(index: usize) *Searcher {
+    return helper_pool.worker(index).searcher;
 }
 
-fn init_helper_range(start: usize, end: usize) void {
-    var i = start;
-    while (i < end) : (i += 1) {
-        helper_searchers.items[i].init();
-    }
-}
-
-fn reset_helper_range(start: usize, end: usize) void {
-    var i = start;
-    while (i < end) : (i += 1) {
-        helper_searchers.items[i].age_pending = false;
-        helper_searchers.items[i].has_searched = false;
-        helper_searchers.items[i].reset_heuristics(true);
-    }
-}
-
+/// Makes at least `n` helpers available for the next search (never shrinks).
 pub fn ensure_helpers(n: usize) void {
-    if (helpers_are_live()) return;
-    const old_len = helper_searchers.items.len;
-    if (n <= old_len) return;
+    if (helpers_are_live() or n <= helper_pool.count()) return;
+    helper_pool.resize(n);
+    NUM_THREADS = @min(NUM_THREADS, helper_pool.count());
+}
 
-    helper_searchers.ensureTotalCapacity(n) catch {
-        NUM_THREADS = @min(NUM_THREADS, old_len);
-        return;
-    };
-    threads.ensureTotalCapacity(n) catch {
-        NUM_THREADS = @min(NUM_THREADS, old_len);
-        return;
-    };
-    helper_searchers.appendNTimesAssumeCapacity(undefined, n - old_len);
-    threads.appendNTimesAssumeCapacity(null, n - old_len);
-
-    parallel_range(old_len, n, init_helper_range);
+/// Sets the number of helper threads, releasing surplus threads and their tables.
+pub fn set_helper_count(n: usize) void {
+    std.debug.assert(!helpers_are_live());
+    helper_pool.resize(n);
+    NUM_THREADS = helper_pool.count();
 }
 
 pub fn helper_count() usize {
-    return helper_searchers.items.len;
+    return helper_pool.count();
 }
 
 pub fn reset_helper_heuristics() void {
-    parallel_range(0, helper_searchers.items.len, reset_helper_range);
+    helper_pool.reset_heuristics();
+}
+
+pub fn shutdown_helpers() void {
+    helper_pool.deinit();
 }
 
 pub const Searcher = struct {
@@ -595,9 +570,9 @@ pub const Searcher = struct {
         ensure_helpers(NUM_THREADS);
         var ti: usize = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
-            helper_searchers.items[ti].nodes = 0;
-            helper_searchers.items[ti].tbhits = 0;
-            helper_searchers.items[ti].age_pending = helper_searchers.items[ti].has_searched;
+            helper(ti).nodes = 0;
+            helper(ti).tbhits = 0;
+            helper(ti).age_pending = helper(ti).has_searched;
         }
 
         const limited = self.strength.is_limited();
@@ -641,33 +616,15 @@ pub const Searcher = struct {
 
             bm = self.lines[0].pv[0];
 
-            var total_nodes_all: u64 = self.nodes;
-            var total_tbhits: u64 = self.tbhits;
-
-            if (tdepth > 1) {
-                var thread_index: usize = 0;
-                while (thread_index < NUM_THREADS) : (thread_index += 1) {
-                    total_nodes_all += helper_searchers.items[thread_index].nodes;
-                    total_tbhits += helper_searchers.items[thread_index].tbhits;
-                }
-            }
-
             const is_mate_score = @as(i32, @intCast(@abs(score))) >= hce.MateScore - hce.MaxMate;
             if (is_mate_score and !self.force_thinking and max_depth == null and bound == MAX_PLY - 2) {
                 bound = tdepth + 2;
             }
 
             if (!self.silent_output) {
-                const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
-                const stats = InfoStats{
-                    .nodes = total_nodes_all,
-                    .nps = total_nodes_all * 1000 / @max(@as(u64, 1), elapsed_ms),
-                    .hashfull = self.ttable.hashfull(),
-                    .tbhits = total_tbhits,
-                    .time_ms = elapsed_ms,
-                };
+                const stats = self.collect_stats();
                 for (self.lines[0..self.line_count], 1..) |*line, multipv| {
-                    print_line(outW, pos, line, multipv, stats);
+                    print_line(outW, pos, line, multipv, .exact, stats);
                 }
                 outW.flush() catch {};
             }
@@ -809,6 +766,10 @@ pub const Searcher = struct {
                 return null;
             }
 
+            if (score <= alpha or score >= beta) {
+                self.report_aspiration_failure(pos, score, depth, if (score <= alpha) .upper else .lower);
+            }
+
             if (score <= alpha) {
                 beta = @divTrunc(alpha + beta, 2);
                 alpha = @max(alpha - delta, -hce.MateScore);
@@ -826,7 +787,11 @@ pub const Searcher = struct {
     }
 
     fn record_line(self: *Searcher, index: usize, score: i32, depth: usize) void {
-        const line = &self.lines[index];
+        self.capture_root_line(&self.lines[index], score, depth);
+        self.line_count = @max(self.line_count, index + 1);
+    }
+
+    fn capture_root_line(self: *const Searcher, line: *RootLine, score: i32, depth: usize) void {
         line.score = score;
         line.depth = depth;
         line.seldepth = self.seldepth;
@@ -837,7 +802,51 @@ pub const Searcher = struct {
             line.pv_len = 1;
             line.pv[0] = self.best_move;
         }
-        self.line_count = @max(self.line_count, index + 1);
+    }
+
+    /// Node and tablebase counts summed over the main thread and all helpers.
+    fn collect_stats(self: *Searcher) InfoStats {
+        var nodes: u64 = self.nodes;
+        var tbhits: u64 = self.tbhits;
+        for (0..NUM_THREADS) |i| {
+            nodes += helper(i).nodes;
+            tbhits += helper(i).tbhits;
+        }
+        const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
+        return .{
+            .nodes = nodes,
+            .nps = nodes * 1000 / @max(@as(u64, 1), elapsed_ms),
+            .hashfull = self.ttable.hashfull(),
+            .tbhits = tbhits,
+            .time_ms = elapsed_ms,
+        };
+    }
+
+    inline fn reports_live_info(self: *const Searcher) bool {
+        return self.thread_id == 0 and !self.silent_output and
+            self.timer.read() / std.time.ns_per_ms >= LIVE_INFO_DELAY_MS;
+    }
+
+    // Like Stockfish, bounds are only reported with a single PV line, where the
+    // bounded score unambiguously refers to the line GUIs are displaying.
+    fn report_aspiration_failure(self: *Searcher, pos: *const position.Position, score: i32, depth: usize, bound: ScoreBound) void {
+        if (self.root_excluded_count > 0 or self.multi_pv > 1 or self.strength.is_limited() or !self.reports_live_info()) return;
+        var line: RootLine = .{};
+        self.capture_root_line(&line, score, depth);
+        var buf: [4096]u8 = undefined;
+        var out = platform.Stdout.init(&buf);
+        print_line(out.writer(), pos, &line, 1, bound, self.collect_stats());
+        out.writer().flush() catch {};
+    }
+
+    fn report_current_move(self: *const Searcher, pos: *const position.Position, move: types.Move, number: usize, depth: usize) void {
+        var buf: [128]u8 = undefined;
+        var out = platform.Stdout.init(&buf);
+        const w = out.writer();
+        w.print("info depth {} currmove ", .{depth}) catch {};
+        move.uci_print(w, pos.chess960_notation());
+        w.print(" currmovenumber {}" ++ line_ending, .{number + self.root_excluded_count}) catch {};
+        w.flush() catch {};
     }
 
     fn sort_lines(self: *Searcher) void {
@@ -1035,45 +1044,35 @@ pub const Searcher = struct {
 
     pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &helpers_live, true, .release);
-        var i: usize = 0;
-        while (i < NUM_THREADS) : (i += 1) {
+        const root_accumulator = pos.evaluator.nnue_evaluator.current().*;
+        for (0..NUM_THREADS) |i| {
             const id: usize = i + 1;
-            if (threads.items[i] != null) {
-                threads.items[i].?.join();
-            }
-            var depth: usize = depth_;
-            if (id % 2 == 1) {
-                depth += 1;
-            }
-            helper_searchers.items[i].max_millis = self.max_millis;
-            helper_searchers.items[i].max_nodes = self.max_nodes;
-            helper_searchers.items[i].soft_max_nodes = self.soft_max_nodes;
-            helper_searchers.items[i].ttable = self.ttable;
-            helper_searchers.items[i].thread_id = id;
-            helper_searchers.items[i].parent_stop = &self.stop;
-            helper_searchers.items[i].parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
-            helper_searchers.items[i].root_history_len = self.root_history_len;
-            helper_searchers.items[i].copy_root_candidates(self);
-            const helper_board = helper_searchers.items[i].root_board;
-            const helper_stack = helper_board.evaluator.nnue_evaluator.stack;
-            const root_accumulator = pos.evaluator.nnue_evaluator.current().*;
-            helper_board.* = pos.*;
-            const helper_nnue = &helper_board.evaluator.nnue_evaluator;
+            const h = helper(i);
+            h.max_millis = self.max_millis;
+            h.max_nodes = self.max_nodes;
+            h.soft_max_nodes = self.soft_max_nodes;
+            h.ttable = self.ttable;
+            h.thread_id = id;
+            h.parent_stop = &self.stop;
+            h.parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
+            h.root_history_len = self.root_history_len;
+            h.copy_root_candidates(self);
+            const helper_stack = h.root_board.evaluator.nnue_evaluator.stack;
+            h.root_board.* = pos.*;
+            const helper_nnue = &h.root_board.evaluator.nnue_evaluator;
             helper_nnue.stack = helper_stack;
             helper_nnue.depth = 0;
             helper_nnue.frame_written = true;
             helper_nnue.current().* = root_accumulator;
-            helper_searchers.items[i].hash_history.clearRetainingCapacity();
-            helper_searchers.items[i].hash_history.appendSlice(self.hash_history.items) catch {};
-            @atomicStore(bool, &helper_searchers.items[i].stop, false, .monotonic);
-            threads.items[i] = std.Thread.spawn(
-                .{ .stack_size = 64 * 1024 * 1024 },
-                Searcher.start_helper,
-                .{ &helper_searchers.items[i], color, depth, alpha_, beta_ },
-            ) catch |e| {
-                std.debug.panic("Could not spawn helper thread {}!\n{}", .{ i, e });
-                unreachable;
-            };
+            h.hash_history.clearRetainingCapacity();
+            h.hash_history.appendSlice(self.hash_history.items) catch {};
+            @atomicStore(bool, &h.stop, false, .monotonic);
+            helper_pool.start_search(i, .{
+                .color = color,
+                .depth = if (id % 2 == 1) depth_ + 1 else depth_,
+                .alpha = alpha_,
+                .beta = beta_,
+            });
         }
     }
 
@@ -1107,24 +1106,10 @@ pub const Searcher = struct {
         @atomicStore(bool, &self.is_searching, false, .release);
     }
 
-    pub fn stop_helpers(self: *Searcher) void {
-        _ = self;
+    pub fn stop_helpers(_: *Searcher) void {
         defer @atomicStore(bool, &helpers_live, false, .release);
-        var i: usize = 0;
-        while (i < NUM_THREADS) : (i += 1) {
-            @atomicStore(bool, &helper_searchers.items[i].stop, true, .monotonic);
-        }
-        i = 0;
-        while (i < NUM_THREADS) : (i += 1) {
-            // Clear the slot after joining: a reaped std.Thread handle must never
-            // be joined twice (pthread_join returns ESRCH -> `unreachable`). The
-            // next `helpers()` call re-checks this slot for a still-running thread,
-            // so leaving the dead handle here would crash it on the very next depth.
-            if (threads.items[i]) |t| {
-                t.join();
-                threads.items[i] = null;
-            }
-        }
+        for (0..NUM_THREADS) |i| @atomicStore(bool, &helper(i).stop, true, .monotonic);
+        for (0..NUM_THREADS) |i| helper_pool.worker(i).wait_idle();
     }
 
     pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType, comptime cutnode: bool) i32 {
@@ -1547,6 +1532,9 @@ pub const Searcher = struct {
             }
 
             legals += 1;
+            if (is_root and self.reports_live_info()) {
+                self.report_current_move(pos, move, legals, depth);
+            }
 
             var extension: i32 = 0;
 
@@ -1998,4 +1986,25 @@ test "contempt skips numerically ambiguous generic TT stores" {
     try std.testing.expect(s.tt_store_is_ambiguous(0, tt.Bound.Exact));
     try std.testing.expect(!s.tt_store_is_ambiguous(0, tt.Bound.Lower));
     try std.testing.expect(!s.tt_store_is_ambiguous(23, tt.Bound.Exact));
+}
+
+test "info line: bound annotation follows the score in Stockfish order" {
+    var pos: position.Position = undefined;
+    pos.uci_chess960 = false;
+    pos.castling = .{};
+    var line: RootLine = .{ .score = 42, .depth = 9, .seldepth = 12, .pv_len = 1 };
+    line.pv[0] = types.Move.new_from_to(.e2, .e4);
+    const stats = InfoStats{ .nodes = 10, .nps = 20, .hashfull = 3, .tbhits = 0, .time_ms = 500 };
+
+    var buf: [256]u8 = undefined;
+    var w = std.Io.Writer.fixed(&buf);
+    print_line(&w, &pos, &line, 1, .lower, stats);
+    try std.testing.expectEqualStrings(
+        "info depth 9 seldepth 12 multipv 1 score cp 42 lowerbound nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ line_ending,
+        w.buffered(),
+    );
+
+    w = std.Io.Writer.fixed(&buf);
+    print_line(&w, &pos, &line, 2, .exact, stats);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "multipv 2 score cp 42 nodes") != null);
 }

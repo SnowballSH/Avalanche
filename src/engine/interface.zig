@@ -4,6 +4,7 @@ const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const perft = @import("../chess/perft.zig");
 const tt = @import("tt.zig");
+const hce = @import("hce.zig");
 const search = @import("search.zig");
 const parameters = @import("parameters.zig");
 const build_options = @import("build_options");
@@ -11,6 +12,7 @@ const genfens = @import("genfens.zig");
 const syzygy = @import("syzygy.zig");
 const options = @import("uci/options.zig");
 const go = @import("uci/go.zig");
+const numa = @import("numa.zig");
 
 const nl = search.line_ending;
 
@@ -63,11 +65,7 @@ pub const UciInterface = struct {
             self.stop_search();
             self.searcher.deinit();
             self.position.deinit();
-            for (search.helper_searchers.items) |*helper| {
-                helper.deinit();
-            }
-            search.helper_searchers.deinit();
-            search.threads.deinit();
+            search.shutdown_helpers();
             syzygy.deinit();
         }
 
@@ -115,10 +113,9 @@ pub const UciInterface = struct {
             try options.print_all(out);
             try out.writeAll("uciok" ++ nl);
         } else if (eql(command, "setoption")) {
-            options.set_option(tokens.rest(), &self.settings, out) catch |err| {
+            options.set_option(tokens.rest(), .{ .settings = &self.settings, .position = &self.position, .out = out }) catch |err| {
                 try out.print("info string setoption failed ({s}): {s}" ++ nl, .{ @errorName(err), tokens.rest() });
             };
-            self.position.uci_chess960 = self.settings.chess960;
         } else if (eql(command, "ucinewgame")) {
             self.searcher.deinit();
             self.searcher = search.Searcher.new();
@@ -131,6 +128,8 @@ pub const UciInterface = struct {
             self.start_search(&tokens);
         } else if (eql(command, "d")) {
             self.position.debug_print();
+        } else if (eql(command, "eval")) {
+            try self.print_evaluation(out);
         } else if (eql(command, "perft") or eql(command, "perftdiv")) {
             const depth = @max(std.fmt.parseUnsigned(u32, tokens.next() orelse "1", 10) catch 1, 1);
             if (eql(command, "perft")) {
@@ -157,6 +156,19 @@ pub const UciInterface = struct {
             return false;
         }
         return true;
+    }
+
+    /// Static evaluation from White's point of view: the raw network output and
+    /// the final score the search uses (after endgame handling and scaling).
+    fn print_evaluation(self: *UciInterface, out: *std.Io.Writer) !void {
+        const pos = &self.position;
+        const white_sign: i32 = if (pos.turn == .White) 1 else -1;
+        const final = switch (pos.turn) {
+            .White => hce.evaluate_comptime(pos, .White),
+            .Black => hce.evaluate_comptime(pos, .Black),
+        };
+        try out.print("info string NNUE evaluation {d} cp (white side)" ++ nl, .{white_sign * hce.evaluate_nnue(pos)});
+        try out.print("info string Final evaluation {d} cp (white side)" ++ nl, .{white_sign * final});
     }
 
     fn set_position(self: *UciInterface, tokens: *Tokens) void {
@@ -233,6 +245,7 @@ pub const UciInterface = struct {
 };
 
 fn run_search(searcher: *search.Searcher, pos: *position.Position, max_depth: ?u8, instant_single_reply: bool) void {
+    numa.place_current_thread(0);
     var depth = max_depth;
     if (instant_single_reply and legal_move_count(pos) == 1) {
         depth = 1;

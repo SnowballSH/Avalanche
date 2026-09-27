@@ -22,6 +22,10 @@ export class AvalancheClient {
   readonly #signals: SearchSignals | null;
   #seq = 0;
   #closed = false;
+  // Searches sent but not yet answered by "bestmove". While one runs the worker
+  // is blocked inside wasm, so the client itself answers "isready".
+  #pendingSearches = 0;
+  #onLine: (line: string) => void = () => undefined;
   readonly #whenClosed: PromiseWithResolvers<void> = Promise.withResolvers();
 
   private constructor(port: ClientPort, signals: SearchSignals | null) {
@@ -36,6 +40,10 @@ export class AvalancheClient {
   ): Promise<AvalancheClient> {
     const signals = SearchSignals.tryCreate();
     const client = new AvalancheClient(port, signals);
+    client.#onLine = (line) => {
+      if (line.startsWith("bestmove")) client.#pendingSearches = Math.max(0, client.#pendingSearches - 1);
+      onLine?.(line);
+    };
 
     return new Promise((resolve, reject) => {
       let ready = false;
@@ -57,7 +65,7 @@ export class AvalancheClient {
             resolve(client);
             return;
           case "line":
-            onLine?.(message.line);
+            client.#onLine(message.line);
             return;
           case "quit":
             client.terminate();
@@ -90,6 +98,13 @@ export class AvalancheClient {
     if (this.#closed) throw new Error("Engine has quit");
     const seq = ++this.#seq;
     const verb = command.trim().split(/\s+/, 1)[0] ?? "";
+    if (verb === "isready" && this.#pendingSearches > 0) {
+      queueMicrotask(() => {
+        this.#onLine("readyok");
+      });
+      return;
+    }
+    if (verb === "go") this.#pendingSearches++;
     const signal = SIGNALLING_COMMANDS.get(verb);
     if (signal) this.#signals?.request(signal, seq);
     this.#port.postMessage({ type: "command", seq, command });

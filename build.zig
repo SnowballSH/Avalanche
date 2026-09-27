@@ -156,4 +156,9 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    // For running the unit tests on another machine, e.g. `-Dtarget=aarch64-linux-gnu`.
+    const install_tests = b.addInstallArtifact(exe_tests, .{ .dest_sub_path = "avalanche-tests" });
+    const test_exe_step = b.step("test-exe", "Install the unit-test binary as zig-out/bin/avalanche-tests");
+    test_exe_step.dependOn(&install_tests.step);
 }

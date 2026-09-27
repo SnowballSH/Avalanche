@@ -9,6 +9,7 @@
 | `position startpos\|fen <fen> [moves ...]` | FEN accepts X-FEN and Shredder castling fields |
 | `go ...` | `wtime btime winc binc movestogo depth nodes movetime mate infinite ponder searchmoves`, in any combination |
 | `stop`, `ponderhit` | accepted while searching |
+| `eval` | static evaluation of the current position (network output and final score, White's view) |
 | `d`, `perft N`, `perftdiv N`, `spsa`, `spsa++`, `genfens ...` | engine-specific |
 
 ## Options
@@ -16,8 +17,9 @@
 | Option | Type | Default | Notes |
 | --- | --- | --- | --- |
 | Hash | spin | 16 | MB |
-| Threads | spin | 1 | |
-| MoveOverhead | spin | 25 | ms |
+| Threads | spin | 1 | persistent helper pool, see [THREADS.md](THREADS.md); max 1 on wasm |
+| NumaPolicy | combo | auto | `auto` binds threads to NUMA nodes on multi-node Linux machines, `none` leaves placement to the OS |
+| Move Overhead | spin | 25 | ms; the former name `MoveOverhead` is still accepted |
 | MultiPV | spin | 1 | up to 256 |
 | Ponder | check | false | tells GUIs pondering is supported; pondering itself is driven by `go ponder` |
 | Clear Hash | button | | |
@@ -26,6 +28,7 @@
 | UCI_Elo | spin | 3000 | 1320–3000, see [STRENGTH.md](STRENGTH.md) |
 | Skill Level | spin | 20 | 0–20 |
 | SyzygyPath, SyzygyProbeDepth, SyzygyProbeLimit, Syzygy50MoveRule | | | tablebases |
+| EvalFile | string | `<embedded>` | load a network file at runtime (same architecture as the embedded net); `<embedded>` restores the built-in net; unavailable on wasm |
 | UCI_ShowWDL | check | false | |
 | Contempt | spin | 0 | |
 
@@ -52,6 +55,14 @@ Tunable search parameters are also exposed as spin options for SPSA.
   With MultiPV 1 the search path is unchanged.
 - **Root candidates**: `searchmoves` and the Syzygy DTZ filter narrow
   `Searcher.root_moves`; helpers receive the same candidates and exclusions.
+- **Live feedback**: once a search has run for 3 s, the main thread also
+  reports `info depth D currmove M currmovenumber N` as it starts each root
+  move, and, with a single PV line, `lowerbound`/`upperbound` lines when an
+  aspiration window fails high/low. Shorter searches print only one line per
+  completed iteration (and MultiPV line).
+- **EvalFile**: a file is validated (exact size, output-weight range) into a
+  temporary buffer before it replaces the active network, so a bad file never
+  leaves the engine without a network; cached accumulators are then refreshed.
 - Output lines use CRLF on Windows and the Stockfish field order
   (`depth seldepth multipv score [wdl] nodes nps hashfull tbhits time pv`),
   which some GUIs require to record PVs.

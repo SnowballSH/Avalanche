@@ -23,3 +23,6 @@ for await (const line of createInterface({ input: process.stdin })) {
 }
 if (!quitSent) client.send("quit");
 await client.whenClosed;
+// Leaving the readline loop does not release stdin; a GUI keeps the pipe open
+// after "quit", so stdin would otherwise keep the process alive.
+process.stdin.destroy();

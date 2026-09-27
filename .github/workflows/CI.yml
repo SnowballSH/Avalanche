@@ -114,6 +114,41 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
           python3 scripts/uci_protocol_test.py "$BIN"
 
+  wasm:
+    name: wasm / node
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Zig ${{ env.ZIG_VERSION }}
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install web dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Type check and lint
+        working-directory: web
+        run: |
+          npm run check
+          npm run lint
+
+      - name: Web tests (builds wasm and native release)
+        working-directory: web
+        run: npm test
+
+      - name: UCI protocol tests on wasm
+        run: python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalanche.wasm
+
   # Cross-compile optimized release binaries for the standard platforms and
   # upload them. Runs only after the matrix passes, on push-to-master and manual
   # dispatch -- never on pull requests (so forks cannot trigger artifact builds).

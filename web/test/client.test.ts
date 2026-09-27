@@ -91,6 +91,22 @@ describe("worker client", () => {
     await nextLine((line) => line.startsWith("bestmove "), 5_000);
   });
 
+  it("answers isready while a search is running", async (t) => {
+    const { client, nextLine } = await startSession();
+    t.after(() => {
+      client.terminate();
+    });
+    client.send("position startpos");
+    client.send("go infinite");
+    await nextLine((line) => line.startsWith("info depth 3 "));
+    client.send("isready");
+    await nextLine((line) => line === "readyok", 1_000);
+    client.send("stop");
+    await nextLine((line) => line.startsWith("bestmove "), 2_000);
+    client.send("isready");
+    await nextLine((line) => line === "readyok", 2_000);
+  });
+
   it("stops a ponder search on stop", async (t) => {
     const { client, nextLine } = await startSession();
     t.after(() => {

@@ -83,6 +83,13 @@ pub const Position = struct {
         self.reset();
     }
 
+    /// Recomputes evaluation state from scratch, discarding cached
+    /// accumulators; required after the network weights change.
+    pub fn refresh_evaluation(self: *Position) void {
+        self.evaluator.nnue_evaluator.finny_ready = false;
+        self.evaluator.full_refresh(self);
+    }
+
     pub fn deinit(self: *Position) void {
         self.evaluator.nnue_evaluator.release_stack();
     }
