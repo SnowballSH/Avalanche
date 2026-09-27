@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const build_options = @import("build_options");
+const platform = @import("../platform.zig");
 
 const NNUE_SOURCE = @embedFile("nnue");
 
@@ -21,12 +22,18 @@ pub const NNUEWeights = struct {
 };
 
 const MODEL_ALIGN = if (builtin.os.tag == .linux) 2 * 1024 * 1024 else std.atomic.cache_line;
-pub var MODEL: NNUEWeights align(MODEL_ALIGN) = undefined;
+var model_storage: NNUEWeights align(MODEL_ALIGN) = undefined;
+
+// Read in place on wasm to avoid a second 25 MB copy in linear memory. It must
+// be a var: through a const, every MODEL access would be folded at comptime.
+var embedded_model: [@sizeOf(NNUEWeights)]u8 align(@alignOf(NNUEWeights)) = NNUE_SOURCE[0..@sizeOf(NNUEWeights)].*;
+
+pub const MODEL: *const NNUEWeights = if (platform.is_wasm) @ptrCast(&embedded_model) else &model_storage;
 
 fn adviseHugePages() void {
     if (builtin.os.tag != .linux) return;
     const MADV_HUGEPAGE = 14;
-    const bytes = std.mem.asBytes(&MODEL);
+    const bytes = std.mem.asBytes(&model_storage);
     const ptr: [*]align(2 * 1024 * 1024) u8 = @alignCast(bytes.ptr);
     std.posix.madvise(ptr, bytes.len, MADV_HUGEPAGE) catch {};
 }
@@ -45,7 +52,9 @@ pub fn do_nnue() void {
     }
     // Copy straight into the global. Do NOT assign through a by-value temporary.
     // A 25 MB MODEL on the stack may cause overflow.
-    @memcpy(std.mem.asBytes(&MODEL), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
+    if (!platform.is_wasm) {
+        @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
+    }
 
     for (&MODEL.layer_2, 0..) |bucket, bucket_idx| {
         for (bucket, 0..) |weight, weight_idx| {

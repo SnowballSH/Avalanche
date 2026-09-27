@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
 const zobrist = @import("zobrist.zig");
@@ -12,7 +13,7 @@ pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) u
     var nodes: usize = 0;
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
-    var list = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 48) catch unreachable;
+    var list = std.array_list.Managed(types.Move).initCapacity(platform.allocator, 48) catch unreachable;
     defer list.deinit();
 
     pos.generate_legal_moves(color, &list);
@@ -34,7 +35,7 @@ pub fn perft_div(comptime color: types.Color, pos: *position.Position, depth: u3
     var branch: usize = 0;
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
-    var list = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 48) catch unreachable;
+    var list = std.array_list.Managed(types.Move).initCapacity(platform.allocator, 48) catch unreachable;
     defer list.deinit();
 
     pos.generate_legal_moves(color, &list);
@@ -46,16 +47,16 @@ pub fn perft_div(comptime color: types.Color, pos: *position.Position, depth: u3
         pos.undo_move(color, move);
 
         move.debug_print();
-        std.debug.print(": {}\n", .{branch});
+        platform.print(": {}\n", .{branch});
     }
 
-    std.debug.print("\nTotal: {}\n", .{nodes});
+    platform.print("\nTotal: {}\n", .{nodes});
 }
 
 pub fn perft_test(pos: *position.Position, depth: u32) void {
     pos.debug_print();
 
-    std.debug.print("Running Perft {}:\n", .{depth});
+    platform.print("Running Perft {}:\n", .{depth});
 
     const timer = types.Timer.start();
     var nodes: usize = 0;
@@ -67,10 +68,10 @@ pub fn perft_test(pos: *position.Position, depth: u32) void {
     }
 
     const elapsed = timer.read();
-    std.debug.print("\n", .{});
-    std.debug.print("Nodes: {}\n", .{nodes});
+    platform.print("\n", .{});
+    platform.print("Nodes: {}\n", .{nodes});
     const mcs = @as(f64, @floatFromInt(elapsed)) / 1000.0;
-    std.debug.print("Elapsed: {d:.2} microseconds (or {d:.6} seconds)\n", .{ mcs, mcs / 1000.0 / 1000.0 });
+    platform.print("Elapsed: {d:.2} microseconds (or {d:.6} seconds)\n", .{ mcs, mcs / 1000.0 / 1000.0 });
     const nps = @as(f64, @floatFromInt(nodes)) / (@as(f64, @floatFromInt(elapsed)) / 1000.0 / 1000.0 / 1000.0);
-    std.debug.print("NPS: {d:.2} nodes/s (or {d:.4} mn/s)\n", .{ nps, nps / 1000.0 / 1000.0 });
+    platform.print("NPS: {d:.2} nodes/s (or {d:.4} mn/s)\n", .{ nps, nps / 1000.0 / 1000.0 });
 }

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Avalanche WebAssembly</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: system-ui, sans-serif;
+      }
+      body {
+        max-width: 60rem;
+        margin: 2rem auto;
+        padding: 0 1rem;
+      }
+      form {
+        display: flex;
+        gap: 0.5rem;
+      }
+      input {
+        flex: 1;
+        font: inherit;
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        height: 60vh;
+        overflow: auto;
+        padding: 0.75rem;
+        border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Avalanche WebAssembly</h1>
+    <p id="status">Loading engine…</p>
+    <form id="command-form">
+      <input id="command" autocomplete="off" value="go infinite" aria-label="UCI command" />
+      <button type="submit">Send</button>
+      <button type="button" id="stop">Stop</button>
+    </form>
+    <pre id="output"></pre>
+    <script type="module" src="/demo/demo.js"></script>
+  </body>
+</html>

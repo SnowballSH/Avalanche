@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
 const zobrist = @import("zobrist.zig");
@@ -100,23 +101,23 @@ pub const Position = struct {
     pub fn debug_print(self: *const Position) void {
         const line = "   +---+---+---+---+---+---+---+---+\n";
         const letters = "     A   B   C   D   E   F   G   H\n";
-        std.debug.print("{s}", .{letters});
+        platform.print("{s}", .{letters});
         var i: i32 = 56;
         while (i >= 0) : (i -= 8) {
-            std.debug.print("{s} {} ", .{ line, @divTrunc(i, 8) + 1 });
+            platform.print("{s} {} ", .{ line, @divTrunc(i, 8) + 1 });
             var j: i32 = 0;
             while (j < 8) : (j += 1) {
-                std.debug.print("| {c} ", .{types.PieceString[self.mailbox[@as(usize, @intCast(i + j))].index()]});
+                platform.print("| {c} ", .{types.PieceString[self.mailbox[@as(usize, @intCast(i + j))].index()]});
             }
-            std.debug.print("| {}\n", .{@divTrunc(i, 8) + 1});
+            platform.print("| {}\n", .{@divTrunc(i, 8) + 1});
         }
-        std.debug.print("{s}", .{line});
-        std.debug.print("{s}\n", .{letters});
+        platform.print("{s}", .{line});
+        platform.print("{s}\n", .{letters});
 
         const s = if (self.turn == types.Color.White) "White" else "Black";
 
-        std.debug.print("{s} to move\n", .{s});
-        std.debug.print("Hash: 0x{x}\n", .{self.hash});
+        platform.print("{s} to move\n", .{s});
+        platform.print("Hash: 0x{x}\n", .{self.hash});
     }
 
     pub fn set_fen(self: *Position, fen: []const u8) void {

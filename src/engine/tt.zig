@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const builtin = @import("builtin");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
@@ -37,11 +38,12 @@ comptime {
     }
 }
 
-const tt_allocator = std.heap.c_allocator;
+const tt_allocator = platform.allocator;
 
 fn parallelMemset(data: []i128, num_threads: usize) void {
     const len = data.len;
     if (len == 0) return;
+    if (comptime !platform.has_threads) return @memset(data, 0);
 
     const MIN_ENTRIES_PER_THREAD = 1024 * 1024 / @sizeOf(i128);
     const max_useful_threads = @max(1, len / MIN_ENTRIES_PER_THREAD);
@@ -75,6 +77,7 @@ fn memsetWorker(slice: []i128) void {
 }
 
 fn memsetThreadCount() usize {
+    if (comptime !platform.has_threads) return 1;
     if (search.THREADS_CONFIGURED) return search.NUM_THREADS + 1;
     return std.Thread.getCpuCount() catch 1;
 }
@@ -94,11 +97,11 @@ fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
 
 fn hugePageBytes(addr: usize) u64 {
     if (builtin.os.tag != .linux) return 0;
-    const file = std.Io.Dir.cwd().openFile(types.GLOBAL_IO, "/proc/self/smaps", .{}) catch return 0;
-    defer file.close(types.GLOBAL_IO);
+    const file = std.Io.Dir.cwd().openFile(platform.io, "/proc/self/smaps", .{}) catch return 0;
+    defer file.close(platform.io);
 
     var buf: [1 << 15]u8 = undefined;
-    var stream = file.readerStreaming(types.GLOBAL_IO, &buf);
+    var stream = file.readerStreaming(platform.io, &buf);
     const reader = &stream.interface;
     var in_range = false;
     while (reader.takeDelimiterInclusive('\n') catch null) |line| {
@@ -148,7 +151,7 @@ pub const TranspositionTable = struct {
         if (mb != 0 and bytes / MB != mb) {
             return;
         }
-        const requested_size = @max(@as(usize, 1), bytes / @sizeOf(Item));
+        const requested_size: usize = @intCast(@max(1, @min(bytes / @sizeOf(Item), std.math.maxInt(usize))));
 
         const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
         _ = adviseHugePages(new_data);
@@ -172,8 +175,16 @@ pub const TranspositionTable = struct {
         self.age +%= 1;
     }
 
-    pub inline fn index(self: *TranspositionTable, hash: u64) u64 {
-        return @as(u64, @intCast(@as(u128, @intCast(hash)) * @as(u128, @intCast(self.size)) >> 64));
+    pub inline fn index(self: *TranspositionTable, hash: u64) usize {
+        if (comptime @bitSizeOf(usize) <= 32) {
+            // Same result as the u128 form using only 64-bit multiplies, since
+            // 128-bit products lower to a slow libcall on 32-bit targets.
+            const size: u64 = self.size;
+            const hi = (hash >> 32) * size;
+            const lo = ((hash & 0xFFFF_FFFF) * size) >> 32;
+            return @intCast((hi + lo) >> 32);
+        }
+        return @as(usize, @intCast(@as(u128, @intCast(hash)) * @as(u128, @intCast(self.size)) >> 64));
     }
 
     const LOCK_BIT: i64 = @bitCast(@as(u64, 1) << 63);
@@ -184,11 +195,11 @@ pub const TranspositionTable = struct {
     };
 
     inline fn loadSnapshot(p: *i128) ?Snapshot {
-        const w1_before = @atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        const w1_before = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
         if (w1_before & LOCK_BIT != 0) return null;
 
-        const w0 = @atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
-        const w1_after = @atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        const w0 = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
+        const w1_after = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
         if (w1_before != w1_after or w1_after & LOCK_BIT != 0) return null;
 
         const combined: i128 = @as(i128, @bitCast([2]i64{ w0, w1_after }));
@@ -205,11 +216,11 @@ pub const TranspositionTable = struct {
 
         // Slot lock in the high bit of word1; remaining padding bits are a sequence.
         const w1_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p) + 8));
-        const old_w1 = @atomicRmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
+        const old_w1 = platform.atomicRmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
         if (old_w1 & LOCK_BIT != 0) return;
 
         const w0_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p)));
-        const old_w0 = @atomicLoad(i64, w0_ptr, .acquire);
+        const old_w0 = platform.atomicLoad(i64, w0_ptr, .acquire);
         const existing_combined: i128 = @as(i128, @bitCast([2]i64{ old_w0, old_w1 }));
         const p_val: Item = @as(Item, @bitCast(existing_combined));
 
@@ -224,10 +235,10 @@ pub const TranspositionTable = struct {
             stored_entry._padding = (p_val._padding +% 1) & 0x7fff;
             const entry_as_i128: i128 = @as(i128, @bitCast(stored_entry));
             const words: [2]i64 = @as([2]i64, @bitCast(entry_as_i128));
-            @atomicStore(i64, w0_ptr, words[0], .monotonic);
-            @atomicStore(i64, w1_ptr, words[1], .release);
+            platform.atomicStore(i64, w0_ptr, words[0], .monotonic);
+            platform.atomicStore(i64, w1_ptr, words[1], .release);
         } else {
-            @atomicStore(i64, w1_ptr, old_w1, .release);
+            platform.atomicStore(i64, w1_ptr, old_w1, .release);
         }
     }
 

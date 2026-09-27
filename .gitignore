@@ -23,6 +23,11 @@ cutechess-cli
 
 *.json
 !scripts/datagen_a_lot.json
+!web/package.json
+!web/package-lock.json
+!web/tsconfig.json
+!web/tsconfig.build.json
+!web/biome.json
 
 .zig-cache
 **/zig-**

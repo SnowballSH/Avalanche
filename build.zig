@@ -126,6 +126,33 @@ pub fn build(b: *std.Build) void {
 
     addPyrrhic(b, exe_tests);
 
+    const wasm = b.addExecutable(.{
+        .name = "avalanche",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/wasm.zig"),
+            .target = b.resolveTargetQuery(.{
+                .cpu_arch = .wasm32,
+                .os_tag = .freestanding,
+                .cpu_model = .{ .explicit = &std.Target.wasm.cpu.generic },
+                .cpu_features_add = std.Target.wasm.featureSet(&.{.simd128}),
+            }),
+            .optimize = optimize,
+            .single_threaded = true,
+            .strip = optimize != .Debug,
+        }),
+    });
+    wasm.entry = .disabled;
+    wasm.rdynamic = true;
+    wasm.stack_size = 16 * 1024 * 1024;
+    wasm.root_module.addOptions("build_options", build_options);
+    wasm.root_module.addAnonymousImport("nnue", .{
+        .root_source_file = b.path(netPath),
+    });
+
+    const install_wasm = b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = "web" } } });
+    const wasm_step = b.step("wasm", "Build the WebAssembly engine into zig-out/web");
+    wasm_step.dependOn(&install_wasm.step);
+
     const run_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);

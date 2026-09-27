@@ -1,19 +1,17 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const position = @import("position.zig");
-
-// Global Io (set in main); backs clocks and stdio.
-pub var GLOBAL_IO: std.Io = undefined;
 
 // Monotonic timer; replaces std.time.Timer (removed in 0.16).
 pub const Timer = struct {
     start_ns: i96,
 
     pub fn start() Timer {
-        return Timer{ .start_ns = std.Io.Clock.awake.now(GLOBAL_IO).nanoseconds };
+        return Timer{ .start_ns = platform.nowNs() };
     }
 
     pub fn read(self: Timer) u64 {
-        const now_ns = std.Io.Clock.awake.now(GLOBAL_IO).nanoseconds;
+        const now_ns = platform.nowNs();
         return @as(u64, @intCast(now_ns - self.start_ns));
     }
 };
@@ -284,14 +282,14 @@ pub fn debug_print_bitboard(b: Bitboard) void {
         var j: i32 = 0;
         while (j < 8) : (j += 1) {
             if ((b >> @as(u6, @intCast(i + j))) & 1 != 0) {
-                std.debug.print("1 ", .{});
+                platform.print("1 ", .{});
             } else {
-                std.debug.print("0 ", .{});
+                platform.print("0 ", .{});
             }
         }
-        std.debug.print("\n", .{});
+        platform.print("\n", .{});
     }
-    std.debug.print("\n", .{});
+    platform.print("\n", .{});
 }
 
 pub const k1: Bitboard = 0x5555555555555555;
@@ -437,7 +435,7 @@ pub const Move = packed struct {
         if (move[2] < 'a' or move[2] > 'h') return Move.empty();
         if (move[3] < '1' or move[3] > '8') return Move.empty();
 
-        var list = std.array_list.Managed(Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
+        var list = std.array_list.Managed(Move).initCapacity(platform.allocator, 8) catch unreachable;
         defer list.deinit();
         const f = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[0] - 'a')), @as(Rank, @enumFromInt(move[1] - '1'))))));
         const t = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[2] - 'a')), @as(Rank, @enumFromInt(move[3] - '1'))))));
@@ -482,7 +480,7 @@ pub const Move = packed struct {
     }
 
     pub fn debug_print(self: Move) void {
-        std.debug.print("{s}{s}{s}", .{
+        platform.print("{s}{s}{s}", .{
             SquareToString[self.from],
             SquareToString[self.to],
             MoveTypeString[self.flags],

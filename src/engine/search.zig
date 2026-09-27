@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
@@ -108,6 +109,7 @@ pub const NodeType = enum {
 };
 
 pub const MAX_THREADS = 512;
+pub const MAX_SEARCH_THREADS: usize = if (platform.has_threads) MAX_THREADS else 1;
 pub var NUM_THREADS: usize = 0;
 pub var THREADS_CONFIGURED: bool = false;
 
@@ -118,8 +120,8 @@ pub var MOVE_OVERHEAD: u64 = DEFAULT_MOVE_OVERHEAD;
 pub var CONTEMPT: i32 = 0;
 pub const MAX_CONTEMPT: i32 = 100;
 
-pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(std.heap.c_allocator);
-pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(std.heap.c_allocator);
+pub var helper_searchers: std.array_list.Managed(Searcher) = std.array_list.Managed(Searcher).init(platform.allocator);
+pub var threads: std.array_list.Managed(?std.Thread) = std.array_list.Managed(?std.Thread).init(platform.allocator);
 pub var helpers_live: bool = false;
 
 pub fn helpers_are_live() bool {
@@ -128,6 +130,7 @@ pub fn helpers_are_live() bool {
 
 fn parallel_range(start: usize, end: usize, comptime f: fn (usize, usize) void) void {
     if (end <= start) return;
+    if (comptime !platform.has_threads) return f(start, end);
     const count = end - start;
     const cpus = std.Thread.getCpuCount() catch 1;
     const workers = @max(1, @min(count, @min(cpus, MAX_THREADS)));
@@ -211,8 +214,8 @@ pub const Searcher = struct {
     stop: bool = false,
     is_searching: bool = false,
     parent_stop: ?*bool = null,
-    shared_nodes: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
-    parent_nodes: ?*std.atomic.Value(u64) = null,
+    shared_nodes: platform.AtomicValue(u64) = platform.AtomicValue(u64).init(0),
+    parent_nodes: ?*platform.AtomicValue(u64) = null,
     root_history_len: usize = 0,
 
     exclude_move: [MAX_PLY]types.Move = undefined,
@@ -247,13 +250,13 @@ pub const Searcher = struct {
     syzygy_root: syzygy.RootResult = undefined,
 
     pub fn init(self: *Searcher) void {
-        const board = std.heap.c_allocator.create(position.Position) catch unreachable;
+        const board = platform.allocator.create(position.Position) catch unreachable;
         board.init();
         self.* = .{
-            .continuation = std.heap.c_allocator.create([12][64][64][64]i16) catch unreachable,
+            .continuation = platform.allocator.create([12][64][64][64]i16) catch unreachable,
             .root_board = board,
         };
-        self.hash_history = std.array_list.Managed(u64).initCapacity(std.heap.c_allocator, MAX_GAMEPLY) catch unreachable;
+        self.hash_history = std.array_list.Managed(u64).initCapacity(platform.allocator, MAX_GAMEPLY) catch unreachable;
         self.reset_heuristics(true);
     }
 
@@ -265,9 +268,9 @@ pub const Searcher = struct {
 
     pub fn deinit(self: *Searcher) void {
         self.hash_history.deinit();
-        std.heap.c_allocator.destroy(self.continuation);
+        platform.allocator.destroy(self.continuation);
         self.root_board.deinit();
-        std.heap.c_allocator.destroy(self.root_board);
+        platform.allocator.destroy(self.root_board);
     }
 
     inline fn pack_static_eval(value: i32) i16 {
@@ -356,6 +359,10 @@ pub const Searcher = struct {
 
     inline fn stop_requested(self: *Searcher) bool {
         if (@atomicLoad(bool, &self.stop, .monotonic)) return true;
+        if (platform.hostStopRequested()) {
+            @atomicStore(bool, &self.stop, true, .monotonic);
+            return true;
+        }
         if (self.parent_stop) |parent| {
             if (@atomicLoad(bool, parent, .monotonic)) return true;
         }
@@ -440,8 +447,8 @@ pub const Searcher = struct {
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) i32 {
         var out_buf: [4096]u8 = undefined;
-        var out_file = std.Io.File.stdout().writerStreaming(types.GLOBAL_IO, &out_buf);
-        const outW = &out_file.interface;
+        var out_file = platform.Stdout.init(&out_buf);
+        const outW = out_file.writer();
         @atomicStore(bool, &self.is_searching, true, .release);
         self.parent_stop = null;
         self.parent_nodes = null;
@@ -463,7 +470,7 @@ pub const Searcher = struct {
         self.timer = types.Timer.start();
 
         self.syzygy_root_active = false;
-        if (syzygy.enabled and syzygy.no_castling_rights(pos) and
+        if (syzygy.active() and syzygy.no_castling_rights(pos) and
             syzygy.piece_count(pos) <= syzygy.max_pieces())
         {
             const repeated = self.count_repetitions(pos) > 1;
@@ -477,7 +484,7 @@ pub const Searcher = struct {
         }
 
         {
-            var root_moves = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 64) catch unreachable;
+            var root_moves = std.array_list.Managed(types.Move).initCapacity(platform.allocator, 64) catch unreachable;
             defer root_moves.deinit();
             pos.generate_legal_moves(color, &root_moves);
             if (self.syzygy_root_active) {
@@ -562,7 +569,7 @@ pub const Searcher = struct {
                     beta = hce.MateScore;
                 }
                 self.iterative_deepening_depth = @max(self.iterative_deepening_depth, depth);
-                if (depth > 1) {
+                if (platform.has_threads and depth > 1) {
                     self.helpers(pos, color, depth, alpha, beta);
                 }
 
@@ -570,7 +577,7 @@ pub const Searcher = struct {
 
                 const val = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root, false);
 
-                if (depth > 1) {
+                if (platform.has_threads and depth > 1) {
                     self.stop_helpers();
                 }
 
@@ -603,7 +610,7 @@ pub const Searcher = struct {
 
             bm = self.best_move;
 
-            var total_nodes_all: usize = self.nodes;
+            var total_nodes_all: u64 = self.nodes;
             var total_tbhits: u64 = self.tbhits;
 
             if (depth > 1) {
@@ -723,7 +730,7 @@ pub const Searcher = struct {
         }
 
         if (bm.to_u16() == 0) {
-            var fallback = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 32) catch unreachable;
+            var fallback = std.array_list.Managed(types.Move).initCapacity(platform.allocator, 32) catch unreachable;
             defer fallback.deinit();
             pos.generate_legal_moves(color, &fallback);
             if (self.syzygy_root_active) {
@@ -1017,7 +1024,7 @@ pub const Searcher = struct {
         // >> Step 2.5: Syzygy tablebase WDL probe
         var tb_min: i32 = -hce.MateScore;
         var tb_max: i32 = hce.MateScore;
-        if (syzygy.enabled and !is_root and !is_null and
+        if (syzygy.active() and !is_root and !is_null and
             self.exclude_move[self.ply].to_u16() == 0 and
             @as(i32, @intCast(depth)) >= syzygy.probe_depth and
             pos.history[pos.game_ply].fifty == 0 and

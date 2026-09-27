@@ -139,14 +139,14 @@ pub fn init_rook_attacks() void {
 
         index = index *% RookMagics[sq];
         index = index >> @as(u6, @intCast(RookAttackShifts[sq]));
-        RookAttacks[sq][index] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+        RookAttacks[sq][@intCast(index)] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
         subset = (subset -% RookAttackMasks[sq]) & RookAttackMasks[sq];
 
         while (subset != 0) {
             index = subset;
             index = index *% RookMagics[sq];
             index = index >> @as(u6, @intCast(RookAttackShifts[sq]));
-            RookAttacks[sq][index] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+            RookAttacks[sq][@intCast(index)] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
             subset = (subset -% RookAttackMasks[sq]) & RookAttackMasks[sq];
         }
     }
@@ -154,7 +154,7 @@ pub fn init_rook_attacks() void {
 
 // Returns the bitboard for rook attacks
 pub inline fn get_rook_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
-    return RookAttacks[square.index()][((occ & RookAttackMasks[square.index()]) *% RookMagics[square.index()]) >> @as(u6, @intCast(RookAttackShifts[square.index()]))];
+    return RookAttacks[square.index()][@intCast(((occ & RookAttackMasks[square.index()]) *% RookMagics[square.index()]) >> @as(u6, @intCast(RookAttackShifts[square.index()])))];
 }
 
 // Returns x-ray attacks, which is the attack when the first-layer blockers are removed.
@@ -207,14 +207,14 @@ pub fn init_bishop_attacks() void {
 
         index = index *% BishopMagics[sq];
         index = index >> @as(u6, @intCast(BishopAttackShifts[sq]));
-        BishopAttacks[sq][index] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+        BishopAttacks[sq][@intCast(index)] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
         subset = (subset -% BishopAttackMasks[sq]) & BishopAttackMasks[sq];
 
         while (subset != 0) {
             index = subset;
             index = index *% BishopMagics[sq];
             index = index >> @as(u6, @intCast(BishopAttackShifts[sq]));
-            BishopAttacks[sq][index] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+            BishopAttacks[sq][@intCast(index)] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
             subset = (subset -% BishopAttackMasks[sq]) & BishopAttackMasks[sq];
         }
     }
@@ -222,7 +222,7 @@ pub fn init_bishop_attacks() void {
 
 // Returns the bitboard for bishop attacks
 pub inline fn get_bishop_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
-    return BishopAttacks[square.index()][((occ & BishopAttackMasks[square.index()]) *% BishopMagics[square.index()]) >> @as(u6, @intCast(BishopAttackShifts[square.index()]))];
+    return BishopAttacks[square.index()][@intCast(((occ & BishopAttackMasks[square.index()]) *% BishopMagics[square.index()]) >> @as(u6, @intCast(BishopAttackShifts[square.index()])))];
 }
 
 // Returns x-ray attacks, which is the attack when the first-layer blockers are removed.

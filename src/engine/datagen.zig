@@ -1,4 +1,5 @@
 const std = @import("std");
+const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
@@ -569,10 +570,10 @@ pub const DatagenSingle = struct {
         board.wdl = white_result;
 
         // Write game under file lock: PackedBoard + MoveScorePairs + Terminator
-        self.fileLock.lock.lockUncancelable(types.GLOBAL_IO);
-        defer self.fileLock.lock.unlock(types.GLOBAL_IO);
+        self.fileLock.lock.lockUncancelable(platform.io);
+        defer self.fileLock.lock.unlock(platform.io);
         var wbuf: [8192]u8 = undefined;
-        var file_writer = self.fileLock.file.writerStreaming(types.GLOBAL_IO, &wbuf);
+        var file_writer = self.fileLock.file.writerStreaming(platform.io, &wbuf);
         const writer = &file_writer.interface;
         try writer.writeAll(std.mem.asBytes(&board));
         for (move_scores.items) |*ms| {
@@ -711,10 +712,10 @@ pub const DatagenSingle = struct {
             rec.board.result = if (rec.white_was_stm) white_result else 2 - white_result;
         }
 
-        self.fileLock.lock.lockUncancelable(types.GLOBAL_IO);
-        defer self.fileLock.lock.unlock(types.GLOBAL_IO);
+        self.fileLock.lock.lockUncancelable(platform.io);
+        defer self.fileLock.lock.unlock(platform.io);
         var wbuf: [4096]u8 = undefined;
-        var file_writer = self.fileLock.file.writerStreaming(types.GLOBAL_IO, &wbuf);
+        var file_writer = self.fileLock.file.writerStreaming(platform.io, &wbuf);
         const writer = &file_writer.interface;
         for (records.items) |*rec| {
             const bytes = std.mem.asBytes(&rec.board);
@@ -745,16 +746,16 @@ pub const DatagenSingle = struct {
 };
 
 pub fn loadEpdFile(path: []const u8) ![]const []const u8 {
-    const file = std.Io.Dir.cwd().openFile(types.GLOBAL_IO, path, .{}) catch {
+    const file = std.Io.Dir.cwd().openFile(platform.io, path, .{}) catch {
         std.debug.panic("Unable to open EPD file: {s}", .{path});
     };
-    const file_len = file.length(types.GLOBAL_IO) catch {
+    const file_len = file.length(platform.io) catch {
         std.debug.panic("Unable to get EPD file size: {s}", .{path});
     };
     const content = std.heap.page_allocator.alloc(u8, @as(usize, @intCast(file_len))) catch {
         std.debug.panic("Out of memory reading EPD file: {s}", .{path});
     };
-    _ = file.readPositionalAll(types.GLOBAL_IO, content, 0) catch {
+    _ = file.readPositionalAll(platform.io, content, 0) catch {
         std.debug.panic("Unable to read EPD file: {s}", .{path});
     };
 
@@ -786,7 +787,7 @@ pub const Datagen = struct {
 
     pub fn new(config: DatagenConfig) Datagen {
         var seed: u128 = undefined;
-        std.Io.random(types.GLOBAL_IO, std.mem.asBytes(&seed));
+        std.Io.random(platform.io, std.mem.asBytes(&seed));
         return Datagen{
             .fileLock = undefined,
             .seed = seed,
@@ -806,7 +807,7 @@ pub const Datagen = struct {
 
     pub fn start(self: *Datagen, num_threads: usize) !void {
         const ext = if (self.config.format == .viri) ".viribin" else ".bin";
-        const now_ns = std.Io.Clock.real.now(types.GLOBAL_IO).nanoseconds;
+        const now_ns = std.Io.Clock.real.now(platform.io).nanoseconds;
         const path = try std.fmt.allocPrint(
             std.heap.page_allocator,
             "data_{d}_{d}_{d}{s}",
@@ -825,7 +826,7 @@ pub const Datagen = struct {
         std.debug.print("=========================\n\n", .{});
 
         const file = std.Io.Dir.cwd().createFile(
-            types.GLOBAL_IO,
+            platform.io,
             path,
             .{ .read = true },
         ) catch {
@@ -868,7 +869,7 @@ pub const Datagen = struct {
     }
 
     pub fn startSingleThreaded(self: *Datagen) !void {
-        const now_ns = std.Io.Clock.real.now(types.GLOBAL_IO).nanoseconds;
+        const now_ns = std.Io.Clock.real.now(platform.io).nanoseconds;
         const id: u64 = @as(u64, @truncate(@as(u96, @bitCast(now_ns))));
         const ext = if (self.config.format == .viri) ".viribin" else ".bin";
         const path = try std.fmt.allocPrint(
@@ -878,7 +879,7 @@ pub const Datagen = struct {
         );
         std.debug.print("Writing data to {s} (single-threaded, {s})\n", .{ path, if (self.config.format == .viri) "viriformat" else "bulletformat" });
         const file = std.Io.Dir.cwd().createFile(
-            types.GLOBAL_IO,
+            platform.io,
             path,
             .{ .read = true },
         ) catch {
