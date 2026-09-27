@@ -14,11 +14,11 @@ June 2026 update: **Avalanche now builds with Zig 0.16.0.**
 
 ## Strength
 
-**Latest (4.0.0): estimated 3600**
+**Official [40/15 CCRL ELO (v4.0.0)](https://computerchess.org.uk/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%204.0.0%2064-bit#Avalanche_4_0_0_64-bit): 3492**
 
-**Official [40/15 CCRL ELO (v3.0.0)](https://computerchess.org.uk/4040/cgi/engine_details.cgi?match_length=30&each_game=0&print=Details&each_game=0&eng=Avalanche%203.0.0%2064-bit#Avalanche_3_0_0_64-bit): 3384**
+**Official [Blitz CCRL ELO (v4.0.0)](https://computerchess.org.uk/404/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%204.0.0%2064-bit#Avalanche_4_0_0_64-bit): 3597**
 
-**Official [Blitz CCRL ELO (v3.0.0)](https://computerchess.org.uk/404/cgi/engine_details.cgi?print=Details&each_game=1&eng=Avalanche%203.0.0%2064-bit#Avalanche_3_0_0_64-bit): 3420**
+Version 4.0.0 placed 6/11 in the TCEC Season 30 Category 2 Playoff.
 
 Version 2.1.0 participated in TCEC Swiss 6.
 
