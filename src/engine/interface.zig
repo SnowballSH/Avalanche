@@ -101,7 +101,7 @@ pub const UciInterface = struct {
         }
 
         if (@atomicLoad(bool, &self.searcher.is_searching, .acquire)) {
-            try out.print("info string ignored while searching: {s}" ++ nl, .{command});
+            try out.print("info string ignored while searching: {s}" ++ nl, .{std.mem.trim(u8, line, "\r\n")});
             return true;
         }
         self.join_search();

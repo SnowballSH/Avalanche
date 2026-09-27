@@ -1,14 +1,12 @@
 const std = @import("std");
 const types = @import("../chess/types.zig");
-const tables = @import("../chess/tables.zig");
-const zobrist = @import("../chess/zobrist.zig");
 const position = @import("../chess/position.zig");
 const castling = @import("../chess/castling.zig");
 const frc = @import("../chess/frc.zig");
 const perft = @import("../chess/perft.zig");
-const weights = @import("../engine/weights.zig");
 const search = @import("../engine/search.zig");
 const tt = @import("../engine/tt.zig");
+const support = @import("support.zig");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualStrings = std.testing.expectEqualStrings;
@@ -51,22 +49,9 @@ const CASTLING_EDGE_SUITE = [_]PerftCase{
     .{ .fen = "4k3/8/8/8/8/8/8/1q3RK1 w F - 0 1", .nodes = &.{ 8, 142, 1687, 36496, 476384 } },
 };
 
-fn init_tables() void {
-    tables.init_all();
-    zobrist.init_zobrist();
-    weights.do_nnue();
-}
-
-fn new_position() !*position.Position {
-    const pos = try std.testing.allocator.create(position.Position);
-    pos.init();
-    return pos;
-}
-
-fn destroy_position(pos: *position.Position) void {
-    pos.deinit();
-    std.testing.allocator.destroy(pos);
-}
+const init_tables = support.init_tables;
+const new_position = support.new_position;
+const destroy_position = support.destroy_position;
 
 fn perft_from(pos: *position.Position, depth: u32) usize {
     return switch (pos.turn) {

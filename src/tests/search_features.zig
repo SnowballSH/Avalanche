@@ -1,9 +1,7 @@
 const std = @import("std");
 const types = @import("../chess/types.zig");
-const tables = @import("../chess/tables.zig");
-const zobrist = @import("../chess/zobrist.zig");
 const position = @import("../chess/position.zig");
-const weights = @import("../engine/weights.zig");
+const support = @import("support.zig");
 const search = @import("../engine/search.zig");
 const strength = @import("../engine/strength.zig");
 const tt = @import("../engine/tt.zig");
@@ -18,15 +16,12 @@ const Fixture = struct {
     fn init(self: *Fixture, fen: []const u8) !void {
         self.io_threaded = .init(std.heap.page_allocator, .{});
         types.GLOBAL_IO = self.io_threaded.io();
-        tables.init_all();
-        zobrist.init_zobrist();
-        weights.do_nnue();
+        support.init_tables();
         search.init_lmr();
         tt.GlobalTT.reset(16);
         search.NUM_THREADS = 0;
 
-        self.pos = try std.testing.allocator.create(position.Position);
-        self.pos.init();
+        self.pos = try support.new_position();
         self.pos.set_fen(fen);
         self.searcher = try std.testing.allocator.create(search.Searcher);
         self.searcher.init();
@@ -37,8 +32,7 @@ const Fixture = struct {
     fn deinit(self: *Fixture) void {
         self.searcher.deinit();
         std.testing.allocator.destroy(self.searcher);
-        self.pos.deinit();
-        std.testing.allocator.destroy(self.pos);
+        support.destroy_position(self.pos);
         self.io_threaded.deinit();
     }
 
