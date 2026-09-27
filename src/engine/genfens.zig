@@ -6,7 +6,8 @@
 // We must print N lines to stdout in the form:
 //   info string genfens <fen>
 // then exit.  Each FEN is a random opening position produced by:
-//   - picking a random book line (if a book is given), OR starting from startpos
+//   - picking a random book line (if a book is given), OR starting from startpos,
+//     or from a random Chess960 ("frc") / Double Fischer Random ("dfrc") start
 //   - playing 9-12 random legal plies
 //   - ensuring the position is not in check and is not drawn
 
@@ -14,6 +15,9 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
+const frc = @import("../chess/frc.zig");
+
+const Variant = enum { standard, frc, dfrc };
 
 fn playRandomMoves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
@@ -38,6 +42,10 @@ fn playRandomMoves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) v
     }
 }
 
+fn random_start(prng: *utils.PRNG) u16 {
+    return @intCast(prng.rand64() % frc.N_POSITIONS);
+}
+
 fn positionIsUsable(pos: *position.Position) bool {
     const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
     if (in_check) return false;
@@ -59,11 +67,12 @@ pub fn run(args_in: []const []const u8) !void {
     var out_file = std.Io.File.stdout().writerStreaming(io, &out_buf);
     const out = &out_file.interface;
 
-    // Parse: genfens <count> seed <S> book <None|path>
+    // Parse: genfens <count> seed <S> book <None|path> [frc|dfrc]
     // args_in[0] = "genfens", args_in[1] = count, then keyword pairs
     var n_fens: u64 = 1;
     var seed: u64 = 0;
     var book_path: ?[]const u8 = null;
+    var variant = Variant.standard;
 
     if (args_in.len >= 2) {
         n_fens = std.fmt.parseInt(u64, args_in[1], 10) catch 1;
@@ -80,6 +89,8 @@ pub fn run(args_in: []const []const u8) !void {
             if (i < args_in.len and !std.mem.eql(u8, args_in[i], "None")) {
                 book_path = args_in[i];
             }
+        } else if (std.meta.stringToEnum(Variant, tok)) |v| {
+            variant = v;
         }
     }
 
@@ -122,7 +133,12 @@ pub fn run(args_in: []const []const u8) !void {
             const extra_plies = 1 + (prng.rand64() % 3);
             playRandomMoves(&pos, &prng, extra_plies);
         } else {
-            pos.set_fen(types.DEFAULT_FEN);
+            var fen_buf: [frc.FEN_CAPACITY]u8 = undefined;
+            pos.set_fen(switch (variant) {
+                .standard => types.DEFAULT_FEN,
+                .frc => frc.frc_fen(random_start(&prng), &fen_buf),
+                .dfrc => frc.dfrc_fen(random_start(&prng), random_start(&prng), &fen_buf),
+            });
             const random_plies = 9 + (prng.rand64() % 4);
             playRandomMoves(&pos, &prng, random_plies);
         }

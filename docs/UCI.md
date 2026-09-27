@@ -1,0 +1,57 @@
+# UCI support
+
+## Commands
+
+| Command | Notes |
+| --- | --- |
+| `uci`, `isready`, `ucinewgame`, `quit` | standard |
+| `setoption name <name> [value <value>]` | names are case-insensitive and may contain spaces |
+| `position startpos\|fen <fen> [moves ...]` | FEN accepts X-FEN and Shredder castling fields |
+| `go ...` | `wtime btime winc binc movestogo depth nodes movetime mate infinite ponder searchmoves`, in any combination |
+| `stop`, `ponderhit` | accepted while searching |
+| `d`, `perft N`, `perftdiv N`, `spsa`, `spsa++`, `genfens ...` | engine-specific |
+
+## Options
+
+| Option | Type | Default | Notes |
+| --- | --- | --- | --- |
+| Hash | spin | 16 | MB |
+| Threads | spin | 1 | |
+| MoveOverhead | spin | 25 | ms |
+| MultiPV | spin | 1 | up to 256 |
+| Ponder | check | false | tells GUIs pondering is supported; pondering itself is driven by `go ponder` |
+| Clear Hash | button | | |
+| UCI_Chess960 | check | false | king-captures-rook castling notation |
+| UCI_LimitStrength | check | false | uses `UCI_Elo` instead of `Skill Level` |
+| UCI_Elo | spin | 3000 | 1320–3000, see [STRENGTH.md](STRENGTH.md) |
+| Skill Level | spin | 20 | 0–20 |
+| SyzygyPath, SyzygyProbeDepth, SyzygyProbeLimit, Syzygy50MoveRule | | | tablebases |
+| UCI_ShowWDL | check | false | |
+| Contempt | spin | 0 | |
+
+Tunable search parameters are also exposed as spin options for SPSA.
+
+## Search integration
+
+- **Time**: `src/engine/uci/go.zig` turns a `go` command into a `TimeBudget`.
+  Clock and `movetime` limits combine (the tighter wins); `depth`, `nodes` and
+  `mate` are independent stop conditions. Without a clock or `movetime` the
+  search ignores time.
+- **Pondering**: `go ponder` sets `Searcher.pondering`. While it is set, time
+  limits are ignored; `ponderhit` clears it and the budget, measured from the
+  original `go`, applies again, so a long ponder can end the search at once.
+  `bestmove` is never printed during `go ponder` or `go infinite` until
+  `ponderhit`/`stop`, even if the search finishes early.
+- **bestmove ... ponder**: the second move of the chosen PV, or, when the PV
+  is one move long, the transposition-table move of the resulting position if
+  it is legal.
+- **MultiPV**: each iteration searches line `k` at the root with the first
+  moves of lines `0..k-1` excluded (`Searcher.root_excluded`), each with its
+  own aspiration window; lines are then sorted by score. Root TT stores are
+  skipped for `k > 0` because those scores describe a restricted move set.
+  With MultiPV 1 the search path is unchanged.
+- **Root candidates**: `searchmoves` and the Syzygy DTZ filter narrow
+  `Searcher.root_moves`; helpers receive the same candidates and exclusions.
+- Output lines use CRLF on Windows and the Stockfish field order
+  (`depth seldepth multipv score [wdl] nodes nps hashfull tbhits time pv`),
+  which some GUIs require to record PVs.

@@ -108,6 +108,12 @@ jobs:
           [ "$fail" -eq 0 ] || exit 1
           echo "OK: UCI smoke test passed (uciok / readyok / bestmove)"
 
+      - name: UCI protocol tests
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
+          python3 scripts/uci_protocol_test.py "$BIN"
+
   # Cross-compile optimized release binaries for the standard platforms and
   # upload them. Runs only after the matrix passes, on push-to-master and manual
   # dispatch -- never on pull requests (so forks cannot trigger artifact builds).

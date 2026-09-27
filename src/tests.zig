@@ -15,6 +15,9 @@ const expect = std.testing.expect;
 
 test {
     _ = @import("tests/frc.zig");
+    _ = @import("engine/strength.zig");
+    _ = @import("engine/uci/go.zig");
+    _ = @import("engine/uci/options.zig");
 }
 
 test "Basic Piece and Color" {

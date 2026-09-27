@@ -125,7 +125,7 @@ pub const Position = struct {
         self.reset();
         var sq: i32 = @as(i32, @intCast(@intFromEnum(types.Square.a8)));
         var tokens = std.mem.tokenizeScalar(u8, fen, ' ');
-        const bd = tokens.next().?;
+        const bd = tokens.next() orelse return;
         for (bd) |ch| {
             if (std.ascii.isDigit(ch)) {
                 sq += @as(i32, @intCast(ch - '0')) * @intFromEnum(types.Direction.East);
@@ -137,7 +137,7 @@ pub const Position = struct {
             }
         }
 
-        const turn = tokens.next().?;
+        const turn = tokens.next() orelse "w";
         if (std.mem.eql(u8, turn, "w")) {
             self.turn = types.Color.White;
         } else {
@@ -145,9 +145,9 @@ pub const Position = struct {
             self.hash ^= zobrist.TurnHash;
         }
 
-        self.parse_castling(tokens.next().?);
+        self.parse_castling(tokens.next() orelse "-");
 
-        const ep = tokens.next().?;
+        const ep = tokens.next() orelse "-";
         if (ep.len == 2) {
             for (types.SquareToString, 0..) |sq_str, i| {
                 if (std.mem.eql(u8, ep, sq_str)) {
