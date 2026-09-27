@@ -105,6 +105,7 @@ pub const ThreadPool = struct {
     /// Grows or shrinks to `target` helpers; stops early if a thread cannot be created.
     pub fn resize(self: *ThreadPool, target: usize) void {
         if (comptime !platform.has_threads) return;
+        numa.init();
         while (self.workers.items.len > target) {
             const w = self.workers.pop().?;
             w.submit(.quit);

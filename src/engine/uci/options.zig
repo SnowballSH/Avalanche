@@ -184,6 +184,8 @@ fn set_numa_policy(_: Context, value: Value) !void {
     const chosen = std.meta.stringToEnum(numa.Policy, value.string).?;
     if (chosen == numa.policy) return;
     numa.policy = chosen;
+    numa.init();
+    if (!numa.topology().is_numa()) return;
     // Helpers are placed when they start, so restart them under the new policy.
     const helpers = search.helper_count();
     search.set_helper_count(0);

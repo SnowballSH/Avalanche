@@ -199,13 +199,6 @@ inline fn helper(index: usize) *Searcher {
     return helper_pool.worker(index).searcher;
 }
 
-/// Makes at least `n` helpers available for the next search (never shrinks).
-pub fn ensure_helpers(n: usize) void {
-    if (helpers_are_live() or n <= helper_pool.count()) return;
-    helper_pool.resize(n);
-    NUM_THREADS = @min(NUM_THREADS, helper_pool.count());
-}
-
 /// Sets the number of helper threads, releasing surplus threads and their tables.
 pub fn set_helper_count(n: usize) void {
     std.debug.assert(!helpers_are_live());
@@ -295,6 +288,11 @@ pub const Searcher = struct {
     lines: [MAX_MULTI_PV]RootLine = undefined,
     line_count: usize = 0,
     ponder_move: types.Move = types.Move.empty(),
+    // The main thread's UCI output for the running search; live info shares it
+    // so every line of one search goes through one ordered channel.
+    info_out: ?*std.Io.Writer = null,
+    // Iteration depth reported to GUIs; aspiration re-searches may search shallower.
+    root_depth: usize = 0,
     rng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(0),
     rng_seeded: bool = false,
 
@@ -498,6 +496,8 @@ pub const Searcher = struct {
         var out_buf: [4096]u8 = undefined;
         var out_file = platform.Stdout.init(&out_buf);
         const outW = out_file.writer();
+        self.info_out = outW;
+        defer self.info_out = null;
         @atomicStore(bool, &self.is_searching, true, .release);
         self.parent_stop = null;
         self.parent_nodes = null;
@@ -567,7 +567,8 @@ pub const Searcher = struct {
         var previous_iteration_nodes: u64 = 0;
         var previous_iteration_node_cost: u64 = 0;
 
-        ensure_helpers(NUM_THREADS);
+        // Threads are only ever changed through set_helper_count.
+        std.debug.assert(NUM_THREADS <= helper_pool.count());
         var ti: usize = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
             helper(ti).nodes = 0;
@@ -727,6 +728,7 @@ pub const Searcher = struct {
     fn search_root_line(self: *Searcher, pos: *position.Position, comptime color: types.Color, tdepth: usize, previous_score: i32) ?i32 {
         self.ply = 0;
         self.seldepth = 0;
+        self.root_depth = tdepth;
 
         var alpha = -hce.MateScore;
         var beta = hce.MateScore;
@@ -767,7 +769,7 @@ pub const Searcher = struct {
             }
 
             if (score <= alpha or score >= beta) {
-                self.report_aspiration_failure(pos, score, depth, if (score <= alpha) .upper else .lower);
+                self.report_aspiration_failure(pos, score, tdepth, if (score <= alpha) .upper else .lower);
             }
 
             if (score <= alpha) {
@@ -831,18 +833,15 @@ pub const Searcher = struct {
     // bounded score unambiguously refers to the line GUIs are displaying.
     fn report_aspiration_failure(self: *Searcher, pos: *const position.Position, score: i32, depth: usize, bound: ScoreBound) void {
         if (self.root_excluded_count > 0 or self.multi_pv > 1 or self.strength.is_limited() or !self.reports_live_info()) return;
+        const w = self.info_out orelse return;
         var line: RootLine = .{};
         self.capture_root_line(&line, score, depth);
-        var buf: [4096]u8 = undefined;
-        var out = platform.Stdout.init(&buf);
-        print_line(out.writer(), pos, &line, 1, bound, self.collect_stats());
-        out.writer().flush() catch {};
+        print_line(w, pos, &line, 1, bound, self.collect_stats());
+        w.flush() catch {};
     }
 
     fn report_current_move(self: *const Searcher, pos: *const position.Position, move: types.Move, number: usize, depth: usize) void {
-        var buf: [128]u8 = undefined;
-        var out = platform.Stdout.init(&buf);
-        const w = out.writer();
+        const w = self.info_out orelse return;
         w.print("info depth {} currmove ", .{depth}) catch {};
         move.uci_print(w, pos.chess960_notation());
         w.print(" currmovenumber {}" ++ line_ending, .{number + self.root_excluded_count}) catch {};
@@ -1533,7 +1532,7 @@ pub const Searcher = struct {
 
             legals += 1;
             if (is_root and self.reports_live_info()) {
-                self.report_current_move(pos, move, legals, depth);
+                self.report_current_move(pos, move, legals, self.root_depth);
             }
 
             var extension: i32 = 0;

@@ -63,6 +63,9 @@ Tunable search parameters are also exposed as spin options for SPSA.
 - **EvalFile**: a file is validated (exact size, output-weight range) into a
   temporary buffer before it replaces the active network, so a bad file never
   leaves the engine without a network; cached accumulators are then refreshed.
+  The file format carries no architecture header, so a same-size network
+  trained for a different input-bucket layout cannot be detected and would be
+  accepted; only load networks trained for this build's architecture.
 - Output lines use CRLF on Windows and the Stockfish field order
   (`depth seldepth multipv score [wdl] nodes nps hashfull tbhits time pv`),
   which some GUIs require to record PVs.

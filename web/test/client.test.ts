@@ -107,6 +107,20 @@ describe("worker client", () => {
     await nextLine((line) => line === "readyok", 2_000);
   });
 
+  it("answers isready sent right after go, before the search reports", async (t) => {
+    const { client, nextLine } = await startSession();
+    t.after(() => {
+      client.terminate();
+    });
+    client.send("position startpos");
+    client.send("go depth 30");
+    client.send("isready");
+    const first = await nextLine((line) => line === "readyok" || line.startsWith("info "), 1_000);
+    assert.equal(first, "readyok");
+    client.send("stop");
+    await nextLine((line) => line.startsWith("bestmove "), 5_000);
+  });
+
   it("stops a ponder search on stop", async (t) => {
     const { client, nextLine } = await startSession();
     t.after(() => {

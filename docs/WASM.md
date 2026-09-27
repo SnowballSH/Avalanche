@@ -72,6 +72,16 @@ A signal therefore affects only a search that was requested before it. A stale s
 or leaving ponder mode), so all later checks in that search agree. While a `go ponder` or `go infinite`
 search holds back its `bestmove`, the engine busy-polls these imports, since wasm has no sleep.
 
+### `isready` during a search
+
+For the same reason the worker cannot answer `isready` while `go` runs, yet UCI requires an immediate `readyok`
+while the engine is thinking. `AvalancheClient` therefore answers it itself while a search is outstanding: it counts
+`go` commands sent and `bestmove` lines received, and while more have been sent than answered it emits `readyok`
+without forwarding the command. This relies on every `go` the worker executes producing exactly one `bestmove`,
+which holds because the worker runs commands strictly in order, so a `go` can never arrive while another search is
+running (the engine's "ignored while searching" path is unreachable on wasm). A consequence GUIs may notice: after
+`stop`, the `readyok` for an `isready` sent before the `bestmove` arrived can precede that `bestmove`.
+
 `SharedArrayBuffer` requires a
 [cross-origin isolated](https://developer.mozilla.org/docs/Web/API/Window/crossOriginIsolated) page
 (`Cross-Origin-Opener-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`). Without it,

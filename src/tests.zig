@@ -21,6 +21,7 @@ test {
     _ = @import("engine/uci/go.zig");
     _ = @import("tests/uci_options.zig");
     _ = @import("engine/numa.zig");
+    _ = @import("tests/thread_pool.zig");
 }
 
 test "Basic Piece and Color" {

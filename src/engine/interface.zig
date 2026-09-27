@@ -226,6 +226,7 @@ pub const UciInterface = struct {
         @atomicStore(bool, &s.pondering, cmd.ponder, .release);
 
         const instant_single_reply = budget.managed and !cmd.ponder and !cmd.infinite;
+        numa.init();
 
         @atomicStore(bool, &s.stop, false, .monotonic);
         // Mark searching BEFORE spawning so a second `go` arriving before the

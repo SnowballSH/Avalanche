@@ -34,8 +34,12 @@ pub const Topology = struct {
     }
 
     pub fn add_node(self: *Topology, cpulist: []const u8) ParseError!void {
+        try self.add_cpus(try parse_cpulist(cpulist));
+    }
+
+    fn add_cpus(self: *Topology, cpus: CpuSet) ParseError!void {
         if (self.node_count == MAX_NODES) return ParseError.TooManyNodes;
-        self.node_cpus[self.node_count] = try parse_cpulist(cpulist);
+        self.node_cpus[self.node_count] = cpus;
         self.node_count += 1;
     }
 
@@ -78,16 +82,40 @@ var detected: ?Topology = null;
 
 const SYSFS_NODES = "/sys/devices/system/node";
 
-/// Detected once and cached; falls back to a single node on any error.
+/// Detects the topology once. Must run before any search thread is placed and
+/// on a thread that still has the process's CPU mask (the UCI thread), since
+/// placement stays within the CPUs the process was started with.
+pub fn init() void {
+    if (detected != null) return;
+    detected = if (supported)
+        detect(SYSFS_NODES, allowed_cpus()) catch Topology.single_node()
+    else
+        Topology.single_node();
+}
+
 pub fn topology() *const Topology {
-    if (detected == null) {
-        detected = if (supported) detect(SYSFS_NODES) catch Topology.single_node() else Topology.single_node();
-    }
+    std.debug.assert(detected != null);
     return &detected.?;
 }
 
-/// Reads `<root>/online` and each online node's `<root>/node<N>/cpulist`.
-pub fn detect(root: []const u8) !Topology {
+/// CPUs the calling thread may run on, e.g. as restricted by taskset or a cpuset.
+fn allowed_cpus() CpuSet {
+    if (!supported) return CpuSet.initFull();
+    var mask: std.os.linux.cpu_set_t = undefined;
+    if (std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &mask)) != .SUCCESS) {
+        return CpuSet.initFull();
+    }
+    var set = CpuSet.initEmpty();
+    for (mask, 0..) |word, i| {
+        var bits = word;
+        while (bits != 0) : (bits &= bits - 1) set.set(i * @bitSizeOf(usize) + @ctz(bits));
+    }
+    return set;
+}
+
+/// Reads `<root>/online` and each online node's `<root>/node<N>/cpulist`,
+/// keeping only `allowed` CPUs and dropping nodes left without any.
+pub fn detect(root: []const u8, allowed: CpuSet) !Topology {
     var buf: [4096]u8 = undefined;
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = std.Io.Dir.cwd();
@@ -98,7 +126,9 @@ pub fn detect(root: []const u8) !Topology {
     var nodes = online_nodes.iterator(.{});
     while (nodes.next()) |node| {
         const path = try std.fmt.bufPrint(&path_buf, "{s}/node{}/cpulist", .{ root, node });
-        try result.add_node(try dir.readFile(platform.io, path, &buf));
+        var cpus = try parse_cpulist(try dir.readFile(platform.io, path, &buf));
+        cpus.setIntersection(allowed);
+        if (cpus.count() > 0) try result.add_cpus(cpus);
     }
     return if (result.node_count == 0) Topology.single_node() else result;
 }
@@ -151,6 +181,7 @@ test "numa: threads fill nodes in order and wrap" {
 test "numa: binding really restricts the thread's CPUs on Linux" {
     if (!supported) return error.SkipZigTest;
     platform.io = std.testing.io;
+    init();
     const topo = topology();
     try std.testing.expect(topo.node_count >= 1);
     try std.testing.expect(topo.node_cpus[0].count() >= 1);
@@ -183,11 +214,21 @@ test "numa: detection reads the sysfs node layout" {
 
     var root_buf: [std.fs.max_path_bytes]u8 = undefined;
     const root = root_buf[0..try tmp.dir.realPath(io, &root_buf)];
-    const topo = try detect(root);
+    const topo = try detect(root, CpuSet.initFull());
     try std.testing.expectEqual(@as(usize, 2), topo.node_count);
     try std.testing.expect(topo.node_cpus[0].isSet(9) and !topo.node_cpus[0].isSet(4));
     try std.testing.expect(topo.node_cpus[1].isSet(12));
     try std.testing.expectEqual(@as(usize, 1), topo.node_for_thread(8));
+
+    // A process restricted to CPUs 2-5 (taskset/cpuset) never leaves them.
+    const restricted = try detect(root, try parse_cpulist("2-5"));
+    try std.testing.expectEqual(@as(usize, 2), restricted.node_count);
+    try std.testing.expectEqual(@as(usize, 2), restricted.node_cpus[0].count());
+    try std.testing.expect(restricted.node_cpus[0].isSet(2) and restricted.node_cpus[0].isSet(3));
+    try std.testing.expect(restricted.node_cpus[1].isSet(4) and restricted.node_cpus[1].isSet(5));
+
+    // Restricted to one node: nothing left to spread across.
+    try std.testing.expect(!(try detect(root, try parse_cpulist("8-11"))).is_numa());
 }
 
 test "numa: placement binds each thread to its node's CPUs on Linux" {
