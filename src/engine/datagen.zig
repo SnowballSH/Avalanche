@@ -63,17 +63,11 @@ fn encode_viri_move(move: types.Move) u16 {
     const from: u16 = @as(u16, move.from);
     const raw_flags: u4 = move.flags;
 
-    var to: u16 = @as(u16, move.to);
+    const to: u16 = @as(u16, move.to);
     var promo: u16 = 0;
     var mtype: u16 = 0;
 
-    if (raw_flags == 0b0010) {
-        // OO: king-takes-rook on h-file
-        to = (from & 0b111000) | 7;
-        mtype = 2;
-    } else if (raw_flags == 0b0011) {
-        // OOO: king-takes-rook on a-file
-        to = (from & 0b111000) | 0;
+    if (move.is_castle()) {
         mtype = 2;
     } else if (raw_flags == 0b1010) {
         // EN_PASSANT
@@ -90,11 +84,7 @@ fn encode_viri_move(move: types.Move) u16 {
 fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) ViriPackedBoard {
     const all_occ = pos.all_all_pieces();
 
-    const castling_entry = pos.history[pos.game_ply].entry;
-    const h1_rook_can_castle = (castling_entry & types.WhiteOOMask) == 0;
-    const a1_rook_can_castle = (castling_entry & types.WhiteOOOMask) == 0;
-    const h8_rook_can_castle = (castling_entry & types.BlackOOMask) == 0;
-    const a8_rook_can_castle = (castling_entry & types.BlackOOOMask) == 0;
+    const castling_rooks = pos.castling_rook_squares();
 
     // Pack pieces in occupancy order (LSB first)
     var pcs: [16]u8 = .{0} ** 16;
@@ -113,24 +103,13 @@ fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) 
         var piece_nibble: u8 = @as(u8, pt.index());
 
         // Mark unmoved rooks as type 6 (castling rights indicator in viriformat)
-        if (pt == types.PieceType.Rook) {
-            const is_castling_rook = blk: {
-                if (color == types.Color.White) {
-                    if (sq_idx == 0 and a1_rook_can_castle) break :blk true;
-                    if (sq_idx == 7 and h1_rook_can_castle) break :blk true;
-                } else {
-                    if (sq_idx == 56 and a8_rook_can_castle) break :blk true;
-                    if (sq_idx == 63 and h8_rook_can_castle) break :blk true;
-                }
-                break :blk false;
-            };
-            if (is_castling_rook) piece_nibble = 6;
+        if (pt == types.PieceType.Rook and castling_rooks & sq_bit != 0) {
+            piece_nibble = 6;
         }
 
         // Color bit: 0=white, 1=black (bit 3)
         if (color == types.Color.Black) piece_nibble |= 8;
 
-        _ = sq_bit;
         pcs[idx / 2] |= piece_nibble << @as(u3, @intCast(4 * (idx & 1)));
         idx += 1;
     }

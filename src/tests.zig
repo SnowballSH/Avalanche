@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("chess/types.zig");
 const tables = @import("chess/tables.zig");
 const position = @import("chess/position.zig");
+const castling = @import("chess/castling.zig");
 const zobrist = @import("chess/zobrist.zig");
 const hce = @import("engine/hce.zig");
 const weights = @import("engine/weights.zig");
@@ -11,6 +12,10 @@ const see = @import("engine/see.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
 const expect = std.testing.expect;
+
+test {
+    _ = @import("tests/frc.zig");
+}
 
 test "Basic Piece and Color" {
     try expect(types.Color.White.invert() == types.Color.Black);
@@ -494,8 +499,7 @@ test "fen: starting position parse" {
     try expect(pos.piece_bitboards[types.Piece.BLACK_KING.index()] == 0x1000000000000000);
     try expect(pos.piece_bitboards[types.Piece.WHITE_ROOK.index()] == 0x81);
 
-    // "KQkq" clears all four castling mask bits in entry -> 0.
-    try expect(pos.history[pos.game_ply].entry == 0);
+    try expect(pos.castling_rights() == 0b1111);
     // No en-passant target.
     try expect(pos.history[pos.game_ply].ep_sq == types.Square.NO_SQUARE);
 }
@@ -512,14 +516,12 @@ test "fen: black-to-move and partial castling rights" {
     // Black to move, only black kingside castling available ("k").
     pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b k -"[0..]);
     try expect(pos.turn == types.Color.Black);
-    // AllCastlingMask(0x9100000000000091) with only BlackOOMask(0x9000000000000000) cleared.
-    try expect(pos.history[pos.game_ply].entry == 0x100000000000091);
+    try expect(pos.castling_rights() == castling.right(.Black, .King));
     try expect(pos.history[pos.game_ply].ep_sq == types.Square.NO_SQUARE);
 
-    // No castling rights at all: entry stays at full AllCastlingMask.
     pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - -"[0..]);
     try expect(pos.turn == types.Color.White);
-    try expect(pos.history[pos.game_ply].entry == types.AllCastlingMask);
+    try expect(pos.castling_rights() == castling.NO_RIGHTS);
 }
 
 test "fen: en-passant target square stored" {
@@ -562,7 +564,6 @@ test "fen: basic_fen board round-trips" {
     defer std.testing.allocator.destroy(pos);
     pos.init();
 
-    // basic_fen returns a sub-slice of an over-allocation; use an arena.
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
 

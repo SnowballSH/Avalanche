@@ -45,8 +45,10 @@ pub fn perft_div(comptime color: types.Color, pos: *position.Position, depth: u3
         nodes += branch;
         pos.undo_move(color, move);
 
-        move.debug_print();
-        std.debug.print(": {}\n", .{branch});
+        var buf: [8]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buf);
+        move.uci_print(&writer, pos.chess960_notation());
+        std.debug.print("{s}: {}\n", .{ writer.buffered(), branch });
     }
 
     std.debug.print("\nTotal: {}\n", .{nodes});

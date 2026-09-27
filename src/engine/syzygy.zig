@@ -114,9 +114,7 @@ pub inline fn piece_count(pos: *const position.Position) i32 {
 }
 
 pub inline fn no_castling_rights(pos: *const position.Position) bool {
-    const e = pos.history[pos.game_ply].entry;
-    return (e & types.WhiteOOMask) != 0 and (e & types.WhiteOOOMask) != 0 and
-        (e & types.BlackOOMask) != 0 and (e & types.BlackOOOMask) != 0;
+    return pos.castling_rights() == 0;
 }
 
 /// WDL probe for interior search nodes. The caller must ensure: not the root,

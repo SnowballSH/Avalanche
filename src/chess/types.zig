@@ -428,38 +428,42 @@ pub const Move = packed struct {
     // Returns the matching legal move, or Move.empty() (to_u16() == 0) if the
     // string is malformed or names no legal move. Callers must check the result;
     // a real legal move never has from == to, so the empty() sentinel is unambiguous.
+    // Castling is accepted as king-captures-rook, and additionally as
+    // king-to-destination unless the position uses Chess960 notation.
     pub fn new_from_string(pos: *position.Position, move: []const u8) Move {
-        // Validate the coordinate token before parsing so a garbage token cannot
-        // index out of bounds or build an out-of-range Square/File/Rank.
-        if (move.len < 4) return Move.empty();
-        if (move[0] < 'a' or move[0] > 'h') return Move.empty();
-        if (move[1] < '1' or move[1] > '8') return Move.empty();
-        if (move[2] < 'a' or move[2] > 'h') return Move.empty();
-        if (move[3] < '1' or move[3] > '8') return Move.empty();
+        const from = parse_square(move, 0) orelse return Move.empty();
+        const to = parse_square(move, 2) orelse return Move.empty();
+        const promo: ?u8 = if (move.len >= 5) move[4] else null;
+        const chess960 = pos.chess960_notation();
 
-        var list = std.array_list.Managed(Move).initCapacity(std.heap.c_allocator, 8) catch unreachable;
+        var storage: [256]Move = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
+        var list = std.array_list.Managed(Move).initCapacity(fba.allocator(), storage.len) catch unreachable;
         defer list.deinit();
-        const f = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[0] - 'a')), @as(Rank, @enumFromInt(move[1] - '1'))))));
-        const t = @as(u6, @intCast(@intFromEnum(Square.new(@as(File, @enumFromInt(move[2] - 'a')), @as(Rank, @enumFromInt(move[3] - '1'))))));
-        const p: ?u8 = if (move.len >= 5) move[4] else null;
-        if (pos.turn == Color.White) {
-            pos.generate_legal_moves(Color.White, &list);
-        } else {
-            pos.generate_legal_moves(Color.Black, &list);
+        switch (pos.turn) {
+            .White => pos.generate_legal_moves(Color.White, &list),
+            .Black => pos.generate_legal_moves(Color.Black, &list),
         }
 
         for (list.items) |m| {
-            if (m.from == f and m.to == t) {
-                if (p != null) {
-                    const promo = PromMoveTypeString[m.flags];
-                    if (promo.len == 0 or p.? != promo[0]) {
-                        continue;
-                    }
-                }
-                return m;
+            if (m.from != from.index()) continue;
+            const destination = if (m.is_castle() and !chess960) m.castle_king_destination().index() else m.to;
+            if (destination != to.index() and !(m.is_castle() and m.to == to.index())) continue;
+            if (promo) |p| {
+                const expected = PromMoveTypeString[m.flags];
+                if (expected.len == 0 or expected[0] != p) continue;
             }
+            return m;
         }
         return Move.empty();
+    }
+
+    fn parse_square(move: []const u8, offset: usize) ?Square {
+        if (move.len < offset + 2) return null;
+        const f = move[offset];
+        const r = move[offset + 1];
+        if (f < 'a' or f > 'h' or r < '1' or r > '8') return null;
+        return Square.new(@enumFromInt(f - 'a'), @enumFromInt(r - '1'));
     }
 
     pub fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *std.array_list.Managed(Move)) void {
@@ -489,10 +493,21 @@ pub const Move = packed struct {
         });
     }
 
-    pub fn uci_print(self: Move, writer: anytype) void {
+    pub inline fn is_castle(self: Move) bool {
+        return self.flags == @intFromEnum(MoveFlags.OO) or self.flags == @intFromEnum(MoveFlags.OOO);
+    }
+
+    // Castling moves are encoded king-captures-rook; this is the square the king lands on.
+    pub inline fn castle_king_destination(self: Move) Square {
+        const file: File = if (self.to > self.from) .GFILE else .CFILE;
+        return Square.new(file, self.get_from().rank());
+    }
+
+    pub fn uci_print(self: Move, writer: anytype, chess960: bool) void {
+        const to = if (self.is_castle() and !chess960) self.castle_king_destination().index() else self.to;
         writer.print("{s}{s}", .{
             SquareToString[self.from],
-            SquareToString[self.to],
+            SquareToString[to],
         }) catch {};
         if (self.is_promotion()) {
             writer.print("{c}", .{
@@ -501,52 +516,3 @@ pub const Move = packed struct {
         }
     }
 };
-
-pub const WhiteOOMask: Bitboard = 0x90;
-pub const WhiteOOOMask: Bitboard = 0x11;
-
-pub const WhiteOOBetweenMask: Bitboard = 0x60;
-pub const WhiteOOOBetweenMask: Bitboard = 0xe;
-
-pub const BlackOOMask: Bitboard = 0x9000000000000000;
-pub const BlackOOOMask: Bitboard = 0x1100000000000000;
-
-pub const BlackOOBetweenMask: Bitboard = 0x6000000000000000;
-pub const BlackOOOBetweenMask: Bitboard = 0xe00000000000000;
-
-pub const AllCastlingMask: Bitboard = 0x9100000000000091;
-
-pub inline fn get_oo_mask(comptime color: Color) Bitboard {
-    return switch (color) {
-        Color.White => WhiteOOMask,
-        Color.Black => BlackOOMask,
-    };
-}
-
-pub inline fn get_ooo_mask(comptime color: Color) Bitboard {
-    return switch (color) {
-        Color.White => WhiteOOOMask,
-        Color.Black => BlackOOOMask,
-    };
-}
-
-pub inline fn get_oo_blocker_mask(comptime color: Color) Bitboard {
-    return switch (color) {
-        Color.White => WhiteOOBetweenMask,
-        Color.Black => BlackOOBetweenMask,
-    };
-}
-
-pub inline fn get_ooo_blocker_mask(comptime color: Color) Bitboard {
-    return switch (color) {
-        Color.White => WhiteOOOBetweenMask,
-        Color.Black => BlackOOOBetweenMask,
-    };
-}
-
-pub inline fn ignore_ooo_danger(comptime color: Color) Bitboard {
-    return switch (color) {
-        Color.White => 0x2,
-        Color.Black => 0x200000000000000,
-    };
-}

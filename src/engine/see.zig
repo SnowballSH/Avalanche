@@ -94,6 +94,9 @@ fn legalAttackers(pos: *position.Position, comptime color: types.Color, target: 
 }
 
 pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) bool {
+    if (move.is_castle()) {
+        return threshold <= 0;
+    }
     const from = move.from;
     const to = move.to;
     const attacker = pos.mailbox[from].piece_type().index();

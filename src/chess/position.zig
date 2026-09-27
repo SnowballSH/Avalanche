@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
+const castling = @import("castling.zig");
 const zobrist = @import("zobrist.zig");
 const utils = @import("utils.zig");
 const hce = @import("../engine/hce.zig");
@@ -10,8 +11,7 @@ pub const MAX_HISTORY_PLY: u32 = 1920;
 
 // Stores information for undoing a move.
 pub const UndoInfo = packed struct {
-    // Bitboard of changed pieces
-    entry: types.Bitboard,
+    castling: castling.Rights,
 
     // piece that was captured
     captured: types.Piece,
@@ -24,7 +24,7 @@ pub const UndoInfo = packed struct {
 
     pub fn new() UndoInfo {
         return UndoInfo{
-            .entry = 0,
+            .castling = castling.NO_RIGHTS,
             .captured = types.Piece.NO_PIECE,
             .ep_sq = types.Square.NO_SQUARE,
             .fifty = 0,
@@ -33,7 +33,7 @@ pub const UndoInfo = packed struct {
 
     pub fn from(old: UndoInfo) UndoInfo {
         return UndoInfo{
-            .entry = old.entry,
+            .castling = old.castling,
             .captured = types.Piece.NO_PIECE,
             .ep_sq = types.Square.NO_SQUARE,
             .fifty = old.fifty +| 1,
@@ -66,6 +66,8 @@ pub const Position = struct {
 
     // Stores the pieces that are pinned to the king
     pinned: types.Bitboard = 0,
+
+    castling: castling.Setup = .{},
 
     // Classical Evaluator
     evaluator: hce.DynamicEvaluator = undefined,
@@ -143,25 +145,7 @@ pub const Position = struct {
             self.hash ^= zobrist.TurnHash;
         }
 
-        self.history[self.game_ply].entry = types.AllCastlingMask;
-        const castle = tokens.next().?;
-        for (castle) |ch| {
-            switch (ch) {
-                'K' => {
-                    self.history[self.game_ply].entry &= ~types.WhiteOOMask;
-                },
-                'Q' => {
-                    self.history[self.game_ply].entry &= ~types.WhiteOOOMask;
-                },
-                'k' => {
-                    self.history[self.game_ply].entry &= ~types.BlackOOMask;
-                },
-                'q' => {
-                    self.history[self.game_ply].entry &= ~types.BlackOOOMask;
-                },
-                else => {},
-            }
-        }
+        self.parse_castling(tokens.next().?);
 
         const ep = tokens.next().?;
         if (ep.len == 2) {
@@ -198,9 +182,82 @@ pub const Position = struct {
             self.start_ply = 0;
         }
 
-        self.hash ^= zobrist.CastlingHash[zobrist.castling_rights_index(self.history[self.game_ply].entry)];
+        self.hash ^= zobrist.CastlingHash[self.castling_rights()];
 
         self.evaluator.full_refresh(self);
+    }
+
+    // Accepts standard, X-FEN (K/Q = outermost rook on that wing) and
+    // Shredder-FEN (rook file letters); rights naming a missing rook are dropped.
+    fn parse_castling(self: *Position, field: []const u8) void {
+        var rights = castling.NO_RIGHTS;
+        for (field) |ch| {
+            const color: types.Color = if (std.ascii.isUpper(ch)) .White else .Black;
+            const king_bb = self.piece_bitboards[types.Piece.new(color, .King).index()];
+            if (king_bb == 0) continue;
+            const king_sq: types.Square = @enumFromInt(types.lsb(king_bb));
+            const back_rank: types.Rank = if (color == .White) .RANK1 else .RANK8;
+            if (king_sq.rank() != back_rank) continue;
+
+            const rooks = self.piece_bitboards[types.Piece.new(color, .Rook).index()] & types.MaskRank[back_rank.index()];
+            const king_file = king_sq.file().index();
+            const rook_sq: types.Square = switch (std.ascii.toLower(ch)) {
+                'k' => blk: {
+                    const outer = rooks & ~(types.SquareIndexBB[king_sq.index()] *% 2 -% 1);
+                    if (outer == 0) continue;
+                    break :blk @enumFromInt(63 - @clz(outer));
+                },
+                'q' => blk: {
+                    const outer = rooks & (types.SquareIndexBB[king_sq.index()] -% 1);
+                    if (outer == 0) continue;
+                    break :blk @enumFromInt(types.lsb(outer));
+                },
+                'a'...'h' => blk: {
+                    const sq = types.Square.new(@enumFromInt(std.ascii.toLower(ch) - 'a'), back_rank);
+                    if (rooks & types.SquareIndexBB[sq.index()] == 0 or sq.file().index() == king_file) continue;
+                    break :blk sq;
+                },
+                else => continue,
+            };
+            const side: castling.Side = if (rook_sq.file().index() > king_file) .King else .Queen;
+            if (rights & castling.right(color, side) != 0) continue;
+            rights |= self.castling.add(color, side, king_sq, rook_sq);
+        }
+        self.history[self.game_ply].castling = rights;
+    }
+
+    pub inline fn castling_rights(self: *const Position) castling.Rights {
+        return self.history[self.game_ply].castling;
+    }
+
+    pub fn castling_rook_squares(self: *const Position) types.Bitboard {
+        var rooks: types.Bitboard = 0;
+        const rights = self.castling_rights();
+        for ([_]types.Color{ .White, .Black }) |color| {
+            for ([_]castling.Side{ .King, .Queen }) |side| {
+                if (rights & castling.right(color, side) != 0) {
+                    rooks |= types.SquareIndexBB[self.castling.rule(color, side).rook_from.index()];
+                }
+            }
+        }
+        return rooks;
+    }
+
+    pub inline fn chess960_notation(self: *const Position) bool {
+        return castling.uci_chess960 or self.castling.is_chess960;
+    }
+
+    fn castling_symbol(self: *const Position, color: types.Color, side: castling.Side) u8 {
+        const rule = self.castling.rule(color, side);
+        const back_rank = rule.rook_from.rank();
+        const rooks = self.piece_bitboards[types.Piece.new(color, .Rook).index()] & types.MaskRank[back_rank.index()];
+        const rook_bb = types.SquareIndexBB[rule.rook_from.index()];
+        const beyond = if (side == .King) ~(rook_bb *% 2 -% 1) else rook_bb -% 1;
+        const symbol: u8 = if (rooks & beyond == 0)
+            (if (side == .King) 'k' else 'q')
+        else
+            'a' + rule.rook_from.file().index();
+        return if (color == .White) std.ascii.toUpper(symbol) else symbol;
     }
 
     pub inline fn absolute_ply(self: *const Position) u32 {
@@ -208,7 +265,8 @@ pub const Position = struct {
     }
 
     pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
-        var fen: []u8 = allocator.alloc(u8, 128) catch unreachable;
+        var buf: [128]u8 = undefined;
+        const fen: []u8 = &buf;
         var index: usize = 0;
 
         var i: i32 = 56;
@@ -250,23 +308,15 @@ pub const Position = struct {
         fen[index] = ' ';
         index += 1;
 
-        const entry = self.history[self.game_ply].entry;
+        const rights = self.castling_rights();
         const castle_start = index;
-        if (entry & types.WhiteOOMask == 0) {
-            fen[index] = 'K';
-            index += 1;
-        }
-        if (entry & types.WhiteOOOMask == 0) {
-            fen[index] = 'Q';
-            index += 1;
-        }
-        if (entry & types.BlackOOMask == 0) {
-            fen[index] = 'k';
-            index += 1;
-        }
-        if (entry & types.BlackOOOMask == 0) {
-            fen[index] = 'q';
-            index += 1;
+        for ([_]types.Color{ .White, .Black }) |color| {
+            for ([_]castling.Side{ .King, .Queen }) |side| {
+                if (rights & castling.right(color, side) != 0) {
+                    fen[index] = self.castling_symbol(color, side);
+                    index += 1;
+                }
+            }
         }
         if (index == castle_start) {
             fen[index] = '-';
@@ -305,7 +355,7 @@ pub const Position = struct {
         @memcpy(fen[index..][0..fm_str.len], fm_str);
         index += fm_str.len;
 
-        return fen[0..index];
+        return allocator.dupe(u8, fen[0..index]) catch unreachable;
     }
 
     pub inline fn phase(self: *const Position) usize {
@@ -331,7 +381,7 @@ pub const Position = struct {
         const pc = self.mailbox[from];
         const captured = self.mailbox[to];
         var k = self.hash ^ zobrist.TurnHash;
-        if (captured != types.Piece.NO_PIECE) {
+        if (move.is_capture() and captured != types.Piece.NO_PIECE) {
             k ^= zobrist.ZobristTable[captured.index()][to];
         }
         return k ^ zobrist.ZobristTable[pc.index()][from] ^ zobrist.ZobristTable[pc.index()][to];
@@ -463,10 +513,12 @@ pub const Position = struct {
         }
 
         const flags = move.get_flags();
-        const old_castle = zobrist.castling_rights_index(self.history[self.game_ply].entry);
-        self.history[self.game_ply].entry |= types.SquareIndexBB[move.to] | types.SquareIndexBB[move.from];
-        const new_castle = zobrist.castling_rights_index(self.history[self.game_ply].entry);
-        self.hash ^= zobrist.CastlingHash[old_castle] ^ zobrist.CastlingHash[new_castle];
+        const old_castle = self.history[self.game_ply].castling;
+        if (old_castle != castling.NO_RIGHTS) {
+            const new_castle = old_castle & ~self.castling.revoked(move.from, move.to);
+            self.history[self.game_ply].castling = new_castle;
+            self.hash ^= zobrist.CastlingHash[old_castle] ^ zobrist.CastlingHash[new_castle];
+        }
 
         const pt = self.mailbox[move.from].piece_type();
         if (pt == types.PieceType.Pawn or move.is_capture()) {
@@ -488,23 +540,8 @@ pub const Position = struct {
                     self.hash ^= zobrist.EnPassantHash[ep_target.file().index()];
                 }
             },
-            types.MoveFlags.OO => {
-                if (color == types.Color.White) {
-                    self.move_piece_quiet(types.Square.e1, types.Square.g1);
-                    self.move_piece_quiet(types.Square.h1, types.Square.f1);
-                } else {
-                    self.move_piece_quiet(types.Square.e8, types.Square.g8);
-                    self.move_piece_quiet(types.Square.h8, types.Square.f8);
-                }
-            },
-            types.MoveFlags.OOO => {
-                if (color == types.Color.White) {
-                    self.move_piece_quiet(types.Square.e1, types.Square.c1);
-                    self.move_piece_quiet(types.Square.a1, types.Square.d1);
-                } else {
-                    self.move_piece_quiet(types.Square.e8, types.Square.c8);
-                    self.move_piece_quiet(types.Square.a8, types.Square.d8);
-                }
+            types.MoveFlags.OO, types.MoveFlags.OOO => {
+                self.castle(color, castling.side_of(flags), false);
             },
             types.MoveFlags.EN_PASSANT => {
                 self.move_piece_quiet(move.get_from(), move.get_to());
@@ -593,23 +630,8 @@ pub const Position = struct {
                     self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
                 }
             },
-            types.MoveFlags.OO => {
-                if (color == types.Color.White) {
-                    self.move_piece_quiet(types.Square.g1, types.Square.e1);
-                    self.move_piece_quiet(types.Square.f1, types.Square.h1);
-                } else {
-                    self.move_piece_quiet(types.Square.g8, types.Square.e8);
-                    self.move_piece_quiet(types.Square.f8, types.Square.h8);
-                }
-            },
-            types.MoveFlags.OOO => {
-                if (color == types.Color.White) {
-                    self.move_piece_quiet(types.Square.c1, types.Square.e1);
-                    self.move_piece_quiet(types.Square.d1, types.Square.a1);
-                } else {
-                    self.move_piece_quiet(types.Square.c8, types.Square.e8);
-                    self.move_piece_quiet(types.Square.d8, types.Square.a8);
-                }
+            types.MoveFlags.OO, types.MoveFlags.OOO => {
+                self.castle(color, castling.side_of(flags), true);
             },
             types.MoveFlags.EN_PASSANT => {
                 self.move_piece_quiet(move.get_to(), move.get_from());
@@ -637,13 +659,13 @@ pub const Position = struct {
             },
         }
 
-        const undone_castle = zobrist.castling_rights_index(self.history[self.game_ply].entry);
+        const undone_castle = self.history[self.game_ply].castling;
 
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;
 
-        const restored_castle = zobrist.castling_rights_index(self.history[self.game_ply].entry);
+        const restored_castle = self.history[self.game_ply].castling;
         self.hash ^= zobrist.CastlingHash[undone_castle] ^ zobrist.CastlingHash[restored_castle];
 
         // Re-add the restored position's en-passant key (mirrors undo_null_move).
@@ -651,6 +673,46 @@ pub const Position = struct {
         if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
             self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
         }
+    }
+
+    fn castle(self: *Position, comptime color: types.Color, side: castling.Side, comptime undo: bool) void {
+        const rule = self.castling.rule(color, side);
+        const king_from = if (undo) rule.king_to else rule.king_from;
+        const king_to = if (undo) rule.king_from else rule.king_to;
+        const rook_from = if (undo) rule.rook_to else rule.rook_from;
+        const rook_to = if (undo) rule.rook_from else rule.rook_to;
+
+        // In Chess960 the king and rook may land on each other's origin squares.
+        if (king_to == rook_from or rook_to == king_from) {
+            self.remove_piece(rook_from);
+            if (king_from != king_to) self.move_piece_quiet(king_from, king_to);
+            self.add_piece(types.Piece.new_comptime(color, .Rook), rook_to);
+            return;
+        }
+        if (king_from != king_to) self.move_piece_quiet(king_from, king_to);
+        if (rook_from != rook_to) self.move_piece_quiet(rook_from, rook_to);
+    }
+
+    inline fn generate_castling(self: *const Position, comptime color: types.Color, occupied: types.Bitboard, danger: types.Bitboard, list: *std.array_list.Managed(types.Move)) void {
+        const rights = self.castling_rights() & castling.color_rights(color);
+        if (rights == castling.NO_RIGHTS) return;
+        const flags = [_]types.MoveFlags{ .OO, .OOO };
+        inline for ([_]castling.Side{ .King, .Queen }, flags) |side, flag| {
+            if (rights & castling.right(color, side) != 0) {
+                const rule = self.castling.rule(color, side);
+                if ((occupied & rule.must_be_empty) | (danger & rule.must_be_safe) == 0 and
+                    !(rule.rook_may_shield and self.rank_attacked_without_rook(color, rule, occupied)))
+                {
+                    list.append(types.Move.new_from_to_flag(rule.king_from, rule.rook_from, flag)) catch {};
+                }
+            }
+        }
+    }
+
+    fn rank_attacked_without_rook(self: *const Position, comptime color: types.Color, rule: *const castling.Rule, occupied: types.Bitboard) bool {
+        const opp = comptime color.invert();
+        const occ = occupied ^ types.SquareIndexBB[rule.rook_from.index()];
+        return tables.get_rook_attacks(rule.king_to, occ) & self.orthogonal_sliders(opp) != 0;
     }
 
     pub fn play_null_move(self: *Position) void {
@@ -837,26 +899,7 @@ pub const Position = struct {
                     }
                 }
 
-                // Castling
-                // Castle is only allowed if:
-                // 1. The king and the rook have both not moved
-                // 2. No piece is attacking between the the rook and the king
-                // 3. The king is not in check
-                const entry = self.history[self.game_ply].entry;
-                if (0 == ((entry & types.get_oo_mask(color)) | ((all_bb | danger) & types.get_oo_blocker_mask(color)))) {
-                    if (color == types.Color.White) {
-                        list.append(types.Move.new_from_to_flag(types.Square.e1, types.Square.g1, types.MoveFlags.OO)) catch {};
-                    } else {
-                        list.append(types.Move.new_from_to_flag(types.Square.e8, types.Square.g8, types.MoveFlags.OO)) catch {};
-                    }
-                }
-                if (0 == ((entry & types.get_ooo_mask(color)) | ((all_bb | (danger & ~types.ignore_ooo_danger(color))) & types.get_ooo_blocker_mask(color)))) {
-                    if (color == types.Color.White) {
-                        list.append(types.Move.new_from_to_flag(types.Square.e1, types.Square.c1, types.MoveFlags.OOO)) catch {};
-                    } else {
-                        list.append(types.Move.new_from_to_flag(types.Square.e8, types.Square.c8, types.MoveFlags.OOO)) catch {};
-                    }
-                }
+                self.generate_castling(color, all_bb, danger, list);
 
                 // pinned rook, bishop, or queen
                 b1 = ~(not_pinned | self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Knight).index()]);

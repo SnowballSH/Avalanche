@@ -657,11 +657,11 @@ pub const Searcher = struct {
                     var i: usize = 0;
                     while (i < self.pv_size[0]) : (i += 1) {
                         outW.writeByte(' ') catch {};
-                        self.pv[0][i].uci_print(outW);
+                        self.pv[0][i].uci_print(outW, pos.chess960_notation());
                     }
                 } else {
                     outW.writeByte(' ') catch {};
-                    bm.uci_print(outW);
+                    bm.uci_print(outW, pos.chess960_notation());
                 }
 
                 outW.writeByte('\n') catch {};
@@ -744,7 +744,7 @@ pub const Searcher = struct {
             if (bm.to_u16() == 0) {
                 outW.writeAll("0000") catch {};
             } else {
-                bm.uci_print(outW);
+                bm.uci_print(outW, pos.chess960_notation());
             }
             outW.writeByte('\n') catch {};
             outW.flush() catch {};
