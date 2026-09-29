@@ -32,6 +32,8 @@ inline fn decode_to(m: u16) u8 {
 }
 
 pub fn init() void {
+    @memset(&keys, 0);
+    @memset(&moves, 0);
     var count: usize = 0;
 
     var color: usize = 0;
@@ -127,4 +129,15 @@ pub fn has_upcoming_repetition(pos: anytype, hash_history: []const u64, ply: u32
         }
     }
     return false;
+}
+
+test "cuckoo: init is idempotent" {
+    tables.init_all();
+    zobrist.init_zobrist();
+    init();
+    const first_keys = keys;
+    const first_moves = moves;
+    init();
+    try std.testing.expectEqualSlices(u64, &first_keys, &keys);
+    try std.testing.expectEqualSlices(u16, &first_moves, &moves);
 }

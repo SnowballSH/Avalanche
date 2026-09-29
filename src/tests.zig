@@ -25,6 +25,7 @@ test {
     _ = @import("engine/datagen/options.zig");
     _ = @import("engine/datagen/adjudicator.zig");
     _ = @import("tests/datagen.zig");
+    _ = @import("chess/cuckoo.zig");
 }
 
 test "Basic Piece and Color" {
