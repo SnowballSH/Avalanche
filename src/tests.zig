@@ -22,6 +22,7 @@ test {
     _ = @import("tests/uci_options.zig");
     _ = @import("engine/numa.zig");
     _ = @import("tests/thread_pool.zig");
+    _ = @import("engine/datagen/options.zig");
 }
 
 test "Basic Piece and Color" {
