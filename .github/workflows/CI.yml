@@ -60,6 +60,10 @@ jobs:
       - name: Release build
         run: zig build --release=fast
 
+      - name: OpenBench build contract
+        if: runner.os == 'Linux'
+        run: scripts/openbench_build_check.sh
+
       - name: Unit tests
         run: zig build test
 
