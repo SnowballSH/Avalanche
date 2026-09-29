@@ -125,3 +125,45 @@ test "datagen: default output path is portable and seed-derived" {
     try testing.expectEqualStrings("data_000000000000002a.viribin", datagen.default_output_path(&buf, 42, .viri));
     try testing.expectEqualStrings("data_000000000000002a.bin", datagen.default_output_path(&buf, 42, .bullet));
 }
+
+test "datagen: EPD lines with opcodes, 4-field FENs and Shredder castling all load and play" {
+    platform.io = std.testing.io;
+    support.init_search();
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const book =
+        \\rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - bm e5; id "x";
+        \\rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -
+        \\bqnb1rkr/pp3ppp/3ppn2/2p5/5P2/P2P4/NPP1P1PP/BQ1BNRKR w HFhf - 2 9
+        \\
+    ;
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "b.epd", .data = book });
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "b.epd", &buf)];
+
+    const lines = try datagen.loadEpdFile(path);
+    try testing.expectEqual(@as(usize, 3), lines.len);
+
+    var out_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const out = try std.fmt.bufPrint(&out_buf, "{s}.viribin", .{path});
+    var gen = datagen.Datagen.new(.{ .soft_nodes = 200, .hard_node_multiplier = 4, .positions_target = 600 }, 5);
+    defer gen.deinit();
+    gen.openings = lines;
+    try gen.start(1, out);
+    try testing.expect(gen.summary().games > 0);
+}
+
+test "datagen: a missing book is an error, not a panic" {
+    platform.io = std.testing.io;
+    try testing.expectError(error.FileNotFound, datagen.loadEpdFile("/nonexistent/book.epd"));
+}
+
+test "datagen: an empty book is an error" {
+    platform.io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "empty.epd", .data = "\n  \n" });
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "empty.epd", &buf)];
+    try testing.expectError(error.EmptyBook, datagen.loadEpdFile(path));
+}
