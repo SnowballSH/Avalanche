@@ -9,7 +9,8 @@ shift 2
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 "$ROOT/zig-out/bin/Avalanche" datagen "$THREADS" nodes=6000 hardmult=8 positions="$POSITIONS" seed=1 \
-    out="$WORK/throughput.viribin" "$@" > "$WORK/summary.json" 2> "$WORK/datagen.log"
+    out="$WORK/throughput.viribin" "$@" > "$WORK/summary.json" 2> "$WORK/datagen.log" \
+    || { cat "$WORK/datagen.log" >&2; exit 1; }
 python3 - "$WORK/summary.json" "$THREADS" <<'PY'
 import json, sys
 summary = json.load(open(sys.argv[1]))

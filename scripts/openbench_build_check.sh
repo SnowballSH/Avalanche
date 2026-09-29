@@ -7,8 +7,8 @@ trap 'rm -rf -- "$WORK"' EXIT
 cp "$ROOT/nets/nezha.nnue" "$WORK/candidate.nnue"
 (cd "$ROOT" && make -j EXE="$WORK/Avalanche-ob" CC=zig EVALFILE="$WORK/candidate.nnue")
 test -x "$WORK/Avalanche-ob"
-printf 'position startpos\ngo depth 1\nquit\n' | "$WORK/Avalanche-ob" | grep -q "NNUE evaluation using candidate " \
-    || { echo "EVALFILE network was not embedded" >&2; exit 1; }
+printf 'position startpos\ngo depth 1\nquit\n' | "$WORK/Avalanche-ob" > "$WORK/uci.txt"
+grep -q "NNUE evaluation using candidate " "$WORK/uci.txt" || { echo "EVALFILE network was not embedded" >&2; exit 1; }
 "$WORK/Avalanche-ob" bench > "$WORK/bench.txt" 2>&1
 python3 - "$WORK/bench.txt" "$ROOT/bench.nodes" <<'PY'
 import re, sys

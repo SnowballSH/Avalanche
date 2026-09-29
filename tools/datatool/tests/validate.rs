@@ -93,3 +93,36 @@ fn start_position_without_a_king_is_invalid() {
         report.errors
     );
 }
+
+fn validate_with_header(name: &str, edit: impl FnOnce(&mut [u8])) -> datatool::validate::Report {
+    let mut bytes = std::fs::read(fixture("std.viribin")).unwrap();
+    edit(&mut bytes[..32]);
+    let path = scratch_copy(name, &bytes);
+    let report = validate(&path, None).unwrap();
+    remove_scratch(&path);
+    report
+}
+
+#[test]
+fn header_with_more_than_32_pieces_is_invalid() {
+    let report = validate_with_header("overfull", |header| {
+        header[..8].copy_from_slice(&u64::MAX.to_le_bytes())
+    });
+    assert!(!report.valid);
+    assert!(
+        report.errors.iter().any(|e| e.contains("pieces")),
+        "{:?}",
+        report.errors
+    );
+}
+
+#[test]
+fn header_with_an_unknown_piece_code_is_invalid() {
+    let report = validate_with_header("badpiece", |header| header[8] = (header[8] & 0xf0) | 0x07);
+    assert!(!report.valid);
+    assert!(
+        report.errors.iter().any(|e| e.contains("piece code")),
+        "{:?}",
+        report.errors
+    );
+}
