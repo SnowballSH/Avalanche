@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use datatool::dupes::dupes;
 use datatool::validate::validate;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,6 +22,13 @@ enum Command {
         #[arg(long)]
         filter: Option<PathBuf>,
     },
+    /// Estimates the duplicate-position rate across viriformat files from a deterministic sample.
+    Dupes {
+        #[arg(required = true)]
+        files: Vec<PathBuf>,
+        #[arg(long, default_value_t = 10)]
+        sample_per_mille: u64,
+    },
 }
 
 fn main() -> anyhow::Result<ExitCode> {
@@ -39,6 +47,16 @@ fn main() -> anyhow::Result<ExitCode> {
             } else {
                 ExitCode::FAILURE
             })
+        }
+        Command::Dupes {
+            files,
+            sample_per_mille,
+        } => {
+            println!(
+                "{}",
+                serde_json::to_string(&dupes(&files, sample_per_mille)?)?
+            );
+            Ok(ExitCode::SUCCESS)
         }
     }
 }
