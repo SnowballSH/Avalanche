@@ -723,8 +723,6 @@ pub fn loadEpdFile(path: []const u8) ![]const []const u8 {
         if (trimmed.len > 0) try lines.append(trimmed);
     }
     if (lines.items.len == 0) return error.EmptyBook;
-
-    std.debug.print("Loaded {} openings from {s}\n", .{ lines.items.len, path });
     return lines.items;
 }
 
@@ -767,7 +765,6 @@ pub const Datagen = struct {
         defer file.close(platform.io);
         self.output = .{ .file = file, .positions_target = self.config.positions_target };
         self.timer = types.Timer.start();
-        self.print_banner(num_threads, out_path);
 
         var seeds = utils.PRNG.new(self.seed);
         try self.datagens.ensureTotalCapacity(num_threads);
@@ -784,7 +781,7 @@ pub const Datagen = struct {
         for (threads.items) |thread| thread.join();
     }
 
-    fn print_banner(self: *const Datagen, num_threads: usize, out_path: []const u8) void {
+    pub fn print_banner(self: *const Datagen, num_threads: usize, out_path: []const u8) void {
         const c = self.config;
         const plies_max = c.random_plies_min + c.random_plies_range -| 1;
         const book_plies_max = c.book_random_plies_min + c.book_random_plies_range -| 1;
@@ -795,7 +792,7 @@ pub const Datagen = struct {
         std.debug.print("TT:        {} MB per side per worker\n", .{c.datagen_tt_mb});
         std.debug.print("Threads:   {}\n", .{num_threads});
         std.debug.print("Positions: {}\n", .{c.positions_target});
-        std.debug.print("Seed:      {}\n", .{self.seed});
+        std.debug.print("Seed:      {x:0>16}\n", .{self.seed});
         std.debug.print("Output:    {s}\n", .{out_path});
         std.debug.print("=========================\n\n", .{});
     }

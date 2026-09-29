@@ -23,3 +23,17 @@ fn sampling_is_deterministic_and_a_subset() {
     assert_eq!(sample, dupes(&[fixture("std.viribin")], 100).unwrap());
     assert!(sample.sampled < full.sampled);
 }
+
+#[test]
+fn a_malformed_header_is_an_error_not_a_panic() {
+    let mut bytes = std::fs::read(fixture("std.viribin")).unwrap();
+    bytes[..8].copy_from_slice(&u64::MAX.to_le_bytes());
+    let dir = std::env::temp_dir().join(format!("datatool-dupes-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("bad.viribin");
+    std::fs::write(&path, &bytes).unwrap();
+    let result = dupes(std::slice::from_ref(&path), 1000);
+    std::fs::remove_file(&path).unwrap();
+    std::fs::remove_dir(&dir).unwrap();
+    assert!(result.unwrap_err().to_string().contains("pieces"));
+}

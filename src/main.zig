@@ -50,10 +50,12 @@ fn run_datagen(args: []const []const u8) !void {
             std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
             std.process.exit(2);
         };
+        std.debug.print("Loaded {} openings from {s}\n", .{ gen.openings.?.len, path });
     }
 
     var path_buf: [64]u8 = undefined;
     const out = opts.out orelse datagen.default_output_path(&path_buf, seed, opts.format);
+    gen.print_banner(opts.threads, out);
     gen.start(opts.threads, out) catch |err| {
         std.debug.print("datagen: cannot write '{s}': {s}\n", .{ out, @errorName(err) });
         std.process.exit(2);

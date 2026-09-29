@@ -1,3 +1,4 @@
+use crate::header;
 use serde::Serialize;
 use std::fs::File;
 use std::io::{BufRead, BufReader, ErrorKind};
@@ -16,6 +17,7 @@ pub struct Report {
     pub white_wins: u64,
     pub draws: u64,
     pub black_wins: u64,
+    pub castles: u64,
     pub min_game_len: u64,
     pub max_game_len: u64,
     pub abs_eval_histogram: [u64; EVAL_BUCKETS.len() + 1],
@@ -32,7 +34,7 @@ impl Report {
     }
 
     fn add_game(&mut self, game: &Game, filter: Option<&Filter>) -> Result<(), String> {
-        check_header(&game.initial_position.as_bytes())
+        header::check(&game.initial_position.as_bytes())
             .map_err(|problem| format!("game {}: invalid start position: {problem}", self.games))?;
         let mut board = game.initial_position();
         for (ply, mv) in game.moves().enumerate() {
@@ -41,6 +43,9 @@ impl Report {
                     "game {}: illegal move {mv:?} at ply {ply}",
                     self.games
                 ));
+            }
+            if mv.is_castle() {
+                self.castles += 1;
             }
             board.make_move_simple(mv);
         }
@@ -71,35 +76,6 @@ impl Report {
         self.positions += len;
         Ok(())
     }
-}
-
-/// Checks the packed header before unpacking it: viriformat panics on headers it cannot decode.
-fn check_header(packed: &[u8; 32]) -> Result<(), String> {
-    const MAX_PIECES: u32 = 32;
-    const UNMOVED_ROOK: u8 = 6;
-    const KING: u8 = 5;
-    const BLACK: u8 = 8;
-    let occupancy = u64::from_le_bytes(packed[..8].try_into().expect("8-byte slice"));
-    let pieces = occupancy.count_ones();
-    if pieces > MAX_PIECES {
-        return Err(format!("{pieces} pieces on the board"));
-    }
-    let nibbles: Vec<u8> = (0..pieces as usize)
-        .map(|i| (packed[8 + i / 2] >> (4 * (i & 1))) & 0x0f)
-        .collect();
-    if let Some(nibble) = nibbles.iter().find(|nibble| *nibble & 7 > UNMOVED_ROOK) {
-        return Err(format!("unknown piece code {nibble}"));
-    }
-    let kings = |colour: u8| {
-        nibbles
-            .iter()
-            .filter(|nibble| *nibble & 7 == KING && *nibble & BLACK == colour)
-            .count()
-    };
-    if kings(0) != 1 || kings(BLACK) != 1 {
-        return Err("start position needs exactly one king per side".to_owned());
-    }
-    Ok(())
 }
 
 /// Replays every game in a viriformat file with the reference move generator.

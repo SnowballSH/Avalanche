@@ -1,3 +1,4 @@
+use crate::header;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::fs::File;
@@ -29,6 +30,7 @@ pub fn dupes(files: &[PathBuf], sample_per_mille: u64) -> anyhow::Result<DupesRe
         let mut reader = BufReader::new(File::open(path)?);
         while !reader.fill_buf()?.is_empty() {
             let game = Game::deserialise_from(&mut reader, Vec::new())?;
+            header::check(&game.initial_position.as_bytes()).map_err(anyhow::Error::msg)?;
             game.visit_positions(|board, _| {
                 let hash = identity_hash(&board.to_marlinformat(0, 0, 0).as_bytes());
                 if hash % 1000 < sample_per_mille {

@@ -39,6 +39,7 @@ fn standard_fixture_matches_the_engine_summary() {
 fn frc_fixture_replays_every_castling_move() {
     let report = validate(&fixture("frc.viribin"), None).unwrap();
     assert!(report.valid, "{:?}", report.errors);
+    assert!(report.castles > 0, "the FRC fixture must exercise castling");
     assert_eq!(
         report.positions,
         summary("frc.summary.json")["positions"].as_u64().unwrap()
@@ -63,6 +64,11 @@ fn corrupted_move_is_invalid() {
     let report = validate(&path, None).unwrap();
     remove_scratch(&path);
     assert!(!report.valid);
+    assert!(
+        report.errors.iter().any(|e| e.contains("illegal move")),
+        "{:?}",
+        report.errors
+    );
 }
 
 #[test]
