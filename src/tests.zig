@@ -24,6 +24,7 @@ test {
     _ = @import("tests/thread_pool.zig");
     _ = @import("engine/datagen/options.zig");
     _ = @import("engine/datagen/adjudicator.zig");
+    _ = @import("tests/datagen.zig");
 }
 
 test "Basic Piece and Color" {
