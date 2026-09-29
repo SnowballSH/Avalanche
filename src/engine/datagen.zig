@@ -80,7 +80,7 @@ pub const DatagenConfig = struct {
 
 // Viriformat PackedBoard — 32 bytes, little-endian
 // Piece encoding: bits 0-2 = type (0=P,1=N,2=B,3=R,4=Q,5=K,6=unmoved_rook), bit3 = color (0=white,1=black)
-const ViriPackedBoard = extern struct {
+pub const ViriPackedBoard = extern struct {
     occ: u64,
     pcs: [16]u8,
     stm_ep: u8,
@@ -106,7 +106,7 @@ comptime {
 
 const VIRI_TERMINATOR: MoveScorePair = .{ .move = 0, .score = 0 };
 
-fn encode_viri_move(move: types.Move) u16 {
+pub fn encode_viri_move(move: types.Move) u16 {
     const from: u16 = @as(u16, move.from);
     const raw_flags: u4 = move.flags;
 
@@ -128,7 +128,7 @@ fn encode_viri_move(move: types.Move) u16 {
     return from | (to << 6) | (promo << 12) | (mtype << 14);
 }
 
-fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) ViriPackedBoard {
+pub fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) ViriPackedBoard {
     const all_occ = pos.all_all_pieces();
 
     const castling_rooks = pos.castling_rook_squares();

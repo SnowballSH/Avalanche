@@ -1,6 +1,7 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
 const datagen = @import("../engine/datagen.zig");
+const types = @import("../chess/types.zig");
 const support = @import("support.zig");
 const testing = std.testing;
 
@@ -166,4 +167,37 @@ test "datagen: an empty book is an error" {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "empty.epd", &buf)];
     try testing.expectError(error.EmptyBook, datagen.loadEpdFile(path));
+}
+
+test "viriformat: FRC castling encodes king-to-rook-square with the castle type" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    pos.set_fen("4k3/8/8/8/8/8/8/1R3K2 w B - 0 1");
+
+    var moves = std.array_list.Managed(types.Move).init(testing.allocator);
+    defer moves.deinit();
+    pos.generate_legal_moves(types.Color.White, &moves);
+    var castle: ?types.Move = null;
+    for (moves.items) |m| {
+        if (m.is_castle()) castle = m;
+    }
+    const encoded = datagen.encode_viri_move(castle.?);
+    try testing.expectEqual(@as(u16, 2), encoded >> 14);
+    try testing.expectEqual(@as(u16, @intFromEnum(types.Square.b1)), (encoded >> 6) & 63);
+    try testing.expectEqual(@as(u16, @intFromEnum(types.Square.f1)), encoded & 63);
+}
+
+test "viriformat: FRC unmoved castling rooks are marked as type 6" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    pos.set_fen("nrkbbqrn/pppppppp/8/8/8/8/PPPPPPPP/NRKBBQRN w GBgb - 0 1");
+    const board = datagen.pos_to_viri_packed_board(pos, 0);
+    var unmoved: usize = 0;
+    for (board.pcs) |byte| {
+        if (byte & 0x7 == 6) unmoved += 1;
+        if ((byte >> 4) & 0x7 == 6) unmoved += 1;
+    }
+    try testing.expectEqual(@as(usize, 4), unmoved);
 }
