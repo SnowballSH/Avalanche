@@ -185,6 +185,12 @@ pub fn probe_wdl_bb(
     };
 }
 
+/// Raw 5-valued WDL probe of `pos`; castling rights must be absent.
+pub fn probe_wdl_position(pos: *const position.Position) ?WdlResult {
+    const p = decompose(pos);
+    return probe_wdl_bb(p.white, p.black, p.kings, p.queens, p.rooks, p.bishops, p.knights, p.pawns, p.ep, p.turn);
+}
+
 /// Root DTZ probe. Ranks every legal root move by distance-to-zero and returns
 /// the WDL plus the set of moves sharing the best rank (the DTZ-optimal set).
 /// The caller restricts the root move list to this set so the search only

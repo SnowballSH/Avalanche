@@ -28,6 +28,7 @@ test {
     _ = @import("chess/cuckoo.zig");
     _ = @import("chess/fen.zig");
     _ = @import("tests/viriformat.zig");
+    _ = @import("tests/tbfilter_viri.zig");
 }
 
 test "Basic Piece and Color" {

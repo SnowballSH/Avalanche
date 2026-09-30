@@ -88,7 +88,7 @@ const Worker = struct {
 
 /// Map a raw tablebase WDL to the recorded-result encoding (0=loss,1=draw,
 /// 2=win). Returns null when the outcome is ambiguous and should be kept.
-fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?u8 {
+pub fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?u8 {
     switch (w) {
         .win => return 2,
         .loss => return 0,
