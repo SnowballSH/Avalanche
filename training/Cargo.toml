@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bullet = { git = "https://github.com/jw1912/bullet", package = "bullet_lib", features = ["cuda"] }
+bullet = { git = "https://github.com/jw1912/bullet", rev = "2ea3d2d0f7e597b0d645f6e8040cf37818f51bce", package = "bullet_lib", features = ["cuda"] }
 viriformat = "2.0.1"
 rand = "0.9"

@@ -10,7 +10,9 @@
 #   TRAIN_WDL (0.25), TRAIN_WDL_END (=WDL; set != WDL for LinearWDL),
 #   TRAIN_LR_SCHEDULE (cosine|constant), TRAIN_LR_INITIAL (0.001), TRAIN_LR_FINAL (1e-7),
 #   TRAIN_BATCH_SIZE (16384), TRAIN_BATCHES_PER_SB (12208),
-#   TRAIN_SAVE_RATE (10), TRAIN_THREADS (all cores).
+#   TRAIN_SAVE_RATE (10), TRAIN_THREADS (all cores),
+#   TRAIN_DATA_DIR (a directory of .viribin chunks, read with games interleaved across files),
+#   TRAIN_START_SB (1; with TRAIN_RESUME_FROM, the superbatch to resume at, keeping the LR schedule).
 #   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh
 #   (HIDDEN is runtime here; the Zig engine's weights.zig must match at build time.)
 #

@@ -65,6 +65,33 @@ fn env_bool(key: &str, default: bool) -> bool {
     }
 }
 
+/// Stored by `Avalanche tbfilter format=viri` for positions whose label contradicts the Syzygy tables.
+const TABLEBASE_MASKED_EVAL: i16 = i16::MAX;
+
+const VIRI_FILTER: Filter = Filter {
+    min_ply: 8,
+    min_pieces: 4,
+    max_eval: 10000,
+    filter_tactical: true,
+    filter_check: true,
+    filter_castling: false,
+    max_eval_incorrectness: 2500,
+    random_fen_skipping: false,
+    random_fen_skip_probability: 0.0,
+    wdl_filtered: false,
+    wdl_model_params_a: [0.0; 4],
+    wdl_model_params_b: [0.0; 4],
+    material_min: 17,
+    material_max: 78,
+    mom_target: 58,
+    wdl_heuristic_scale: 1.0,
+};
+
+const _: () = assert!(
+    VIRI_FILTER.max_eval <= TABLEBASE_MASKED_EVAL as u32,
+    "the filter must drop tablebase-masked positions"
+);
+
 // Initially taken from https://github.com/JonathanHallstrom/bullet/blob/bb5a2725b7beb2178aa59fa38f163aeb31bac7fc/examples/advanced.rs
 fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
     let wdl = match wdl_float {
@@ -73,27 +100,8 @@ fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
         _ => WDL::Draw,
     };
 
-    const FILTER: Filter = Filter {
-        min_ply: 8,
-        min_pieces: 4,
-        max_eval: 10000,
-        filter_tactical: true,
-        filter_check: true,
-        filter_castling: false,
-        max_eval_incorrectness: 2500,
-        random_fen_skipping: false,
-        random_fen_skip_probability: 0.0,
-        wdl_filtered: false,
-        wdl_model_params_a: [0.0; 4],
-        wdl_model_params_b: [0.0; 4],
-        material_min: 17,
-        material_max: 78,
-        mom_target: 58,
-        wdl_heuristic_scale: 1.0,
-    };
-
     let mut rng = rand::rng();
-    !FILTER.should_filter(mv, eval as i32, board, wdl, &mut rng)
+    !VIRI_FILTER.should_filter(mv, eval as i32, board, wdl, &mut rng)
 }
 
 struct TrainConfig {
@@ -111,15 +119,35 @@ struct TrainConfig {
     threads: usize,
     use_factoriser: bool,
     dataset_paths: Vec<String>,
+    start_superbatch: usize,
+}
+
+/// Every `*.viribin` file in `dir`, sorted, so a dataset directory of cleaned chunks is one training input.
+fn viribin_files(dir: &str) -> Vec<String> {
+    let entries = std::fs::read_dir(dir).unwrap_or_else(|err| {
+        eprintln!("Error: cannot read TRAIN_DATA_DIR {dir}: {err}");
+        std::process::exit(1);
+    });
+    let mut files: Vec<String> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "viribin"))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    if files.is_empty() {
+        eprintln!("Error: TRAIN_DATA_DIR {dir} contains no .viribin files");
+        std::process::exit(1);
+    }
+    files
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let default_path = String::from("data/training.bin");
-    let dataset_paths: Vec<String> = if args.is_empty() {
-        vec![default_path]
-    } else {
-        args
+    let dataset_paths = match std::env::var("TRAIN_DATA_DIR") {
+        Ok(dir) => viribin_files(&dir),
+        Err(_) if args.is_empty() => vec![String::from("data/training.bin")],
+        Err(_) => args,
     };
 
     for path in &dataset_paths {
@@ -140,6 +168,11 @@ fn main() {
         );
     }
     let superbatches = env_usize("TRAIN_SUPERBATCHES", 40);
+    let start_superbatch = env_usize("TRAIN_START_SB", 1);
+    if start_superbatch == 0 || start_superbatch > superbatches {
+        eprintln!("Error: TRAIN_START_SB={start_superbatch} must be in 1..={superbatches}");
+        std::process::exit(1);
+    }
     let batch_size = env_usize("TRAIN_BATCH_SIZE", 16_384);
     let batches_per_superbatch = env_usize("TRAIN_BATCHES_PER_SB", 12208);
     let wdl_proportion = env_f32("TRAIN_WDL", 0.25);
@@ -176,6 +209,7 @@ fn main() {
         threads,
         use_factoriser,
         dataset_paths,
+        start_superbatch,
     };
 
     match input_mode.as_str() {
@@ -227,7 +261,7 @@ macro_rules! run_trainer {
         let steps = TrainingSteps {
             batch_size: cfg.batch_size,
             batches_per_superbatch: cfg.batches_per_superbatch,
-            start_superbatch: 1,
+            start_superbatch: cfg.start_superbatch,
             end_superbatch: cfg.superbatches,
         };
 
@@ -261,8 +295,8 @@ macro_rules! run_trainer {
                     save_rate,
                 };
                 if use_viri {
-                    println!("Using ViriBinpackLoader with custom filter");
-                    let dataloader = ViriBinpackLoader::new_concat_multiple(
+                    println!("Using ViriBinpackLoader (games interleaved across {} files) with custom filter", path_strs.len());
+                    let dataloader = ViriBinpackLoader::new_interleave_multiple(
                         &path_strs,
                         128,
                         threads.min(16),
