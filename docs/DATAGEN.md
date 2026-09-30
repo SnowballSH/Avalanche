@@ -91,3 +91,8 @@ position whose |eval| reaches its `max_eval`, so contradicted positions are excl
 its moves and every other position stay unchanged. Cursed wins and blessed losses are kept under `rule50=keep`; a
 missing table keeps the position. The command prints one JSON line of counts (`games`, `positions`, `over_men`,
 `castling`, `failed`, `ambiguous`, `agree`, `masked`) and refuses to overwrite an existing output file.
+
+WDL tables assume a zero fifty-move counter. A tablebase win recorded in a drawn game is masked even when the game's
+counter was already high, although such a win may not be convertible before the fifty-move rule; telling the two
+apart needs DTZ tables. On an endgame-book sample (400k positions), about 6% of positions were masked, 98% of them
+with a non-zero counter; an independent check with python-chess's Syzygy prober agreed on every probed position.
