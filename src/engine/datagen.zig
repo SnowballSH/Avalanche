@@ -9,6 +9,7 @@ const see = @import("see.zig");
 const tt = @import("tt.zig");
 const options = @import("datagen/options.zig");
 const adjudicator = @import("datagen/adjudicator.zig");
+const viriformat = @import("datagen/viriformat.zig");
 
 pub const Format = options.Format;
 
@@ -78,116 +79,6 @@ pub const DatagenConfig = struct {
         };
     }
 };
-
-// Viriformat PackedBoard — 32 bytes, little-endian
-// Piece encoding: bits 0-2 = type (0=P,1=N,2=B,3=R,4=Q,5=K,6=unmoved_rook), bit3 = color (0=white,1=black)
-pub const ViriPackedBoard = extern struct {
-    occ: u64,
-    pcs: [16]u8,
-    stm_ep: u8,
-    halfmove: u8,
-    fullmove: u16,
-    eval: i16,
-    wdl: u8,
-    extra: u8,
-};
-
-comptime {
-    if (@sizeOf(ViriPackedBoard) != 32) @compileError("ViriPackedBoard must be 32 bytes");
-}
-
-const MoveScorePair = extern struct {
-    move: u16,
-    score: i16,
-};
-
-comptime {
-    if (@sizeOf(MoveScorePair) != 4) @compileError("MoveScorePair must be 4 bytes");
-}
-
-const VIRI_TERMINATOR: MoveScorePair = .{ .move = 0, .score = 0 };
-
-pub fn encode_viri_move(move: types.Move) u16 {
-    const from: u16 = @as(u16, move.from);
-    const raw_flags: u4 = move.flags;
-
-    const to: u16 = @as(u16, move.to);
-    var promo: u16 = 0;
-    var mtype: u16 = 0;
-
-    if (move.is_castle()) {
-        mtype = 2;
-    } else if (raw_flags == 0b1010) {
-        // EN_PASSANT
-        mtype = 1;
-    } else if (raw_flags & 0b0100 != 0) {
-        // Any promotion (bit 2 set in flags = promotion)
-        mtype = 3;
-        promo = @as(u16, raw_flags & 0b0011);
-    }
-
-    return from | (to << 6) | (promo << 12) | (mtype << 14);
-}
-
-pub fn pos_to_viri_packed_board(pos: *position.Position, white_relative_score: i32) ViriPackedBoard {
-    const all_occ = pos.all_all_pieces();
-
-    const castling_rooks = pos.castling_rook_squares();
-
-    // Pack pieces in occupancy order (LSB first)
-    var pcs: [16]u8 = .{0} ** 16;
-    var idx: usize = 0;
-    var occ_iter = all_occ;
-    while (occ_iter != 0) {
-        const sq_idx = @ctz(occ_iter);
-        const sq_bit: u64 = @as(u64, 1) << @as(u6, @intCast(sq_idx));
-        occ_iter &= occ_iter - 1;
-
-        const piece = pos.mailbox[sq_idx];
-        if (piece == types.Piece.NO_PIECE) continue;
-
-        const pt = piece.piece_type();
-        const color = piece.color();
-        var piece_nibble: u8 = @as(u8, pt.index());
-
-        // Mark unmoved rooks as type 6 (castling rights indicator in viriformat)
-        if (pt == types.PieceType.Rook and castling_rooks & sq_bit != 0) {
-            piece_nibble = 6;
-        }
-
-        // Color bit: 0=white, 1=black (bit 3)
-        if (color == types.Color.Black) piece_nibble |= 8;
-
-        pcs[idx / 2] |= piece_nibble << @as(u3, @intCast(4 * (idx & 1)));
-        idx += 1;
-    }
-
-    // Side-to-move + en-passant byte
-    const ep_sq = pos.history[pos.game_ply].ep_sq;
-    const ep_val: u8 = if (ep_sq == types.Square.NO_SQUARE) 64 else @as(u8, @intCast(ep_sq.index()));
-    const stm_bit: u8 = if (pos.turn == types.Color.Black) 0x80 else 0;
-    const stm_ep: u8 = stm_bit | (ep_val & 0x7F);
-
-    // Halfmove clock
-    const halfmove: u8 = @as(u8, @intCast(@min(pos.history[pos.game_ply].fifty, 255)));
-
-    // Fullmove counter
-    const fullmove: u16 = @as(u16, @intCast(pos.absolute_ply() / 2 + 1));
-
-    // Eval: white-relative, clamped
-    const clamped = std.math.clamp(white_relative_score, -32000, 32000);
-
-    return ViriPackedBoard{
-        .occ = all_occ,
-        .pcs = pcs,
-        .stm_ep = stm_ep,
-        .halfmove = halfmove,
-        .fullmove = fullmove,
-        .eval = @as(i16, @intCast(clamped)),
-        .wdl = 1, // filled at game end
-        .extra = 0,
-    };
-}
 
 const ChessBoard = extern struct {
     occ: u64,
@@ -480,7 +371,7 @@ pub const DatagenSingle = struct {
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        var move_scores = try std.array_list.Managed(MoveScorePair).initCapacity(arena.allocator(), 256);
+        var move_scores = try std.array_list.Managed(viriformat.MoveScorePair).initCapacity(arena.allocator(), 256);
         defer move_scores.deinit();
 
         var outcome: adjudicator.Outcome = .draw;
@@ -490,7 +381,7 @@ pub const DatagenSingle = struct {
 
         const random_plies = self.randomPlyCount(using_book);
 
-        var initial_board: ?ViriPackedBoard = null;
+        var initial_board: ?viriformat.PackedBoard = null;
 
         while (true) : (ply += 1) {
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
@@ -519,7 +410,7 @@ pub const DatagenSingle = struct {
                 if (screened.score > cfg.opening_reject_threshold or screened.score < -cfg.opening_reject_threshold) {
                     return;
                 }
-                initial_board = pos_to_viri_packed_board(&pos, screened.score);
+                initial_board = viriformat.pack_board(&pos, screened.score);
                 opening_search = screened;
             }
 
@@ -528,8 +419,8 @@ pub const DatagenSingle = struct {
             const best_move = result.best_move;
 
             // Record move+score pair
-            const viri_move = encode_viri_move(best_move);
-            try move_scores.append(MoveScorePair{
+            const viri_move = viriformat.encode_move(best_move);
+            try move_scores.append(viriformat.MoveScorePair{
                 .move = viri_move,
                 .score = @as(i16, @intCast(std.math.clamp(res, -32000, 32000))),
             });
@@ -556,7 +447,7 @@ pub const DatagenSingle = struct {
         var board = initial_board.?;
         board.wdl = @intFromEnum(outcome);
 
-        // Write game under file lock: PackedBoard + MoveScorePairs + Terminator
+        // Write game under file lock: PackedBoard + viriformat.MoveScorePairs + Terminator
         self.output.lock.lockUncancelable(platform.io);
         defer self.output.lock.unlock(platform.io);
         var wbuf: [8192]u8 = undefined;
@@ -566,7 +457,7 @@ pub const DatagenSingle = struct {
         for (move_scores.items) |*ms| {
             try writer.writeAll(std.mem.asBytes(ms));
         }
-        try writer.writeAll(std.mem.asBytes(&VIRI_TERMINATOR));
+        try writer.writeAll(std.mem.asBytes(&viriformat.TERMINATOR));
         try writer.flush();
         self.output.record_game(move_scores.items.len, outcome);
         self.count += move_scores.items.len;
