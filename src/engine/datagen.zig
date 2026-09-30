@@ -492,17 +492,11 @@ pub const DatagenSingle = struct {
         var initial_board: ?ViriPackedBoard = null;
 
         while (true) : (ply += 1) {
-            if (self.isCurrentPositionDraw(&pos)) {
-                outcome = .draw;
-                break;
-            }
-
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
             generateLegalMoves(&pos, &movelist);
-            const move_size = movelist.items.len;
-            if (move_size == 0) {
-                const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-                outcome = if (in_check) adjudicator.Outcome.for_winner(pos.turn.invert()) else .draw;
+            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            if (adjudicator.terminal(movelist.items.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+                outcome = ended;
                 movelist.deinit();
                 break;
             }
@@ -608,16 +602,11 @@ pub const DatagenSingle = struct {
         const random_plies = self.randomPlyCount(using_book);
 
         while (true) : (ply += 1) {
-            if (self.isCurrentPositionDraw(&pos)) {
-                outcome = .draw;
-                break;
-            }
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
             generateLegalMoves(&pos, &movelist);
-            const move_size = movelist.items.len;
-            if (move_size == 0) {
-                const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-                outcome = if (in_check) adjudicator.Outcome.for_winner(pos.turn.invert()) else .draw;
+            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            if (adjudicator.terminal(movelist.items.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+                outcome = ended;
                 movelist.deinit();
                 break;
             }
@@ -639,7 +628,6 @@ pub const DatagenSingle = struct {
             }
 
             const best_move = result.best_move;
-            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
             const min_record_ply: usize = if (using_book) 8 else 16;
             const should_record = ply > min_record_ply and !in_check and

@@ -12,6 +12,13 @@ pub const Outcome = enum(u8) {
     }
 };
 
+/// How a game ends before any search: no legal moves decides first (checkmate or stalemate), so a mate delivered on
+/// the move that also completes the fifty-move count or a repetition is scored as a win.
+pub fn terminal(legal_moves: usize, in_check: bool, mover: types.Color, rule_draw: bool) ?Outcome {
+    if (legal_moves == 0) return if (in_check) Outcome.for_winner(mover.invert()) else .draw;
+    return if (rule_draw) .draw else null;
+}
+
 pub const Thresholds = struct {
     win_score: i32 = 2500,
     win_plies: usize = 4,
@@ -74,4 +81,15 @@ test "adjudicator: winner maps to a white-relative outcome" {
     try testing.expectEqual(Outcome.white_win, Outcome.for_winner(types.Color.White));
     try testing.expectEqual(Outcome.black_win, Outcome.for_winner(types.Color.Black));
     try testing.expectEqual(@as(u8, 2), @intFromEnum(Outcome.white_win));
+}
+
+test "terminal: checkmate beats the fifty-move rule and repetition" {
+    try testing.expectEqual(@as(?Outcome, .black_win), terminal(0, true, types.Color.White, true));
+    try testing.expectEqual(@as(?Outcome, .white_win), terminal(0, true, types.Color.Black, false));
+}
+
+test "terminal: stalemate and rule draws are draws; otherwise play on" {
+    try testing.expectEqual(@as(?Outcome, .draw), terminal(0, false, types.Color.White, false));
+    try testing.expectEqual(@as(?Outcome, .draw), terminal(12, false, types.Color.White, true));
+    try testing.expectEqual(@as(?Outcome, null), terminal(12, true, types.Color.White, false));
 }
