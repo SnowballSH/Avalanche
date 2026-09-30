@@ -17,7 +17,9 @@ Avalanche datagen <threads> [book.epd | book=path] [key=value ...]
 ```
 
 The thread count is required (the old implicit default of 7 is gone). Malformed or unknown options, an unreadable
-or empty book, and an existing output file are errors: datagen prints the reason and exits with status 2.
+or empty book, a book line that is not a legal position (datagen names the line and the reason), and an existing
+output file are errors: datagen prints the reason and exits with status 2. A worker thread that fails (for example on
+a write error) stops the whole run, names the worker and the error, and exits with status 1.
 
 ## Output
 
@@ -40,19 +42,22 @@ training filters.
 
 ## Determinism
 
-`seed` initializes a generator that derives one seed per thread. Each thread's game stream is deterministic; files
+`seed` derives one generator seed per thread with splitmix64, so every seed (including 0) gives distinct streams. Each thread's game stream is deterministic; files
 are byte-identical across runs only with one thread, because threads interleave whole games in arrival order.
 
 ## Adjudication
 
-Games end by checkmate, stalemate, repetition/fifty-move/insufficient material, 500 plies, or score adjudication:
+Games end by checkmate or stalemate (decided first, so a mate on the fiftieth move still counts), repetition,
+the fifty-move rule, insufficient material, 500 plies, or score adjudication:
 a win after 4 consecutive searches beyond ±2500 cp, a draw after 12 consecutive searches within ±5 cp once ply 50 is
 reached. Datagen never probes tablebases: endgames are played out so low-material positions keep search evals, and
 labels are cleaned afterwards with `Avalanche tbfilter` on bulletformat data.
 
 ## Chess960
 
-Books may contain Chess960 and Double Fischer Random positions in Shredder-FEN or X-FEN. Castling moves are stored
+Every book line is validated before datagen starts: eight ranks of eight squares, known pieces, one king per side,
+no pawns on the back ranks, a side to move, well-formed castling and en-passant fields, and the side not to move not
+in check. Books may contain Chess960 and Double Fischer Random positions in Shredder-FEN or X-FEN. Castling moves are stored
 king-to-rook-square with the castle flag, and castling rooks are marked as "unmoved rook" pieces in the packed start
 position, as viriformat specifies. EPD opcodes after the FEN fields are ignored.
 

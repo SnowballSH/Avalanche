@@ -46,8 +46,13 @@ fn run_datagen(args: []const []const u8) !void {
     var gen = datagen.Datagen.new(datagen.DatagenConfig.from_options(opts), seed);
     defer gen.deinit();
     if (opts.book) |path| {
-        gen.openings = datagen.loadEpdFile(path) catch |err| {
-            std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
+        var book_diag: datagen.BookDiagnostic = .{};
+        gen.openings = datagen.loadEpdFile(path, &book_diag) catch |err| {
+            if (err == error.InvalidBookLine) {
+                std.debug.print("datagen: book '{s}' line {}: {s}\n", .{ path, book_diag.line, book_diag.reason });
+            } else {
+                std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
+            }
             std.process.exit(2);
         };
         std.debug.print("Loaded {} openings from {s}\n", .{ gen.openings.?.len, path });
@@ -57,6 +62,7 @@ fn run_datagen(args: []const []const u8) !void {
     const out = opts.out orelse datagen.default_output_path(&path_buf, seed, opts.format);
     gen.print_banner(opts.threads, out);
     gen.start(opts.threads, out) catch |err| {
+        if (err == error.WorkerFailed) std.process.exit(1);
         std.debug.print("datagen: cannot write '{s}': {s}\n", .{ out, @errorName(err) });
         std.process.exit(2);
     };

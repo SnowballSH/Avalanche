@@ -142,7 +142,8 @@ test "datagen: EPD lines with opcodes, 4-field FENs and Shredder castling all lo
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "b.epd", &buf)];
 
-    const lines = try datagen.loadEpdFile(path);
+    var diag: datagen.BookDiagnostic = .{};
+    const lines = try datagen.loadEpdFile(path, &diag);
     try testing.expectEqual(@as(usize, 3), lines.len);
 
     var out_buf: [std.fs.max_path_bytes]u8 = undefined;
@@ -156,7 +157,41 @@ test "datagen: EPD lines with opcodes, 4-field FENs and Shredder castling all lo
 
 test "datagen: a missing book is an error, not a panic" {
     platform.io = std.testing.io;
-    try testing.expectError(error.FileNotFound, datagen.loadEpdFile("/nonexistent/book.epd"));
+    var diag: datagen.BookDiagnostic = .{};
+    try testing.expectError(error.FileNotFound, datagen.loadEpdFile("/nonexistent/book.epd", &diag));
+}
+
+fn load_book_text(text: []const u8, diag: *datagen.BookDiagnostic) ![]const []const u8 {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "book.epd", .data = text });
+    var buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "book.epd", &buf)];
+    return datagen.loadEpdFile(path, diag);
+}
+
+test "datagen: a malformed book line is rejected with its line number and reason" {
+    platform.io = std.testing.io;
+    support.init_search();
+    var diag: datagen.BookDiagnostic = .{};
+    const book =
+        \\rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
+        \\
+        \\rnbq1bnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1
+        \\
+    ;
+    try testing.expectError(error.InvalidBookLine, load_book_text(book, &diag));
+    try testing.expectEqual(@as(usize, 3), diag.line);
+    try testing.expectEqualStrings("BadKingCount", diag.reason);
+}
+
+test "datagen: a book line whose side not to move is in check is rejected" {
+    platform.io = std.testing.io;
+    support.init_search();
+    var diag: datagen.BookDiagnostic = .{};
+    try testing.expectError(error.InvalidBookLine, load_book_text("4k3/8/8/8/8/8/8/4K2r w - - 0 1\n4k3/4R3/8/8/8/8/8/4K3 w - - 0 1\n", &diag));
+    try testing.expectEqual(@as(usize, 2), diag.line);
+    try testing.expectEqualStrings("OpponentInCheck", diag.reason);
 }
 
 test "datagen: an empty book is an error" {
@@ -166,7 +201,8 @@ test "datagen: an empty book is an error" {
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "empty.epd", .data = "\n  \n" });
     var buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "empty.epd", &buf)];
-    try testing.expectError(error.EmptyBook, datagen.loadEpdFile(path));
+    var diag: datagen.BookDiagnostic = .{};
+    try testing.expectError(error.EmptyBook, datagen.loadEpdFile(path, &diag));
 }
 
 test "viriformat: FRC castling encodes king-to-rook-square with the castle type" {
@@ -200,4 +236,14 @@ test "viriformat: FRC unmoved castling rooks are marked as type 6" {
         if ((byte >> 4) & 0x7 == 6) unmoved += 1;
     }
     try testing.expectEqual(@as(usize, 4), unmoved);
+}
+
+test "datagen: thread seeds are non-zero, distinct per thread, and stable" {
+    for ([_]u64{ 0, 1, std.math.maxInt(u64) }) |run_seed| {
+        const first = datagen.thread_seed(run_seed, 0);
+        try testing.expect(first != 0);
+        try testing.expect(first != datagen.thread_seed(run_seed, 1));
+        try testing.expectEqual(first, datagen.thread_seed(run_seed, 0));
+    }
+    try testing.expect(datagen.thread_seed(0, 0) != datagen.thread_seed(1, 0));
 }

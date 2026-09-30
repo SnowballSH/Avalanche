@@ -3,6 +3,7 @@ const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
+const fen = @import("../chess/fen.zig");
 const search = @import("search.zig");
 const see = @import("see.zig");
 const tt = @import("tt.zig");
@@ -306,6 +307,7 @@ pub const DatagenSingle = struct {
     searchers: [2]search.Searcher,
     ttables: [2]*tt.TranspositionTable,
     output: *Output,
+    failure: ?anyerror = null,
     prng: utils.PRNG,
     openings: ?[]const []const u8,
     config: DatagenConfig,
@@ -491,17 +493,11 @@ pub const DatagenSingle = struct {
         var initial_board: ?ViriPackedBoard = null;
 
         while (true) : (ply += 1) {
-            if (self.isCurrentPositionDraw(&pos)) {
-                outcome = .draw;
-                break;
-            }
-
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
             generateLegalMoves(&pos, &movelist);
-            const move_size = movelist.items.len;
-            if (move_size == 0) {
-                const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-                outcome = if (in_check) adjudicator.Outcome.for_winner(pos.turn.invert()) else .draw;
+            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            if (adjudicator.terminal(movelist.items.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+                outcome = ended;
                 movelist.deinit();
                 break;
             }
@@ -516,20 +512,18 @@ pub const DatagenSingle = struct {
             }
             movelist.deinit();
 
-            // Capture initial board state (once, after random moves)
+            // The first search after the random plies both screens the opening and plays the first recorded move.
+            var opening_search: ?SearchResult = null;
             if (initial_board == null) {
-                // Do a quick search to check if position is playable
-                const initial_search = self.searchPosition(&pos);
-                const init_score = initial_search.score;
-
-                if (init_score > cfg.opening_reject_threshold or init_score < -cfg.opening_reject_threshold) {
-                    return; // discard unbalanced opening
+                const screened = self.searchPosition(&pos);
+                if (screened.score > cfg.opening_reject_threshold or screened.score < -cfg.opening_reject_threshold) {
+                    return;
                 }
-                initial_board = pos_to_viri_packed_board(&pos, init_score);
+                initial_board = pos_to_viri_packed_board(&pos, screened.score);
+                opening_search = screened;
             }
 
-            // Search
-            const result = self.searchPosition(&pos);
+            const result = opening_search orelse self.searchPosition(&pos);
             const res = result.score;
             const best_move = result.best_move;
 
@@ -607,16 +601,11 @@ pub const DatagenSingle = struct {
         const random_plies = self.randomPlyCount(using_book);
 
         while (true) : (ply += 1) {
-            if (self.isCurrentPositionDraw(&pos)) {
-                outcome = .draw;
-                break;
-            }
             var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
             generateLegalMoves(&pos, &movelist);
-            const move_size = movelist.items.len;
-            if (move_size == 0) {
-                const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-                outcome = if (in_check) adjudicator.Outcome.for_winner(pos.turn.invert()) else .draw;
+            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
+            if (adjudicator.terminal(movelist.items.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+                outcome = ended;
                 movelist.deinit();
                 break;
             }
@@ -638,7 +627,6 @@ pub const DatagenSingle = struct {
             }
 
             const best_move = result.best_move;
-            const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
 
             const min_record_ply: usize = if (using_book) 8 else 16;
             const should_record = ply > min_record_ply and !in_check and
@@ -690,6 +678,14 @@ pub const DatagenSingle = struct {
         self.game_count += 1;
     }
 
+    /// Thread entry point: a failing worker records its error and stops the others, so the run fails as a whole.
+    fn run(self: *DatagenSingle) void {
+        self.startMany() catch |err| {
+            self.failure = err;
+            self.output.stop.store(true, .release);
+        };
+    }
+
     pub fn startMany(self: *DatagenSingle) !void {
         self.timer = types.Timer.start();
         while (!self.output.stopped()) {
@@ -709,7 +705,14 @@ pub const DatagenSingle = struct {
     }
 };
 
-pub fn loadEpdFile(path: []const u8) ![]const []const u8 {
+pub const BookDiagnostic = struct {
+    line: usize = 0,
+    reason: []const u8 = "",
+};
+
+/// Loads every non-empty line of an EPD/FEN book, rejecting the whole book at the first line that is not a legal
+/// position: a bad line would otherwise be played as an empty board or read out of bounds.
+pub fn loadEpdFile(path: []const u8, diag: *BookDiagnostic) ![]const []const u8 {
     const file = try std.Io.Dir.cwd().openFile(platform.io, path, .{});
     defer file.close(platform.io);
     const file_len = try file.length(platform.io);
@@ -718,12 +721,36 @@ pub fn loadEpdFile(path: []const u8) ![]const []const u8 {
 
     var lines = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
     var iter = std.mem.splitScalar(u8, content, '\n');
+    var number: usize = 0;
     while (iter.next()) |line| {
+        number += 1;
         const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len > 0) try lines.append(trimmed);
+        if (trimmed.len == 0) continue;
+        fen.validate(trimmed) catch |err| {
+            diag.* = .{ .line = number, .reason = @errorName(err) };
+            return error.InvalidBookLine;
+        };
+        try lines.append(trimmed);
     }
     if (lines.items.len == 0) return error.EmptyBook;
     return lines.items;
+}
+
+/// Per-thread PRNG seed derived with splitmix64, so every run seed (including 0) gives distinct, non-zero states.
+pub fn thread_seed(run_seed: u64, thread: usize) u128 {
+    var state = run_seed ^ (@as(u64, thread) *% 0x9E3779B97F4A7C15);
+    const low = splitmix64(&state);
+    const high = splitmix64(&state);
+    const seed = @as(u128, low) | (@as(u128, high) << 64);
+    return if (seed == 0) 1 else seed;
+}
+
+fn splitmix64(state: *u64) u64 {
+    state.* +%= 0x9E3779B97F4A7C15;
+    var z = state.*;
+    z = (z ^ (z >> 30)) *% 0xBF58476D1CE4E5B9;
+    z = (z ^ (z >> 27)) *% 0x94D049BB133111EB;
+    return z ^ (z >> 31);
 }
 
 pub fn default_output_path(buf: []u8, seed: u64, format: Format) []const u8 {
@@ -766,19 +793,23 @@ pub const Datagen = struct {
         self.output = .{ .file = file, .positions_target = self.config.positions_target };
         self.timer = types.Timer.start();
 
-        var seeds = utils.PRNG.new(self.seed);
         try self.datagens.ensureTotalCapacity(num_threads);
         for (0..num_threads) |th| {
-            const thread_seed: u128 = @as(u128, seeds.rand64()) | (@as(u128, seeds.rand64()) << 64);
-            self.datagens.appendAssumeCapacity(DatagenSingle.new(&self.output, thread_seed, th, self.openings, self.config));
+            self.datagens.appendAssumeCapacity(DatagenSingle.new(&self.output, thread_seed(self.seed, th), th, self.openings, self.config));
         }
 
         var threads = std.array_list.Managed(std.Thread).init(std.heap.c_allocator);
         defer threads.deinit();
         for (self.datagens.items) |*d| {
-            try threads.append(try std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DatagenSingle.startMany, .{d}));
+            try threads.append(try std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DatagenSingle.run, .{d}));
         }
         for (threads.items) |thread| thread.join();
+        for (self.datagens.items) |d| {
+            if (d.failure) |err| {
+                std.debug.print("datagen: worker {} failed: {s}\n", .{ d.id, @errorName(err) });
+                return error.WorkerFailed;
+            }
+        }
     }
 
     pub fn print_banner(self: *const Datagen, num_threads: usize, out_path: []const u8) void {
