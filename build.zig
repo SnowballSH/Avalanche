@@ -65,6 +65,10 @@ pub fn build(b: *std.Build) void {
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
     // It is imported under the name "nnue", which weights.zig @embedFile's.
     const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/nezha.nnue";
+    const net: std.Build.LazyPath = if (std.fs.path.isAbsolute(netPath))
+        .{ .cwd_relative = netPath }
+    else
+        b.path(netPath);
     const inputBuckets = b.option(usize, "buckets", "King input buckets (1=Chess768, 16=buckets+HM)") orelse 16;
     if (inputBuckets != 1 and inputBuckets != 16) {
         @panic("-Dbuckets must be 1 (Chess768) or 16 (ChessBucketsMirrored)");
@@ -97,7 +101,7 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addOptions("build_options", build_options);
     exe.root_module.addAnonymousImport("nnue", .{
-        .root_source_file = b.path(netPath),
+        .root_source_file = net,
     });
 
     addPyrrhic(b, exe);
@@ -124,7 +128,7 @@ pub fn build(b: *std.Build) void {
 
     exe_tests.root_module.addOptions("build_options", build_options);
     exe_tests.root_module.addAnonymousImport("nnue", .{
-        .root_source_file = b.path(netPath),
+        .root_source_file = net,
     });
 
     addPyrrhic(b, exe_tests);
@@ -149,7 +153,7 @@ pub fn build(b: *std.Build) void {
     wasm.stack_size = 16 * 1024 * 1024;
     wasm.root_module.addOptions("build_options", build_options);
     wasm.root_module.addAnonymousImport("nnue", .{
-        .root_source_file = b.path(netPath),
+        .root_source_file = net,
     });
 
     const install_wasm = b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = "web" } } });

@@ -60,6 +60,10 @@ jobs:
       - name: Release build
         run: zig build --release=fast
 
+      - name: OpenBench build contract
+        if: runner.os == 'Linux'
+        run: scripts/openbench_build_check.sh
+
       - name: Unit tests
         run: zig build test
 
@@ -118,6 +122,27 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
           python3 scripts/uci_protocol_test.py "$BIN"
+
+  datatool:
+    name: datatool
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: tools/datatool
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test
 
   wasm:
     name: wasm / node
