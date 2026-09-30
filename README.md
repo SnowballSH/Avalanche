@@ -32,7 +32,7 @@ This project isn't possible without the help of the Zig community, since this is
 
 ## License
 
-MIT License.
+GPL-3.0. See [`LICENSE`](LICENSE).
 
 ## Compile
 
