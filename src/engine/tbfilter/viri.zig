@@ -101,12 +101,7 @@ pub fn run_file(cfg: tbfilter.Config) u8 {
         return 1;
     };
 
-    const out = cwd.createFile(io, cfg.output, .{ .exclusive = true }) catch |err| {
-        std.debug.print("tbfilter: cannot create '{s}': {s}\n", .{ cfg.output, @errorName(err) });
-        return 1;
-    };
-    defer out.close(io);
-    out.writeStreamingAll(io, bytes) catch |err| {
+    write_new_file(io, cwd, cfg.output, bytes) catch |err| {
         std.debug.print("tbfilter: cannot write '{s}': {s}\n", .{ cfg.output, @errorName(err) });
         return 1;
     };
@@ -116,4 +111,12 @@ pub fn run_file(cfg: tbfilter.Config) u8 {
     stdout.writer().print("{f}\n", .{std.json.fmt(cleaner.stats, .{})}) catch return 1;
     stdout.writer().flush() catch return 1;
     return 0;
+}
+
+/// Creates `path`, which must not exist yet, holding exactly `bytes`; a failed write leaves no file behind.
+pub fn write_new_file(io: std.Io, dir: std.Io.Dir, path: []const u8, bytes: []const u8) !void {
+    const out = try dir.createFile(io, path, .{ .exclusive = true });
+    errdefer dir.deleteFile(io, path) catch {};
+    defer out.close(io);
+    try out.writeStreamingAll(io, bytes);
 }

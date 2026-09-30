@@ -4,6 +4,7 @@ const position = @import("../chess/position.zig");
 const syzygy = @import("../engine/syzygy.zig");
 const viriformat = @import("../engine/datagen/viriformat.zig");
 const viri_clean = @import("../engine/tbfilter/viri.zig");
+const tbfilter = @import("../engine/tbfilter.zig");
 const support = @import("support.zig");
 const testing = std.testing;
 
@@ -91,4 +92,25 @@ test "tbclean: positions with too many men, castling rights or failed probes are
     defer testing.allocator.free(failed);
     try testing.expectEqual(@as(u64, 3), (try clean(failed, always(null), 6, .keep)).failed);
     try testing.expectEqual([3]i16{ 100, 101, 102 }, try scores(failed));
+}
+
+test "tbclean: format=viri rejects the bullet-only max= and threads= options" {
+    var offending: []const u8 = "";
+    _ = try tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "rule50=on" }, &offending);
+    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in", "out", "tb=tables", "max=10", "format=viri" }, &offending));
+    try testing.expectEqualStrings("max=10", offending);
+    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "threads=4" }, &offending));
+    try testing.expectEqualStrings("threads=4", offending);
+    const bullet = try tbfilter.parse_config(&.{ "in", "out", "tb=tables", "max=10", "threads=4" }, &offending);
+    try testing.expectEqual(@as(u64, 10), bullet.max_positions);
+    try testing.expectEqual(@as(usize, 4), bullet.threads);
+}
+
+test "tbclean: the output file is created exclusively and never clobbers an existing one" {
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try viri_clean.write_new_file(testing.io, tmp.dir, "out.vf", "cleaned");
+    try testing.expectError(error.PathAlreadyExists, viri_clean.write_new_file(testing.io, tmp.dir, "out.vf", "again"));
+    var buf: [16]u8 = undefined;
+    try testing.expectEqualStrings("cleaned", try tmp.dir.readFile(testing.io, "out.vf", &buf));
 }

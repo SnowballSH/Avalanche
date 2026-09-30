@@ -360,7 +360,7 @@ fn printUsage() void {
         \\  format=bullet|viri Input format                (default bullet)
         \\  threads=<n>      Worker threads (bullet only) (default: CPU count)
         \\  men=<n>          Max men to probe             (default 5)
-        \\  max=<n>          Process at most n positions  (default: whole file)
+        \\  max=<n>          Position limit (bullet only) (default: whole file)
         \\  rule50=keep|on|off
         \\                   Cursed-win / blessed-loss handling (default keep):
         \\                     keep = never drop on these (ambiguous)
@@ -370,8 +370,6 @@ fn printUsage() void {
     , .{});
 }
 
-/// Entry point for the `tbfilter` subcommand. Returns a process exit code
-/// (0 = success, non-zero = failure) so callers and scripts can detect errors.
 /// Loads the Syzygy tables at `tb_path` and returns the largest piece count they cover, or null after reporting why.
 pub fn load_tablebases(tb_path: []const u8) ?u32 {
     const path_z = std.heap.page_allocator.dupeZ(u8, tb_path) catch {
@@ -386,10 +384,12 @@ pub fn load_tablebases(tb_path: []const u8) ?u32 {
     return @intCast(@max(@as(i32, 0), syzygy.max_pieces()));
 }
 
-pub fn run(args: []const []const u8) u8 {
-    const io = platform.io;
+pub const ParseError = error{ UnknownFormat, MissingArgument, BulletOnlyOption };
 
+/// Parses the `tbfilter` arguments. On error, `offending` holds the text at fault, if any.
+pub fn parse_config(args: []const []const u8, offending: *[]const u8) ParseError!Config {
     var cfg = Config{};
+    var bullet_only_arg: ?[]const u8 = null;
     var input: ?[]const u8 = null;
     var output: ?[]const u8 = null;
 
@@ -398,15 +398,17 @@ pub fn run(args: []const []const u8) u8 {
             cfg.tb_path = arg[3..];
         } else if (std.mem.startsWith(u8, arg, "format=")) {
             cfg.format = std.meta.stringToEnum(Format, arg[7..]) orelse {
-                std.debug.print("tbfilter: unknown format '{s}' (bullet or viri)\n", .{arg[7..]});
-                return 1;
+                offending.* = arg[7..];
+                return error.UnknownFormat;
             };
         } else if (std.mem.startsWith(u8, arg, "threads=")) {
             cfg.threads = parseUsize(arg[8..], 0);
+            bullet_only_arg = arg;
         } else if (std.mem.startsWith(u8, arg, "men=")) {
             cfg.max_men = std.fmt.parseInt(u32, arg[4..], 10) catch 5;
         } else if (std.mem.startsWith(u8, arg, "max=")) {
             cfg.max_positions = std.fmt.parseInt(u64, arg[4..], 10) catch 0;
+            bullet_only_arg = arg;
         } else if (std.mem.startsWith(u8, arg, "rule50=")) {
             const v = arg[7..];
             if (std.mem.eql(u8, v, "on")) {
@@ -425,12 +427,31 @@ pub fn run(args: []const []const u8) u8 {
         }
     }
 
-    if (input == null or output == null or cfg.tb_path.len == 0) {
-        printUsage();
-        return 1;
+    if (input == null or output == null or cfg.tb_path.len == 0) return error.MissingArgument;
+    if (cfg.format == .viri) {
+        if (bullet_only_arg) |arg| {
+            offending.* = arg;
+            return error.BulletOnlyOption;
+        }
     }
     cfg.input = input.?;
     cfg.output = output.?;
+    return cfg;
+}
+
+/// Entry point for the `tbfilter` subcommand. Returns a process exit code
+/// (0 = success, non-zero = failure) so callers and scripts can detect errors.
+pub fn run(args: []const []const u8) u8 {
+    const io = platform.io;
+    var offending: []const u8 = "";
+    const cfg = parse_config(args, &offending) catch |err| {
+        switch (err) {
+            error.UnknownFormat => std.debug.print("tbfilter: unknown format '{s}' (bullet or viri)\n", .{offending}),
+            error.MissingArgument => printUsage(),
+            error.BulletOnlyOption => std.debug.print("tbfilter: '{s}' is not supported with format=viri\n", .{offending}),
+        }
+        return 1;
+    };
 
     if (std.mem.eql(u8, cfg.input, cfg.output)) {
         std.debug.print("tbfilter: input and output must differ\n", .{});
@@ -447,9 +468,9 @@ pub fn run(args: []const []const u8) u8 {
         }
     }
 
-    // Discover the input size / record count.
     if (cfg.format == .viri) return viri.run_file(cfg);
 
+    // Discover the input size / record count.
     const in_file = std.Io.Dir.cwd().openFile(io, cfg.input, .{}) catch {
         std.debug.print("tbfilter: cannot open input '{s}'\n", .{cfg.input});
         return 1;
