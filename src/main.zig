@@ -46,8 +46,13 @@ fn run_datagen(args: []const []const u8) !void {
     var gen = datagen.Datagen.new(datagen.DatagenConfig.from_options(opts), seed);
     defer gen.deinit();
     if (opts.book) |path| {
-        gen.openings = datagen.loadEpdFile(path) catch |err| {
-            std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
+        var diag: datagen.BookDiagnostic = .{};
+        gen.openings = datagen.loadEpdFile(path, &diag) catch |err| {
+            if (err == error.InvalidBookLine) {
+                std.debug.print("datagen: book '{s}' line {}: {s}\n", .{ path, diag.line, diag.reason });
+            } else {
+                std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
+            }
             std.process.exit(2);
         };
         std.debug.print("Loaded {} openings from {s}\n", .{ gen.openings.?.len, path });

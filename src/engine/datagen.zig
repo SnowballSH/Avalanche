@@ -3,6 +3,7 @@ const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
+const fen = @import("../chess/fen.zig");
 const search = @import("search.zig");
 const see = @import("see.zig");
 const tt = @import("tt.zig");
@@ -709,21 +710,50 @@ pub const DatagenSingle = struct {
     }
 };
 
-pub fn loadEpdFile(path: []const u8) ![]const []const u8 {
+pub const BookDiagnostic = struct {
+    line: usize = 0,
+    reason: []const u8 = "",
+};
+
+/// Loads every non-empty line of an EPD/FEN book, rejecting the whole book at the first line that is not a legal
+/// position: a bad line would otherwise be played as an empty board or read out of bounds.
+pub fn loadEpdFile(path: []const u8, diag: *BookDiagnostic) ![]const []const u8 {
     const file = try std.Io.Dir.cwd().openFile(platform.io, path, .{});
     defer file.close(platform.io);
     const file_len = try file.length(platform.io);
     const content = try std.heap.page_allocator.alloc(u8, @as(usize, @intCast(file_len)));
     _ = try file.readPositionalAll(platform.io, content, 0);
 
+    const pos = try std.heap.page_allocator.create(position.Position);
+    defer std.heap.page_allocator.destroy(pos);
+    pos.init();
+    defer pos.deinit();
+
     var lines = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
     var iter = std.mem.splitScalar(u8, content, '\n');
+    var number: usize = 0;
     while (iter.next()) |line| {
+        number += 1;
         const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len > 0) try lines.append(trimmed);
+        if (trimmed.len == 0) continue;
+        if (check_book_line(pos, trimmed)) |reason| {
+            diag.* = .{ .line = number, .reason = reason };
+            return error.InvalidBookLine;
+        }
+        try lines.append(trimmed);
     }
     if (lines.items.len == 0) return error.EmptyBook;
     return lines.items;
+}
+
+fn check_book_line(pos: *position.Position, line: []const u8) ?[]const u8 {
+    fen.validate(line) catch |err| return @errorName(err);
+    pos.set_fen(line);
+    const opponent_in_check = if (pos.turn == types.Color.White)
+        pos.in_check(types.Color.Black)
+    else
+        pos.in_check(types.Color.White);
+    return if (opponent_in_check) "OpponentInCheck" else null;
 }
 
 pub fn default_output_path(buf: []u8, seed: u64, format: Format) []const u8 {
