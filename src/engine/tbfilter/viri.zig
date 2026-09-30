@@ -4,6 +4,7 @@ const position = @import("../../chess/position.zig");
 const syzygy = @import("../syzygy.zig");
 const viriformat = @import("../datagen/viriformat.zig");
 const tbfilter = @import("../tbfilter.zig");
+const platform = @import("../../platform.zig");
 
 pub const Rule50Mode = tbfilter.Rule50Mode;
 
@@ -77,3 +78,42 @@ pub const Cleaner = struct {
         return true;
     }
 };
+
+/// `tbfilter format=viri`: cleans one viriformat file into a new file and prints the statistics as one JSON line.
+pub fn run_file(cfg: tbfilter.Config) u8 {
+    const tb_max = tbfilter.load_tablebases(cfg.tb_path) orelse return 1;
+    defer syzygy.deinit();
+    const io = platform.io;
+    const cwd = std.Io.Dir.cwd();
+    const bytes = cwd.readFileAlloc(io, cfg.input, std.heap.page_allocator, .unlimited) catch |err| {
+        std.debug.print("tbfilter: cannot read '{s}': {s}\n", .{ cfg.input, @errorName(err) });
+        return 1;
+    };
+    defer std.heap.page_allocator.free(bytes);
+
+    const pos = std.heap.page_allocator.create(position.Position) catch return 1;
+    defer std.heap.page_allocator.destroy(pos);
+    pos.init();
+    defer pos.deinit();
+    var cleaner = Cleaner{ .probe = syzygy.probe_wdl_position, .max_men = @min(cfg.max_men, tb_max), .mode = cfg.rule50 };
+    cleaner.clean_buffer(pos, bytes) catch |err| {
+        std.debug.print("tbfilter: '{s}' is not valid viriformat: {s}\n", .{ cfg.input, @errorName(err) });
+        return 1;
+    };
+
+    const out = cwd.createFile(io, cfg.output, .{ .exclusive = true }) catch |err| {
+        std.debug.print("tbfilter: cannot create '{s}': {s}\n", .{ cfg.output, @errorName(err) });
+        return 1;
+    };
+    defer out.close(io);
+    out.writeStreamingAll(io, bytes) catch |err| {
+        std.debug.print("tbfilter: cannot write '{s}': {s}\n", .{ cfg.output, @errorName(err) });
+        return 1;
+    };
+
+    var buffer: [512]u8 = undefined;
+    var stdout = platform.Stdout.init(&buffer);
+    stdout.writer().print("{f}\n", .{std.json.fmt(cleaner.stats, .{})}) catch return 1;
+    stdout.writer().flush() catch return 1;
+    return 0;
+}

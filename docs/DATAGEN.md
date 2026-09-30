@@ -80,3 +80,14 @@ estimates the duplicate-position rate from a hash-selected sample.
 OpenBench runs `make -j EXE=<path> CC=<compiler> EVALFILE=<absolute .nnue path>`. The Makefile passes `EVALFILE` to
 `zig build -Dnet=...` (absolute and relative paths both work), ignores `CC`, and moves the binary to `EXE`.
 `scripts/openbench_build_check.sh` reproduces this build and OpenBench's bench parsing.
+
+## Tablebase cleaning
+
+`Avalanche tbfilter <in.viribin> <out.viribin> tb=<dir[:dir]> men=6 rule50=keep format=viri` replays every game and,
+for each position of at most `men` pieces without castling rights, probes the Syzygy WDL tables. When the table's
+result for the side to move contradicts the game's result from that side's view, the position's stored eval is
+replaced by 32767. Datagen never writes that value (evals are clamped to ±32000) and the trainer's filter drops every
+position whose |eval| reaches its `max_eval`, so contradicted positions are excluded from training while the game,
+its moves and every other position stay unchanged. Cursed wins and blessed losses are kept under `rule50=keep`; a
+missing table keeps the position. The command prints one JSON line of counts (`games`, `positions`, `over_men`,
+`castling`, `failed`, `ambiguous`, `agree`, `masked`) and refuses to overwrite an existing output file.
