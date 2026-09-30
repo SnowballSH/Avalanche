@@ -1,4 +1,6 @@
 const std = @import("std");
+const types = @import("types.zig");
+const tables = @import("tables.zig");
 
 pub const FenError = error{
     MissingField,
@@ -10,45 +12,85 @@ pub const FenError = error{
     BadSideToMove,
     BadCastling,
     BadEnPassant,
+    OpponentInCheck,
 };
 
 const PIECES = "PNBRQKpnbrqk";
 
-/// Checks the first four FEN/EPD fields (board, side to move, castling, en passant) without building a position.
-/// Later fields (move counters or EPD opcodes) are not inspected.
+/// Checks the first four FEN/EPD fields (board, side to move, castling, en passant) without building a position,
+/// and that the side not to move is not in check. Later fields (move counters or EPD opcodes) are not inspected.
+/// Requires `tables.init_all()`.
 pub fn validate(fen: []const u8) FenError!void {
     var fields = std.mem.tokenizeScalar(u8, fen, ' ');
-    try validate_board(fields.next() orelse return error.MissingField);
+    const board = try parse_board(fields.next() orelse return error.MissingField);
     const side = fields.next() orelse return error.MissingField;
     if (!std.mem.eql(u8, side, "w") and !std.mem.eql(u8, side, "b")) return error.BadSideToMove;
     try validate_castling(fields.next() orelse return error.MissingField);
     try validate_en_passant(fields.next() orelse return error.MissingField, side[0]);
+    const mover: usize = if (side[0] == 'w') WHITE else BLACK;
+    if (board.king_attacked(1 - mover, mover)) return error.OpponentInCheck;
 }
 
-fn validate_board(board: []const u8) FenError!void {
-    var ranks = std.mem.splitScalar(u8, board, '/');
+const WHITE = 0;
+const BLACK = 1;
+const PAWN = 0;
+const KNIGHT = 1;
+const BISHOP = 2;
+const ROOK = 3;
+const QUEEN = 4;
+const KING = 5;
+
+const Board = struct {
+    pieces: [2][6]u64 = .{.{0} ** 6} ** 2,
+
+    fn occupied(self: Board) u64 {
+        var all: u64 = 0;
+        for (self.pieces) |colour| {
+            for (colour) |bits| all |= bits;
+        }
+        return all;
+    }
+
+    fn king_attacked(self: Board, king_colour: usize, attacker: usize) bool {
+        const square: types.Square = @enumFromInt(@ctz(self.pieces[king_colour][KING]));
+        const theirs = self.pieces[attacker];
+        const occupancy = self.occupied();
+        const pawn_sources = if (king_colour == WHITE) tables.WhitePawnAttacks[square.index()] else tables.BlackPawnAttacks[square.index()];
+        const diagonal = tables.get_bishop_attacks(square, occupancy);
+        const straight = tables.get_rook_attacks(square, occupancy);
+        return (pawn_sources & theirs[PAWN]) |
+            (tables.KnightAttacks[square.index()] & theirs[KNIGHT]) |
+            (tables.KingAttacks[square.index()] & theirs[KING]) |
+            (diagonal & (theirs[BISHOP] | theirs[QUEEN])) |
+            (straight & (theirs[ROOK] | theirs[QUEEN])) != 0;
+    }
+};
+
+fn parse_board(text: []const u8) FenError!Board {
+    var board: Board = .{};
+    var ranks = std.mem.splitScalar(u8, text, '/');
     var rank_count: usize = 0;
-    var white_kings: usize = 0;
-    var black_kings: usize = 0;
     while (ranks.next()) |rank| : (rank_count += 1) {
         if (rank_count == 8) return error.BadRankCount;
-        var files: usize = 0;
+        var file: usize = 0;
         for (rank) |ch| {
             if (std.ascii.isDigit(ch)) {
                 if (ch == '0' or ch == '9') return error.BadRankLength;
-                files += ch - '0';
+                file += ch - '0';
                 continue;
             }
-            if (std.mem.indexOfScalar(u8, PIECES, ch) == null) return error.UnknownPiece;
-            if ((ch == 'P' or ch == 'p') and (rank_count == 0 or rank_count == 7)) return error.PawnOnBackRank;
-            if (ch == 'K') white_kings += 1;
-            if (ch == 'k') black_kings += 1;
-            files += 1;
+            const kind = std.mem.indexOfScalar(u8, PIECES[0..6], std.ascii.toUpper(ch)) orelse return error.UnknownPiece;
+            if (kind == PAWN and (rank_count == 0 or rank_count == 7)) return error.PawnOnBackRank;
+            if (file >= 8) return error.BadRankLength;
+            const colour: usize = if (std.ascii.isUpper(ch)) WHITE else BLACK;
+            board.pieces[colour][kind] |= @as(u64, 1) << @intCast((7 - rank_count) * 8 + file);
+            file += 1;
         }
-        if (files != 8) return error.BadRankLength;
+        if (file != 8) return error.BadRankLength;
     }
     if (rank_count != 8) return error.BadRankCount;
-    if (white_kings != 1 or black_kings != 1) return error.BadKingCount;
+    if (@popCount(board.pieces[WHITE][KING]) != 1 or @popCount(board.pieces[BLACK][KING]) != 1) return error.BadKingCount;
+    return board;
 }
 
 fn validate_castling(castling: []const u8) FenError!void {
@@ -88,4 +130,14 @@ test "fen: malformed boards are rejected with a reason" {
     try testing.expectError(error.BadEnPassant, validate("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e4 0 1"));
     try testing.expectError(error.UnknownPiece, validate("# a comment"));
     try testing.expectError(error.UnknownPiece, validate("1. e4 e5 2. Nf3 Nc6"));
+}
+
+test "fen: the side not to move may not be in check" {
+    tables.init_all();
+    try testing.expectError(error.OpponentInCheck, validate("4k3/4R3/8/8/8/8/8/4K3 w - - 0 1"));
+    try testing.expectError(error.OpponentInCheck, validate("4k3/8/8/8/8/8/3p4/4K3 b - - 0 1"));
+    try testing.expectError(error.OpponentInCheck, validate("4k3/8/8/8/1b6/8/8/4K3 b - - 0 1"));
+    try testing.expectError(error.OpponentInCheck, validate("4k3/8/8/8/8/8/2n5/4K3 b - - 0 1"));
+    try validate("4k3/4R3/8/8/8/8/8/4K3 b - - 0 1");
+    try validate("4k3/8/8/8/8/8/4p3/4K3 b - - 0 1");
 }

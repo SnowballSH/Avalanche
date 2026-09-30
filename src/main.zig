@@ -62,6 +62,7 @@ fn run_datagen(args: []const []const u8) !void {
     const out = opts.out orelse datagen.default_output_path(&path_buf, seed, opts.format);
     gen.print_banner(opts.threads, out);
     gen.start(opts.threads, out) catch |err| {
+        if (err == error.WorkerFailed) std.process.exit(1);
         std.debug.print("datagen: cannot write '{s}': {s}\n", .{ out, @errorName(err) });
         std.process.exit(2);
     };

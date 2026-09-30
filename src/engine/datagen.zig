@@ -719,11 +719,6 @@ pub fn loadEpdFile(path: []const u8, diag: *BookDiagnostic) ![]const []const u8 
     const content = try std.heap.page_allocator.alloc(u8, @as(usize, @intCast(file_len)));
     _ = try file.readPositionalAll(platform.io, content, 0);
 
-    const pos = try std.heap.page_allocator.create(position.Position);
-    defer std.heap.page_allocator.destroy(pos);
-    pos.init();
-    defer pos.deinit();
-
     var lines = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
     var iter = std.mem.splitScalar(u8, content, '\n');
     var number: usize = 0;
@@ -731,24 +726,14 @@ pub fn loadEpdFile(path: []const u8, diag: *BookDiagnostic) ![]const []const u8 
         number += 1;
         const trimmed = std.mem.trim(u8, line, " \t\r");
         if (trimmed.len == 0) continue;
-        if (check_book_line(pos, trimmed)) |reason| {
-            diag.* = .{ .line = number, .reason = reason };
+        fen.validate(trimmed) catch |err| {
+            diag.* = .{ .line = number, .reason = @errorName(err) };
             return error.InvalidBookLine;
-        }
+        };
         try lines.append(trimmed);
     }
     if (lines.items.len == 0) return error.EmptyBook;
     return lines.items;
-}
-
-fn check_book_line(pos: *position.Position, line: []const u8) ?[]const u8 {
-    fen.validate(line) catch |err| return @errorName(err);
-    pos.set_fen(line);
-    const opponent_in_check = if (pos.turn == types.Color.White)
-        pos.in_check(types.Color.Black)
-    else
-        pos.in_check(types.Color.White);
-    return if (opponent_in_check) "OpponentInCheck" else null;
 }
 
 /// Per-thread PRNG seed derived with splitmix64, so every run seed (including 0) gives distinct, non-zero states.
@@ -820,7 +805,10 @@ pub const Datagen = struct {
         }
         for (threads.items) |thread| thread.join();
         for (self.datagens.items) |d| {
-            if (d.failure) |err| return err;
+            if (d.failure) |err| {
+                std.debug.print("datagen: worker {} failed: {s}\n", .{ d.id, @errorName(err) });
+                return error.WorkerFailed;
+            }
         }
     }
 

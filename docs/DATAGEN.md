@@ -19,7 +19,7 @@ Avalanche datagen <threads> [book.epd | book=path] [key=value ...]
 The thread count is required (the old implicit default of 7 is gone). Malformed or unknown options, an unreadable
 or empty book, a book line that is not a legal position (datagen names the line and the reason), and an existing
 output file are errors: datagen prints the reason and exits with status 2. A worker thread that fails (for example on
-a write error) stops the whole run, which then exits non-zero.
+a write error) stops the whole run, names the worker and the error, and exits with status 1.
 
 ## Output
 
