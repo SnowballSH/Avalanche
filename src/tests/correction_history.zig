@@ -44,7 +44,13 @@ fn undo(pos: *position.Position, move: types.Move) void {
     }
 }
 
-test "pawn key: incremental matches recomputed over random move sequences" {
+fn expect_keys_match(pos: *const position.Position) !void {
+    try expectEqual(pos.compute_pawn_hash(), pos.pawn_hash);
+    try expectEqual(pos.compute_nonpawn_hash(.White), pos.nonpawn_hash[0]);
+    try expectEqual(pos.compute_nonpawn_hash(.Black), pos.nonpawn_hash[1]);
+}
+
+test "pawn and non-pawn keys: incremental match recomputed over random move sequences" {
     support.init_tables();
     const pos = try support.new_position();
     defer support.destroy_position(pos);
@@ -55,6 +61,7 @@ test "pawn key: incremental matches recomputed over random move sequences" {
     var en_passants: usize = 0;
     var promotions: usize = 0;
     var pawn_captures: usize = 0;
+    var piece_captures: usize = 0;
     var castles: usize = 0;
 
     for (WALK_FENS) |fen| {
@@ -62,7 +69,8 @@ test "pawn key: incremental matches recomputed over random move sequences" {
         while (walk < WALKS_PER_FEN) : (walk += 1) {
             pos.set_fen(fen);
             const root_pawn_hash = pos.pawn_hash;
-            try expectEqual(pos.compute_pawn_hash(), root_pawn_hash);
+            const root_nonpawn_hash = pos.nonpawn_hash;
+            try expect_keys_match(pos);
 
             var played: [MAX_WALK_PLY]types.Move = undefined;
             var ply: usize = 0;
@@ -81,30 +89,37 @@ test "pawn key: incremental matches recomputed over random move sequences" {
                 }
                 if (move.is_promotion()) promotions += 1;
                 const victim = pos.mailbox[move.to];
-                if (victim == types.Piece.WHITE_PAWN or victim == types.Piece.BLACK_PAWN) pawn_captures += 1;
+                if (victim == types.Piece.WHITE_PAWN or victim == types.Piece.BLACK_PAWN) {
+                    pawn_captures += 1;
+                } else if (victim != types.Piece.NO_PIECE) {
+                    piece_captures += 1;
+                }
 
                 play(pos, move);
                 played[ply] = move;
-                try expectEqual(pos.compute_pawn_hash(), pos.pawn_hash);
+                try expect_keys_match(pos);
 
                 const board_fen = pos.basic_fen(std.testing.allocator);
                 defer std.testing.allocator.free(board_fen);
                 fresh.set_fen(board_fen);
                 try expectEqual(fresh.pawn_hash, pos.pawn_hash);
+                try expectEqual(fresh.nonpawn_hash, pos.nonpawn_hash);
             }
 
             while (ply > 0) {
                 ply -= 1;
                 undo(pos, played[ply]);
-                try expectEqual(pos.compute_pawn_hash(), pos.pawn_hash);
+                try expect_keys_match(pos);
             }
             try expectEqual(root_pawn_hash, pos.pawn_hash);
+            try expectEqual(root_nonpawn_hash, pos.nonpawn_hash);
         }
     }
 
     try expect(en_passants > 0);
     try expect(promotions > 0);
     try expect(pawn_captures > 0);
+    try expect(piece_captures > 0);
     try expect(castles > 0);
 }
 
@@ -124,6 +139,27 @@ test "pawn key: ignores pieces other than pawns" {
     const pawn = types.Move.new_from_string(pos, "e7e5");
     pos.play_move(.Black, pawn);
     try expect(start != pos.pawn_hash);
+}
+
+test "non-pawn key: tracks only its own color's pieces" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    pos.set_fen(types.DEFAULT_FEN);
+    const white = pos.nonpawn_hash[0];
+    const black = pos.nonpawn_hash[1];
+    try expect(white != 0 and black != 0 and white != black);
+
+    const pawn = types.Move.new_from_string(pos, "e2e4");
+    pos.play_move(.White, pawn);
+    try expectEqual(white, pos.nonpawn_hash[0]);
+    try expectEqual(black, pos.nonpawn_hash[1]);
+
+    const knight = types.Move.new_from_string(pos, "g8f6");
+    pos.play_move(.Black, knight);
+    try expectEqual(white, pos.nonpawn_hash[0]);
+    try expect(black != pos.nonpawn_hash[1]);
 }
 
 test "correction history: gravity keeps entries within the limit" {
@@ -154,13 +190,17 @@ test "correction history: gravity keeps entries within the limit" {
 }
 
 test "correction history: a consistent error converges instead of saturating" {
-    var entry: i16 = 0;
+    var pawn: i16 = 0;
+    var nonpawn_white: i16 = 0;
+    var nonpawn_black: i16 = 0;
     const raw_eval: i32 = 40;
     const true_value: i32 = 50;
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
-        const corrected = raw_eval + @divTrunc(@as(i32, entry), search.CORRHIST_GRAIN);
-        search.update_correction(&entry, true_value, corrected, 8);
+        const corrected = raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black);
+        search.update_correction(&pawn, true_value, corrected, 8);
+        search.update_correction(&nonpawn_white, true_value, corrected, 8);
+        search.update_correction(&nonpawn_black, true_value, corrected, 8);
     }
-    try expectEqual(true_value, raw_eval + @divTrunc(@as(i32, entry), search.CORRHIST_GRAIN));
+    try expectEqual(true_value, raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black));
 }
