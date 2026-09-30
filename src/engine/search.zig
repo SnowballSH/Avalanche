@@ -158,6 +158,19 @@ pub const TB_WIN_SCORE: i32 = hce.MateScore - hce.MaxMate - MAX_PLY;
 // scores (above MateScore - MaxMate) and TB win/loss scores (above TB_WIN_SCORE - MAX_PLY).
 const SCORE_PLY_ADJ: i32 = TB_WIN_SCORE - MAX_PLY;
 
+// Pawn correction history, see docs/SEARCH.md. Entries are in 1/CORRHIST_GRAIN cp.
+pub const CORRHIST_SIZE: usize = 16384;
+pub const CORRHIST_GRAIN: i32 = 256;
+pub const CORRHIST_LIMIT: i32 = 32 * CORRHIST_GRAIN;
+const CORRHIST_MAX_BONUS: i32 = CORRHIST_LIMIT / 4;
+
+pub fn update_correction(entry: *i16, best_score: i32, static_eval: i32, depth: usize) void {
+    const diff = std.math.clamp(best_score - static_eval, -CORRHIST_LIMIT, CORRHIST_LIMIT);
+    const bonus = std.math.clamp(diff * @as(i32, @intCast(depth)), -CORRHIST_MAX_BONUS, CORRHIST_MAX_BONUS);
+    const value: i32 = entry.*;
+    entry.* = @intCast(value + bonus - @divTrunc(value * @as(i32, @intCast(@abs(bonus))), CORRHIST_LIMIT));
+}
+
 comptime {
     if (hce.MaxMate < 2 * @as(i32, MAX_PLY)) {
         @compileError("hce.MaxMate must be >= 2 * MAX_PLY: TT mate-score normalization adds ply on store and subtracts ply on probe, so a round-tripped mate loses up to two plies of magnitude and the mate band must cover twice the maximum ply");
@@ -246,6 +259,7 @@ pub const Searcher = struct {
 
     hash_history: std.array_list.Managed(u64) = undefined,
     eval_history: [MAX_PLY]i32 = undefined,
+    raw_eval_history: [MAX_PLY]i32 = undefined,
     move_history: [MAX_PLY]types.Move = undefined,
     moved_piece_history: [MAX_PLY]types.Piece = undefined,
 
@@ -258,6 +272,7 @@ pub const Searcher = struct {
 
     counter_moves: [2][64][64]types.Move = undefined,
     continuation: *[12][64][64][64]i16,
+    pawn_correction: [2][CORRHIST_SIZE]i16 = undefined,
 
     root_board: *position.Position,
     ttable: *tt.TranspositionTable = &tt.GlobalTT,
@@ -322,6 +337,15 @@ pub const Searcher = struct {
 
     inline fn pack_static_eval(value: i32) i16 {
         return @as(i16, @intCast(@min(@as(i32, 32767), @max(@as(i32, tt.EVAL_NONE) + 1, value))));
+    }
+
+    inline fn pawn_correction_entry(self: *Searcher, pos: *const position.Position, comptime color: types.Color) *i16 {
+        return &self.pawn_correction[@intFromEnum(color)][@as(usize, @intCast(pos.pawn_hash % CORRHIST_SIZE))];
+    }
+
+    inline fn corrected_eval(self: *Searcher, pos: *const position.Position, comptime color: types.Color, raw_eval: i32) i32 {
+        const correction = @divTrunc(@as(i32, self.pawn_correction_entry(pos, color).*), CORRHIST_GRAIN);
+        return std.math.clamp(raw_eval + correction, -SCORE_PLY_ADJ + 1, SCORE_PLY_ADJ - 1);
     }
 
     inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
@@ -389,6 +413,10 @@ pub const Searcher = struct {
             }
         }
 
+        if (total_reset) {
+            @memset(std.mem.asBytes(&self.pawn_correction), 0);
+        }
+
         {
             var j: usize = 0;
             while (j < MAX_PLY) : (j += 1) {
@@ -398,6 +426,7 @@ pub const Searcher = struct {
                 }
                 self.pv_size[j] = 0;
                 self.eval_history[j] = 0;
+                self.raw_eval_history[j] = 0;
                 self.move_history[j] = types.Move.empty();
                 self.moved_piece_history[j] = types.Piece.NO_PIECE;
             }
@@ -1262,11 +1291,13 @@ pub const Searcher = struct {
             }
         }
 
-        const static_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (is_null) -self.eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.eval_history[self.ply] else hce.evaluate_comptime(pos, color);
+        const raw_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (is_null) -self.raw_eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.raw_eval_history[self.ply] else hce.evaluate_comptime(pos, color);
+        const static_eval: i32 = if (in_check) raw_eval else self.corrected_eval(pos, color, raw_eval);
 
         var best_score: i32 = static_eval;
 
         self.eval_history[self.ply] = static_eval;
+        self.raw_eval_history[self.ply] = raw_eval;
 
         const improving = !in_check and self.ply >= 2 and static_eval > self.eval_history[self.ply - 2];
 
@@ -1408,7 +1439,7 @@ pub const Searcher = struct {
                                 }
                                 self.ttable.set(pos.hash, tt.Item{
                                     .eval = stored,
-                                    .static_eval = pack_static_eval(static_eval),
+                                    .static_eval = pack_static_eval(raw_eval),
                                     .bestmove = move,
                                     .flag = tt.Bound.Lower,
                                     .depth = @as(u8, @intCast(@min(depth - parameters.ProbCutReduction + 1, 255))),
@@ -1736,6 +1767,14 @@ pub const Searcher = struct {
         best_score = std.math.clamp(best_score, tb_min, tb_max);
 
         if (self.exclude_move[self.ply].to_u16() == 0 and !(is_root and self.root_excluded_count > 0)) {
+            if (!in_check and
+                !best_move.is_capture() and !best_move.is_promotion() and
+                !(best_score >= beta_ and best_score <= static_eval) and
+                !(best_score <= alpha_ and best_score >= static_eval))
+            {
+                update_correction(self.pawn_correction_entry(pos, color), best_score, static_eval, depth);
+            }
+
             const tt_flag = if (tb_min != -hce.MateScore and best_score == tb_min)
                 tt.Bound.Lower
             else if (tb_max != hce.MateScore and best_score == tb_max)
@@ -1760,7 +1799,7 @@ pub const Searcher = struct {
 
             self.ttable.set(pos.hash, tt.Item{
                 .eval = stored_eval,
-                .static_eval = pack_static_eval(static_eval),
+                .static_eval = pack_static_eval(raw_eval),
                 .bestmove = best_move,
                 .flag = tt_flag,
                 .depth = @as(u8, @intCast(@min(depth, 255))),
@@ -1830,10 +1869,10 @@ pub const Searcher = struct {
         // >> Step 2: Prunings
 
         var best_score = -hce.MateScore + @as(i32, @intCast(self.ply));
-        var static_eval = best_score;
+        var raw_eval = best_score;
         if (!in_check) {
-            static_eval = hce.evaluate_comptime(pos, color);
-            best_score = static_eval;
+            raw_eval = hce.evaluate_comptime(pos, color);
+            best_score = self.corrected_eval(pos, color, raw_eval);
 
             // Step 2.1: Stand Pat pruning
             if (best_score >= beta) {
@@ -1928,7 +1967,7 @@ pub const Searcher = struct {
                 if (score > alpha) {
                     best_move = move;
                     if (score >= beta) {
-                        self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Lower);
+                        self.qsearch_store(pos, best_score, raw_eval, best_move, tt.Bound.Lower);
                         return if (self.tt_store_is_ambiguous(best_score, tt.Bound.Lower))
                             best_score
                         else
@@ -1941,7 +1980,7 @@ pub const Searcher = struct {
         }
 
         if (best_move.to_u16() != 0) {
-            self.qsearch_store(pos, best_score, static_eval, best_move, tt.Bound.Upper);
+            self.qsearch_store(pos, best_score, raw_eval, best_move, tt.Bound.Upper);
         }
 
         return best_score;

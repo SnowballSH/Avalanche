@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const platform = @import("../platform.zig");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
@@ -56,6 +57,8 @@ pub const Position = struct {
     start_ply: u32 = 0,
     // Zobrist Hash
     hash: u64 = 0,
+    // Zobrist hash of the pawns only
+    pawn_hash: u64 = 0,
 
     // History of Undo information.
     // Sized to accommodate the longest game the UCI position parser will replay
@@ -198,6 +201,23 @@ pub const Position = struct {
         self.hash ^= zobrist.CastlingHash[self.castling_rights()];
 
         self.evaluator.full_refresh(self);
+    }
+
+    pub fn compute_pawn_hash(self: *const Position) u64 {
+        var key: u64 = 0;
+        inline for ([_]types.Piece{ types.Piece.WHITE_PAWN, types.Piece.BLACK_PAWN }) |pc| {
+            var bb = self.piece_bitboards[pc.index()];
+            while (bb != 0) {
+                key ^= zobrist.ZobristTable[pc.index()][types.pop_lsb(&bb).index()];
+            }
+        }
+        return key;
+    }
+
+    inline fn toggle_pawn_hash(self: *Position, pc: types.Piece, sq: usize) void {
+        if (pc.piece_type() == types.PieceType.Pawn) {
+            self.pawn_hash ^= zobrist.ZobristTable[pc.index()][sq];
+        }
     }
 
     // Accepts standard, X-FEN (K/Q = outermost rook on that wing) and
@@ -412,12 +432,14 @@ pub const Position = struct {
         self.mailbox[sq.index()] = pc;
         self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
         self.hash ^= zobrist.ZobristTable[pc.index()][sq.index()];
+        self.toggle_pawn_hash(pc, sq.index());
     }
 
     pub inline fn remove_piece(self: *Position, sq: types.Square) void {
         self.evaluator.remove_piece(sq, self);
         const pc = self.mailbox[sq.index()].index();
         self.hash ^= zobrist.ZobristTable[pc][sq.index()];
+        self.toggle_pawn_hash(self.mailbox[sq.index()], sq.index());
         self.piece_bitboards[pc] &= ~types.SquareIndexBB[sq.index()];
         self.mailbox[sq.index()] = types.Piece.NO_PIECE;
     }
@@ -430,10 +452,14 @@ pub const Position = struct {
 
             // Remove captured piece
             self.hash ^= zobrist.ZobristTable[captured.index()][to.index()];
+            self.toggle_pawn_hash(captured, to.index());
             self.piece_bitboards[captured.index()] &= ~types.SquareIndexBB[to.index()];
 
             // Move piece from -> to
             self.hash ^= zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
+            if (moving.piece_type() == types.PieceType.Pawn) {
+                self.pawn_hash ^= zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
+            }
             self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
             self.mailbox[to.index()] = moving;
             self.mailbox[from.index()] = types.Piece.NO_PIECE;
@@ -447,6 +473,9 @@ pub const Position = struct {
         const moving = self.mailbox[from.index()];
         self.evaluator.move_piece_quiet(from, to, self);
         self.hash ^= zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
+        if (moving.piece_type() == types.PieceType.Pawn) {
+            self.pawn_hash ^= zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
+        }
 
         self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
         self.mailbox[to.index()] = moving;
@@ -625,6 +654,10 @@ pub const Position = struct {
             if (pt == types.PieceType.King) {
                 self.evaluator.nnue_evaluator.reconcile_king_buckets(self, color);
             }
+        }
+
+        if (comptime builtin.mode == .Debug) {
+            std.debug.assert(self.pawn_hash == self.compute_pawn_hash());
         }
     }
 
