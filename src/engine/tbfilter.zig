@@ -8,6 +8,7 @@ const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const syzygy = @import("syzygy.zig");
+const viri = @import("tbfilter/viri.zig");
 
 const RECORD_SIZE: usize = 32;
 const MAX_MEN: u32 = 7;
@@ -21,7 +22,10 @@ pub const Rule50Mode = enum {
     off, // ignore the 50-move rule: cursed win = win, blessed loss = loss
 };
 
-const Config = struct {
+pub const Format = enum { bullet, viri };
+
+pub const Config = struct {
+    format: Format = .bullet,
     input: []const u8 = "",
     output: []const u8 = "",
     tb_path: []const u8 = "",
@@ -88,7 +92,7 @@ const Worker = struct {
 
 /// Map a raw tablebase WDL to the recorded-result encoding (0=loss,1=draw,
 /// 2=win). Returns null when the outcome is ambiguous and should be kept.
-fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?u8 {
+pub fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?u8 {
     switch (w) {
         .win => return 2,
         .loss => return 0,
@@ -342,18 +346,21 @@ fn parseUsize(s: []const u8, default: usize) usize {
 
 fn printUsage() void {
     std.debug.print(
-        \\Usage: Avalanche tbfilter <input.bin> <output.bin> tb=<path> [options]
+        \\Usage: Avalanche tbfilter <input> <output> tb=<path> [options]
         \\
-        \\Filters a bulletformat .bin of self-play positions, dropping every
-        \\<=N-man position whose recorded WDL contradicts the Syzygy tablebase.
+        \\bulletformat (default): drops every <=N-man position whose recorded WDL
+        \\contradicts the Syzygy tablebase.
+        \\viriformat (format=viri): replays each game and masks such positions
+        \\with an out-of-range eval that training filters drop; prints JSON stats.
         \\
         \\Required:
         \\  tb=<path>        Syzygy tablebase directory
         \\
         \\Options:
-        \\  threads=<n>      Worker threads               (default: CPU count)
+        \\  format=bullet|viri Input format                (default bullet)
+        \\  threads=<n>      Worker threads (bullet only) (default: CPU count)
         \\  men=<n>          Max men to probe             (default 5)
-        \\  max=<n>          Process at most n positions  (default: whole file)
+        \\  max=<n>          Position limit (bullet only) (default: whole file)
         \\  rule50=keep|on|off
         \\                   Cursed-win / blessed-loss handling (default keep):
         \\                     keep = never drop on these (ambiguous)
@@ -363,24 +370,45 @@ fn printUsage() void {
     , .{});
 }
 
-/// Entry point for the `tbfilter` subcommand. Returns a process exit code
-/// (0 = success, non-zero = failure) so callers and scripts can detect errors.
-pub fn run(args: []const []const u8) u8 {
-    const io = platform.io;
+/// Loads the Syzygy tables at `tb_path` and returns the largest piece count they cover, or null after reporting why.
+pub fn load_tablebases(tb_path: []const u8) ?u32 {
+    const path_z = std.heap.page_allocator.dupeZ(u8, tb_path) catch {
+        std.debug.print("tbfilter: out of memory\n", .{});
+        return null;
+    };
+    defer std.heap.page_allocator.free(path_z);
+    if (!syzygy.init(path_z.ptr)) {
+        std.debug.print("tbfilter: failed to load Syzygy tablebases from '{s}' -- aborting\n", .{tb_path});
+        return null;
+    }
+    return @intCast(@max(@as(i32, 0), syzygy.max_pieces()));
+}
 
+pub const ParseError = error{ UnknownFormat, MissingArgument, BulletOnlyOption };
+
+/// Parses the `tbfilter` arguments. On error, `offending` holds the text at fault, if any.
+pub fn parse_config(args: []const []const u8, offending: *[]const u8) ParseError!Config {
     var cfg = Config{};
+    var bullet_only_arg: ?[]const u8 = null;
     var input: ?[]const u8 = null;
     var output: ?[]const u8 = null;
 
     for (args) |arg| {
         if (std.mem.startsWith(u8, arg, "tb=")) {
             cfg.tb_path = arg[3..];
+        } else if (std.mem.startsWith(u8, arg, "format=")) {
+            cfg.format = std.meta.stringToEnum(Format, arg[7..]) orelse {
+                offending.* = arg[7..];
+                return error.UnknownFormat;
+            };
         } else if (std.mem.startsWith(u8, arg, "threads=")) {
             cfg.threads = parseUsize(arg[8..], 0);
+            bullet_only_arg = arg;
         } else if (std.mem.startsWith(u8, arg, "men=")) {
             cfg.max_men = std.fmt.parseInt(u32, arg[4..], 10) catch 5;
         } else if (std.mem.startsWith(u8, arg, "max=")) {
             cfg.max_positions = std.fmt.parseInt(u64, arg[4..], 10) catch 0;
+            bullet_only_arg = arg;
         } else if (std.mem.startsWith(u8, arg, "rule50=")) {
             const v = arg[7..];
             if (std.mem.eql(u8, v, "on")) {
@@ -399,12 +427,31 @@ pub fn run(args: []const []const u8) u8 {
         }
     }
 
-    if (input == null or output == null or cfg.tb_path.len == 0) {
-        printUsage();
-        return 1;
+    if (input == null or output == null or cfg.tb_path.len == 0) return error.MissingArgument;
+    if (cfg.format == .viri) {
+        if (bullet_only_arg) |arg| {
+            offending.* = arg;
+            return error.BulletOnlyOption;
+        }
     }
     cfg.input = input.?;
     cfg.output = output.?;
+    return cfg;
+}
+
+/// Entry point for the `tbfilter` subcommand. Returns a process exit code
+/// (0 = success, non-zero = failure) so callers and scripts can detect errors.
+pub fn run(args: []const []const u8) u8 {
+    const io = platform.io;
+    var offending: []const u8 = "";
+    const cfg = parse_config(args, &offending) catch |err| {
+        switch (err) {
+            error.UnknownFormat => std.debug.print("tbfilter: unknown format '{s}' (bullet or viri)\n", .{offending}),
+            error.MissingArgument => printUsage(),
+            error.BulletOnlyOption => std.debug.print("tbfilter: '{s}' is not supported with format=viri\n", .{offending}),
+        }
+        return 1;
+    };
 
     if (std.mem.eql(u8, cfg.input, cfg.output)) {
         std.debug.print("tbfilter: input and output must differ\n", .{});
@@ -420,6 +467,8 @@ pub fn run(args: []const []const u8) u8 {
             }
         }
     }
+
+    if (cfg.format == .viri) return viri.run_file(cfg);
 
     // Discover the input size / record count.
     const in_file = std.Io.Dir.cwd().openFile(io, cfg.input, .{}) catch {
@@ -446,24 +495,8 @@ pub fn run(args: []const []const u8) u8 {
         return 1;
     }
 
-    // Bring up the tablebase before doing any work.
-    const path_z = std.heap.page_allocator.dupeZ(u8, cfg.tb_path) catch {
-        std.debug.print("tbfilter: out of memory\n", .{});
-        return 1;
-    };
-    defer std.heap.page_allocator.free(path_z);
-    if (!syzygy.init(path_z.ptr)) {
-        std.debug.print(
-            "tbfilter: failed to load Syzygy tablebases from '{s}' -- aborting\n",
-            .{cfg.tb_path},
-        );
-        return 1;
-    }
+    const tb_max = load_tablebases(cfg.tb_path) orelse return 1;
     defer syzygy.deinit();
-
-    // Cap the men gate at what the loaded tablebases cover, and never above
-    // MAX_MEN so the decode loop and per-man-count arrays stay in bounds.
-    const tb_max: u32 = @intCast(@max(@as(i32, 0), syzygy.max_pieces()));
     const eff_max_men = @min(@min(cfg.max_men, tb_max), MAX_MEN);
 
     // Auto-detect defaults to a modest cap: the job is largely I/O-bound, so a

@@ -1,6 +1,7 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
 const datagen = @import("../engine/datagen.zig");
+const viriformat = @import("../engine/datagen/viriformat.zig");
 const types = @import("../chess/types.zig");
 const support = @import("support.zig");
 const testing = std.testing;
@@ -218,7 +219,7 @@ test "viriformat: FRC castling encodes king-to-rook-square with the castle type"
     for (moves.items) |m| {
         if (m.is_castle()) castle = m;
     }
-    const encoded = datagen.encode_viri_move(castle.?);
+    const encoded = viriformat.encode_move(castle.?);
     try testing.expectEqual(@as(u16, 2), encoded >> 14);
     try testing.expectEqual(@as(u16, @intFromEnum(types.Square.b1)), (encoded >> 6) & 63);
     try testing.expectEqual(@as(u16, @intFromEnum(types.Square.f1)), encoded & 63);
@@ -229,7 +230,7 @@ test "viriformat: FRC unmoved castling rooks are marked as type 6" {
     const pos = try support.new_position();
     defer support.destroy_position(pos);
     pos.set_fen("nrkbbqrn/pppppppp/8/8/8/8/PPPPPPPP/NRKBBQRN w GBgb - 0 1");
-    const board = datagen.pos_to_viri_packed_board(pos, 0);
+    const board = viriformat.pack_board(pos, 0);
     var unmoved: usize = 0;
     for (board.pcs) |byte| {
         if (byte & 0x7 == 6) unmoved += 1;
