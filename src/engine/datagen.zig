@@ -511,20 +511,18 @@ pub const DatagenSingle = struct {
             }
             movelist.deinit();
 
-            // Capture initial board state (once, after random moves)
+            // The first search after the random plies both screens the opening and plays the first recorded move.
+            var opening_search: ?SearchResult = null;
             if (initial_board == null) {
-                // Do a quick search to check if position is playable
-                const initial_search = self.searchPosition(&pos);
-                const init_score = initial_search.score;
-
-                if (init_score > cfg.opening_reject_threshold or init_score < -cfg.opening_reject_threshold) {
-                    return; // discard unbalanced opening
+                const screened = self.searchPosition(&pos);
+                if (screened.score > cfg.opening_reject_threshold or screened.score < -cfg.opening_reject_threshold) {
+                    return;
                 }
-                initial_board = pos_to_viri_packed_board(&pos, init_score);
+                initial_board = pos_to_viri_packed_board(&pos, screened.score);
+                opening_search = screened;
             }
 
-            // Search
-            const result = self.searchPosition(&pos);
+            const result = opening_search orelse self.searchPosition(&pos);
             const res = result.score;
             const best_move = result.best_move;
 

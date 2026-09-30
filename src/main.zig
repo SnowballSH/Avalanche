@@ -46,10 +46,10 @@ fn run_datagen(args: []const []const u8) !void {
     var gen = datagen.Datagen.new(datagen.DatagenConfig.from_options(opts), seed);
     defer gen.deinit();
     if (opts.book) |path| {
-        var diag: datagen.BookDiagnostic = .{};
-        gen.openings = datagen.loadEpdFile(path, &diag) catch |err| {
+        var book_diag: datagen.BookDiagnostic = .{};
+        gen.openings = datagen.loadEpdFile(path, &book_diag) catch |err| {
             if (err == error.InvalidBookLine) {
-                std.debug.print("datagen: book '{s}' line {}: {s}\n", .{ path, diag.line, diag.reason });
+                std.debug.print("datagen: book '{s}' line {}: {s}\n", .{ path, book_diag.line, book_diag.reason });
             } else {
                 std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
             }
