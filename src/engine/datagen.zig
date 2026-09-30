@@ -307,6 +307,7 @@ pub const DatagenSingle = struct {
     searchers: [2]search.Searcher,
     ttables: [2]*tt.TranspositionTable,
     output: *Output,
+    failure: ?anyerror = null,
     prng: utils.PRNG,
     openings: ?[]const []const u8,
     config: DatagenConfig,
@@ -677,6 +678,14 @@ pub const DatagenSingle = struct {
         self.game_count += 1;
     }
 
+    /// Thread entry point: a failing worker records its error and stops the others, so the run fails as a whole.
+    fn run(self: *DatagenSingle) void {
+        self.startMany() catch |err| {
+            self.failure = err;
+            self.output.stop.store(true, .release);
+        };
+    }
+
     pub fn startMany(self: *DatagenSingle) !void {
         self.timer = types.Timer.start();
         while (!self.output.stopped()) {
@@ -742,6 +751,23 @@ fn check_book_line(pos: *position.Position, line: []const u8) ?[]const u8 {
     return if (opponent_in_check) "OpponentInCheck" else null;
 }
 
+/// Per-thread PRNG seed derived with splitmix64, so every run seed (including 0) gives distinct, non-zero states.
+pub fn thread_seed(run_seed: u64, thread: usize) u128 {
+    var state = run_seed ^ (@as(u64, thread) *% 0x9E3779B97F4A7C15);
+    const low = splitmix64(&state);
+    const high = splitmix64(&state);
+    const seed = @as(u128, low) | (@as(u128, high) << 64);
+    return if (seed == 0) 1 else seed;
+}
+
+fn splitmix64(state: *u64) u64 {
+    state.* +%= 0x9E3779B97F4A7C15;
+    var z = state.*;
+    z = (z ^ (z >> 30)) *% 0xBF58476D1CE4E5B9;
+    z = (z ^ (z >> 27)) *% 0x94D049BB133111EB;
+    return z ^ (z >> 31);
+}
+
 pub fn default_output_path(buf: []u8, seed: u64, format: Format) []const u8 {
     const ext = if (format == .viri) ".viribin" else ".bin";
     return std.fmt.bufPrint(buf, "data_{x:0>16}{s}", .{ seed, ext }) catch unreachable;
@@ -782,19 +808,20 @@ pub const Datagen = struct {
         self.output = .{ .file = file, .positions_target = self.config.positions_target };
         self.timer = types.Timer.start();
 
-        var seeds = utils.PRNG.new(self.seed);
         try self.datagens.ensureTotalCapacity(num_threads);
         for (0..num_threads) |th| {
-            const thread_seed: u128 = @as(u128, seeds.rand64()) | (@as(u128, seeds.rand64()) << 64);
-            self.datagens.appendAssumeCapacity(DatagenSingle.new(&self.output, thread_seed, th, self.openings, self.config));
+            self.datagens.appendAssumeCapacity(DatagenSingle.new(&self.output, thread_seed(self.seed, th), th, self.openings, self.config));
         }
 
         var threads = std.array_list.Managed(std.Thread).init(std.heap.c_allocator);
         defer threads.deinit();
         for (self.datagens.items) |*d| {
-            try threads.append(try std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DatagenSingle.startMany, .{d}));
+            try threads.append(try std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DatagenSingle.run, .{d}));
         }
         for (threads.items) |thread| thread.join();
+        for (self.datagens.items) |d| {
+            if (d.failure) |err| return err;
+        }
     }
 
     pub fn print_banner(self: *const Datagen, num_threads: usize, out_path: []const u8) void {

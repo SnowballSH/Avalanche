@@ -237,3 +237,13 @@ test "viriformat: FRC unmoved castling rooks are marked as type 6" {
     }
     try testing.expectEqual(@as(usize, 4), unmoved);
 }
+
+test "datagen: thread seeds are non-zero, distinct per thread, and stable" {
+    for ([_]u64{ 0, 1, std.math.maxInt(u64) }) |run_seed| {
+        const first = datagen.thread_seed(run_seed, 0);
+        try testing.expect(first != 0);
+        try testing.expect(first != datagen.thread_seed(run_seed, 1));
+        try testing.expectEqual(first, datagen.thread_seed(run_seed, 0));
+    }
+    try testing.expect(datagen.thread_seed(0, 0) != datagen.thread_seed(1, 0));
+}
