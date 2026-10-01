@@ -409,7 +409,11 @@ where
     I: SparseInputType<RequiredDataType = ChessBoard>,
 {
     let cfg = session.cfg;
-    if let Ok(fens) = std::env::var("TRAIN_PARITY_FENS") {
+    // Empty is unset, as for a variable a wrapper script exports unconditionally.
+    let parity_fens = std::env::var("TRAIN_PARITY_FENS")
+        .ok()
+        .filter(|fens| !fens.is_empty());
+    if let Some(fens) = parity_fens {
         if std::env::var("TRAIN_RESUME_FROM").is_err() {
             fail(
                 "TRAIN_PARITY_FENS needs TRAIN_RESUME_FROM=<checkpoint>: without it the positions \

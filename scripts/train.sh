@@ -29,7 +29,7 @@
 #     before training with n = TRAIN_START_SB - 1. Only a failure of that first pass stops the run),
 #   TRAIN_VALIDATION_BATCHES (64; validation batches of TRAIN_BATCH_SIZE, always the first filtered
 #     positions of the held-out files in sorted file order; fewer than that many is a startup error).
-#   TRAIN_PARITY_FENS (unset = train. A file of FENs: instead of training, write the evaluation of each
+#   TRAIN_PARITY_FENS (unset or empty = train. A file of FENs: instead of training, write the evaluation of each
 #     by the net of TRAIN_RESUME_FROM (required), as "<fen> | <centipawns>", to TRAIN_PARITY_OUT (parity.txt), for
 #     `Avalanche nnue-parity`; see docs/NNUE.md).
 #   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh

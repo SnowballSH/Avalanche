@@ -52,7 +52,10 @@ pub const L1Shift = u3;
 pub const L1_SHIFT_MAX: L1Shift = 7;
 
 /// The shift the trainer picks for a net whose largest L1 weight magnitude,
-/// as a float, is `max_weight`.
+/// as a float, is `max_weight`. Only the tests call it: the trainer makes the
+/// choice (`l1_shift` in training/src/multilayer.rs), and rounds an f32 product
+/// where this rounds an f64 one, so the two can differ for a weight within f32
+/// rounding of a boundary.
 pub fn l1_shift_for(max_weight: f64) L1Shift {
     var shift: L1Shift = 0;
     while (shift < L1_SHIFT_MAX and @round(max_weight * L1_WEIGHT_SCALE * @as(f64, @floatFromInt(@as(u32, 2) << shift))) <= 127) shift += 1;

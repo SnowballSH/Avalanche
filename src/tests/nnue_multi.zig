@@ -202,7 +202,8 @@ test "multi head: small L1 weights are stored with a shift and stay close to the
             const float = head_multi.evaluate_float_from_l1(head, 0, z1);
 
             quantise_l1(head, shift, l1_weights, &bias);
-            try expect(@abs(@as(i32, head.l1_weights[0][0][0][0])) > 63);
+            // docs/NNUE.md: the chosen shift puts the largest weight at 64..127 levels.
+            try expect(@abs(@as(i32, head.l1_weights[0][0][0][0])) >= 64);
             const with_shift: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, 0));
             quantise_l1(head, 0, l1_weights, &bias);
             const without: f64 = @floatFromInt(head_multi.evaluate(head, 0, &acc.own, &acc.opp, 0));

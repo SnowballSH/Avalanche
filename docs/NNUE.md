@@ -384,8 +384,22 @@ stored as 14 of 127; `l2w` 1068 of 2047; `l3w` 857 of 2047.
 The arithmetic is right; the last row is the L1 weights rounded to 14 levels. That is what the L1
 shift of format version 2 removes: this net would be saved with `e = 3`, its largest weight at 112
 of 127. A unit test reproduces the case with random weights of that size: 81 cp max and 17 cp mean
-at `e = 0`, 8.1 cp and 1.2 cp at `e = 3`. The run on a GPU with version 2 has not been done yet;
-the target is a few centipawns in the last row.
+at `e = 0`, 8.1 cp and 1.2 cp at `e = 3`.
+
+Third measurement, format version 2, same recipe as the second: the trainer chose `e = 3`, and the
+file stores `l1w` at up to 116 of 127, `l2w` 1070 of 2047, `l3w` 869 of 2047. The 50 bench
+positions, mean abs eval 195 cp, max 887 cp.
+
+| Comparison | Max | Mean |
+|---|---|---|
+| integer vs float forward pass | 2.8 cp | 0.8 cp |
+| integer vs float, quantised pairwise | 0.52 cp | 0.23 cp |
+| integer vs trainer evaluations | 9.8 cp | 2.9 cp |
+
+The shift does what it was added for: the last row fell from 83.8 cp max and 22.7 cp mean to 9.8
+and 2.9, about 1.5% of the mean evaluation. The first row compares the integer and float forward
+passes on the same quantised weights, so the rest of the last row, about 2 cp on average, is the
+rounding of the weights, now at 116 levels for L1.
 
 `nnue-parity` prints a net's L1 shift and the largest stored weight of each layer against its
 limit, and the trainer prints the largest float weight of each section, and the shift, at every
