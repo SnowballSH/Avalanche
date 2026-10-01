@@ -33,6 +33,7 @@ test {
     _ = @import("tests/tbfilter_viri.zig");
     _ = @import("engine/netscale.zig");
     _ = @import("tests/netscale.zig");
+    _ = @import("tests/nnue_multi.zig");
 }
 
 test "Basic Piece and Color" {

@@ -63,6 +63,16 @@ pub const Weights = extern struct {
     l3_bias: [OUTPUT_SIZE]i32 align(64),
 };
 
+/// Largest difference, in centipawns, between `evaluate` and `evaluate_float`
+/// that the tests accept; docs/NNUE.md explains both.
+///
+/// With the engine's own pairwise products the rest of the head differs from
+/// exact arithmetic by the final rounding (0.5) and the two rounding shifts.
+pub const QUANTISED_TOLERANCE_CP: f64 = 0.75;
+/// Against exact pairwise products, for weights of trained magnitude
+/// (`parity.REALISTIC_RANGE`): the rounding of up to 1024 products to 1/127.
+pub const TRAINER_TOLERANCE_CP: f64 = 16.0;
+
 pub const ValidateError = error{ WeightOutOfRange, BiasOutOfRange };
 
 fn check_range(bytes: []const u8, comptime field: []const u8, limit: i32) bool {
@@ -100,8 +110,9 @@ fn activate_scalar(own: *const arch.Accumulator, opp: *const arch.Accumulator, o
     }
 }
 
+/// Rounds to the nearest centipawn, halves up.
 inline fn to_centipawns(output: i32) i32 {
-    return @intCast(@divTrunc(@as(i64, output) * SCALE, 1 << SUM_BITS));
+    return @intCast((@as(i64, output) * SCALE + (1 << (SUM_BITS - 1))) >> SUM_BITS);
 }
 
 inline fn round_shift(value: i32, comptime bits: comptime_int) i32 {
@@ -254,8 +265,9 @@ pub fn evaluate_simd(head: *const Weights, own: *const arch.Accumulator, opp: *c
     const L2 = @Vector(L2_SIZE, i32);
 
     const z1 = l1_simd(head, &activations, bucket);
-    const clipped = @min(@max(z1, @as(L1, @splat(0))), @as(L1, @splat(ONE)));
-    const squared = (clipped * clipped + @as(L1, @splat(1 << (ACT_BITS - 1)))) >> @splat(ACT_BITS);
+    // Typed, because @min would otherwise narrow the element type.
+    const clipped: L1 = @min(@max(z1, @as(L1, @splat(0))), @as(L1, @splat(ONE)));
+    const squared: L1 = (clipped * clipped + @as(L1, @splat(1 << (ACT_BITS - 1)))) >> @splat(ACT_BITS);
     const hidden: [L2_INPUTS]i32 = @bitCast([2]L1{ clipped, squared });
 
     var z2: L2 = head.l2_bias[bucket];
@@ -263,8 +275,8 @@ pub fn evaluate_simd(head: *const Weights, own: *const arch.Accumulator, opp: *c
         z2 += @as(L2, @splat(input)) * @as(L2, column.*);
     }
 
-    const rounded = (z2 + @as(L2, @splat(1 << (WEIGHT_BITS - 1)))) >> @splat(WEIGHT_BITS);
-    const activated = @min(@max(rounded, @as(L2, @splat(0))), @as(L2, @splat(ONE)));
+    const rounded: L2 = (z2 + @as(L2, @splat(1 << (WEIGHT_BITS - 1)))) >> @splat(WEIGHT_BITS);
+    const activated: L2 = @min(@max(rounded, @as(L2, @splat(0))), @as(L2, @splat(ONE)));
     const output = head.l3_bias[bucket] + @reduce(.Add, activated * @as(L2, head.l3_weights[bucket]));
     return to_centipawns(output);
 }
