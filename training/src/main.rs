@@ -1,22 +1,31 @@
+mod schedule;
+mod validation;
+
+use std::str::FromStr;
+
 use bullet::{
     game::{
-        inputs::{Chess768, ChessBucketsMirrored, get_num_buckets},
+        formats::bulletformat::ChessBoard,
+        inputs::{Chess768, ChessBucketsMirrored, SparseInputType, get_num_buckets},
         outputs::MaterialCount,
     },
     nn::{
-        InitSettings, Shape,
+        ExecutionContext, InitSettings, Shape,
         optimiser::{AdamW, AdamWParams},
     },
     trainer::{
         save::SavedFormat,
-        schedule::{TrainingSchedule, TrainingSteps, lr, wdl},
+        schedule::{TrainingSchedule, TrainingSteps, lr::LrScheduler, wdl},
         settings::LocalSettings,
     },
     value::{
-        ValueTrainerBuilder,
+        ValueTrainer, ValueTrainerBuilder,
         loader::{DirectSequentialDataLoader, ViriBinpackLoader, viribinpack::ViriFilter},
     },
 };
+use bullet_trainer::{optimiser::OptimiserState, reader::DataReader};
+use schedule::{BaseLr, LinearWarmup, LrKind};
+use validation::ValidationConfig;
 use viriformat::{
     chess::{board::Board, chessmove::Move},
     dataformat::{Filter, WDL},
@@ -62,6 +71,24 @@ fn env_bool(key: &str, default: bool) -> bool {
     match std::env::var(key) {
         Ok(v) => matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"),
         Err(_) => default,
+    }
+}
+
+fn fail(message: &str) -> ! {
+    eprintln!("Error: {message}");
+    std::process::exit(1);
+}
+
+/// Unlike the lenient helpers above, a value that is set but does not parse is an error.
+fn env_strict<T>(key: &str, default: T) -> Result<T, String>
+where
+    T: FromStr<Err: std::fmt::Display>,
+{
+    match std::env::var(key) {
+        Ok(value) => value
+            .parse()
+            .map_err(|err| format!("{key}={value} is not valid: {err}")),
+        Err(_) => Ok(default),
     }
 }
 
@@ -111,23 +138,25 @@ struct TrainConfig {
     batches_per_superbatch: usize,
     wdl_proportion: f32,
     wdl_end: f32,
-    lr_schedule: String,
+    lr_schedule: LrKind,
     lr_initial: f32,
     lr_final: f32,
+    warmup_superbatches: usize,
     net_id: String,
     save_rate: usize,
     threads: usize,
     use_factoriser: bool,
     dataset_paths: Vec<String>,
+    shuffle_mb: usize,
     start_superbatch: usize,
+    validation: Option<ValidationConfig>,
 }
 
-/// Every `*.viribin` file in `dir`, sorted, so a dataset directory of cleaned chunks is one training input.
-fn viribin_files(dir: &str) -> Vec<String> {
-    let entries = std::fs::read_dir(dir).unwrap_or_else(|err| {
-        eprintln!("Error: cannot read TRAIN_DATA_DIR {dir}: {err}");
-        std::process::exit(1);
-    });
+/// Every `*.viribin` file in the directory named by the env variable `key`, sorted, so a directory of
+/// cleaned chunks is one dataset.
+fn viribin_files(key: &str, dir: &str) -> Result<Vec<String>, String> {
+    let entries =
+        std::fs::read_dir(dir).map_err(|err| format!("cannot read {key} {dir}: {err}"))?;
     let mut files: Vec<String> = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
@@ -136,16 +165,58 @@ fn viribin_files(dir: &str) -> Vec<String> {
         .collect();
     files.sort();
     if files.is_empty() {
-        eprintln!("Error: TRAIN_DATA_DIR {dir} contains no .viribin files");
-        std::process::exit(1);
+        return Err(format!("{key} {dir} contains no .viribin files"));
     }
-    files
+    Ok(files)
+}
+
+fn lr_schedule_from_env() -> Result<LrKind, String> {
+    let name = env_string("TRAIN_LR_SCHEDULE", "cosine");
+    LrKind::parse(&name).ok_or_else(|| {
+        format!(
+            "unknown TRAIN_LR_SCHEDULE={name}; supported: {}",
+            LrKind::SUPPORTED
+        )
+    })
+}
+
+fn shuffle_mb_from_env() -> Result<usize, String> {
+    match env_strict("TRAIN_SHUFFLE_MB", 128)? {
+        0 => Err(String::from("TRAIN_SHUFFLE_MB must be at least 1")),
+        shuffle_mb => Ok(shuffle_mb),
+    }
+}
+
+fn warmup_superbatches_from_env(superbatches: usize) -> Result<usize, String> {
+    let warmup: usize = env_strict("TRAIN_WARMUP_SB", 0)?;
+    if warmup > superbatches {
+        return Err(format!(
+            "TRAIN_WARMUP_SB={warmup} exceeds TRAIN_SUPERBATCHES={superbatches}"
+        ));
+    }
+    Ok(warmup)
+}
+
+fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
+    let dir = std::env::var("TRAIN_VALIDATION_DIR").unwrap_or_default();
+    if dir.is_empty() {
+        return Ok(None);
+    }
+    let batches = env_strict("TRAIN_VALIDATION_BATCHES", 64)?;
+    if batches == 0 {
+        return Err(String::from("TRAIN_VALIDATION_BATCHES must be at least 1"));
+    }
+    Ok(Some(ValidationConfig {
+        files: viribin_files("TRAIN_VALIDATION_DIR", &dir)?,
+        batches,
+        filter: viri_filter,
+    }))
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dataset_paths = match std::env::var("TRAIN_DATA_DIR") {
-        Ok(dir) => viribin_files(&dir),
+        Ok(dir) => viribin_files("TRAIN_DATA_DIR", &dir).unwrap_or_else(|err| fail(&err)),
         Err(_) if args.is_empty() => vec![String::from("data/training.bin")],
         Err(_) => args,
     };
@@ -177,22 +248,17 @@ fn main() {
     let batches_per_superbatch = env_usize("TRAIN_BATCHES_PER_SB", 12208);
     let wdl_proportion = env_f32("TRAIN_WDL", 0.25);
     let wdl_end = env_f32("TRAIN_WDL_END", wdl_proportion);
-    let lr_schedule = env_string("TRAIN_LR_SCHEDULE", "cosine");
+    let lr_schedule = lr_schedule_from_env().unwrap_or_else(|err| fail(&err));
+    let warmup_superbatches =
+        warmup_superbatches_from_env(superbatches).unwrap_or_else(|err| fail(&err));
+    let shuffle_mb = shuffle_mb_from_env().unwrap_or_else(|err| fail(&err));
+    let validation = validation_from_env().unwrap_or_else(|err| fail(&err));
     let lr_initial = env_f32("TRAIN_LR_INITIAL", 0.001);
     let lr_final = env_f32("TRAIN_LR_FINAL", 0.0000001);
     let net_id = env_string("TRAIN_NET_ID", "net");
     let save_rate = env_usize("TRAIN_SAVE_RATE", 10);
     let threads = env_usize("TRAIN_THREADS", num_cpus());
     let use_factoriser = env_bool("TRAIN_FACTORISER", true);
-
-    match lr_schedule.as_str() {
-        "cosine" | "constant" => {}
-        other => {
-            eprintln!("Error: unknown TRAIN_LR_SCHEDULE={other:?}");
-            eprintln!("Supported: cosine (default), constant");
-            std::process::exit(1);
-        }
-    }
 
     let cfg = TrainConfig {
         hidden_size,
@@ -204,12 +270,15 @@ fn main() {
         lr_schedule,
         lr_initial,
         lr_final,
+        warmup_superbatches,
         net_id,
         save_rate,
         threads,
         use_factoriser,
         dataset_paths,
+        shuffle_mb,
         start_superbatch,
+        validation,
     };
 
     match input_mode.as_str() {
@@ -241,136 +310,157 @@ fn print_banner(cfg: &TrainConfig, arch: &str) {
     );
     println!("Threads: {}", cfg.threads);
     println!("WDL: {} -> {}", cfg.wdl_proportion, cfg.wdl_end);
-    match cfg.lr_schedule.as_str() {
-        "constant" => println!("LR: constant {}", cfg.lr_initial),
-        _ => println!(
-            "LR: cosine {} -> {} over {} sb",
-            cfg.lr_initial, cfg.lr_final, cfg.superbatches
+    match cfg.lr_schedule {
+        LrKind::Constant => println!("LR: constant {}", cfg.lr_initial),
+        kind => println!(
+            "LR: {} {} -> {} over {} sb",
+            kind.name(),
+            cfg.lr_initial,
+            cfg.lr_final,
+            cfg.superbatches
         ),
+    }
+    if cfg.warmup_superbatches > 0 {
+        println!("LR warmup: linear over {} sb", cfg.warmup_superbatches);
+    }
+    if let Some(validation) = &cfg.validation {
+        println!(
+            "Validation: {} batches from {:?}",
+            validation.batches, validation.files
+        );
     }
     println!("==============================");
     println!();
 }
 
-// ValueTrainer is a concrete generic struct (not a trait), so share the run
-// loop via a macro that works for both Chess768 and ChessBucketsMirrored.
-macro_rules! run_trainer {
-    ($trainer:expr, $cfg:expr) => {{
-        let cfg = $cfg;
-        let mut trainer = $trainer;
-        let steps = TrainingSteps {
+type OutputBuckets = MaterialCount<NUM_OUTPUT_BUCKETS>;
+
+/// A built trainer plus what `ValueTrainer` keeps private but a validated run has to supply again.
+struct Session<'a, Opt: OptimiserState<ExecutionContext>, I: SparseInputType> {
+    trainer: &'a mut ValueTrainer<Opt, I, OutputBuckets>,
+    inputs: I,
+    saved_format: &'a [SavedFormat],
+    cfg: &'a TrainConfig,
+}
+
+fn run_trainer<Opt, I>(session: Session<Opt, I>)
+where
+    Opt: OptimiserState<ExecutionContext>,
+    I: SparseInputType<RequiredDataType = ChessBoard>,
+{
+    let cfg = session.cfg;
+    let (start, end) = (cfg.wdl_proportion, cfg.wdl_end);
+    if (end - start).abs() > 1e-6 {
+        run_with_wdl(session, wdl::LinearWDL { start, end });
+    } else {
+        run_with_wdl(session, wdl::ConstantWDL { value: start });
+    }
+    println!("Training complete. net_id={}", cfg.net_id);
+}
+
+fn run_with_wdl<Opt, I>(session: Session<Opt, I>, wdl_scheduler: impl wdl::WdlScheduler)
+where
+    Opt: OptimiserState<ExecutionContext>,
+    I: SparseInputType<RequiredDataType = ChessBoard>,
+{
+    let cfg = session.cfg;
+    let schedule = TrainingSchedule {
+        net_id: cfg.net_id.clone(),
+        eval_scale: EVAL_SCALE,
+        steps: TrainingSteps {
             batch_size: cfg.batch_size,
             batches_per_superbatch: cfg.batches_per_superbatch,
             start_superbatch: cfg.start_superbatch,
             end_superbatch: cfg.superbatches,
-        };
-
-        let settings = LocalSettings {
-            threads: cfg.threads,
-            test_set: None,
-            output_directory: "checkpoints",
-            batch_queue_size: 64,
-        };
-
-        let path_strs: Vec<&str> = cfg.dataset_paths.iter().map(|s| s.as_str()).collect();
-        let use_viri = path_strs.iter().any(|p| p.ends_with(".viribin"));
-        let net_id = cfg.net_id.clone();
-        let wdl_proportion = cfg.wdl_proportion;
-        let wdl_end = cfg.wdl_end;
-        let lr_schedule = cfg.lr_schedule.clone();
-        let lr_initial = cfg.lr_initial;
-        let lr_final = cfg.lr_final;
-        let superbatches = cfg.superbatches;
-        let save_rate = cfg.save_rate;
-        let threads = cfg.threads;
-
-        macro_rules! run_with_schedule {
-            ($wdl_sched:expr, $lr_sched:expr) => {{
-                let schedule = TrainingSchedule {
-                    net_id: net_id.clone(),
-                    eval_scale: EVAL_SCALE,
-                    steps,
-                    wdl_scheduler: $wdl_sched,
-                    lr_scheduler: $lr_sched,
-                    save_rate,
-                };
-                if use_viri {
-                    println!("Using ViriBinpackLoader (games interleaved across {} files) with custom filter", path_strs.len());
-                    let dataloader = ViriBinpackLoader::new_interleave_multiple(
-                        &path_strs,
-                        128,
-                        threads.min(16),
-                        ViriFilter::Custom(viri_filter),
-                    );
-                    trainer.run(&schedule, &settings, &dataloader);
-                } else {
-                    println!("Using DirectSequentialDataLoader (bulletformat)");
-                    let dataloader = DirectSequentialDataLoader::new(&path_strs);
-                    trainer.run(&schedule, &settings, &dataloader);
-                }
-            }};
-        }
-
-        let linear_wdl = (wdl_end - wdl_proportion).abs() > 1e-6;
-        match (linear_wdl, lr_schedule.as_str()) {
-            (true, "constant") => run_with_schedule!(
-                wdl::LinearWDL {
-                    start: wdl_proportion,
-                    end: wdl_end
-                },
-                lr::ConstantLR { value: lr_initial }
+        },
+        wdl_scheduler,
+        lr_scheduler: LinearWarmup {
+            inner: BaseLr::new(
+                cfg.lr_schedule,
+                cfg.lr_initial,
+                cfg.lr_final,
+                cfg.superbatches,
             ),
-            (false, "constant") => run_with_schedule!(
-                wdl::ConstantWDL {
-                    value: wdl_proportion
-                },
-                lr::ConstantLR { value: lr_initial }
-            ),
-            (true, _) => run_with_schedule!(
-                wdl::LinearWDL {
-                    start: wdl_proportion,
-                    end: wdl_end
-                },
-                lr::CosineDecayLR {
-                    initial_lr: lr_initial,
-                    final_lr: lr_final,
-                    final_superbatch: superbatches,
-                }
-            ),
-            (false, _) => run_with_schedule!(
-                wdl::ConstantWDL {
-                    value: wdl_proportion
-                },
-                lr::CosineDecayLR {
-                    initial_lr: lr_initial,
-                    final_lr: lr_final,
-                    final_superbatch: superbatches,
-                }
-            ),
-        }
+            warmup_superbatches: cfg.warmup_superbatches,
+            batches_per_superbatch: cfg.batches_per_superbatch,
+        },
+        save_rate: cfg.save_rate,
+    };
 
-        println!("Training complete. net_id={net_id}");
-    }};
+    let paths: Vec<&str> = cfg.dataset_paths.iter().map(String::as_str).collect();
+    if paths.iter().any(|path| path.ends_with(".viribin")) {
+        println!(
+            "Using ViriBinpackLoader (games interleaved across {} files, {} MB shuffle buffer) with custom filter",
+            paths.len(),
+            cfg.shuffle_mb
+        );
+        let reader = ViriBinpackLoader::new_interleave_multiple(
+            &paths,
+            cfg.shuffle_mb,
+            cfg.threads.min(16),
+            ViriFilter::Custom(viri_filter),
+        );
+        run_with_reader(session, &schedule, &reader);
+    } else {
+        println!("Using DirectSequentialDataLoader (bulletformat)");
+        run_with_reader(session, &schedule, &DirectSequentialDataLoader::new(&paths));
+    }
+}
+
+fn run_with_reader<Opt, I>(
+    session: Session<Opt, I>,
+    schedule: &TrainingSchedule<impl LrScheduler, impl wdl::WdlScheduler>,
+    reader: &impl DataReader<ChessBoard>,
+) where
+    Opt: OptimiserState<ExecutionContext>,
+    I: SparseInputType<RequiredDataType = ChessBoard>,
+{
+    let settings = LocalSettings {
+        threads: session.cfg.threads,
+        test_set: None,
+        output_directory: "checkpoints",
+        batch_queue_size: 64,
+    };
+
+    let Some(validation) = &session.cfg.validation else {
+        session.trainer.run(schedule, &settings, reader);
+        return;
+    };
+    validation::run(
+        &mut session.trainer.optimiser,
+        session.saved_format,
+        session.inputs,
+        OutputBuckets::default(),
+        schedule,
+        &settings,
+        reader,
+        validation,
+    )
+    .unwrap_or_else(|err| fail(&err));
 }
 
 fn run_chess768(cfg: TrainConfig) {
     print_banner(&cfg, "768");
     let hidden_size = cfg.hidden_size;
 
+    let save_format = [
+        SavedFormat::id("l0w").round().quantise::<i16>(QA),
+        SavedFormat::id("l0b").round().quantise::<i16>(QA),
+        SavedFormat::id("l1w")
+            .round()
+            .quantise::<i16>(QB)
+            .transpose(),
+        SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
+    ];
+
+    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
+    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)
         .inputs(Chess768)
         .output_buckets(MaterialCount::<NUM_OUTPUT_BUCKETS>)
-        .save_format(&[
-            SavedFormat::id("l0w").round().quantise::<i16>(QA),
-            SavedFormat::id("l0b").round().quantise::<i16>(QA),
-            SavedFormat::id("l1w")
-                .round()
-                .quantise::<i16>(QB)
-                .transpose(),
-            SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
-        ])
+        .save_format(&save_format)
         .loss_fn(|output, target| output.sigmoid().squared_error(target))
         .build(move |builder, stm_inputs, ntm_inputs, output_buckets| {
             let l0 = builder.new_affine("l0", 768, hidden_size);
@@ -386,7 +476,12 @@ fn run_chess768(cfg: TrainConfig) {
         println!("Resuming from checkpoint: {resume_path}");
         trainer.load_from_checkpoint(&resume_path);
     }
-    run_trainer!(trainer, cfg);
+    run_trainer(Session {
+        trainer: &mut trainer,
+        inputs: Chess768,
+        saved_format: &save_format,
+        cfg: &cfg,
+    });
 }
 
 fn run_buckets16(cfg: TrainConfig) {
@@ -438,10 +533,13 @@ fn run_buckets16(cfg: TrainConfig) {
         ]
     };
 
+    let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
+    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
+    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)
-        .inputs(ChessBucketsMirrored::new(BUCKET_LAYOUT_16))
+        .inputs(inputs)
         .output_buckets(MaterialCount::<NUM_OUTPUT_BUCKETS>)
         .save_format(&save_format)
         .loss_fn(|output, target| output.sigmoid().squared_error(target))
@@ -481,7 +579,12 @@ fn run_buckets16(cfg: TrainConfig) {
         println!("Resuming from checkpoint: {resume_path}");
         trainer.load_from_checkpoint(&resume_path);
     }
-    run_trainer!(trainer, cfg);
+    run_trainer(Session {
+        trainer: &mut trainer,
+        inputs,
+        saved_format: &save_format,
+        cfg: &cfg,
+    });
 }
 
 fn num_cpus() -> usize {
