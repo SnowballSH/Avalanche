@@ -54,18 +54,21 @@ class Engine:
         self.process.stdin.flush()
 
     def read_until(self, prefix: str, timeout: float) -> list[str]:
+        return self.read_until_match(lambda line: line.startswith(prefix), repr(prefix), timeout)
+
+    def read_until_match(self, matches, description: str, timeout: float) -> list[str]:
         deadline = time.monotonic() + timeout
         seen: list[str] = []
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                raise AssertionError(f"timed out waiting for {prefix!r}; last lines: {seen[-5:]}")
+                raise AssertionError(f"timed out waiting for {description}; last lines: {seen[-5:]}")
             try:
                 line = self.lines.get(timeout=remaining)
             except queue.Empty:
                 continue
             seen.append(line)
-            if line.startswith(prefix):
+            if matches(line):
                 return seen
 
     def expect_silence(self, prefix: str, duration: float) -> None:
@@ -107,6 +110,9 @@ def fields(line: str) -> dict[str, str]:
 def bestmove_parts(line: str) -> tuple[str, str | None]:
     tokens = line.split()
     return tokens[1], tokens[3] if len(tokens) >= 4 and tokens[2] == "ponder" else None
+
+
+LIVE_INFO_DELAY_SECONDS = 3.0
 
 
 class Skipped(Exception):
@@ -161,11 +167,17 @@ def test_search_names_the_network(engine: Engine) -> None:
 
 
 def test_live_currmove_after_delay(engine: Engine) -> None:
-    output, best = engine.search("position startpos moves e2e4 c7c5", "go movetime 4500", 30)
-    currmoves = [line for line in output if " currmove " in line]
-    assert currmoves, "no currmove reported during a 4.5 s search"
-    assert all(" currmovenumber " in line for line in currmoves)
-    assert best.startswith("bestmove ")
+    engine.sync()
+    engine.send("position startpos moves e2e4 c7c5")
+    started = time.monotonic()
+    engine.send("go infinite")
+    currmove = engine.read_until_match(lambda line: " currmove " in line, "a currmove line", 120)[-1]
+    elapsed = time.monotonic() - started
+    engine.send("stop")
+    best = engine.read_until("bestmove", 10)[-1]
+    assert " currmovenumber " in currmove, currmove
+    assert elapsed >= LIVE_INFO_DELAY_SECONDS, f"currmove reported after only {elapsed:.2f} s"
+    assert best.split()[1] != "0000", best
 
 
 def test_threads_with_thread_pool(engine: Engine) -> None:
