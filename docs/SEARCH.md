@@ -20,11 +20,11 @@
   in its children. Cleared on `ucinewgame`; helper threads keep their own table
   and nothing is copied per search.
 - Entries are in 1/256 cp and bounded by ±8192 (32 cp). The corrected eval,
-  `raw + (8 * pawn + 6 * (nonpawn_white + nonpawn_black) + 6 * cont) / (256 * 8)`
+  `raw + (8 * pawn + 6 * (nonpawn_white + nonpawn_black) + 3 * cont) / (256 * 8)`
   clamped below the TB/mate bands, is the `static_eval` used by pruning,
-  reductions and qsearch stand-pat. The pawn term keeps full weight; each
-  non-pawn term and the continuation term get 3/4, as in Stockfish where the
-  terms are of similar weight. The TT stores the raw eval.
+  reductions and qsearch stand-pat. The pawn term keeps full weight, each
+  non-pawn term gets 3/4 and the continuation term 3/8 (it lost at 3/4 on top
+  of the other two). The TT stores the raw eval.
 - Update at the end of `negamax`, the same bonus to every applicable entry:
   `bonus = clamp((best - eval) * depth, ±2048)`,
   `entry += bonus - entry * |bonus| / 8192`. Skipped in check, in singular

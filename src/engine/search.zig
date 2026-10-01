@@ -166,7 +166,7 @@ const CORRHIST_MAX_BONUS: i32 = CORRHIST_LIMIT / 4;
 const CORRHIST_WEIGHT_SCALE: i32 = 8;
 const PAWN_CORRHIST_WEIGHT: i32 = 8;
 const NONPAWN_CORRHIST_WEIGHT: i32 = 6;
-const CONT_CORRHIST_WEIGHT: i32 = 6;
+const CONT_CORRHIST_WEIGHT: i32 = 3;
 pub const CONT_CORRHIST_SIZE: usize = 12 * 64 * 12 * 64;
 
 pub fn weighted_correction(pawn: i32, nonpawn_white: i32, nonpawn_black: i32, cont: i32) i32 {
