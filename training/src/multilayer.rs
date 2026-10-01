@@ -127,31 +127,55 @@ fn l2_weights_layout(values: &[f32]) -> Vec<f32> {
     layout
 }
 
+/// Prints the largest magnitude of a section at every save: how much of the stored range a trained net
+/// uses decides whether the fixed-point positions above can be made finer (docs/NNUE.md).
+fn report_max(name: &'static str, stored_scale: f64, stored_limit: f64) -> impl Fn(&[f32]) {
+    move |values| {
+        let max = values
+            .iter()
+            .fold(0.0f32, |max, value| max.max(value.abs()));
+        println!(
+            "  {name}: max |value| {max:.4}, stored as {:.0} of {stored_limit:.0}",
+            (f64::from(max) * stored_scale).round()
+        );
+    }
+}
+
 /// The file, in order: header, feature transformer, L1, L2, L3. bullet pads it to a multiple of 64 bytes.
 fn save_format(input_buckets: usize, hidden_size: usize, use_factoriser: bool) -> Vec<SavedFormat> {
+    let weight_one = f64::from(1u32 << WEIGHT_BITS);
+    let bias_limit = f64::from(1u32 << 30);
+    let reported = |id: &'static str, scale: f64, limit: f64| {
+        let report = report_max(id, scale, limit);
+        SavedFormat::id(id).transform(move |_, values| {
+            report(&values);
+            values
+        })
+    };
+
     let mut format = vec![SavedFormat::custom(header(input_buckets, hidden_size))];
     format.extend(feature_transformer_format(use_factoriser, input_buckets));
     format.extend([
-        SavedFormat::id("l1w")
+        reported("l1w", L1_WEIGHT_SCALE, 127.0)
             .transform(move |_, values| l1_weights_layout(&values, hidden_size))
             .round()
             .quantise::<i8>(1),
-        SavedFormat::id("l1b")
+        reported("l1b", f64::from(1u32 << ACT_BITS), bias_limit)
             .round()
             .quantise::<i32>(1 << ACT_BITS),
-        SavedFormat::id("l2w")
+        reported("l2w", weight_one, 2047.0)
             .transform(|_, values| l2_weights_layout(&values))
             .round()
             .quantise::<i32>(1 << WEIGHT_BITS),
-        SavedFormat::id("l2b")
+        reported("l2b", f64::from(1u32 << SUM_BITS), bias_limit)
             .round()
             .quantise::<i32>(1 << SUM_BITS),
         // Rows are buckets here, so the transpose is already `[bucket][input]`.
-        SavedFormat::id("l3w")
+        reported("l3w", weight_one, 2047.0)
             .transpose()
             .round()
             .quantise::<i32>(1 << WEIGHT_BITS),
-        SavedFormat::id("l3b")
+        reported("l3b", f64::from(1u32 << SUM_BITS), bias_limit)
             .round()
             .quantise::<i32>(1 << SUM_BITS),
     ]);

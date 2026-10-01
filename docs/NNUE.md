@@ -14,7 +14,9 @@ flag, and the default build (`nets/nezha.nnue`) is single-layer. An explicit `-D
 contradicts the file is a compile error.
 
 `setoption name EvalFile` loads a network of the build's architecture. A file of the other
-architecture is refused with `WrongArchitecture` and the current network stays in use.
+architecture is refused with `WrongArchitecture`, and a file that is neither (truncated, garbage)
+with `NotANetwork` in a multi-layer build or `WrongSize` in a single-layer one. The current network
+stays in use.
 
 Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
 `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig` (file layouts, loading),
@@ -160,8 +162,9 @@ Header: the 8 bytes `AVALNNUE`, then fourteen u32:
 | reserved | 0 |
 
 The engine compares all 64 bytes with the header of its own architecture. A file that does not
-start with `AVALNNUE` is not a multi-layer network (`WrongArchitecture`); one that does but differs
-later is `UnsupportedHeader`. A single-layer file has no header: its first bytes are
+start with `AVALNNUE` is not a multi-layer network: `WrongArchitecture` if it has exactly the size
+of a single-layer file, `NotANetwork` otherwise. One that starts with it but differs later is
+`UnsupportedHeader`. A single-layer file has no header: its first bytes are
 feature-transformer weights. Change the format version whenever a formula or a section changes.
 
 ### Invariants
@@ -200,6 +203,20 @@ random weights and accumulators.
 Only L1 uses target intrinsics, and its three variants compute an exact i32 sum, so the result does
 not depend on the target. AVX-512 VNNI (`vpdpbusd`) would be one instruction instead of two; it is
 not used because no machine was available to test it.
+
+The intrinsics are compiled only outside Debug (LLVM leaves them unresolved at `-ODebug`). So a
+plain `zig build test` compares the scalar path with the *portable* L1 only, and reports the test
+`multi head: the SIMD comparison covers an L1 intrinsic path` as skipped. To test the path a release
+binary runs:
+
+```
+zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi "
+```
+
+What has run this way: `sdot` on Apple Silicon, and `pmaddubsw` with AVX2 and with SSSE3 under
+Rosetta. **The AVX-512BW path is untested**: it compiles, and nothing has executed it. Run the
+command above on an AVX-512 machine before trusting a build made there (OpenBench workers built
+with `-Dcpu=native` on such a machine use this path).
 
 ## Training
 
@@ -283,8 +300,8 @@ the scalar-against-SIMD equality on both weight ranges.
 
 ### Trainer against engine, on a GPU machine
 
-This has not been run: the trainer needs CUDA. It checks what the tests above cannot, that
-bullet's graph and save format mean what this document says.
+The trainer needs CUDA. This checks what the tests above cannot, that bullet's graph and save
+format mean what this document says.
 
 ```
 # 1. A net. A short run is enough; parity does not need a strong net.
@@ -302,18 +319,47 @@ TRAIN_ARCH=multi TRAIN_RESUME_FROM=checkpoints/parity-4 TRAIN_PARITY_FENS=fens.t
 ../zig-out/bin/Avalanche nnue-parity checkpoints/parity-4/quantised.bin parity.txt
 ```
 
-Pass: `integer vs trainer evaluations` has a mean of a few centipawns and a maximum below about
-25 cp, and `integer vs float, quantised pairwise` is below 0.75 cp. The trainer evaluates the
-unquantised weights, so this difference also contains the rounding of the weights themselves, the
-i8 L1 weights above all; the 16 cp tolerance above does not apply to it. A failure of the layout
-looks like the third row of the table: differences as large as the evaluations.
+Pass: `integer vs float, quantised pairwise` is below 0.75 cp, and `integer vs trainer
+evaluations` is small against the evaluations themselves (see the measurement below). The trainer
+evaluates the unquantised weights, so that difference also contains the rounding of the weights
+themselves, the i8 L1 weights above all; the 16 cp tolerance above does not apply to it. A failure
+of the layout looks like the third row of the table: differences as large as the evaluations.
+
+First measurement, on commit d4d0dde: a net trained for 3 superbatches of 200 batches on a tiny
+dataset, before the 32-input initialisation was added; the 50 bench positions, mean abs eval
+162 cp, max 773 cp. The trainer ran and saved a 25334400-byte file.
+
+| Comparison | Max | Mean |
+|---|---|---|
+| integer vs float forward pass | 14.2 cp | 2.95 cp |
+| integer vs float, quantised pairwise | 0.49 cp | 0.26 cp |
+| integer vs trainer evaluations | 28.5 cp | 9.3 cp |
+
+So the layout and the formulas match the file bullet saves. The 9 cp mean of the last row is
+weight quantisation, mainly the i8 L1 weights at a resolution of 1/64.5.
+
+Open question, to revisit with a fully trained net: whether that L1 resolution is enough. The
+inputs to the decision are the net's largest `|l1w|` and its parity error. If the weights stay well
+inside ±1.97, one more bit is free (`ACT_BITS = 14`, weights stored as `round(w * 129)`, clip
+±0.98); otherwise quantisation-aware training of L1 is the other route. Either one is a format
+change: bump the format version. `nnue-parity` prints the largest stored weight of each layer
+against its limit, and the trainer prints the largest float weight of each section at every save.
 
 Then build the engine from that file (`zig build --release=fast -Dnet=...`) and run
-`zig build test -Dnet=...` once, which repeats every test of this document with the trained net
-embedded, and `Avalanche bench` on an x86 and an ARM machine: the node counts must be equal.
+
+```
+zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="multi "
+zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="eval: "
+zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="options: EvalFile"
+```
+
+which repeat the network tests of this document with the trained net embedded and the intrinsic
+L1 path compiled in, and `Avalanche bench` on an x86 and an ARM machine: the node counts must be
+equal.
 
 ## Tests
 
 `zig build test` in the default build covers both heads: the multi-layer head's weights are passed
 explicitly, so its tests do not need a multi-layer build. `-Dtest-filter=<text>` runs the tests
-whose name contains the text.
+whose name contains the text. In Debug the L1 intrinsics are not compiled, see "Inference paths";
+use `-Doptimize=ReleaseSafe` for those.
