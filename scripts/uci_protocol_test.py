@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -56,7 +57,7 @@ class Engine:
     def read_until(self, prefix: str, timeout: float) -> list[str]:
         return self.read_until_match(lambda line: line.startswith(prefix), repr(prefix), timeout)
 
-    def read_until_match(self, matches, description: str, timeout: float) -> list[str]:
+    def read_until_match(self, matches: Callable[[str], bool], description: str, timeout: float) -> list[str]:
         deadline = time.monotonic() + timeout
         seen: list[str] = []
         while True:
