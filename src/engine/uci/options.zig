@@ -258,6 +258,7 @@ fn set_eval_file(ctx: Context, value: Value) !void {
         return;
     };
     ctx.position.refresh_evaluation();
+    search.discard_helper_evaluation_caches();
     try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{weights.active_network()});
 }
 

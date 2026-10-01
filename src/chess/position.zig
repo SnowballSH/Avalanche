@@ -97,6 +97,33 @@ pub const Position = struct {
         self.evaluator.nnue_evaluator.release_stack();
     }
 
+    /// Installs `src`'s current position without touching the evaluator, so
+    /// this position keeps its own accumulator stack and Finny table; follow
+    /// with `rebuild_evaluation`. Only the current undo entry is copied: moves
+    /// played from here never read the entries below it.
+    pub fn copy_game_state(self: *Position, src: *const Position) void {
+        self.piece_bitboards = src.piece_bitboards;
+        self.mailbox = src.mailbox;
+        self.turn = src.turn;
+        self.game_ply = src.game_ply;
+        self.start_ply = src.start_ply;
+        self.hash = src.hash;
+        self.pawn_hash = src.pawn_hash;
+        self.history[self.game_ply] = src.history[src.game_ply];
+        self.checkers = src.checkers;
+        self.pinned = src.pinned;
+        self.castling = src.castling;
+        self.uci_chess960 = src.uci_chess960;
+    }
+
+    /// Recomputes evaluation state for the current pieces at the bottom of the
+    /// accumulator stack. Finny entries record the bitboards they were built
+    /// for, so the existing table is reused whatever position it last saw.
+    pub fn rebuild_evaluation(self: *Position) void {
+        self.evaluator.nnue_evaluator.depth = 0;
+        self.evaluator.full_refresh(self);
+    }
+
     pub fn reset(self: *Position) void {
         const stack = self.evaluator.nnue_evaluator.stack;
         const uci_chess960 = self.uci_chess960;
