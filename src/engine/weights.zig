@@ -220,10 +220,22 @@ pub fn do_nnue() void {
     validate(std.mem.asBytes(MODEL)) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
 }
 
+/// Large enough to read a network of either architecture, so that a file of
+/// the other one is named as such rather than as too large.
+pub const MAX_FILE_SIZE = @max(@sizeOf(Network(.single)), @sizeOf(Network(.multi)));
+
+/// The whole file at `path`, for `install`. The caller frees it with
+/// `platform.allocator`.
+pub fn read_file(path: []const u8) ![]u8 {
+    return std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(MAX_FILE_SIZE + 1));
+}
+
 /// Replaces the active network's weights with `bytes`, a whole network file,
-/// keeping its name. The active network is untouched on error. Callers must
-/// refresh every position's accumulators afterwards. Not for wasm, which reads
-/// the embedded network in place.
+/// keeping its name. Every network enters through here, so `bytes` gets the
+/// checks of `validate`: this build's architecture, header and weight ranges.
+/// The active network is untouched on error. Callers must refresh every
+/// position's accumulators afterwards. Not for wasm, which reads the embedded
+/// network in place.
 pub fn install(bytes: []const u8) NetworkError!void {
     try validate(bytes);
     @memcpy(std.mem.asBytes(&model_storage), bytes);
@@ -232,17 +244,14 @@ pub fn install(bytes: []const u8) NetworkError!void {
 /// Replaces the active network with the file at `path`, or with the embedded
 /// network for `EMBEDDED_NAME`. The active network is untouched on error.
 /// Callers must refresh every position's accumulators afterwards.
-/// Large enough to read a network of either architecture and name the problem.
-const MAX_FILE_SIZE = @max(@sizeOf(Network(.single)), @sizeOf(Network(.multi)));
-
 pub fn load(path: []const u8) !void {
     if (comptime !supports_eval_file) return error.Unsupported;
     if (std.mem.eql(u8, path, EMBEDDED_NAME)) {
-        @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
+        try install(NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
         active_name = build_options.net_name;
         return;
     }
-    const bytes = try std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(MAX_FILE_SIZE + 1));
+    const bytes = try read_file(path);
     defer platform.allocator.free(bytes);
     try install(bytes);
 

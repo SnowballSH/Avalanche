@@ -134,7 +134,7 @@ test "netscale: measuring restores the active network, on errors too" {
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
     try testing.expectError(error.NoPositions, netscale.measure(embedded, embedded, &.{CHECK_FEN}, 0));
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
-    try testing.expectError(error.WrongSize, netscale.measure(embedded[1..], embedded, &FENS, 0));
+    try testing.expectError(error.WrongSize, netscale.measure(embedded[0 .. embedded.len - 64], embedded, &FENS, 0));
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
 }
 
@@ -183,6 +183,13 @@ test "netscale: run reports the result as JSON and failures through its exit cod
     try f.write("net.nnue", embedded);
     try f.write("quiet.nnue", quiet);
     try f.write("short.nnue", "not a network");
+    // A network of the architecture this build does not run: a multi-layer one has the magic, a single-layer one
+    // has its size and no magic.
+    const other_bytes = try testing.allocator.alloc(u8, @sizeOf(weights.Network(.single)));
+    defer testing.allocator.free(other_bytes);
+    @memset(other_bytes, 0);
+    if (weights.HEAD == .single) @memcpy(other_bytes[0..weights.MAGIC.len], weights.MAGIC);
+    try f.write("other.nnue", other_bytes);
     try f.write("book.epd", FENS[0] ++ "\n" ++ FENS[1] ++ "\n" ++ CHECK_FEN ++ "\n" ++ FENS[2] ++ "\n");
     try f.write("bad.epd", FENS[0] ++ "\nnot a position\n");
     try f.write("check.epd", CHECK_FEN ++ "\n");
@@ -222,6 +229,15 @@ test "netscale: run reports the result as JSON and failures through its exit cod
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "bad.epd" } }, &.{})).code);
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "missing.epd" } }, &.{})).code);
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "check.epd" } }, &.{})).code);
+
+    // Both networks run on this build's head, so one of the other architecture is refused as EvalFile refuses it.
+    inline for (.{ .{ "other.nnue", "net.nnue" }, .{ "net.nnue", "other.nnue" } }) |nets| {
+        const other = try f.run(&.{ .{ "net", nets[0] }, .{ "ref", nets[1] }, .{ "positions", "book.epd" } }, &.{});
+        try testing.expectEqual(@as(u8, 1), other.code);
+        try testing.expectEqualStrings("", other.output);
+        try testing.expect(std.mem.indexOf(u8, other.errors, "other.nnue' (WrongArchitecture: ") != null);
+        try testing.expect(std.mem.indexOf(u8, other.errors, weights.explain(weights.NetworkError.WrongArchitecture)) != null);
+    }
 
     try testing.expectEqualSlices(u8, embedded, std.mem.asBytes(weights.MODEL));
 }

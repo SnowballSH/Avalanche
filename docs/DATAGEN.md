@@ -137,6 +137,10 @@ Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd
 
 then give the candidate `EvalScale=<eval_scale>` in the SPRT (the reference keeps the default 1000).
 
+Both networks are evaluated by the build that runs the tool, so both must have its architecture (`-Dhead`, see
+[NNUE.md](NNUE.md)): to compare two multi-layer networks, build with one of them as `-Dnet`. A file of the other
+architecture is refused with the message `EvalFile` gives for it.
+
 For both networks the tool takes the mean absolute raw network output (centipawns for the side to move, before
 `EvalScale`, the eval post-scaling, the drawish division and correction history) over the positions the engine would
 evaluate with the network. Positions in check are skipped, and so are positions with no pawns and a phase below 3,
