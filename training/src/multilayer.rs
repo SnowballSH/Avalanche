@@ -34,7 +34,7 @@ const WEIGHT_BITS: u32 = 10;
 /// Fixed-point position of the L2 and L3 biases.
 const SUM_BITS: u32 = ACT_BITS + WEIGHT_BITS;
 
-const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 2;
 const HEAD_MULTI: u32 = 1;
 const MAGIC: &[u8; 8] = b"AVALNNUE";
 const HEADER_SIZE: usize = 64;
@@ -49,10 +49,12 @@ pub fn is_multilayer_file(first_bytes: &[u8]) -> bool {
 /// 12288 inputs, starts the pairwise products near zero.
 const FT_EFFECTIVE_INPUTS: usize = 32;
 
-/// An L1 weight is stored as `round(w * L1_WEIGHT_SCALE)`: a pairwise product of 1.0 is the integer
-/// `255 * 255 / 2^FT_SHIFT`, and the L1 sum has to land on `2^ACT_BITS`.
+/// An L1 weight is stored as `round(w * L1_WEIGHT_SCALE * 2^shift)`: a pairwise product of 1.0 is the
+/// integer `255 * 255 / 2^FT_SHIFT`, and at shift 0 the L1 sum lands on `2^ACT_BITS`.
 const L1_WEIGHT_SCALE: f64 = (1u64 << (ACT_BITS + FT_SHIFT)) as f64 / (QA as f64 * QA as f64);
-/// Keeps `round(w * L1_WEIGHT_SCALE)` inside an i8.
+/// The largest L1 shift the engine accepts (`head_multi.L1_SHIFT_MAX`).
+const L1_SHIFT_MAX: u32 = 7;
+/// Keeps `round(w * L1_WEIGHT_SCALE)` inside an i8, so that shift 0 always works.
 const L1_WEIGHT_CLIP: f32 = (126.9 / L1_WEIGHT_SCALE) as f32;
 /// The engine accepts L2 and L3 weights up to 2047 / 2^WEIGHT_BITS; this is bullet's default clip.
 const WEIGHT_CLIP: f32 = 1.98;
@@ -62,8 +64,29 @@ const _: () = assert!(
     "L2 and L3 weights must fit the engine's range"
 );
 
-/// The 64-byte header the engine compares byte for byte: the magic, then little-endian u32 fields.
-fn header(input_buckets: usize, hidden_size: usize) -> Vec<u8> {
+/// An L1 weight as the file stores it at `shift`, before rounding. `l1_shift` and the layout both go
+/// through this, so the shift is chosen on exactly the numbers that get rounded.
+fn l1_stored(weight: f32, shift: u32) -> f32 {
+    (f64::from(weight) * L1_WEIGHT_SCALE * f64::from(1u32 << shift)) as f32
+}
+
+/// The L1 shift of a net: the largest one, up to `L1_SHIFT_MAX`, at which every stored L1 weight still
+/// fits an i8. A net with small L1 weights then uses the whole i8 range instead of a few levels of it.
+/// The engine removes the extra bits after the L1 sum.
+fn l1_shift(l1_weights: &[f32]) -> u32 {
+    let max = l1_weights
+        .iter()
+        .fold(0.0f32, |max, weight| max.max(weight.abs()));
+    let mut shift = 0;
+    while shift < L1_SHIFT_MAX && l1_stored(max, shift + 1).round() <= 127.0 {
+        shift += 1;
+    }
+    shift
+}
+
+/// The 64-byte header: the magic, then little-endian u32 fields. The engine compares all of it but
+/// the L1 shift with its own.
+fn header(input_buckets: usize, hidden_size: usize, l1_shift: u32) -> Vec<u8> {
     let fields = [
         FORMAT_VERSION,
         HEAD_MULTI,
@@ -77,6 +100,7 @@ fn header(input_buckets: usize, hidden_size: usize) -> Vec<u8> {
         ACT_BITS,
         WEIGHT_BITS,
         EVAL_SCALE as u32,
+        l1_shift,
     ];
     let mut bytes = MAGIC.to_vec();
     for field in fields {
@@ -91,7 +115,7 @@ fn header(input_buckets: usize, hidden_size: usize) -> Vec<u8> {
 ///
 /// L1 goes to `[bucket][input / 4][output][input % 4]`, scaled: the four weights that one output has
 /// for one block of four inputs are adjacent, which is what the engine's sparse dot product reads.
-fn l1_weights_layout(values: &[f32], inputs: usize) -> Vec<f32> {
+fn l1_weights_layout(values: &[f32], inputs: usize, shift: u32) -> Vec<f32> {
     let rows = NUM_OUTPUT_BUCKETS * L1_SIZE;
     assert_eq!(values.len(), rows * inputs);
     assert_eq!(inputs % 4, 0);
@@ -101,9 +125,9 @@ fn l1_weights_layout(values: &[f32], inputs: usize) -> Vec<f32> {
     for bucket in 0..NUM_OUTPUT_BUCKETS {
         for input in 0..inputs {
             for output in 0..L1_SIZE {
-                let weight = f64::from(values[input * rows + bucket * L1_SIZE + output]);
+                let weight = values[input * rows + bucket * L1_SIZE + output];
                 let index = ((bucket * blocks + input / 4) * L1_SIZE + output) * 4 + input % 4;
-                layout[index] = (weight * L1_WEIGHT_SCALE) as f32;
+                layout[index] = l1_stored(weight, shift);
             }
         }
     }
@@ -153,16 +177,43 @@ fn save_format(input_buckets: usize, hidden_size: usize, use_factoriser: bool) -
         })
     };
 
-    let mut format = vec![SavedFormat::custom(header(input_buckets, hidden_size))];
+    // The header depends on the weights being saved, through the L1 shift, so it is not a fixed
+    // `SavedFormat::custom`. It is written byte by byte as i8, and has no id, which keeps it out of
+    // bullet's raw.bin.
+    let header_format = SavedFormat::empty()
+        .transform(move |store, _| {
+            let shift = l1_shift(store.get("l1w").values.f32());
+            header(input_buckets, hidden_size, shift)
+                .into_iter()
+                .map(|byte| f32::from(byte as i8))
+                .collect()
+        })
+        .quantise::<i8>(1);
+
+    let mut format = vec![header_format];
     format.extend(feature_transformer_format(use_factoriser, input_buckets));
     format.extend([
-        reported("l1w", L1_WEIGHT_SCALE, 127.0)
-            .transform(move |_, values| l1_weights_layout(&values, hidden_size))
+        SavedFormat::id("l1w")
+            .transform(move |_, values| {
+                let shift = l1_shift(&values);
+                report_max("l1w", L1_WEIGHT_SCALE * f64::from(1u32 << shift), 127.0)(&values);
+                println!("  l1w: L1 shift {shift} of {L1_SHIFT_MAX}");
+                l1_weights_layout(&values, hidden_size, shift)
+            })
             .round()
             .quantise::<i8>(1),
-        reported("l1b", f64::from(1u32 << ACT_BITS), bias_limit)
+        // The bias joins the L1 sum, so it carries the same extra bits as the weights.
+        SavedFormat::id("l1b")
+            .transform(move |store, values| {
+                let scale = f64::from(1u32 << (ACT_BITS + l1_shift(store.get("l1w").values.f32())));
+                report_max("l1b", scale, bias_limit)(&values);
+                values
+                    .into_iter()
+                    .map(|bias| (f64::from(bias) * scale) as f32)
+                    .collect()
+            })
             .round()
-            .quantise::<i32>(1 << ACT_BITS),
+            .quantise::<i32>(1),
         reported("l2w", weight_one, 2047.0)
             .transform(|_, values| l2_weights_layout(&values))
             .round()
@@ -297,7 +348,7 @@ mod tests {
 
     #[test]
     fn header_matches_the_engine() {
-        let bytes = header(16, 1024);
+        let bytes = header(16, 1024, 3);
         assert_eq!(bytes.len(), 64);
         assert_eq!(&bytes[..8], b"AVALNNUE");
         let fields: Vec<u32> = bytes[8..]
@@ -306,7 +357,7 @@ mod tests {
             .collect();
         assert_eq!(
             fields,
-            [1, 1, 16, 1024, 8, 16, 32, 255, 9, 13, 10, 400, 0, 0]
+            [2, 1, 16, 1024, 8, 16, 32, 255, 9, 13, 10, 400, 3, 0]
         );
     }
 
@@ -327,13 +378,44 @@ mod tests {
             }
         }
 
-        let layout = l1_weights_layout(&values, inputs);
+        let shift = 2;
+        let layout = l1_weights_layout(&values, inputs, shift);
         let at = |bucket: usize, block: usize, output: usize, k: usize| {
             layout[((bucket * 2 + block) * L1_SIZE + output) * 4 + k]
         };
         for (bucket, block, output, k) in [(0, 0, 0, 0), (3, 1, 7, 2), (7, 1, 15, 3)] {
-            let expected = f64::from(code(bucket, block * 4 + k, output)) * L1_WEIGHT_SCALE;
+            let expected = f64::from(code(bucket, block * 4 + k, output)) * L1_WEIGHT_SCALE * 4.0;
             assert!((f64::from(at(bucket, block, output, k)) - expected).abs() < 1e-4);
+        }
+    }
+
+    /// The same cases as `head_multi.l1_shift_for` in the engine's tests.
+    #[test]
+    fn l1_shift_fills_the_i8_range() {
+        assert_eq!(l1_shift(&[0.5, -1.9689]), 0);
+        assert_eq!(l1_shift(&[1.0]), 0);
+        assert_eq!(l1_shift(&[-0.98, 0.1]), 1);
+        assert_eq!(l1_shift(&[0.2166, -0.01]), 3);
+        assert_eq!(l1_shift(&[0.001]), L1_SHIFT_MAX);
+        assert_eq!(l1_shift(&[0.0]), L1_SHIFT_MAX);
+        assert_eq!(l1_shift(&[L1_WEIGHT_CLIP, -L1_WEIGHT_CLIP]), 0);
+
+        // Whatever the largest weight, it is stored in 64..=127 unless the shift is at its cap.
+        for step in 1..2000 {
+            let max = step as f32 * 0.001;
+            if max > L1_WEIGHT_CLIP {
+                break;
+            }
+            let shift = l1_shift(&[max, -max / 3.0]);
+            let stored = l1_stored(max, shift).round();
+            assert!(
+                stored <= 127.0,
+                "{max} at shift {shift} is stored as {stored}"
+            );
+            assert!(
+                shift == L1_SHIFT_MAX || stored >= 63.0,
+                "{max} wastes range at shift {shift}"
+            );
         }
     }
 

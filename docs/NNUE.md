@@ -68,13 +68,30 @@ product that fits.
 | `FT_SHIFT` | 9 | pairwise product shift |
 | pairwise 1.0 | 255² / 2⁹ = 127.002 | integer value of a pairwise product of 1.0 |
 | `ACT_BITS` | 13 | fixed point of the L1 output and of every later activation: 8192 is 1.0 |
-| `L1_WEIGHT_SCALE` | 2²² / 255² = 64.5027 | an L1 weight is stored as `round(w * 64.5027)` |
+| `L1_WEIGHT_SCALE` | 2²² / 255² = 64.5027 | an L1 weight is stored as `round(w * 64.5027 * 2^e)` |
+| `e`, the L1 shift | 0..7, per network, in the header | extra fixed-point bits of the L1 weights, bias and sum |
 | `WEIGHT_BITS` | 10 | fixed point of L2 and L3 weights: 1024 is 1.0 |
 | `SUM_BITS` | 23 | fixed point of L2 and L3 biases and sums |
 | `SCALE` | 400 | centipawns per unit of output |
 
-`L1_WEIGHT_SCALE` is chosen so that `stored weight * stored activation = w * a * 2¹³` exactly:
-`64.5027 * 127.002 = 8192`. The L1 sum is therefore a plain Q13 number and its bias is `b * 8192`.
+`L1_WEIGHT_SCALE` is chosen so that, at `e = 0`, `stored weight * stored activation = w * a * 2¹³`
+exactly: `64.5027 * 127.002 = 8192`. The L1 sum is then a plain Q13 number.
+
+**The L1 shift.** An i8 at scale 64.5 covers weights up to ±1.97, but the L1 weights of a trained
+net are much smaller: the first net trained on a GPU had a largest `|l1w|` of 0.2166, 14 of 127
+levels, and the rounding of those weights alone cost 23 cp on average against the trainer. So the
+scale is per network. The trainer saves with the largest `e` in 0..7 at which every stored L1
+weight still fits an i8 (`round(max|w| * 64.5027 * 2^e) <= 127`), which puts the largest weight at
+64..127 levels; it stores `e` in the header and the L1 bias at the same scale. The L1 sum is then a
+Q(13 + e) number, and the engine rounds it back to Q13 with one shift on 16 values. Everything
+after that is the same for every network.
+
+`e` stops at 7: a net that would take more has no L1 weight above 0.0154, which is not a net worth
+storing better, and the cap keeps the bias range wide (see Invariants). L2 and L3 need no such
+thing. Their weights are i32 at Q10, so a weight is rounded by at most 2⁻¹¹ whatever its size, and
+there are only 32 inputs per sum, against 1024 for L1: the same GPU net used 1068 and 857 of 2047
+levels there, and the float comparison with the engine's pairwise products, which contains all of
+the L2 and L3 arithmetic, was within 0.54 cp.
 
 ### Integer formula
 
@@ -86,8 +103,9 @@ nearest, halves up. Everything is i32 except the last line.
      p[i]       = (clamp(own[i], 0, 255) * clamp(own[i + 512], 0, 255) + 256) >> 9     i < 512
      p[512 + i] = (clamp(opp[i], 0, 255) * clamp(opp[i + 512], 0, 255) + 256) >> 9
 
-2. L1, for j < 16:
-     z1[j] = l1b[b][j] + sum over i < 1024 of p[i] * l1w[b][i / 4][j][i % 4]
+2. L1, for j < 16, with the network's shift e:
+     s[j]  = l1b[b][j] + sum over i < 1024 of p[i] * l1w[b][i / 4][j][i % 4]
+     z1[j] = (s[j] + ((1 << e) >> 1)) >> e                  (z1 = s when e = 0)
 
 3. Dual activation, 32 values in 0..8192:
      c[j]      = clamp(z1[j], 0, 8192)
@@ -131,8 +149,8 @@ changes nothing in the sum, only its cost. The weights of one block are 64 adjac
 | 0 | header | bytes | 64 | below |
 | 64 | `l0w[feature][i]` | i16 | 12288 x 1024 | `round(w * 255)` |
 | 25165888 | `l0b[i]` | i16 | 1024 | `round(b * 255)` |
-| 25167936 | `l1w[bucket][block][j][k]`, input `4 * block + k` | i8 | 8 x 256 x 16 x 4 | `round(w * 64.5027)` |
-| 25299008 | `l1b[bucket][j]` | i32 | 8 x 16 | `round(b * 2¹³)` |
+| 25167936 | `l1w[bucket][block][j][k]`, input `4 * block + k` | i8 | 8 x 256 x 16 x 4 | `round(w * 64.5027 * 2^e)` |
+| 25299008 | `l1b[bucket][j]` | i32 | 8 x 16 | `round(b * 2^(13 + e))`, Q(13 + e) |
 | 25299520 | `l2w[bucket][k][o]`, input `k`, output `o` | i32 | 8 x 32 x 32 | `round(w * 2¹⁰)` |
 | 25332288 | `l2b[bucket][o]` | i32 | 8 x 32 | `round(b * 2²³)` |
 | 25333312 | `l3w[bucket][o]` | i32 | 8 x 32 | `round(w * 2¹⁰)` |
@@ -146,7 +164,7 @@ Header: the 8 bytes `AVALNNUE`, then fourteen u32:
 
 | Field | Value |
 |---|---|
-| format version | 1 |
+| format version | 2 |
 | head | 1 (multi) |
 | king input buckets | 16 |
 | accumulator width | 1024 |
@@ -158,10 +176,15 @@ Header: the 8 bytes `AVALNNUE`, then fourteen u32:
 | `ACT_BITS` | 13 |
 | `WEIGHT_BITS` | 10 |
 | `SCALE` | 400 |
-| reserved | 0 |
+| L1 shift `e` | 0..7, chosen by the trainer for this network |
 | reserved | 0 |
 
-The engine compares all 64 bytes with the header of its own architecture. A file that does not
+Version 1 had no L1 shift (it was version 2 with `e = 0` and a reserved field in its place); no
+network of it was ever used.
+
+The engine compares all 64 bytes, except the L1 shift, with the header of its own architecture,
+and requires the shift to be at most 7. It reads the shift from the header of the active network
+at every evaluation, so an embedded network and one loaded with `EvalFile` work the same way. A file that does not
 start with `AVALNNUE` is not a multi-layer network: `WrongArchitecture` if it has exactly the size
 of a single-layer file, `NotANetwork` otherwise. One that starts with it but differs later is
 `UnsupportedHeader`. A single-layer file has no header: its first bytes are
@@ -174,14 +197,20 @@ enforces them by clipping, and bullet's quantiser fails the save rather than wra
 
 | Value | Stored range | Float range | Trainer |
 |---|---|---|---|
-| `l1w` | any i8 | ±1.9689 | AdamW clip ±126.9 / 64.5027 = ±1.9674 |
+| `e` | 0..7 | | largest value at which `l1w` fits an i8 |
+| `l1w` | any i8 | ±1.9689 / 2^e | AdamW clip ±126.9 / 64.5027 = ±1.9674, so `e = 0` always fits |
 | `l2w`, `l3w` | ±2047 | ±1.999 | AdamW clip ±1.98 (stored ±2028) |
-| `l1b`, `l2b`, `l3b` | ±2³⁰ | ±131072 (`l1b`), ±128 | AdamW default clip ±1.98 |
+| `l1b` | ±2³⁰ | ±2^(17 - e): ±131072 at `e = 0`, ±1024 at `e = 7` | AdamW default clip ±1.98 |
+| `l2b`, `l3b` | ±2³⁰ | ±128 | AdamW default clip ±1.98 |
 | `l0w`, `l0b` | i16 | | as for the single-layer net: ±0.99 with the factoriser |
 
 Why no i32 sum can overflow:
 
-- L1: `1024 * 127 * 128 < 2²⁴`, plus a bias up to 2³⁰.
+- L1: the weights are i8 and the activations at most 127 whatever `e` is, so the sum of products
+  is below `1024 * 127 * 128 < 2²⁴`. With a bias up to 2³⁰ and the rounding term `2^(e-1) <= 64`,
+  `2³⁰ + 2²⁴ + 64 < 2³¹`. `e` only changes what the numbers mean, not how large they get. That is
+  why the bound on `e` comes from the bias, not from overflow: at `e = 7` a bias of ±1024 still
+  fits, 500 times the trainer's clip.
 - L2 and L3: `32 * 8192 * 2047 < 2²⁹`, plus a bias up to 2³⁰, so below 2³¹.
 - The square: `8192² + 4096 < 2²⁷`.
 - Accumulators cannot overflow i16 for trained weights, as for the single-layer net; that is not
@@ -274,7 +303,8 @@ A positions file has one FEN per line, optionally followed by `| <centipawns>`. 
 the report adds the difference between the integer evaluation and the given numbers.
 
 `nnue-random` writes a random network: by default with head weights of the magnitude of a trained
-network (`|l1w| <= 12`, `|l2w|, |l3w| <= 400`), with `full` over the whole valid range.
+network (`|l1w| <= 0.19`, stored as up to 96 at `e = 3`; `|l2w|, |l3w| <= 400`), with `full` over
+the whole valid range at `e = 0`.
 `nnue-speed` times the build's head on the bench positions.
 
 ### Tolerances
@@ -282,7 +312,7 @@ network (`|l1w| <= 12`, `|l2w|, |l3w| <= 400`), with `full` over the whole valid
 | Comparison | Tolerance | Measured on random weights |
 |---|---|---|
 | integer vs float with quantised pairwise | 0.75 cp | max 0.53 cp, any weight range |
-| integer vs float, trained-magnitude weights | 16 cp | max 7.4 cp, mean 1.2 cp, mean abs eval 100 to 180 cp |
+| integer vs float, trained-magnitude weights | 16 cp | max 6.0 cp, mean 1.2 cp, mean abs eval 100 to 180 cp |
 | integer vs float, full-range weights | none | max 143 cp, mean 18 cp, mean abs eval 1200 cp |
 
 - With the engine's own pairwise products, what is left is the final rounding to a whole
@@ -294,9 +324,12 @@ network (`|l1w| <= 12`, `|l2w|, |l3w| <= 400`), with `full` over the whole valid
   and is the same in every engine that uses them.
 - A layout or formula mismatch gives a difference of the order of the evaluations themselves,
   hundreds of centipawns.
+- A fourth tolerance, 16 cp max and 4 cp mean, is for the rounding of the L1 weights: float L1
+  weights up to 0.2166, stored at the shift the trainer would pick, against those floats on the
+  engine's pairwise products. Measured 8.1 cp max, 1.2 cp mean; without the shift, 81 and 17.
 
 The unit tests (`src/tests/nnue_multi.zig`) assert the first two rows on random accumulators, and
-the scalar-against-SIMD equality on both weight ranges.
+the scalar-against-SIMD equality on both weight ranges at every L1 shift.
 
 ### Trainer against engine, on a GPU machine
 
@@ -325,7 +358,7 @@ evaluates the unquantised weights, so that difference also contains the rounding
 themselves, the i8 L1 weights above all; the 16 cp tolerance above does not apply to it. A failure
 of the layout looks like the third row of the table: differences as large as the evaluations.
 
-First measurement, on commit d4d0dde: a net trained for 3 superbatches of 200 batches on a tiny
+First measurement, on commit d4d0dde (format version 1): a net trained for 3 superbatches of 200 batches on a tiny
 dataset, before the 32-input initialisation was added; the 50 bench positions, mean abs eval
 162 cp, max 773 cp. The trainer ran and saved a 25334400-byte file.
 
@@ -338,12 +371,26 @@ dataset, before the 32-input initialisation was added; the 50 bench positions, m
 So the layout and the formulas match the file bullet saves. The 9 cp mean of the last row is
 weight quantisation, mainly the i8 L1 weights at a resolution of 1/64.5.
 
-Open question, to revisit with a fully trained net: whether that L1 resolution is enough. The
-inputs to the decision are the net's largest `|l1w|` and its parity error. If the weights stay well
-inside ±1.97, one more bit is free (`ACT_BITS = 14`, weights stored as `round(w * 129)`, clip
-±0.98); otherwise quantisation-aware training of L1 is the other route. Either one is a format
-change: bump the format version. `nnue-parity` prints the largest stored weight of each layer
-against its limit, and the trainer prints the largest float weight of each section at every save.
+Second measurement, on commit 31b3a0d (still format version 1), with the 32-input initialisation
+and `TRAIN_L1_SPARSITY=0.005`; mean abs eval 196.7 cp. The trainer printed, at save: `l1w` max 0.2166,
+stored as 14 of 127; `l2w` 1068 of 2047; `l3w` 857 of 2047.
+
+| Comparison | Max | Mean |
+|---|---|---|
+| integer vs float forward pass | 3.0 cp | 0.9 cp |
+| integer vs float, quantised pairwise | 0.54 cp | 0.23 cp |
+| integer vs trainer evaluations | 83.8 cp | 22.7 cp |
+
+The arithmetic is right; the last row is the L1 weights rounded to 14 levels. That is what the L1
+shift of format version 2 removes: this net would be saved with `e = 3`, its largest weight at 112
+of 127. A unit test reproduces the case with random weights of that size: 81 cp max and 17 cp mean
+at `e = 0`, 8.1 cp and 1.2 cp at `e = 3`. The run on a GPU with version 2 has not been done yet;
+the target is a few centipawns in the last row.
+
+`nnue-parity` prints a net's L1 shift and the largest stored weight of each layer against its
+limit, and the trainer prints the largest float weight of each section, and the shift, at every
+save. If a fully trained net still shows a large last row with `l1w` near 127 levels, the next
+step is quantisation-aware training of L1, not more bits.
 
 Then build the engine from that file (`zig build --release=fast -Dnet=...`) and run
 
