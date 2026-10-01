@@ -125,3 +125,23 @@ WDL tables assume a zero fifty-move counter. A tablebase win recorded in a drawn
 counter was already high, although such a win may not be convertible before the fifty-move rule; telling the two
 apart needs DTZ tables. On an endgame-book sample (400k positions), about 6% of positions were masked, 98% of them
 with a non-zero counter; an independent check with python-chess's Syzygy prober agreed on every probed position.
+
+## Network eval scale
+
+Search margins are tuned to the production network's eval scale, and every newly trained network comes out slightly
+louder or quieter. Before an SPRT, rescale the candidate to the production network:
+
+```
+Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd> out=<scaled.nnue> [limit=<n>]
+```
+
+For both networks the tool takes the mean absolute raw network output (centipawns for the side to move, before the
+eval post-scaling, the drawish division and correction history) over the positions that are not in check, each
+evaluated from a fresh accumulator. `out` is a copy of `net` whose output-layer weights and biases are multiplied by
+`factor = ref_mean_abs / candidate_mean_abs` and rounded to nearest; every other byte is identical. `limit` uses only
+the first `n` positions not in check. An invalid position line is an error naming the line.
+
+It prints one JSON line: `positions`, `ref_mean_abs`, `candidate_mean_abs`, `factor` and `scaled_mean_abs`, the last
+measured on the written network to show the rounding error. Nothing is written, and the exit code is non-zero, when
+a scaled output weight would leave [-128, 127] (inference multiplies a weight by an activation of up to 255 in an
+i16, and `EvalFile` rejects weights outside that range) or a scaled bias would overflow i16.

@@ -30,6 +30,8 @@ test {
     _ = @import("chess/fen.zig");
     _ = @import("tests/viriformat.zig");
     _ = @import("tests/tbfilter_viri.zig");
+    _ = @import("engine/netscale.zig");
+    _ = @import("tests/netscale.zig");
 }
 
 test "Basic Piece and Color" {
