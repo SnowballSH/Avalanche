@@ -15,6 +15,10 @@
   verification, at a restricted root, when a capture or promotion raised alpha,
   and when the result is bounded on the wrong side of the eval. qsearch only
   reads.
+- qsearch probes the TT before evaluating: a cutoff costs no evaluation, and a
+  stored raw eval replaces the evaluator call, corrected on read as in `negamax`.
+  The upper-bound cutoff therefore compares against the incoming alpha, not the
+  one raised by stand-pat.
 - The bonus uses the corrected eval: the gravity rule accumulates, so a
   raw-based bonus would drive any consistent error to the limit, while the
   residual stops once the corrected eval agrees with the search.

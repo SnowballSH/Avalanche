@@ -1867,24 +1867,7 @@ pub const Searcher = struct {
             }
         }
 
-        // >> Step 2: Prunings
-
-        var best_score = -hce.MateScore + @as(i32, @intCast(self.ply));
-        var raw_eval = best_score;
-        if (!in_check) {
-            raw_eval = hce.evaluate_comptime(pos, color);
-            best_score = self.corrected_eval(pos, color, raw_eval);
-
-            // Step 2.1: Stand Pat pruning
-            if (best_score >= beta) {
-                return beta;
-            }
-            if (best_score > alpha) {
-                alpha = best_score;
-            }
-        }
-
-        // >> Step 3: TT Probe
+        // >> Step 2: TT Probe
         var hashmove = types.Move.empty();
         var best_move = types.Move.empty();
         const entry = self.ttable.get(pos.hash);
@@ -1904,6 +1887,23 @@ pub const Searcher = struct {
                 return scored;
             } else if (entry.?.flag == tt.Bound.Upper and scored <= alpha) {
                 return scored;
+            }
+        }
+
+        // >> Step 3: Prunings
+
+        var best_score = -hce.MateScore + @as(i32, @intCast(self.ply));
+        var raw_eval = best_score;
+        if (!in_check) {
+            raw_eval = if (entry != null and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else hce.evaluate_comptime(pos, color);
+            best_score = self.corrected_eval(pos, color, raw_eval);
+
+            // Step 3.1: Stand Pat pruning
+            if (best_score >= beta) {
+                return beta;
+            }
+            if (best_score > alpha) {
+                alpha = best_score;
             }
         }
 
