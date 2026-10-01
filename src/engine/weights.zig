@@ -25,11 +25,17 @@ pub const Head = enum { single, multi };
 /// header and starts with feature-transformer weights.
 pub const MAGIC = "AVALNNUE";
 pub const HEADER_SIZE = 64;
-pub const FORMAT_VERSION = 1;
+pub const FORMAT_VERSION = 2;
 
-/// The whole header of a multi-layer network this build can run: the magic,
-/// then little-endian u32 fields. A file must match it byte for byte.
-pub const MULTI_HEADER: [HEADER_SIZE]u8 = blk: {
+/// Where the header keeps the network's L1 shift, a u32.
+pub const L1_SHIFT_OFFSET = MAGIC.len + 12 * 4;
+
+/// The header of a multi-layer network this build can run, with L1 shift 0:
+/// the magic, then little-endian u32 fields. A file must match it byte for
+/// byte except for its L1 shift, which is 0..7.
+pub const MULTI_HEADER: [HEADER_SIZE]u8 = multi_header(0);
+
+pub fn multi_header(shift: head_multi.L1Shift) [HEADER_SIZE]u8 {
     const fields = [_]u32{
         FORMAT_VERSION,
         @intFromEnum(Head.multi),
@@ -43,14 +49,26 @@ pub const MULTI_HEADER: [HEADER_SIZE]u8 = blk: {
         head_multi.ACT_BITS,
         head_multi.WEIGHT_BITS,
         arch.SCALE,
+        shift,
     };
     var header: [HEADER_SIZE]u8 = @splat(0);
     @memcpy(header[0..MAGIC.len], MAGIC);
     for (fields, 0..) |field, i| {
         std.mem.writeInt(u32, header[MAGIC.len + i * 4 ..][0..4], field, .little);
     }
-    break :blk header;
-};
+    return header;
+}
+
+/// The L1 shift of a validated header.
+pub inline fn l1_shift(header: *const [HEADER_SIZE]u8) head_multi.L1Shift {
+    return @truncate(header[L1_SHIFT_OFFSET]);
+}
+
+fn header_supported(header: *const [HEADER_SIZE]u8) bool {
+    const shift = std.mem.readInt(u32, header[L1_SHIFT_OFFSET..][0..4], .little);
+    if (shift > head_multi.L1_SHIFT_MAX) return false;
+    return std.mem.eql(u8, header, &multi_header(@intCast(shift)));
+}
 
 fn has_magic(bytes: []const u8) bool {
     return std.mem.startsWith(u8, bytes, MAGIC);
@@ -138,7 +156,7 @@ pub fn validate_as(comptime kind: Head, bytes: []const u8) NetworkError!void {
             if (!has_magic(bytes)) {
                 return if (bytes.len == @sizeOf(Network(.single))) NetworkError.WrongArchitecture else NetworkError.NotANetwork;
             }
-            if (bytes.len < HEADER_SIZE or !std.mem.eql(u8, bytes[0..HEADER_SIZE], &MULTI_HEADER)) return NetworkError.UnsupportedHeader;
+            if (bytes.len < HEADER_SIZE or !header_supported(bytes[0..HEADER_SIZE])) return NetworkError.UnsupportedHeader;
         },
     }
     if (bytes.len != @sizeOf(Net)) return NetworkError.WrongSize;
@@ -146,6 +164,15 @@ pub fn validate_as(comptime kind: Head, bytes: []const u8) NetworkError!void {
     try switch (kind) {
         .single => head_single.validate(head_bytes),
         .multi => head_multi.validate(head_bytes),
+    };
+}
+
+/// Evaluation of the active network in centipawns for the side to move, whose
+/// accumulator is `own`.
+pub inline fn evaluate(own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
+    return switch (HEAD) {
+        .single => head_single.evaluate(&MODEL.head, own, opp, bucket),
+        .multi => head_multi.evaluate(&MODEL.head, l1_shift(&MODEL.header), own, opp, bucket),
     };
 }
 
@@ -173,7 +200,7 @@ comptime {
     if (build_options.head != .auto and has_magic(NNUE_SOURCE) != (HEAD == .multi)) {
         @compileError("-Dhead=" ++ @tagName(HEAD) ++ " does not match the embedded network, which is a " ++ (if (has_magic(NNUE_SOURCE)) "multi" else "single") ++ "-layer one; check -Dnet");
     }
-    if (HEAD == .multi and !std.mem.eql(u8, NNUE_SOURCE[0..HEADER_SIZE], &MULTI_HEADER)) {
+    if (HEAD == .multi and !header_supported(NNUE_SOURCE[0..HEADER_SIZE])) {
         @compileError("The embedded multi-layer network's header does not match this build's architecture (" ++ ARCHITECTURE ++ "); see docs/NNUE.md");
     }
     if (NNUE_SOURCE.len != @sizeOf(NNUEWeights)) {

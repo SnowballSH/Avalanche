@@ -456,6 +456,6 @@ pub const NNUE = struct {
 
         const own = if (turn == types.Color.White) &acc.white else &acc.black;
         const opp = if (turn == types.Color.White) &acc.black else &acc.white;
-        return weights.head.evaluate(&weights.MODEL.head, own, opp, bucket);
+        return weights.evaluate(own, opp, bucket);
     }
 };

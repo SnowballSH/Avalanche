@@ -761,7 +761,7 @@ fn evaluate_nnue_scalar(pos: *position.Position, comptime turn: types.Color) i32
     const bucket = @min((pieces -| 2) / 4, weights.OUTPUT_SIZE - 1);
     const own = if (turn == types.Color.White) &accumulator.white else &accumulator.black;
     const opp = if (turn == types.Color.White) &accumulator.black else &accumulator.white;
-    if (weights.HEAD == .multi) return weights.head_multi.evaluate_scalar(&weights.MODEL.head, own, opp, bucket);
+    if (weights.HEAD == .multi) return weights.head_multi.evaluate_scalar(&weights.MODEL.head, weights.l1_shift(&weights.MODEL.header), own, opp, bucket);
     const output_weights = &weights.MODEL.head.layer_2[bucket];
 
     var result: i32 = 0;

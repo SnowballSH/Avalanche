@@ -46,16 +46,20 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
 
     var distinct = std.AutoHashMap(i32, void).init(std.testing.allocator);
     defer distinct.deinit();
-    for (0..6) |net| {
-        // Even rounds use the whole validated range, including its extremes.
-        head_multi.fill_random(head, random, if (net % 2 == 0) .{} else parity.REALISTIC_RANGE);
+    for (0..16) |net| {
+        // Every L1 shift, with the whole validated range (including its
+        // extremes) and with weights of trained magnitude.
+        const shift: head_multi.L1Shift = @intCast(net / 2);
+        var range: head_multi.RandomRange = if (net % 2 == 0) .{} else parity.REALISTIC_RANGE;
+        range.l1_shift = shift;
+        head_multi.fill_random(head, random, range);
         try head_multi.validate(std.mem.asBytes(head));
-        for (0..400) |round| {
+        for (0..200) |round| {
             const acc = random_accumulators(random, round);
             const bucket = round % arch.OUTPUT_SIZE;
-            const scalar = head_multi.evaluate_scalar(head, &acc.own, &acc.opp, bucket);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, &acc.own, &acc.opp, bucket));
-            try expectEqual(scalar, head_multi.evaluate(head, &acc.own, &acc.opp, bucket));
+            const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, bucket);
+            try expectEqual(scalar, head_multi.evaluate_simd(head, shift, &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate(head, shift, &acc.own, &acc.opp, bucket));
             try distinct.put(scalar, {});
         }
     }
@@ -90,8 +94,10 @@ test "multi head: saturated weights cannot overflow" {
             @memset(values, sign * head_multi.WEIGHT_LIMIT);
         }
         try head_multi.validate(std.mem.asBytes(head));
-        const scalar = head_multi.evaluate_scalar(head, &acc.own, &acc.opp, 0);
-        try expectEqual(scalar, head_multi.evaluate_simd(head, &acc.own, &acc.opp, 0));
+        for ([_]head_multi.L1Shift{ 0, 1, head_multi.L1_SHIFT_MAX }) |shift| {
+            const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, 0);
+            try expectEqual(scalar, head_multi.evaluate_simd(head, shift, &acc.own, &acc.opp, 0));
+        }
     }
 
     head.l3_weights[3][5] = head_multi.WEIGHT_LIMIT + 1;
@@ -110,15 +116,20 @@ test "multi head: the integer formula follows the float forward pass" {
     var trainer: parity.Difference = .{};
     var quantised: parity.Difference = .{};
     var magnitude: parity.Difference = .{};
-    for (0..8) |_| {
-        head_multi.fill_random(head, random, parity.REALISTIC_RANGE);
+    for (0..8) |net| {
+        // The same float magnitudes at every shift: 12 << shift is stored.
+        const shift: head_multi.L1Shift = @intCast(net % 4);
+        var range = parity.REALISTIC_RANGE;
+        range.l1_shift = shift;
+        range.l1_weight = @as(i8, 12) << shift;
+        head_multi.fill_random(head, random, range);
         for (0..250) |round| {
             // Dense rounds only: `random.int(i16)` rounds are all 0 or 255.
             const acc = random_accumulators(random, round % 3);
             const bucket = round % arch.OUTPUT_SIZE;
-            const engine: f64 = @floatFromInt(head_multi.evaluate(head, &acc.own, &acc.opp, bucket));
-            trainer.add(engine, head_multi.evaluate_float(head, &acc.own, &acc.opp, bucket, .trainer));
-            quantised.add(engine, head_multi.evaluate_float(head, &acc.own, &acc.opp, bucket, .quantised_pairwise));
+            const engine: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, bucket));
+            trainer.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .trainer));
+            quantised.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .quantised_pairwise));
             magnitude.add(engine, 0);
         }
     }
@@ -128,6 +139,85 @@ test "multi head: the integer formula follows the float forward pass" {
     try expect(magnitude.mean() > 50);
     try expect(quantised.max <= head_multi.QUANTISED_TOLERANCE_CP);
     try expect(trainer.max <= head_multi.TRAINER_TOLERANCE_CP);
+}
+
+/// Stores float L1 weights and biases of bucket 0 as the trainer does at `shift`.
+fn quantise_l1(head: *head_multi.Weights, shift: head_multi.L1Shift, l1_weights: *const [head_multi.L1_INPUTS][head_multi.L1_SIZE]f64, bias: *const [head_multi.L1_SIZE]f64) void {
+    const shifted: f64 = @floatFromInt(@as(u32, 1) << shift);
+    for (l1_weights, 0..) |*outputs, input| {
+        for (outputs, 0..) |weight, j| {
+            head.l1_weights[0][input / 4][j][input % 4] = @intFromFloat(@round(weight * head_multi.L1_WEIGHT_SCALE * shifted));
+        }
+    }
+    for (bias, &head.l1_bias[0]) |value, *stored| {
+        stored.* = @intFromFloat(@round(value * @as(f64, @floatFromInt(head_multi.ONE)) * shifted));
+    }
+}
+
+test "multi head: small L1 weights are stored with a shift and stay close to the float model" {
+    var prng = std.Random.DefaultPrng.init(0x5eed_0005);
+    const random = prng.random();
+    const head = try std.testing.allocator.create(head_multi.Weights);
+    defer std.testing.allocator.destroy(head);
+    const l1_weights = try std.testing.allocator.create([head_multi.L1_INPUTS][head_multi.L1_SIZE]f64);
+    defer std.testing.allocator.destroy(l1_weights);
+
+    try expectEqual(@as(head_multi.L1Shift, 0), head_multi.l1_shift_for(1.9689));
+    try expectEqual(@as(head_multi.L1Shift, 0), head_multi.l1_shift_for(1.0));
+    try expectEqual(@as(head_multi.L1Shift, 1), head_multi.l1_shift_for(0.98));
+    try expectEqual(@as(head_multi.L1Shift, 3), head_multi.l1_shift_for(0.2166));
+    try expectEqual(head_multi.L1_SHIFT_MAX, head_multi.l1_shift_for(0.001));
+    try expectEqual(head_multi.L1_SHIFT_MAX, head_multi.l1_shift_for(0));
+
+    // The largest L1 weight of the first net trained on a GPU: 14 of 127
+    // levels at shift 0.
+    const max_weight = 0.2166;
+    const shift = head_multi.l1_shift_for(max_weight);
+    try expect(shift > 0);
+
+    var shifted: parity.Difference = .{};
+    var unshifted: parity.Difference = .{};
+    var magnitude: parity.Difference = .{};
+    for (0..4) |_| {
+        head_multi.fill_random(head, random, parity.REALISTIC_RANGE);
+        var bias: [head_multi.L1_SIZE]f64 = undefined;
+        for (&bias) |*value| value.* = random.float(f64) - 0.5;
+        // Most weights small, as in a trained net; the largest sets the shift.
+        for (l1_weights) |*outputs| {
+            for (outputs) |*weight| weight.* = max_weight * std.math.pow(f64, random.float(f64), 3) * (if (random.boolean()) @as(f64, 1) else -1);
+        }
+        l1_weights[0][0] = max_weight;
+
+        for (0..100) |round| {
+            const acc = random_accumulators(random, round % 3);
+            // The float model: exact L1 weights on the engine's pairwise
+            // products, so that only the weight rounding is measured.
+            var z1 = bias;
+            for ([_]arch.AccumulatorPtr{ &acc.own, &acc.opp }, 0..) |side_acc, side| {
+                for (0..head_multi.PAIRS) |i| {
+                    const activation = @as(f64, @floatFromInt(head_multi.pairwise(side_acc[i], side_acc[i + head_multi.PAIRS]))) / head_multi.PAIRWISE_ONE;
+                    for (&z1, l1_weights[side * head_multi.PAIRS + i]) |*sum, weight| sum.* += activation * weight;
+                }
+            }
+            const float = head_multi.evaluate_float_from_l1(head, 0, z1);
+
+            quantise_l1(head, shift, l1_weights, &bias);
+            try expect(@abs(@as(i32, head.l1_weights[0][0][0][0])) > 63);
+            const with_shift: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, 0));
+            quantise_l1(head, 0, l1_weights, &bias);
+            const without: f64 = @floatFromInt(head_multi.evaluate(head, 0, &acc.own, &acc.opp, 0));
+            shifted.add(with_shift, float);
+            unshifted.add(without, float);
+            magnitude.add(float, 0);
+        }
+    }
+
+    try expect(magnitude.mean() > 50);
+    // Measured: 8.1 max and 1.2 mean with the shift, 81 and 17 without, which
+    // is what the first GPU net showed against the trainer (84 and 23).
+    try expect(shifted.max <= head_multi.L1_ROUNDING_TOLERANCE_CP);
+    try expect(shifted.mean() <= head_multi.L1_ROUNDING_TOLERANCE_CP / 4);
+    try expect(unshifted.mean() > 4 * shifted.mean());
 }
 
 fn random_network(seed: u64, range: head_multi.RandomRange) !*parity.Net {
@@ -151,7 +241,7 @@ test "multi net: a file in the documented layout round-trips" {
     var offset: usize = 0;
     const sections = [_][]const u8{
         "AVALNNUE",
-        std.mem.sliceAsBytes(&[_]u32{ 1, 1, 16, 1024, 8, 16, 32, 255, 9, 13, 10, 400, 0, 0 }),
+        std.mem.sliceAsBytes(&[_]u32{ 2, 1, 16, 1024, 8, 16, 32, 255, 9, 13, 10, 400, 3, 0 }),
         std.mem.asBytes(&net.layer_1),
         std.mem.asBytes(&net.layer_1_bias),
         std.mem.asBytes(&net.head.l1_weights),
@@ -253,6 +343,19 @@ test "multi net: the loaders reject the other architecture and damaged files" {
         try expectError(weights.NetworkError.UnsupportedHeader, weights.validate_as(.multi, multi));
         net.header[field] -= 1;
     }
+    // The L1 shift is the one field that varies, within 0..7.
+    const shift_field = net.header[weights.L1_SHIFT_OFFSET..][0..4];
+    for (0..8) |shift| {
+        std.mem.writeInt(u32, shift_field, @intCast(shift), .little);
+        try weights.validate_as(.multi, multi);
+        try expectEqual(shift, @as(usize, weights.l1_shift(&net.header)));
+    }
+    for ([_]u32{ 8, 256, 1 << 31 }) |shift| {
+        std.mem.writeInt(u32, shift_field, shift, .little);
+        try expectError(weights.NetworkError.UnsupportedHeader, weights.validate_as(.multi, multi));
+    }
+    std.mem.writeInt(u32, shift_field, 0, .little);
+
     net.head.l2_weights[0][0][0] = head_multi.WEIGHT_LIMIT + 1;
     try expectError(weights.NetworkError.WeightOutOfRange, weights.validate_as(.multi, multi));
     net.head.l2_weights[0][0][0] = 0;

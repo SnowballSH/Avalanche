@@ -40,12 +40,28 @@ pub const WEIGHT_BITS = 10;
 /// Fixed-point position of the L2 and L3 biases and pre-activations.
 pub const SUM_BITS = ACT_BITS + WEIGHT_BITS;
 
-/// L1 weights are stored as `round(w * L1_WEIGHT_SCALE)`, which makes an L1
-/// sum of quantised activations land exactly on `ACT_BITS`.
+/// L1 weights are stored as `round(w * L1_WEIGHT_SCALE * 2^l1_shift)`. At
+/// shift 0 an L1 sum of quantised activations lands exactly on `ACT_BITS`.
 pub const L1_WEIGHT_SCALE: f64 = @as(f64, @floatFromInt(ONE)) / PAIRWISE_ONE;
 
+/// Extra fixed-point bits of one network's L1 weights, bias and sum, from its
+/// header. The trainer picks the largest shift that keeps every stored weight
+/// in an i8, so that a net with small L1 weights still uses the whole i8
+/// range. The L1 sum is rounded back to `ACT_BITS` before the activation.
+pub const L1Shift = u3;
+pub const L1_SHIFT_MAX: L1Shift = 7;
+
+/// The shift the trainer picks for a net whose largest L1 weight magnitude,
+/// as a float, is `max_weight`.
+pub fn l1_shift_for(max_weight: f64) L1Shift {
+    var shift: L1Shift = 0;
+    while (shift < L1_SHIFT_MAX and @round(max_weight * L1_WEIGHT_SCALE * @as(f64, @floatFromInt(@as(u32, 2) << shift))) <= 127) shift += 1;
+    return shift;
+}
+
 /// Largest magnitude of an L2 or L3 weight, and of any bias. Together they
-/// keep every i32 sum below 2^31: 32 * 2047 * 8192 < 2^29.
+/// keep every i32 sum below 2^31: 32 * 2047 * 8192 < 2^29 for L2 and L3, and
+/// 1024 * 127 * 128 < 2^24 for L1 at any shift.
 pub const WEIGHT_LIMIT: i32 = 2047;
 pub const BIAS_LIMIT: i32 = 1 << 30;
 
@@ -72,6 +88,10 @@ pub const QUANTISED_TOLERANCE_CP: f64 = 0.75;
 /// Against exact pairwise products, for weights of trained magnitude
 /// (`parity.REALISTIC_RANGE`): the rounding of up to 1024 products to 1/127.
 pub const TRAINER_TOLERANCE_CP: f64 = 16.0;
+/// Against float L1 weights, on the engine's pairwise products, for a net
+/// stored with the shift `l1_shift_for` picks: the rounding of the L1 weights
+/// to at least 64 levels of the largest one.
+pub const L1_ROUNDING_TOLERANCE_CP: f64 = 16.0;
 
 pub const ValidateError = error{ WeightOutOfRange, BiasOutOfRange };
 
@@ -98,7 +118,7 @@ pub fn validate(bytes: []const u8) ValidateError!void {
 
 const Activations = [L1_INPUTS]u8;
 
-inline fn pairwise(a: i16, b: i16) u8 {
+pub inline fn pairwise(a: i16, b: i16) u8 {
     const ca: i32 = std.math.clamp(a, 0, QA);
     const cb: i32 = std.math.clamp(b, 0, QA);
     return @intCast((ca * cb + FT_ROUND) >> FT_SHIFT);
@@ -120,7 +140,7 @@ inline fn round_shift(value: i32, comptime bits: comptime_int) i32 {
 }
 
 /// The reference implementation: one plain loop per stage of docs/NNUE.md.
-pub fn evaluate_scalar(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
+pub fn evaluate_scalar(head: *const Weights, l1_shift: L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     var activations: Activations = undefined;
     activate_scalar(own, opp, &activations);
 
@@ -135,7 +155,9 @@ pub fn evaluate_scalar(head: *const Weights, own: arch.AccumulatorPtr, opp: arch
 
     var hidden: [L2_INPUTS]i32 = undefined;
     for (z1, 0..) |sum, j| {
-        const clipped = std.math.clamp(sum, 0, ONE);
+        // Back to ACT_BITS, to nearest, halves up; nothing to do at shift 0.
+        const rounded = (sum + ((@as(i32, 1) << l1_shift) >> 1)) >> l1_shift;
+        const clipped = std.math.clamp(rounded, 0, ONE);
         hidden[j] = clipped;
         hidden[L1_SIZE + j] = round_shift(clipped * clipped, ACT_BITS);
     }
@@ -261,14 +283,15 @@ fn l1_simd(head: *const Weights, activations: *align(64) const Activations, buck
 }
 
 /// Same value as `evaluate_scalar`, with vectors.
-pub fn evaluate_simd(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
+pub fn evaluate_simd(head: *const Weights, l1_shift: L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     var activations: Activations align(64) = undefined;
     activate_simd(own, opp, &activations);
 
     const L1 = @Vector(L1_SIZE, i32);
     const L2 = @Vector(L2_SIZE, i32);
 
-    const z1 = l1_simd(head, &activations, bucket);
+    const half: i32 = (@as(i32, 1) << l1_shift) >> 1;
+    const z1 = (l1_simd(head, &activations, bucket) + @as(L1, @splat(half))) >> @splat(l1_shift);
     // Typed, because @min would otherwise narrow the element type.
     const clipped: L1 = @min(@max(z1, @as(L1, @splat(0))), @as(L1, @splat(ONE)));
     const squared: L1 = (clipped * clipped + @as(L1, @splat(1 << (ACT_BITS - 1)))) >> @splat(ACT_BITS);
@@ -286,8 +309,8 @@ pub fn evaluate_simd(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.A
 }
 
 /// Evaluation in centipawns for the side to move, whose accumulator is `own`.
-pub inline fn evaluate(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
-    return evaluate_simd(head, own, opp, bucket);
+pub inline fn evaluate(head: *const Weights, l1_shift: L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
+    return evaluate_simd(head, l1_shift, own, opp, bucket);
 }
 
 pub const FloatMode = enum {
@@ -301,10 +324,10 @@ pub const FloatMode = enum {
 /// The forward pass in floating point, in centipawns, from the quantised
 /// weights of `head` and accumulators of the quantised feature transformer.
 /// It never rounds an intermediate value.
-pub fn evaluate_float(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize, mode: FloatMode) f64 {
-    const one: f64 = @floatFromInt(ONE);
-    const weight_one: f64 = @floatFromInt(1 << WEIGHT_BITS);
-    const sum_one: f64 = @floatFromInt(1 << SUM_BITS);
+pub fn evaluate_float(head: *const Weights, l1_shift: L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize, mode: FloatMode) f64 {
+    const shifted: f64 = @floatFromInt(@as(u32, 1) << l1_shift);
+    const one: f64 = @as(f64, @floatFromInt(ONE)) * shifted;
+    const l1_weight_one = L1_WEIGHT_SCALE * shifted;
     const qa: f64 = @floatFromInt(QA);
 
     var z1: [L1_SIZE]f64 = undefined;
@@ -321,10 +344,17 @@ pub fn evaluate_float(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.
             };
             const input = side * PAIRS + i;
             for (&z1, &head.l1_weights[bucket][input / 4]) |*sum, *block_weights| {
-                sum.* += activation * @as(f64, @floatFromInt(block_weights[input % 4])) / L1_WEIGHT_SCALE;
+                sum.* += activation * @as(f64, @floatFromInt(block_weights[input % 4])) / l1_weight_one;
             }
         }
     }
+    return evaluate_float_from_l1(head, bucket, z1);
+}
+
+/// The float forward pass from the L1 pre-activations on, in centipawns.
+pub fn evaluate_float_from_l1(head: *const Weights, bucket: usize, z1: [L1_SIZE]f64) f64 {
+    const weight_one: f64 = @floatFromInt(1 << WEIGHT_BITS);
+    const sum_one: f64 = @floatFromInt(1 << SUM_BITS);
 
     var hidden: [L2_INPUTS]f64 = undefined;
     for (z1, 0..) |sum, j| {
@@ -348,6 +378,8 @@ pub fn evaluate_float(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.
 /// far below the i8 range, and the float comparison is only meaningful there.
 pub const RandomRange = struct {
     l1_weight: i8 = 127,
+    /// Goes into the header; it also scales `l1_bias`, given at shift 0.
+    l1_shift: L1Shift = 0,
     weight: i32 = WEIGHT_LIMIT,
     l1_bias: i32 = ONE,
     bias: i32 = 1 << SUM_BITS,
@@ -358,7 +390,7 @@ pub fn fill_random(head: *Weights, random: std.Random, range: RandomRange) void 
     for (std.mem.asBytes(&head.l1_weights)) |*byte| {
         byte.* = @bitCast(random.intRangeAtMost(i8, -range.l1_weight, range.l1_weight));
     }
-    inline for (.{ "l2_weights", "l3_weights", "l1_bias", "l2_bias", "l3_bias" }, .{ range.weight, range.weight, range.l1_bias, range.bias, range.bias }) |field, limit| {
+    inline for (.{ "l2_weights", "l3_weights", "l1_bias", "l2_bias", "l3_bias" }, .{ range.weight, range.weight, range.l1_bias << range.l1_shift, range.bias, range.bias }) |field, limit| {
         const values: *[@sizeOf(@FieldType(Weights, field)) / 4]i32 = @ptrCast(&@field(head, field));
         for (values) |*value| value.* = random.intRangeAtMost(i32, -limit, limit);
     }

@@ -70,10 +70,11 @@ pub fn evaluate(net: *const Net, pos: *const position.Position) Evaluation {
     const opp = if (pos.turn == types.Color.White) &black else &white;
     const pieces = types.popcount_usize(pos.all_all_pieces());
     const bucket = @min((pieces -| 2) / 4, arch.OUTPUT_SIZE - 1);
+    const shift = weights.l1_shift(&net.header);
     return .{
-        .engine = head_multi.evaluate(&net.head, own, opp, bucket),
-        .trainer = head_multi.evaluate_float(&net.head, own, opp, bucket, .trainer),
-        .quantised = head_multi.evaluate_float(&net.head, own, opp, bucket, .quantised_pairwise),
+        .engine = head_multi.evaluate(&net.head, shift, own, opp, bucket),
+        .trainer = head_multi.evaluate_float(&net.head, shift, own, opp, bucket, .trainer),
+        .quantised = head_multi.evaluate_float(&net.head, shift, own, opp, bucket, .quantised_pairwise),
     };
 }
 
@@ -102,7 +103,7 @@ const RANDOM_FT_BIAS = 128;
 /// A random network with a valid header. `range` bounds the head's weights.
 pub fn fill_random(net: *Net, random: std.Random, range: head_multi.RandomRange) void {
     @memset(std.mem.asBytes(net), 0);
-    net.header = weights.MULTI_HEADER;
+    net.header = weights.multi_header(range.l1_shift);
     for (&net.layer_1) |*weight| weight.* = random.intRangeAtMost(i16, -RANDOM_FT_WEIGHT, RANDOM_FT_WEIGHT);
     for (&net.layer_1_bias) |*bias| bias.* = random.intRangeAtMost(i16, 0, RANDOM_FT_BIAS);
     head_multi.fill_random(&net.head, random, range);
@@ -113,7 +114,9 @@ pub fn fill_random(net: *Net, random: std.Random, range: head_multi.RandomRange)
 /// whole integer range the rounding of 1024 activations is amplified to
 /// hundreds of centipawns in both directions.
 pub const REALISTIC_RANGE: head_multi.RandomRange = .{
-    .l1_weight = 12,
+    // As the trainer saves such a net: |w| <= 0.19, stored with three extra bits.
+    .l1_weight = 96,
+    .l1_shift = 3,
     .weight = 400,
     .l1_bias = head_multi.ONE / 2,
     .bias = 1 << (head_multi.SUM_BITS - 2),
@@ -218,7 +221,8 @@ fn run_parity(args: []const []const u8, out: *std.Io.Writer) !u8 {
     try out.print("  integer vs float, quantised pairwise: max {d:.3} cp, mean {d:.3} cp\n", .{ quantised.max, quantised.mean() });
     var l1_max: u32 = 0;
     for (std.mem.asBytes(&net.head.l1_weights)) |byte| l1_max = @max(l1_max, @abs(@as(i32, @as(i8, @bitCast(byte)))));
-    try out.print("  largest stored weight:                l1 {d}/127, l2 {d}/{d}, l3 {d}/{d}\n", .{
+    try out.print("  L1 shift {d}; largest stored weight:    l1 {d}/127, l2 {d}/{d}, l3 {d}/{d}\n", .{
+        weights.l1_shift(&net.header),
         l1_max,
         max_abs(std.mem.bytesAsSlice(i32, std.mem.asBytes(&net.head.l2_weights))),
         head_multi.WEIGHT_LIMIT,
@@ -272,7 +276,7 @@ fn run_speed(out: *std.Io.Writer) !u8 {
     const timer = types.Timer.start();
     for (0..rounds) |_| {
         for (samples) |*sample| {
-            checksum += weights.head.evaluate(&weights.MODEL.head, &sample.white, &sample.black, sample.bucket);
+            checksum += weights.evaluate(&sample.white, &sample.black, sample.bucket);
         }
     }
     const elapsed = timer.read();
