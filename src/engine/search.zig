@@ -158,7 +158,7 @@ pub const TB_WIN_SCORE: i32 = hce.MateScore - hce.MaxMate - MAX_PLY;
 // scores (above MateScore - MaxMate) and TB win/loss scores (above TB_WIN_SCORE - MAX_PLY).
 const SCORE_PLY_ADJ: i32 = TB_WIN_SCORE - MAX_PLY;
 
-// Pawn and non-pawn correction history, see docs/SEARCH.md. Entries are in 1/CORRHIST_GRAIN cp.
+// Pawn, non-pawn and continuation correction history, see docs/SEARCH.md. Entries are in 1/CORRHIST_GRAIN cp.
 pub const CORRHIST_SIZE: usize = 16384;
 pub const CORRHIST_GRAIN: i32 = 256;
 pub const CORRHIST_LIMIT: i32 = 32 * CORRHIST_GRAIN;
@@ -166,9 +166,15 @@ const CORRHIST_MAX_BONUS: i32 = CORRHIST_LIMIT / 4;
 const CORRHIST_WEIGHT_SCALE: i32 = 8;
 const PAWN_CORRHIST_WEIGHT: i32 = 8;
 const NONPAWN_CORRHIST_WEIGHT: i32 = 6;
+const CONT_CORRHIST_WEIGHT: i32 = 6;
+pub const CONT_CORRHIST_SIZE: usize = 12 * 64 * 12 * 64;
 
-pub fn weighted_correction(pawn: i32, nonpawn_white: i32, nonpawn_black: i32) i32 {
-    return @divTrunc(PAWN_CORRHIST_WEIGHT * pawn + NONPAWN_CORRHIST_WEIGHT * (nonpawn_white + nonpawn_black), CORRHIST_GRAIN * CORRHIST_WEIGHT_SCALE);
+pub fn weighted_correction(pawn: i32, nonpawn_white: i32, nonpawn_black: i32, cont: i32) i32 {
+    return @divTrunc(PAWN_CORRHIST_WEIGHT * pawn + NONPAWN_CORRHIST_WEIGHT * (nonpawn_white + nonpawn_black) + CONT_CORRHIST_WEIGHT * cont, CORRHIST_GRAIN * CORRHIST_WEIGHT_SCALE);
+}
+
+pub fn cont_correction_index(prev2_piece: types.Piece, prev2_to: u6, prev_piece: types.Piece, prev_to: u6) usize {
+    return ((prev2_piece.pure_index() * 64 + prev2_to) * 12 + prev_piece.pure_index()) * 64 + prev_to;
 }
 
 pub fn update_correction(entry: *i16, best_score: i32, static_eval: i32, depth: usize) void {
@@ -281,6 +287,7 @@ pub const Searcher = struct {
     continuation: *[12][64][64][64]i16,
     pawn_correction: [2][CORRHIST_SIZE]i16 = undefined,
     nonpawn_correction: [2][2][CORRHIST_SIZE]i16 = undefined,
+    cont_correction: *[CONT_CORRHIST_SIZE]i16,
 
     root_board: *position.Position,
     ttable: *tt.TranspositionTable = &tt.GlobalTT,
@@ -324,6 +331,7 @@ pub const Searcher = struct {
         board.init();
         self.* = .{
             .continuation = platform.allocator.create([12][64][64][64]i16) catch unreachable,
+            .cont_correction = platform.allocator.create([CONT_CORRHIST_SIZE]i16) catch unreachable,
             .root_board = board,
         };
         self.hash_history = std.array_list.Managed(u64).initCapacity(platform.allocator, MAX_GAMEPLY) catch unreachable;
@@ -339,6 +347,7 @@ pub const Searcher = struct {
     pub fn deinit(self: *Searcher) void {
         self.hash_history.deinit();
         platform.allocator.destroy(self.continuation);
+        platform.allocator.destroy(self.cont_correction);
         self.root_board.deinit();
         platform.allocator.destroy(self.root_board);
     }
@@ -355,11 +364,22 @@ pub const Searcher = struct {
         return &self.nonpawn_correction[@intFromEnum(color)][@intFromEnum(key_color)][@as(usize, @intCast(pos.nonpawn_hash[@intFromEnum(key_color)] % CORRHIST_SIZE))];
     }
 
+    // Null unless the two previous plies exist and were both real moves.
+    pub inline fn cont_correction_entry(self: *Searcher) ?*i16 {
+        if (self.ply < 2) return null;
+        const prev = self.move_history[self.ply - 1];
+        const prev2 = self.move_history[self.ply - 2];
+        if (prev.to_u16() == 0 or prev2.to_u16() == 0) return null;
+        return &self.cont_correction[cont_correction_index(self.moved_piece_history[self.ply - 2], prev2.to, self.moved_piece_history[self.ply - 1], prev.to)];
+    }
+
     inline fn corrected_eval(self: *Searcher, pos: *const position.Position, comptime color: types.Color, raw_eval: i32) i32 {
+        const cont_entry = self.cont_correction_entry();
         const correction = weighted_correction(
             self.pawn_correction_entry(pos, color).*,
             self.nonpawn_correction_entry(pos, color, .White).*,
             self.nonpawn_correction_entry(pos, color, .Black).*,
+            if (cont_entry) |cont| cont.* else 0,
         );
         return std.math.clamp(raw_eval + correction, -SCORE_PLY_ADJ + 1, SCORE_PLY_ADJ - 1);
     }
@@ -432,6 +452,7 @@ pub const Searcher = struct {
         if (total_reset) {
             @memset(std.mem.asBytes(&self.pawn_correction), 0);
             @memset(std.mem.asBytes(&self.nonpawn_correction), 0);
+            @memset(self.cont_correction, 0);
         }
 
         {
@@ -1793,6 +1814,7 @@ pub const Searcher = struct {
                 update_correction(self.pawn_correction_entry(pos, color), best_score, static_eval, depth);
                 update_correction(self.nonpawn_correction_entry(pos, color, .White), best_score, static_eval, depth);
                 update_correction(self.nonpawn_correction_entry(pos, color, .Black), best_score, static_eval, depth);
+                if (self.cont_correction_entry()) |cont| update_correction(cont, best_score, static_eval, depth);
             }
 
             const tt_flag = if (tb_min != -hce.MateScore and best_score == tb_min)

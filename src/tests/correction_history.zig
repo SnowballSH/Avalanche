@@ -193,14 +193,97 @@ test "correction history: a consistent error converges instead of saturating" {
     var pawn: i16 = 0;
     var nonpawn_white: i16 = 0;
     var nonpawn_black: i16 = 0;
+    var cont: i16 = 0;
     const raw_eval: i32 = 40;
     const true_value: i32 = 50;
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
-        const corrected = raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black);
+        const corrected = raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black, cont);
         search.update_correction(&pawn, true_value, corrected, 8);
         search.update_correction(&nonpawn_white, true_value, corrected, 8);
         search.update_correction(&nonpawn_black, true_value, corrected, 8);
+        search.update_correction(&cont, true_value, corrected, 8);
     }
-    try expectEqual(true_value, raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black));
+    try expectEqual(true_value, raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black, cont));
+}
+
+const PIECES = [_]types.Piece{
+    .WHITE_PAWN, .WHITE_KNIGHT, .WHITE_BISHOP, .WHITE_ROOK, .WHITE_QUEEN, .WHITE_KING,
+    .BLACK_PAWN, .BLACK_KNIGHT, .BLACK_BISHOP, .BLACK_ROOK, .BLACK_QUEEN, .BLACK_KING,
+};
+
+test "continuation correction: index is in range and distinct for every piece and square" {
+    var expected: usize = 0;
+    for (PIECES) |prev2_piece| {
+        var prev2_to: usize = 0;
+        while (prev2_to < 64) : (prev2_to += 1) {
+            for (PIECES) |prev_piece| {
+                var prev_to: usize = 0;
+                while (prev_to < 64) : (prev_to += 1) {
+                    const index = search.cont_correction_index(prev2_piece, @intCast(prev2_to), prev_piece, @intCast(prev_to));
+                    try expectEqual(expected, index);
+                    expected += 1;
+                }
+            }
+        }
+    }
+    try expectEqual(search.CONT_CORRHIST_SIZE, expected);
+}
+
+test "continuation correction: skipped at the root, at ply 1 and around a null move" {
+    support.init_tables();
+    const searcher = try std.testing.allocator.create(search.Searcher);
+    defer std.testing.allocator.destroy(searcher);
+    searcher.init();
+    defer searcher.deinit();
+
+    const pos = searcher.root_board;
+    pos.set_fen(types.DEFAULT_FEN);
+    const e2e4 = types.Move.new_from_string(pos, "e2e4");
+    play(pos, e2e4);
+    const e7e5 = types.Move.new_from_string(pos, "e7e5");
+    play(pos, e7e5);
+    const g1f3 = types.Move.new_from_string(pos, "g1f3");
+    const moves = [_]types.Move{ e2e4, e7e5, g1f3 };
+    const pieces = [_]types.Piece{ .WHITE_PAWN, .BLACK_PAWN, .WHITE_KNIGHT };
+    for (moves, pieces, 0..) |move, piece, ply| {
+        searcher.move_history[ply] = move;
+        searcher.moved_piece_history[ply] = piece;
+    }
+
+    searcher.ply = 0;
+    try expect(searcher.cont_correction_entry() == null);
+    searcher.ply = 1;
+    try expect(searcher.cont_correction_entry() == null);
+
+    searcher.ply = 2;
+    const after_two = searcher.cont_correction_entry().?;
+    try expectEqual(&searcher.cont_correction[search.cont_correction_index(.WHITE_PAWN, e2e4.to, .BLACK_PAWN, e7e5.to)], after_two);
+    searcher.ply = 3;
+    const after_three = searcher.cont_correction_entry().?;
+    try expectEqual(&searcher.cont_correction[search.cont_correction_index(.BLACK_PAWN, e7e5.to, .WHITE_KNIGHT, g1f3.to)], after_three);
+    try expect(after_two != after_three);
+
+    // A null move at ply 1 hides the term from the null node and from its child.
+    searcher.move_history[1] = types.Move.empty();
+    searcher.moved_piece_history[1] = types.Piece.NO_PIECE;
+    searcher.ply = 2;
+    try expect(searcher.cont_correction_entry() == null);
+    searcher.ply = 3;
+    try expect(searcher.cont_correction_entry() == null);
+}
+
+test "continuation correction: cleared on a total reset only" {
+    support.init_tables();
+    const searcher = try std.testing.allocator.create(search.Searcher);
+    defer std.testing.allocator.destroy(searcher);
+    searcher.init();
+    defer searcher.deinit();
+
+    for (searcher.cont_correction) |entry| try expectEqual(@as(i16, 0), entry);
+    searcher.cont_correction[search.CONT_CORRHIST_SIZE - 1] = 77;
+    searcher.reset_heuristics(false);
+    try expectEqual(@as(i16, 77), searcher.cont_correction[search.CONT_CORRHIST_SIZE - 1]);
+    searcher.reset_heuristics(true);
+    try expectEqual(@as(i16, 0), searcher.cont_correction[search.CONT_CORRHIST_SIZE - 1]);
 }
