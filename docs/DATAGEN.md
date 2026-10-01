@@ -12,15 +12,16 @@ Avalanche datagen <threads> [book.epd | book=path] [key=value ...]
   ttmb=N        TT MiB per side per thread (default 4)
   positions=N   stop after at least N positions, at a game boundary (default: unbounded)
   seed=N        deterministic seed (default: random)
-  raweval=true|false label with the unscaled network output (default false)
+  raweval=BOOL  true labels with the unscaled network output (default false)
   out=PATH      output file, must not exist (default data_<seed>.viribin)
   format=viri|bullet (default viri)
 ```
 
-The thread count is required (the old implicit default of 7 is gone). Malformed or unknown options, an unreadable
-or empty book, a book line that is not a legal position (datagen names the line and the reason), and an existing
-output file are errors: datagen prints the reason and exits with status 2. A worker thread that fails (for example on
-a write error) stops the whole run, names the worker and the error, and exits with status 1.
+The thread count is required (the old implicit default of 7 is gone). Malformed, unknown or repeated options (a key
+given twice, or two books), an unreadable or empty book, a book line that is not a legal position (datagen names the
+line and the reason), and an existing output file are errors: datagen prints the reason and exits with status 2. A
+worker thread that fails (for example on a write error) stops the whole run, names the worker and the error, and
+exits with status 1.
 
 ## Output
 
@@ -56,6 +57,17 @@ bulletformat recording window and the stored scores all operate on raw-scale sco
 than scaled ones (by about 1024/900 with full material and more as material comes off or the fifty-move counter
 grows). Datasets generated with and without `raweval=true` therefore label the same position differently and must
 not be mixed blindly; tell them apart by the `raw_eval` field of the summary line and the `Eval:` banner line.
+
+The search itself is not retuned, so raw-eval searches behave a little differently. Pruning margins and the
+correction-history limits are fixed centipawn amounts and are therefore relatively tighter against the larger raw
+scores. Without the fifty-move decay the scores of shuffling positions do not drift towards zero, so draw
+adjudication fires less often, and win adjudication at 2500 cp is reached earlier. Positions without pawns and with
+phase below 3 keep their scaled hand-crafted labels inside a raw dataset; filtering them out of raw datasets is
+recommended.
+
+Each worker owns two transposition tables, one per side, shared with no other worker. They are aged, not cleared,
+between games, so entries (including static evaluations) outlive a game. This is safe because the evaluation mode is
+fixed for the whole run; if the mode ever becomes switchable per game, the tables must be cleared on a switch.
 
 ## Determinism
 

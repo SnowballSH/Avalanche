@@ -39,58 +39,51 @@ pub const Diagnostic = struct {
     value: []const u8 = "",
 };
 
-pub const ParseError = error{ InvalidValue, UnknownKey, MissingThreads };
+pub const ParseError = error{ InvalidValue, UnknownKey, DuplicateKey, MissingThreads };
 
-/// `args` are the arguments after `datagen`: a thread count, then book paths and `key=value` options.
+const Key = enum { book, format, nodes, hardmult, plies, bookplies, randsee, ttmb, positions, seed, raweval, out };
+
+/// `args` are the arguments after `datagen`: a thread count, then at most one book path and `key=value` options, each key once.
 pub fn parse(args: []const []const u8, diag: *Diagnostic) ParseError!Options {
     if (args.len == 0) return error.MissingThreads;
     const threads = std.fmt.parseInt(usize, args[0], 10) catch return invalid(diag, "threads", args[0]);
     if (threads == 0) return invalid(diag, "threads", args[0]);
 
     var options: Options = .{ .threads = threads };
+    var seen: std.EnumSet(Key) = .initEmpty();
     for (args[1..]) |arg| {
-        const eq = std.mem.indexOfScalar(u8, arg, '=') orelse {
-            options.book = arg;
-            continue;
-        };
-        const key = arg[0..eq];
-        const value = arg[eq + 1 ..];
-        if (std.mem.eql(u8, key, "book")) {
-            options.book = value;
-        } else if (std.mem.eql(u8, key, "format")) {
-            options.format = std.meta.stringToEnum(Format, value) orelse return invalid(diag, key, value);
-        } else if (std.mem.eql(u8, key, "nodes")) {
-            options.soft_nodes = try positive(u64, key, value, diag);
-        } else if (std.mem.eql(u8, key, "hardmult")) {
-            options.hard_multiplier = try positive(u64, key, value, diag);
-        } else if (std.mem.eql(u8, key, "plies")) {
-            options.plies = PlySpan.parse(value) orelse return invalid(diag, key, value);
-        } else if (std.mem.eql(u8, key, "bookplies")) {
-            options.book_plies = PlySpan.parse(value) orelse return invalid(diag, key, value);
-        } else if (std.mem.eql(u8, key, "randsee")) {
-            options.random_see = std.fmt.parseInt(i32, value, 10) catch return invalid(diag, key, value);
-        } else if (std.mem.eql(u8, key, "ttmb")) {
-            options.tt_mb = try positive(u64, key, value, diag);
-        } else if (std.mem.eql(u8, key, "positions")) {
-            options.positions = try positive(u64, key, value, diag);
-        } else if (std.mem.eql(u8, key, "seed")) {
-            options.seed = std.fmt.parseInt(u64, value, 0) catch return invalid(diag, key, value);
-        } else if (std.mem.eql(u8, key, "raweval")) {
-            options.raw_eval = boolean(value) orelse return invalid(diag, key, value);
-        } else if (std.mem.eql(u8, key, "out")) {
-            if (value.len == 0) return invalid(diag, key, value);
-            options.out = value;
-        } else {
-            diag.* = .{ .key = key, .value = value };
-            return error.UnknownKey;
+        // A bare argument is the book path.
+        const eq = std.mem.indexOfScalar(u8, arg, '=');
+        const key = if (eq) |at| arg[0..at] else "book";
+        const value = if (eq) |at| arg[at + 1 ..] else arg;
+        diag.* = .{ .key = key, .value = value };
+        const known = std.meta.stringToEnum(Key, key) orelse return error.UnknownKey;
+        if (seen.contains(known)) return error.DuplicateKey;
+        seen.insert(known);
+        switch (known) {
+            .book => options.book = value,
+            .format => options.format = std.meta.stringToEnum(Format, value) orelse return error.InvalidValue,
+            .nodes => options.soft_nodes = try positive(u64, value),
+            .hardmult => options.hard_multiplier = try positive(u64, value),
+            .plies => options.plies = PlySpan.parse(value) orelse return error.InvalidValue,
+            .bookplies => options.book_plies = PlySpan.parse(value) orelse return error.InvalidValue,
+            .randsee => options.random_see = std.fmt.parseInt(i32, value, 10) catch return error.InvalidValue,
+            .ttmb => options.tt_mb = try positive(u64, value),
+            .positions => options.positions = try positive(u64, value),
+            .seed => options.seed = std.fmt.parseInt(u64, value, 0) catch return error.InvalidValue,
+            .raweval => options.raw_eval = boolean(value) orelse return error.InvalidValue,
+            .out => {
+                if (value.len == 0) return error.InvalidValue;
+                options.out = value;
+            },
         }
     }
     return options;
 }
 
-fn positive(comptime T: type, key: []const u8, value: []const u8, diag: *Diagnostic) ParseError!T {
-    const n = std.fmt.parseInt(T, value, 10) catch return invalid(diag, key, value);
-    if (n == 0) return invalid(diag, key, value);
+fn positive(comptime T: type, value: []const u8) ParseError!T {
+    const n = std.fmt.parseInt(T, value, 10) catch return error.InvalidValue;
+    if (n == 0) return error.InvalidValue;
     return n;
 }
 
@@ -149,6 +142,19 @@ test "datagen options: malformed values are errors naming the key" {
     try testing.expectError(error.InvalidValue, parse(&.{"0"}, &diag));
     try testing.expectError(error.UnknownKey, parse(&.{ "4", "nodez=5" }, &diag));
     try testing.expectError(error.MissingThreads, parse(&.{}, &diag));
+}
+
+test "datagen options: a repeated key is an error, whatever its values" {
+    var diag: Diagnostic = .{};
+    try testing.expectError(error.DuplicateKey, parse(&.{ "4", "raweval=true", "raweval=false" }, &diag));
+    try testing.expectEqualStrings("raweval", diag.key);
+    try testing.expectEqualStrings("false", diag.value);
+    try testing.expectError(error.DuplicateKey, parse(&.{ "4", "nodes=5000", "seed=1", "nodes=5000" }, &diag));
+    try testing.expectEqualStrings("nodes", diag.key);
+    try testing.expectError(error.DuplicateKey, parse(&.{ "4", "a.epd", "b.epd" }, &diag));
+    try testing.expectError(error.DuplicateKey, parse(&.{ "4", "a.epd", "book=b.epd" }, &diag));
+    try testing.expectEqualStrings("book", diag.key);
+    try testing.expectEqualStrings("b.epd", diag.value);
 }
 
 test "datagen options: raweval takes exactly true or false" {

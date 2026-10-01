@@ -56,7 +56,8 @@ JSON shape:
 
 Each job inherits missing threads, duration, and engine_args from defaults. A
 missing book means datagen starts without an opening book. Job engine_args are
-appended after default engine_args.
+appended after default engine_args; a job key replaces the same default key,
+because datagen rejects repeated keys.
 
 Job SPEC formats:
   COUNT
@@ -170,7 +171,11 @@ load_config_jobs() {
                 (.threads // ""),
                 (.duration // ""),
                 (.book // ""),
-                engine_args($default_engine_args + (.engine_args // []))
+                ((.engine_args // []) as $job_engine_args
+                 | ($job_engine_args | map(tostring | split("=")[0])) as $job_keys
+                 | engine_args(
+                     ($default_engine_args | map(select((tostring | split("=")[0]) as $key | $job_keys | index($key) | not)))
+                     + $job_engine_args))
               ]
             | map(tostring)
             | join("\u001f")

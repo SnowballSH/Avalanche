@@ -542,9 +542,7 @@ pub const Searcher = struct {
         return self.iterative_deepening_mode(pos, color, .scaled, max_depth);
     }
 
-    /// Helper threads always search `.scaled`, so `.raw` is for single-threaded searchers only.
     pub fn iterative_deepening_mode(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, max_depth: ?u8) i32 {
-        std.debug.assert(mode == .scaled or NUM_THREADS == 0);
         var out_buf: [4096]u8 = undefined;
         var out_file = platform.Stdout.init(&out_buf);
         const outW = out_file.writer();
@@ -805,7 +803,7 @@ pub const Searcher = struct {
             }
             self.iterative_deepening_depth = @max(self.iterative_deepening_depth, depth);
             if (platform.has_threads and depth > 1) {
-                self.helpers(pos, color, depth, alpha, beta);
+                self.helpers(pos, color, mode, depth, alpha, beta);
             }
 
             self.nmp_min_ply = 0;
@@ -1093,7 +1091,7 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
+    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &helpers_live, true, .release);
         const root_accumulator = pos.evaluator.nnue_evaluator.current().*;
         for (0..NUM_THREADS) |i| {
@@ -1120,6 +1118,7 @@ pub const Searcher = struct {
             @atomicStore(bool, &h.stop, false, .monotonic);
             helper_pool.start_search(i, .{
                 .color = color,
+                .mode = mode,
                 .depth = if (id % 2 == 1) depth_ + 1 else depth_,
                 .alpha = alpha_,
                 .beta = beta_,
@@ -1135,7 +1134,7 @@ pub const Searcher = struct {
         @memcpy(self.root_excluded[0..main.root_excluded_count], main.root_excluded[0..main.root_excluded_count]);
     }
 
-    pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
+    pub fn start_helper(self: *Searcher, color: types.Color, mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &self.is_searching, true, .release);
         self.has_searched = true;
         if (self.age_pending) {
@@ -1149,10 +1148,10 @@ pub const Searcher = struct {
         self.ply = 0;
         self.seldepth = 0;
 
-        if (color == types.Color.White) {
-            _ = self.negamax(self.root_board, types.Color.White, .scaled, depth_, alpha_, beta_, false, NodeType.Root, false);
-        } else {
-            _ = self.negamax(self.root_board, types.Color.Black, .scaled, depth_, alpha_, beta_, false, NodeType.Root, false);
+        switch (color) {
+            inline else => |c| switch (mode) {
+                inline else => |m| _ = self.negamax(self.root_board, c, m, depth_, alpha_, beta_, false, NodeType.Root, false),
+            },
         }
         @atomicStore(bool, &self.is_searching, false, .release);
     }
