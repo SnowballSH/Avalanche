@@ -189,3 +189,83 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
     }
     try expect(helper_nodes > 0);
 }
+
+fn stop_after(s: *search.Searcher, delay_ms: i64) void {
+    platform.sleepMs(delay_ms);
+    @atomicStore(bool, &s.stop, true, .monotonic);
+}
+
+const Ending = enum { stopped_before_start, stopped_at_once, stopped_early, node_limit, depth_limit };
+
+test "smp root: short searches in a row leave every helper idle on the root" {
+    if (comptime !platform.has_threads) return error.SkipZigTest;
+    platform.io = std.testing.io;
+    support.init_search();
+    tt.GlobalTT.reset(16);
+    defer search.set_helper_count(0);
+
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    s.silent_output = true;
+
+    const endings = std.enums.values(Ending);
+    var helper_nodes: u64 = 0;
+    for ([_]usize{ 1, 3, 7, 2, 0, 5 }) |helpers| {
+        search.set_helper_count(helpers);
+        try expectEqual(helpers, search.helper_count());
+
+        for (0..3 * endings.len) |round| {
+            const case = root_cases[round % root_cases.len];
+            const ending = endings[round % endings.len];
+            pos.set_fen(case.fen);
+            s.hash_history.clearRetainingCapacity();
+            try s.hash_history.append(pos.hash);
+            for (case.moves) |move| {
+                try play(pos, move);
+                try s.hash_history.append(pos.hash);
+            }
+            const root_hash = pos.hash;
+
+            s.stop = ending == .stopped_before_start;
+            s.max_nodes = if (ending == .node_limit) 3000 else null;
+            s.soft_max_nodes = null;
+            const stopper: ?std.Thread = switch (ending) {
+                .stopped_at_once => try std.Thread.spawn(.{}, stop_after, .{ &s, 0 }),
+                .stopped_early => try std.Thread.spawn(.{}, stop_after, .{ &s, 2 }),
+                else => null,
+            };
+            const depth: u8 = if (ending == .depth_limit) 5 else 30;
+            switch (pos.turn) {
+                .White => _ = s.iterative_deepening(pos, .White, depth),
+                .Black => _ = s.iterative_deepening(pos, .Black, depth),
+            }
+            if (stopper) |thread| thread.join();
+
+            try expectEqual(root_hash, pos.hash);
+            var storage: [256]types.Move = undefined;
+            var legal = false;
+            for (legal_moves(pos, &storage)) |move| {
+                if (move.to_u16() == s.best_move.to_u16()) legal = true;
+            }
+            try expect(legal);
+
+            try expect(!search.helpers_are_live());
+            try expectEqual(@as(u32, 1), search.helper_pool.idle.load(.acquire));
+            try expectEqual(@as(u32, 0), search.helper_pool.pending.load(.acquire));
+            for (0..search.helper_count()) |i| {
+                const h = search.helper_pool.worker(i).searcher;
+                helper_nodes += h.nodes;
+                try expect(!h.is_searching);
+                try expectEqual(root_hash, h.root_board.hash);
+                try expectEqual(s.hash_history.items.len, h.hash_history.items.len);
+                try expectEqual(@as(u16, 0), h.root_board.evaluator.nnue_evaluator.depth);
+                if (!h.root_evaluation_pending) try expect_matches_fresh(h.root_board);
+            }
+        }
+        search.reset_helper_heuristics();
+    }
+    try expect(helper_nodes > 0);
+}

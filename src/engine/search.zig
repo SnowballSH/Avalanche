@@ -203,6 +203,8 @@ pub const MAX_CONTEMPT: i32 = 100;
 
 pub var helper_pool: thread_pool.ThreadPool = .{};
 pub var helpers_live: bool = false;
+/// Ends the helpers' current job; one flag for all of them.
+var helpers_stop: bool = false;
 
 pub fn helpers_are_live() bool {
     return @atomicLoad(bool, &helpers_live, .acquire);
@@ -448,6 +450,7 @@ pub const Searcher = struct {
         }
         if (self.parent_stop) |parent| {
             if (@atomicLoad(bool, parent, .monotonic)) return true;
+            if (@atomicLoad(bool, &helpers_stop, .monotonic)) return true;
         }
         return false;
     }
@@ -1080,27 +1083,15 @@ pub const Searcher = struct {
 
     pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &helpers_live, true, .release);
-        for (0..NUM_THREADS) |i| {
-            const id: usize = i + 1;
-            const h = helper(i);
-            h.max_millis = self.max_millis;
-            h.max_nodes = self.max_nodes;
-            h.soft_max_nodes = self.soft_max_nodes;
-            h.ttable = self.ttable;
-            h.thread_id = id;
-            h.parent_stop = &self.stop;
-            h.parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
-            h.root_history_len = self.root_history_len;
-            h.copy_root_candidates(self);
-            std.debug.assert(h.root_board.hash == pos.hash and h.hash_history.items.len == self.hash_history.items.len);
-            @atomicStore(bool, &h.stop, false, .monotonic);
-            helper_pool.start_search(i, .{
-                .color = color,
-                .depth = if (id % 2 == 1) depth_ + 1 else depth_,
-                .alpha = alpha_,
-                .beta = beta_,
-            });
-        }
+        @atomicStore(bool, &helpers_stop, false, .monotonic);
+        helper_pool.start_search(NUM_THREADS, .{
+            .main = self,
+            .root_hash = pos.hash,
+            .color = color,
+            .depth = depth_,
+            .alpha = alpha_,
+            .beta = beta_,
+        });
     }
 
     /// Takes over the main thread's root once per search; every job unwinds
@@ -1121,7 +1112,22 @@ pub const Searcher = struct {
         @memcpy(self.root_excluded[0..main.root_excluded_count], main.root_excluded[0..main.root_excluded_count]);
     }
 
-    pub fn start_helper(self: *Searcher, color: types.Color, depth_: usize, alpha_: i32, beta_: i32) void {
+    /// Runs one job on the helper's own thread. Everything read from the main
+    /// searcher here stays untouched until the main thread has joined the helpers.
+    pub fn start_helper(self: *Searcher, id: usize, job: thread_pool.SearchJob) void {
+        const main = job.main;
+        self.max_millis = main.max_millis;
+        self.max_nodes = main.max_nodes;
+        self.soft_max_nodes = main.soft_max_nodes;
+        self.ttable = main.ttable;
+        self.thread_id = id;
+        self.parent_stop = &main.stop;
+        self.parent_nodes = if (main.max_nodes != null or main.soft_max_nodes != null) &main.shared_nodes else null;
+        self.root_history_len = main.root_history_len;
+        self.copy_root_candidates(main);
+        std.debug.assert(self.root_board.hash == job.root_hash and self.hash_history.items.len == main.root_history_len);
+        const depth_ = if (id % 2 == 1) job.depth + 1 else job.depth;
+
         @atomicStore(bool, &self.is_searching, true, .release);
         self.has_searched = true;
         if (self.age_pending) {
@@ -1139,18 +1145,18 @@ pub const Searcher = struct {
         self.ply = 0;
         self.seldepth = 0;
 
-        if (color == types.Color.White) {
-            _ = self.negamax(self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root, false);
+        if (job.color == types.Color.White) {
+            _ = self.negamax(self.root_board, types.Color.White, depth_, job.alpha, job.beta, false, NodeType.Root, false);
         } else {
-            _ = self.negamax(self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root, false);
+            _ = self.negamax(self.root_board, types.Color.Black, depth_, job.alpha, job.beta, false, NodeType.Root, false);
         }
         @atomicStore(bool, &self.is_searching, false, .release);
     }
 
     pub fn stop_helpers(_: *Searcher) void {
         defer @atomicStore(bool, &helpers_live, false, .release);
-        for (0..NUM_THREADS) |i| @atomicStore(bool, &helper(i).stop, true, .monotonic);
-        for (0..NUM_THREADS) |i| helper_pool.worker(i).wait_idle();
+        @atomicStore(bool, &helpers_stop, true, .monotonic);
+        helper_pool.wait_idle();
     }
 
     pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType, comptime cutnode: bool) i32 {

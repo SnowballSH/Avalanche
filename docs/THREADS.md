@@ -7,11 +7,24 @@ search one ply deeper to diversify the trees.
 ## Persistent thread pool (`src/engine/thread_pool.zig`)
 
 Helpers are created once, when `Threads` is set (or lazily before the first
-search), and then park on a condition variable. Each aspiration re-search
-posts a `search` job to every helper and `stop_helpers` waits for them to go
-idle again, instead of spawning and joining one OS thread (with a 64 MiB
-stack) per helper per re-search, which happened dozens of times per move and
-became the dominant cost at high thread counts.
+search), and then sleep on a futex. Each aspiration re-search posts one
+`search` job to the pool and `stop_helpers` waits for the pool to go idle
+again, instead of spawning and joining one OS thread (with a 64 MiB stack) per
+helper per re-search, which happened dozens of times per move and became the
+dominant cost at high thread counts.
+
+Starting and joining cost the main thread the same at any thread count. To
+start, it writes the job once, bumps a generation counter and wakes every
+sleeper with a single futex wake; each worker compares the counter with the
+last generation it handled, and sets up its own searcher from the main one. To
+join, it raises one stop flag shared by all helpers and sleeps on a single
+`idle` word. Every worker acknowledges every posting by decrementing a pending
+count, whether or not the job is addressed to it, and the one that brings the
+count to zero sets `idle` and wakes the main thread. So the posted job is never
+rewritten while a worker may still read it, no worker can skip a generation,
+and a job is never posted while another is outstanding. Resetting heuristics,
+shutting down surplus workers and waiting for new workers to come up use the
+same counter and latch.
 
 A worker owns its `Searcher`: the worker thread allocates and initialises it
 after NUMA placement, so its ~12.6 MiB of history tables are first touched,
