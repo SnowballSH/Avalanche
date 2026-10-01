@@ -80,11 +80,14 @@ fn fail(message: &str) -> ! {
 }
 
 /// Unlike the lenient helpers above, a value that is set but does not parse is an error.
-fn env_strict<T: FromStr>(key: &str, default: T) -> Result<T, String> {
+fn env_strict<T>(key: &str, default: T) -> Result<T, String>
+where
+    T: FromStr<Err: std::fmt::Display>,
+{
     match std::env::var(key) {
         Ok(value) => value
             .parse()
-            .map_err(|_| format!("{key}={value:?} is not a valid value")),
+            .map_err(|err| format!("{key}={value} is not valid: {err}")),
         Err(_) => Ok(default),
     }
 }
@@ -171,7 +174,7 @@ fn lr_schedule_from_env() -> Result<LrKind, String> {
     let name = env_string("TRAIN_LR_SCHEDULE", "cosine");
     LrKind::parse(&name).ok_or_else(|| {
         format!(
-            "unknown TRAIN_LR_SCHEDULE={name:?}; supported: {}",
+            "unknown TRAIN_LR_SCHEDULE={name}; supported: {}",
             LrKind::SUPPORTED
         )
     })
@@ -184,10 +187,21 @@ fn shuffle_mb_from_env() -> Result<usize, String> {
     }
 }
 
+fn warmup_superbatches_from_env(superbatches: usize) -> Result<usize, String> {
+    let warmup: usize = env_strict("TRAIN_WARMUP_SB", 0)?;
+    if warmup > superbatches {
+        return Err(format!(
+            "TRAIN_WARMUP_SB={warmup} exceeds TRAIN_SUPERBATCHES={superbatches}"
+        ));
+    }
+    Ok(warmup)
+}
+
 fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
-    let Ok(dir) = std::env::var("TRAIN_VALIDATION_DIR") else {
+    let dir = std::env::var("TRAIN_VALIDATION_DIR").unwrap_or_default();
+    if dir.is_empty() {
         return Ok(None);
-    };
+    }
     let batches = env_strict("TRAIN_VALIDATION_BATCHES", 64)?;
     if batches == 0 {
         return Err(String::from("TRAIN_VALIDATION_BATCHES must be at least 1"));
@@ -195,7 +209,7 @@ fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
     Ok(Some(ValidationConfig {
         files: viribin_files("TRAIN_VALIDATION_DIR", &dir)?,
         batches,
-        filter: ViriFilter::Custom(viri_filter),
+        filter: viri_filter,
     }))
 }
 
@@ -235,7 +249,8 @@ fn main() {
     let wdl_proportion = env_f32("TRAIN_WDL", 0.25);
     let wdl_end = env_f32("TRAIN_WDL_END", wdl_proportion);
     let lr_schedule = lr_schedule_from_env().unwrap_or_else(|err| fail(&err));
-    let warmup_superbatches = env_strict("TRAIN_WARMUP_SB", 0).unwrap_or_else(|err| fail(&err));
+    let warmup_superbatches =
+        warmup_superbatches_from_env(superbatches).unwrap_or_else(|err| fail(&err));
     let shuffle_mb = shuffle_mb_from_env().unwrap_or_else(|err| fail(&err));
     let validation = validation_from_env().unwrap_or_else(|err| fail(&err));
     let lr_initial = env_f32("TRAIN_LR_INITIAL", 0.001);
@@ -438,6 +453,8 @@ fn run_chess768(cfg: TrainConfig) {
         SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
     ];
 
+    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
+    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)
@@ -517,6 +534,8 @@ fn run_buckets16(cfg: TrainConfig) {
     };
 
     let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
+    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
+    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)

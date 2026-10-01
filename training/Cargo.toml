@@ -9,5 +9,5 @@ bullet = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6c
 bullet-compiler = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5" }
 bullet-gpu = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5" }
 bullet-trainer = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5" }
-viriformat ="2.0.1"
+viriformat = "2.0.1"
 rand = "0.9"

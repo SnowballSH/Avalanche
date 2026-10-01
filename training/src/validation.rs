@@ -1,7 +1,14 @@
 //! Held-out validation. bullet's `ValueTrainer::run` has neither a validation pass nor a superbatch hook,
 //! so a validated run drives `bullet_trainer::run::train` directly, the layer `ValueTrainer::run` wraps.
 
-use std::{cell::RefCell, collections::BTreeMap, fmt::Debug, sync::Arc};
+use std::{
+    cell::RefCell,
+    collections::BTreeMap,
+    fmt::Debug,
+    fs::File,
+    io::{BufRead, BufReader},
+    sync::Arc,
+};
 
 use bullet::{
     game::{formats::bulletformat::ChessBoard, inputs::SparseInputType, outputs::OutputBuckets},
@@ -11,10 +18,7 @@ use bullet::{
         schedule::{TrainingSchedule, lr::LrScheduler, wdl::WdlScheduler},
         settings::LocalSettings,
     },
-    value::{
-        loader::{LoadableDataType, ViriBinpackLoader, ViriFilter},
-        save,
-    },
+    value::{loader::LoadableDataType, save},
 };
 use bullet_compiler::{
     ir::NodeId,
@@ -27,18 +31,24 @@ use bullet_trainer::{
     reader::{DataReader, ReadMapLoader},
     run::{self, HostPool, Step, logger},
 };
+use viriformat::{
+    chess::{board::Board, chessmove::Move},
+    dataformat::{Game, WDL},
+};
 
 type DeviceBuffer = Arc<Buffer<ExecutionContext>>;
 
-/// Positions one megabyte of `ViriBinpackLoader` shuffle buffer holds.
-const POSITIONS_PER_BUFFER_MB: usize = 1024 * 1024 / size_of::<ChessBoard>() / 2;
+/// Same shape as bullet's `ViriFilter::Custom`: whether to keep a position, given its game result as
+/// 1.0, 0.5 or 0.0.
+pub type PositionFilter = fn(&Board, Move, i16, f32) -> bool;
 
 pub struct ValidationConfig {
     pub files: Vec<String>,
     pub batches: usize,
-    pub filter: ViriFilter,
+    pub filter: PositionFilter,
 }
 
+/// For bullet's GPU and training errors, which implement `Debug` but not `Display`.
 fn describe(error: impl Debug) -> String {
     format!("{error:?}")
 }
@@ -47,32 +57,65 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-/// The first `count` positions of `files` that pass `filter`, in file order.
+fn result_score(wdl: WDL) -> f32 {
+    match wdl {
+        WDL::Win => 1.0,
+        WDL::Draw => 0.5,
+        WDL::Loss => 0.0,
+    }
+}
+
+/// Appends the positions of `path` that pass `filter`, game by game in file order, stopping after the
+/// game that brings `positions` to `count`.
+fn append_file_positions(
+    path: &str,
+    filter: PositionFilter,
+    count: usize,
+    positions: &mut Vec<ChessBoard>,
+) -> Result<(), String> {
+    let invalid = |err: &dyn std::fmt::Display| format!("validation file {path}: {err}");
+    let file = File::open(path).map_err(|err| invalid(&err))?;
+    let mut reader = BufReader::new(file);
+    let mut moves = Vec::new();
+
+    while positions.len() < count && !reader.fill_buf().map_err(|err| invalid(&err))?.is_empty() {
+        let game = Game::deserialise_from(&mut reader, moves).map_err(|err| invalid(&err))?;
+        game.splat_to_bulletformat_with_filter_callback(
+            |position| {
+                positions.push(position);
+                Ok(())
+            },
+            |mv, eval, board, wdl, _| !filter(board, mv, eval as i16, result_score(wdl)),
+        )
+        .map_err(|err| invalid(&err))?;
+        moves = game.moves;
+    }
+    Ok(())
+}
+
+/// The first `count` positions of `files` that pass `filter`, in file and game order.
 ///
-/// Read without interleaving on one thread and with a shuffle buffer of at least `count` positions, so the
-/// first buffer the loader hands out is the same set of positions on every run.
+/// The files are parsed here rather than through bullet's `ViriBinpackLoader`, which shuffles with a
+/// time seed and loops over its files forever: this way the set is identical on every run and resume
+/// for any batch size, and held-out files that are too small are an error instead of repeated positions.
 fn load_positions(
     files: &[String],
-    filter: &ViriFilter,
+    filter: PositionFilter,
     count: usize,
 ) -> Result<Vec<ChessBoard>, String> {
-    let paths: Vec<&str> = files.iter().map(String::as_str).collect();
-    let buffer_mb = count.div_ceil(POSITIONS_PER_BUFFER_MB);
-    let loader = ViriBinpackLoader::new_concat_multiple(&paths, buffer_mb, 1, filter.clone());
-
     let mut positions = Vec::with_capacity(count);
-    loader.read_chunks(0, |chunk| {
-        let wanted = count - positions.len();
-        positions.extend_from_slice(&chunk[..wanted.min(chunk.len())]);
-        positions.len() == count
-    });
+    for path in files {
+        append_file_positions(path, filter, count, &mut positions)?;
+    }
 
     if positions.len() < count {
         return Err(format!(
-            "the validation files yielded only {} of the {count} positions needed",
+            "the validation files hold {} positions that pass the filter, but TRAIN_VALIDATION_BATCHES \
+             x TRAIN_BATCH_SIZE needs {count}",
             positions.len()
         ));
     }
+    positions.truncate(count);
     Ok(positions)
 }
 
@@ -161,7 +204,9 @@ impl LossEvaluator {
             None,
             [(loss_node, String::from("loss"))],
         );
-        let forward = loss_only.lower_forward(batch_size).map_err(describe)?;
+        let forward = loss_only
+            .lower_forward(batch_size)
+            .map_err(|err| err.to_string())?;
         let lowered = |node: &NodeId| {
             forward
                 .map()
@@ -188,7 +233,8 @@ impl LossEvaluator {
         let bound = BTreeMap::from([(loss_id, loss.clone())]);
 
         let stream = device.new_stream().map_err(describe)?;
-        let mut function = Function::new(device, forward.ir().clone()).map_err(describe)?;
+        let mut function =
+            Function::new(device, forward.ir().clone()).map_err(|err| err.to_string())?;
         function.prealloc().map_err(describe)?;
 
         Ok(Self {
@@ -247,7 +293,7 @@ impl Validator {
         batch_size: usize,
         threads: u8,
     ) -> Result<Self, String> {
-        let positions = load_positions(&config.files, &config.filter, config.batches * batch_size)?;
+        let positions = load_positions(&config.files, config.filter, config.batches * batch_size)?;
         Ok(Self {
             positions,
             batch_size,
@@ -304,8 +350,9 @@ fn save_checkpoint<Opt: OptimiserState<ExecutionContext>>(
 }
 
 /// `ValueTrainer::run` with a validation pass after every superbatch, and one before training starts so
-/// that a broken validation setup fails before any training time is spent. A failure later on does not
-/// stop the training run; it is reported once and returned when training has finished.
+/// that a broken validation setup fails before any training time is spent. Only that first pass
+/// and training itself can fail the run: a validation failure later on is a warning, validation is
+/// switched off, and training carries on to a normal `Ok`.
 #[allow(clippy::too_many_arguments)]
 pub fn run<Opt, I, O>(
     optimiser: &mut Optimiser<ExecutionContext, Opt>,
@@ -382,8 +429,11 @@ where
             if validation_error.is_none()
                 && let Err(error) = validator.report(optimiser, step, superbatch)
             {
-                eprintln!("Error: validation failed and is off for the rest of the run: {error}");
-                validation_error = Some(error);
+                eprintln!(
+                    "Warning: validation failed at superbatch {superbatch} and is off for the rest \
+                     of the run; training continues: {error}"
+                );
+                validation_error = Some((superbatch, error));
             }
             if schedule.should_save(superbatch) {
                 let name = format!("{}-{superbatch}", schedule.net_id);
@@ -399,7 +449,11 @@ where
     )
     .map_err(describe)?;
 
-    validation_error.map_or(Ok(()), |error| {
-        Err(format!("validation failed during training: {error}"))
-    })
+    if let Some((superbatch, error)) = validation_error {
+        eprintln!(
+            "Warning: training finished and every checkpoint was saved, but there are no validation \
+             losses from superbatch {superbatch} on: {error}"
+        );
+    }
+    Ok(())
 }

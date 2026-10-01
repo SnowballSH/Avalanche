@@ -19,11 +19,11 @@
 #   TRAIN_DATA_DIR (a directory of .viribin chunks, read with games interleaved across files),
 #   TRAIN_SHUFFLE_MB (128; shuffle buffer of the .viribin loader, 16384 positions per MB),
 #   TRAIN_START_SB (1; with TRAIN_RESUME_FROM, the superbatch to resume at, keeping the LR schedule),
-#   TRAIN_VALIDATION_DIR (unset = off; a directory of held-out .viribin files, filtered like the training
-#     data. Prints "validation superbatch <n> loss <value>" after every superbatch, and once before
-#     training with n = TRAIN_START_SB - 1),
-#   TRAIN_VALIDATION_BATCHES (64; validation batches of TRAIN_BATCH_SIZE, always the first positions of
-#     the held-out files; these must hold at least that many or positions repeat).
+#   TRAIN_VALIDATION_DIR (unset or empty = off; a directory of held-out .viribin files, filtered like the
+#     training data. Prints "validation superbatch <n> loss <value>" after every superbatch, and once
+#     before training with n = TRAIN_START_SB - 1. Only a failure of that first pass stops the run),
+#   TRAIN_VALIDATION_BATCHES (64; validation batches of TRAIN_BATCH_SIZE, always the first filtered
+#     positions of the held-out files in sorted file order; fewer than that many is a startup error).
 #   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh
 #   (HIDDEN is runtime here; the Zig engine's weights.zig must match at build time.)
 #
