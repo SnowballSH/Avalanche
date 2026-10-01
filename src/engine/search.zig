@@ -539,6 +539,12 @@ pub const Searcher = struct {
     }
 
     pub fn iterative_deepening(self: *Searcher, pos: *position.Position, comptime color: types.Color, max_depth: ?u8) i32 {
+        return self.iterative_deepening_mode(pos, color, .scaled, max_depth);
+    }
+
+    /// Helper threads always search `.scaled`, so `.raw` is for single-threaded searchers only.
+    pub fn iterative_deepening_mode(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, max_depth: ?u8) i32 {
+        std.debug.assert(mode == .scaled or NUM_THREADS == 0);
         var out_buf: [4096]u8 = undefined;
         var out_file = platform.Stdout.init(&out_buf);
         const outW = out_file.writer();
@@ -639,7 +645,7 @@ pub const Searcher = struct {
             while (pv_index < pv_target) : (pv_index += 1) {
                 self.root_excluded_count = pv_index;
                 const line_seed = if (pv_index < self.line_count) self.lines[pv_index].score else score;
-                const line_score = self.search_root_line(pos, color, tdepth, line_seed) orelse {
+                const line_score = self.search_root_line(pos, color, mode, tdepth, line_seed) orelse {
                     interrupted = true;
                     break;
                 };
@@ -771,7 +777,7 @@ pub const Searcher = struct {
     }
 
     // Aspiration-window search of one MultiPV line; null when the search was stopped.
-    fn search_root_line(self: *Searcher, pos: *position.Position, comptime color: types.Color, tdepth: usize, previous_score: i32) ?i32 {
+    fn search_root_line(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, tdepth: usize, previous_score: i32) ?i32 {
         self.ply = 0;
         self.seldepth = 0;
         self.root_depth = tdepth;
@@ -804,7 +810,7 @@ pub const Searcher = struct {
 
             self.nmp_min_ply = 0;
 
-            const score = self.negamax(pos, color, depth, alpha, beta, false, NodeType.Root, false);
+            const score = self.negamax(pos, color, mode, depth, alpha, beta, false, NodeType.Root, false);
 
             if (platform.has_threads and depth > 1) {
                 self.stop_helpers();
@@ -1144,9 +1150,9 @@ pub const Searcher = struct {
         self.seldepth = 0;
 
         if (color == types.Color.White) {
-            _ = self.negamax(self.root_board, types.Color.White, depth_, alpha_, beta_, false, NodeType.Root, false);
+            _ = self.negamax(self.root_board, types.Color.White, .scaled, depth_, alpha_, beta_, false, NodeType.Root, false);
         } else {
-            _ = self.negamax(self.root_board, types.Color.Black, depth_, alpha_, beta_, false, NodeType.Root, false);
+            _ = self.negamax(self.root_board, types.Color.Black, .scaled, depth_, alpha_, beta_, false, NodeType.Root, false);
         }
         @atomicStore(bool, &self.is_searching, false, .release);
     }
@@ -1157,7 +1163,7 @@ pub const Searcher = struct {
         for (0..NUM_THREADS) |i| helper_pool.worker(i).wait_idle();
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType, comptime cutnode: bool) i32 {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType, comptime cutnode: bool) i32 {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -1182,7 +1188,7 @@ pub const Searcher = struct {
 
         // Step 1.3: Ply Overflow Check
         if (self.ply == MAX_PLY) {
-            return if (in_check) self.contempt_score() else hce.evaluate_comptime(pos, color);
+            return if (in_check) self.contempt_score() else hce.evaluate_mode(pos, color, mode);
         }
 
         // Step 4.1: Check Extension (moved up)
@@ -1197,7 +1203,7 @@ pub const Searcher = struct {
         }
 
         if (depth == 0) {
-            return self.quiescence_search(pos, color, alpha, beta);
+            return self.quiescence_search(pos, color, mode, alpha, beta);
         }
 
         // Step 1.4: Mate-distance pruning
@@ -1308,7 +1314,7 @@ pub const Searcher = struct {
             }
         }
 
-        const raw_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (is_null) -self.raw_eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.raw_eval_history[self.ply] else hce.evaluate_comptime(pos, color);
+        const raw_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (is_null) -self.raw_eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.raw_eval_history[self.ply] else hce.evaluate_mode(pos, color, mode);
         const static_eval: i32 = if (in_check) raw_eval else self.corrected_eval(pos, color, raw_eval);
 
         var best_score: i32 = static_eval;
@@ -1359,7 +1365,7 @@ pub const Searcher = struct {
                 self.ply += 1;
                 pos.play_null_move();
                 self.ttable.prefetch(pos.hash);
-                var null_score = -self.negamax(pos, opp_color, depth - r, -beta, -beta + 1, true, NodeType.NonPV, !cutnode);
+                var null_score = -self.negamax(pos, opp_color, mode, depth - r, -beta, -beta + 1, true, NodeType.NonPV, !cutnode);
                 self.ply -= 1;
                 pos.undo_null_move();
 
@@ -1378,7 +1384,7 @@ pub const Searcher = struct {
 
                     self.nmp_min_ply = self.ply + @as(u32, @intCast((depth - r) * parameters.NMPVerifyPlyFactor / 100));
 
-                    const verif_score = self.negamax(pos, color, depth - r, beta - 1, beta, false, NodeType.NonPV, false);
+                    const verif_score = self.negamax(pos, color, mode, depth - r, beta - 1, beta, false, NodeType.NonPV, false);
 
                     self.nmp_min_ply = 0;
 
@@ -1394,7 +1400,7 @@ pub const Searcher = struct {
 
             // Step 4.3: Razoring
             if (depth <= parameters.RazoringDepth and static_eval - parameters.RazoringBase + parameters.RazoringMargin * @as(i32, @intCast(depth)) < alpha) {
-                return self.quiescence_search(pos, color, alpha, beta);
+                return self.quiescence_search(pos, color, mode, alpha, beta);
             }
 
             // Step 4.4: ProbCut
@@ -1431,11 +1437,11 @@ pub const Searcher = struct {
                         self.ttable.prefetch(pos.hash);
 
                         // Quick qsearch verification
-                        var qscore = -self.quiescence_search(pos, opp_color, -probcut_beta, -probcut_beta + 1);
+                        var qscore = -self.quiescence_search(pos, opp_color, mode, -probcut_beta, -probcut_beta + 1);
 
                         // Full shallow verification if qsearch passes
                         if (qscore >= probcut_beta) {
-                            qscore = -self.negamax(pos, opp_color, depth - parameters.ProbCutReduction, -probcut_beta, -probcut_beta + 1, false, NodeType.NonPV, !cutnode);
+                            qscore = -self.negamax(pos, opp_color, mode, depth - parameters.ProbCutReduction, -probcut_beta, -probcut_beta + 1, false, NodeType.NonPV, !cutnode);
                         }
 
                         self.ply -= 1;
@@ -1602,7 +1608,7 @@ pub const Searcher = struct {
                 const singular_beta = @max(tt_eval - margin, -hce.MateScore + hce.MaxMate);
 
                 self.exclude_move[self.ply] = hashmove;
-                const singular_score = self.negamax(pos, color, (depth - 1) / 2, singular_beta - 1, singular_beta, true, NodeType.NonPV, cutnode);
+                const singular_score = self.negamax(pos, color, mode, (depth - 1) / 2, singular_beta - 1, singular_beta, true, NodeType.NonPV, cutnode);
                 self.exclude_move[self.ply] = types.Move.empty();
                 if (singular_score < singular_beta) {
                     extension = 1;
@@ -1643,7 +1649,7 @@ pub const Searcher = struct {
             const min_lmr_move: usize = if (on_pv) parameters.LMRMinMovePV else parameters.LMRMinMoveNonPV;
             const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 200;
             if (on_pv and legals == 1) {
-                score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV, false);
+                score = -self.negamax(pos, opp_color, mode, new_depth, -beta, -alpha, false, NodeType.PV, false);
             } else {
                 var do_full_search = true;
                 if (!in_check and depth >= parameters.LMRDepth and index >= min_lmr_move and !is_winning_capture) {
@@ -1682,17 +1688,17 @@ pub const Searcher = struct {
                     const rd: usize = @as(usize, @intCast(std.math.clamp(@as(i32, @intCast(new_depth)) - reduction, 1, new_depth + 1)));
 
                     // Step 5.7: Principal-Variation-Search (PVS)
-                    score = -self.negamax(pos, opp_color, rd, -alpha - 1, -alpha, false, NodeType.NonPV, true);
+                    score = -self.negamax(pos, opp_color, mode, rd, -alpha - 1, -alpha, false, NodeType.NonPV, true);
 
                     do_full_search = score > alpha and rd < new_depth;
                 }
 
                 if (do_full_search) {
-                    score = -self.negamax(pos, opp_color, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV, !cutnode);
+                    score = -self.negamax(pos, opp_color, mode, new_depth, -alpha - 1, -alpha, false, NodeType.NonPV, !cutnode);
                 }
 
                 if (on_pv and score > alpha and score < beta) {
-                    score = -self.negamax(pos, opp_color, new_depth, -beta, -alpha, false, NodeType.PV, false);
+                    score = -self.negamax(pos, opp_color, mode, new_depth, -beta, -alpha, false, NodeType.PV, false);
                 }
             }
 
@@ -1832,7 +1838,7 @@ pub const Searcher = struct {
         return best_score;
     }
 
-    pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, alpha_: i32, beta_: i32) i32 {
+    pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, alpha_: i32, beta_: i32) i32 {
         var alpha = alpha_;
         const beta = beta_;
         const opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
@@ -1851,7 +1857,7 @@ pub const Searcher = struct {
 
         // Step 1.4: Ply Overflow Check
         if (self.ply == MAX_PLY) {
-            return if (in_check) self.contempt_score() else hce.evaluate_comptime(pos, color);
+            return if (in_check) self.contempt_score() else hce.evaluate_mode(pos, color, mode);
         }
 
         if (self.draw_score(pos, color, in_check, true)) |draw| {
@@ -1891,7 +1897,7 @@ pub const Searcher = struct {
         var best_score = -hce.MateScore + @as(i32, @intCast(self.ply));
         var raw_eval = best_score;
         if (!in_check) {
-            raw_eval = hce.evaluate_comptime(pos, color);
+            raw_eval = hce.evaluate_mode(pos, color, mode);
             best_score = self.corrected_eval(pos, color, raw_eval);
 
             // Step 2.1: Stand Pat pruning
@@ -1972,7 +1978,7 @@ pub const Searcher = struct {
             self.ply += 1;
             pos.play_move(color, move);
             self.hash_history.append(pos.hash) catch {};
-            const score = -self.quiescence_search(pos, opp_color, -beta, -alpha);
+            const score = -self.quiescence_search(pos, opp_color, mode, -beta, -alpha);
             self.ply -= 1;
             pos.undo_move(color, move);
             _ = self.hash_history.pop();

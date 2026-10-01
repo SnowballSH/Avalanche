@@ -1349,7 +1349,7 @@ test "qsearch: checkmate takes precedence over fifty-move draw" {
     s.force_thinking = true;
     s.silent_output = true;
     s.hash_history.append(pos.hash) catch unreachable;
-    const score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, hce.MateScore);
+    const score = s.quiescence_search(pos, types.Color.Black, .scaled, -hce.MateScore, hce.MateScore);
     try expect(score <= -hce.MateScore + hce.MaxMate);
 }
 
@@ -1392,11 +1392,11 @@ test "qsearch: stalemate precedes stand-pat and TT cutoffs" {
     s.silent_output = true;
     s.hash_history.append(pos.hash) catch unreachable;
 
-    const tt_score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, hce.MateScore);
+    const tt_score = s.quiescence_search(pos, types.Color.Black, .scaled, -hce.MateScore, hce.MateScore);
     try expect(tt_score == -100);
 
     tt.GlobalTT.clear();
-    const stand_pat_score = s.quiescence_search(pos, types.Color.Black, -hce.MateScore, -hce.MateScore + 1);
+    const stand_pat_score = s.quiescence_search(pos, types.Color.Black, .scaled, -hce.MateScore, -hce.MateScore + 1);
     try expect(stand_pat_score == -100);
 }
 
@@ -1432,7 +1432,7 @@ test "qsearch: contempt draw keeps fail-soft provenance" {
     const static_eval = hce.evaluate_comptime(pos, types.Color.White);
     try expect(static_eval < 100);
     const beta = @divTrunc(static_eval + 100, 2);
-    const score = s.quiescence_search(pos, types.Color.White, beta - 1, beta);
+    const score = s.quiescence_search(pos, types.Color.White, .scaled, beta - 1, beta);
     try expect(score == 100);
     try expect(tt.GlobalTT.get(pos.hash) == null);
 }

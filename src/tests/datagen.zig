@@ -3,6 +3,8 @@ const platform = @import("../platform.zig");
 const datagen = @import("../engine/datagen.zig");
 const viriformat = @import("../engine/datagen/viriformat.zig");
 const types = @import("../chess/types.zig");
+const hce = @import("../engine/hce.zig");
+const position = @import("../chess/position.zig");
 const support = @import("support.zig");
 const testing = std.testing;
 
@@ -247,4 +249,90 @@ test "datagen: thread seeds are non-zero, distinct per thread, and stable" {
         try testing.expectEqual(first, datagen.thread_seed(run_seed, 0));
     }
     try testing.expect(datagen.thread_seed(0, 0) != datagen.thread_seed(1, 0));
+}
+
+// The scaled evaluation of a network position, rebuilt from the network output.
+fn scaled_from_network(pos: *position.Position, network: i32) i32 {
+    var result = network;
+    if (pos.phase() <= 5 and @abs(result) >= 16 and hce.is_material_drawish(pos)) result = @divTrunc(result, 8);
+    const fifty: i32 = @intCast(pos.history[pos.game_ply].fifty);
+    return @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - fifty * 5), 1024);
+}
+
+test "datagen: raw eval is the network output, scaled eval is unchanged" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const network_positions = [_][]const u8{
+        "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 9",
+        // High fifty-move counter.
+        "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 90 60",
+        "2r3k1/5ppp/8/8/8/8/5PPP/2RQ2K1 b - - 70 80",
+        // Pawn endings.
+        "8/5pk1/6p1/8/8/6P1/4PPK1/8 w - - 0 40",
+        "8/8/3k4/8/3PK3/8/8/8 b - - 12 60",
+        // Drawish material that still uses the network: KBN vs KB.
+        "8/8/3k4/3b4/8/2NBK3/8/8 w - - 0 70",
+        "8/8/3k4/3b4/8/2NBK3/8/8 b - - 40 90",
+    };
+    var differing: usize = 0;
+    for (network_positions) |line| {
+        pos.set_fen(line);
+        inline for (.{ types.Color.White, types.Color.Black }) |color| {
+            const network = hce.evaluate_nnue_comptime(pos, color);
+            const scaled = hce.evaluate_comptime(pos, color);
+            try testing.expectEqual(network, hce.evaluate_mode(pos, color, .raw));
+            try testing.expectEqual(scaled, hce.evaluate_mode(pos, color, .scaled));
+            try testing.expectEqual(scaled_from_network(pos, network), scaled);
+            if (network != scaled) differing += 1;
+        }
+    }
+    try testing.expect(differing >= network_positions.len);
+
+    // No pawns and phase below 3: the hand-crafted fallback is the same in both modes.
+    for ([_][]const u8{ "8/8/3k4/8/8/4K3/8/R7 w - - 0 1", "8/8/3k4/8/8/4K3/8/1NN5 b - - 30 1" }) |line| {
+        pos.set_fen(line);
+        inline for (.{ types.Color.White, types.Color.Black }) |color| {
+            try testing.expectEqual(hce.evaluate_comptime(pos, color), hce.evaluate_mode(pos, color, .raw));
+        }
+    }
+}
+
+fn run_bytes(config: datagen.DatagenConfig, seed: u64) ![]u8 {
+    var run: Run = undefined;
+    try run.init("chunk.viribin");
+    defer run.tmp.cleanup();
+
+    var gen = datagen.Datagen.new(config, seed);
+    defer gen.deinit();
+    try gen.start(1, run.path);
+    try testing.expectEqual(config.raw_eval, gen.summary().raw_eval);
+    return run.read();
+}
+
+test "datagen: raweval changes the recorded data and is reported in the summary" {
+    platform.io = std.testing.io;
+    support.init_search();
+
+    var raw_config = quick_config(300);
+    raw_config.raw_eval = true;
+    const raw = try run_bytes(raw_config, 11);
+    defer testing.allocator.free(raw);
+    const raw_again = try run_bytes(raw_config, 11);
+    defer testing.allocator.free(raw_again);
+    const scaled = try run_bytes(quick_config(300), 11);
+    defer testing.allocator.free(scaled);
+
+    try testing.expect((try count_viri(raw)).positions >= 300);
+    try testing.expectEqualSlices(u8, raw, raw_again);
+    try testing.expect(!std.mem.eql(u8, raw, scaled));
+}
+
+test "datagen: the summary line always carries raw_eval" {
+    var buf: [256]u8 = undefined;
+    inline for (.{ .{ false, "\"raw_eval\":false}" }, .{ true, "\"raw_eval\":true}" } }) |case| {
+        const line = try std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(datagen.Summary{ .raw_eval = case[0] }, .{})});
+        try testing.expect(std.mem.endsWith(u8, line, case[1]));
+    }
 }

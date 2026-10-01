@@ -21,6 +21,7 @@ pub const Summary = struct {
     black_wins: u64 = 0,
     seconds: f64 = 0,
     seed: u64 = 0,
+    raw_eval: bool = false,
 };
 
 /// Shared by all datagen threads; `lock` serializes whole-game writes and the totals.
@@ -63,6 +64,7 @@ pub const DatagenConfig = struct {
     opening_reject_threshold: i32 = 600,
     thresholds: adjudicator.Thresholds = .{},
     positions_target: u64 = 0,
+    raw_eval: bool = false,
 
     pub fn from_options(o: options.Options) DatagenConfig {
         return .{
@@ -76,6 +78,7 @@ pub const DatagenConfig = struct {
             .random_move_see_threshold = o.random_see,
             .datagen_tt_mb = o.tt_mb,
             .positions_target = o.positions,
+            .raw_eval = o.raw_eval,
         };
     }
 };
@@ -290,17 +293,19 @@ pub const DatagenSingle = struct {
         s.force_thinking = false;
         @atomicStore(bool, &s.stop, false, .monotonic);
 
-        const score: i32 = if (pos.turn == types.Color.White)
-            s.iterative_deepening(pos, types.Color.White, null)
-        else
-            -s.iterative_deepening(pos, types.Color.Black, null);
+        const score: i32 = switch (pos.turn) {
+            inline else => |turn| switch (self.config.raw_eval) {
+                inline else => |raw| s.iterative_deepening_mode(pos, turn, if (raw) .raw else .scaled, null),
+            },
+        };
+        const white_score = if (pos.turn == types.Color.White) score else -score;
 
         @atomicStore(bool, &s.stop, false, .monotonic);
         s.time_stop = false;
         s.force_thinking = false;
 
         return .{
-            .score = score,
+            .score = white_score,
             .best_move = s.best_move,
         };
     }
@@ -673,6 +678,7 @@ pub const Datagen = struct {
     pub fn summary(self: *const Datagen) Summary {
         var s = self.output.totals;
         s.seed = self.seed;
+        s.raw_eval = self.config.raw_eval;
         s.seconds = @as(f64, @floatFromInt(self.timer.read())) / std.time.ns_per_s;
         return s;
     }
@@ -683,6 +689,10 @@ pub const Datagen = struct {
         defer file.close(platform.io);
         self.output = .{ .file = file, .positions_target = self.config.positions_target };
         self.timer = types.Timer.start();
+
+        const contempt = search.CONTEMPT;
+        defer search.CONTEMPT = contempt;
+        if (self.config.raw_eval) search.CONTEMPT = 0;
 
         try self.datagens.ensureTotalCapacity(num_threads);
         for (0..num_threads) |th| {
@@ -711,6 +721,7 @@ pub const Datagen = struct {
         std.debug.print("Format:    {s}\n", .{if (c.format == .viri) "viriformat binpack" else "bulletformat"});
         std.debug.print("Nodes:     {} soft, {} hard\n", .{ c.soft_nodes, c.soft_nodes * c.hard_node_multiplier });
         std.debug.print("Opening:   {}-{} plies, book {}-{} plies, SEE >= {}\n", .{ c.random_plies_min, plies_max, c.book_random_plies_min, book_plies_max, c.random_move_see_threshold });
+        std.debug.print("Eval:      {s}\n", .{if (c.raw_eval) "raw network output (raweval=true)" else "scaled (raweval=false)"});
         std.debug.print("TT:        {} MB per side per worker\n", .{c.datagen_tt_mb});
         std.debug.print("Threads:   {}\n", .{num_threads});
         std.debug.print("Positions: {}\n", .{c.positions_target});

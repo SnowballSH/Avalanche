@@ -26,6 +26,7 @@ const DATAGEN_USAGE =
     \\  ttmb=N        TT MiB per side per thread (default 4)
     \\  positions=N   stop after at least N positions, at a game boundary (default: unbounded)
     \\  seed=N        deterministic seed (default: random)
+    \\  raweval=true|false label with the unscaled network output (default false)
     \\  out=PATH      output file, must not exist (default data_<seed>.viribin)
     \\  format=viri|bullet (default viri)
     \\

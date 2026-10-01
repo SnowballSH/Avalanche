@@ -30,6 +30,7 @@ pub const Options = struct {
     tt_mb: u64 = 4,
     positions: u64 = 0,
     seed: ?u64 = null,
+    raw_eval: bool = false,
     out: ?[]const u8 = null,
 };
 
@@ -74,6 +75,8 @@ pub fn parse(args: []const []const u8, diag: *Diagnostic) ParseError!Options {
             options.positions = try positive(u64, key, value, diag);
         } else if (std.mem.eql(u8, key, "seed")) {
             options.seed = std.fmt.parseInt(u64, value, 0) catch return invalid(diag, key, value);
+        } else if (std.mem.eql(u8, key, "raweval")) {
+            options.raw_eval = boolean(value) orelse return invalid(diag, key, value);
         } else if (std.mem.eql(u8, key, "out")) {
             if (value.len == 0) return invalid(diag, key, value);
             options.out = value;
@@ -89,6 +92,12 @@ fn positive(comptime T: type, key: []const u8, value: []const u8, diag: *Diagnos
     const n = std.fmt.parseInt(T, value, 10) catch return invalid(diag, key, value);
     if (n == 0) return invalid(diag, key, value);
     return n;
+}
+
+fn boolean(value: []const u8) ?bool {
+    if (std.mem.eql(u8, value, "true")) return true;
+    if (std.mem.eql(u8, value, "false")) return false;
+    return null;
 }
 
 fn invalid(diag: *Diagnostic, key: []const u8, value: []const u8) ParseError {
@@ -111,6 +120,7 @@ test "datagen options: defaults with only a thread count" {
     try testing.expectEqual(@as(?u64, null), o.seed);
     try testing.expectEqual(Format.viri, o.format);
     try testing.expectEqual(PlySpan{ .min = 8, .range = 3 }, o.plies);
+    try testing.expect(!o.raw_eval);
 }
 
 test "datagen options: every key parses" {
@@ -139,4 +149,15 @@ test "datagen options: malformed values are errors naming the key" {
     try testing.expectError(error.InvalidValue, parse(&.{"0"}, &diag));
     try testing.expectError(error.UnknownKey, parse(&.{ "4", "nodez=5" }, &diag));
     try testing.expectError(error.MissingThreads, parse(&.{}, &diag));
+}
+
+test "datagen options: raweval takes exactly true or false" {
+    try testing.expect((try parse_ok(&.{ "4", "raweval=true" })).raw_eval);
+    try testing.expect(!(try parse_ok(&.{ "4", "raweval=false" })).raw_eval);
+
+    var diag: Diagnostic = .{};
+    for ([_][]const u8{ "raweval=", "raweval=1", "raweval=True", "raweval=yes", "raweval=true " }) |arg| {
+        try testing.expectError(error.InvalidValue, parse(&.{ "4", arg }, &diag));
+        try testing.expectEqualStrings("raweval", diag.key);
+    }
 }
