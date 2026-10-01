@@ -26,3 +26,6 @@
 - The bonus uses the corrected eval: the gravity rule accumulates, so a
   raw-based bonus would drive any consistent error to the limit, while the
   residual stops once the corrected eval agrees with the search.
+- The correction is computed once per `negamax` node (0 in check) and its
+  magnitude is a measure of how unreliable the static eval is. LMR reduces
+  `|correction| / 64` plies less (reductions are whole plies).
