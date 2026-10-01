@@ -1350,18 +1350,26 @@ pub const Searcher = struct {
 
         // >> Step 4: Prunings
         if (!in_check and !on_pv and self.exclude_move[self.ply].to_u16() == 0) {
+            const tt_bounds_eval = tthit and @as(i32, @intCast(@abs(tt_eval))) < SCORE_PLY_ADJ and switch (entry.?.flag) {
+                .Exact => true,
+                .Lower => tt_eval > static_eval,
+                .Upper => tt_eval < static_eval,
+                else => false,
+            };
+            const eval: i32 = if (tt_bounds_eval) tt_eval else static_eval;
+
             // Step 4.1: Reverse Futility Pruning
             if (@as(i32, @intCast(@abs(beta))) < hce.MateScore - hce.MaxMate and depth <= parameters.RFPDepth) {
                 var n = @as(i32, @intCast(depth)) * parameters.RFPMultiplier;
                 if (improving) {
                     n -= parameters.RFPImprovingDeduction;
                 }
-                if (static_eval - n >= beta) {
+                if (eval - n >= beta) {
                     return beta;
                 }
             }
 
-            var nmp_static_eval = static_eval;
+            var nmp_static_eval = eval;
             if (improving) {
                 nmp_static_eval += parameters.NMPImprovingMargin;
             }
@@ -1369,7 +1377,7 @@ pub const Searcher = struct {
             // Step 4.2: Null move pruning
             if (!is_null and depth >= parameters.NMPDepth and self.ply >= self.nmp_min_ply and nmp_static_eval >= beta and has_non_pawns) {
                 var r = parameters.NMPBase + ((depth * parameters.NMPDepthFactor) >> 8);
-                r += @as(usize, @intCast(@max(@as(i32, 0), @min(parameters.NMPBetaMax, @divTrunc((static_eval - beta), parameters.NMPBetaDivisor)))));
+                r += @as(usize, @intCast(@max(@as(i32, 0), @min(parameters.NMPBetaMax, @divTrunc((eval - beta), parameters.NMPBetaDivisor)))));
                 r = @min(r, depth);
 
                 self.move_history[self.ply] = types.Move.empty();
@@ -1411,7 +1419,7 @@ pub const Searcher = struct {
             }
 
             // Step 4.3: Razoring
-            if (depth <= parameters.RazoringDepth and static_eval - parameters.RazoringBase + parameters.RazoringMargin * @as(i32, @intCast(depth)) < alpha) {
+            if (depth <= parameters.RazoringDepth and eval - parameters.RazoringBase + parameters.RazoringMargin * @as(i32, @intCast(depth)) < alpha) {
                 return self.quiescence_search(pos, color, mode, alpha, beta);
             }
 
