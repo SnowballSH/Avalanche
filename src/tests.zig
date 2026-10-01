@@ -23,6 +23,7 @@ test {
     _ = @import("tests/uci_options.zig");
     _ = @import("engine/numa.zig");
     _ = @import("tests/thread_pool.zig");
+    _ = @import("tests/smp_root.zig");
     _ = @import("engine/datagen/options.zig");
     _ = @import("engine/datagen/adjudicator.zig");
     _ = @import("tests/datagen.zig");

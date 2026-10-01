@@ -19,6 +19,16 @@ and therefore physically allocated, on the node the thread runs on.
 `ucinewgame` resets all helpers' heuristics in parallel on their own threads.
 Lowering `Threads` shuts down surplus workers and frees their tables.
 
+A helper takes over the root once per search, not per job: the main thread
+copies only the game state (`Position.copy_game_state`, about 400 bytes) and
+the game's hash history, and the helper rebuilds its accumulator on its own
+thread from its own Finny table before its first job. Every job unwinds back
+to the root, so an aspiration re-search costs each helper a few scalars and
+the root move list. Copying the whole `Position` instead cost 157 KB per
+helper per re-search (80 MB at 512 threads) and replaced each helper's warm
+Finny table with the main thread's. Loading a network (`EvalFile`) discards
+the helpers' Finny tables.
+
 The search contract is unchanged: helpers run a fixed-depth root search per
 job, observe the main thread's stop flag and share the node budget for
 `go nodes`. On wasm (`platform.has_threads == false`) the pool is never
