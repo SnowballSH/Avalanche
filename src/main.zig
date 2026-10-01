@@ -13,6 +13,7 @@ const bench = @import("engine/bench.zig");
 const datagen = @import("engine/datagen.zig");
 const datagen_options = @import("engine/datagen/options.zig");
 const tbfilter = @import("engine/tbfilter.zig");
+const netscale = @import("engine/netscale.zig");
 
 const arch = @import("build_options");
 
@@ -100,6 +101,17 @@ pub fn main(init: std.process.Init) anyerror!void {
         if (std.mem.eql(u8, second, "tbfilter")) {
             // Usage: tbfilter <input.bin> <output.bin> tb=<path> [threads=..] [men=5] [max=..] [rule50=keep|on|off]
             const code = tbfilter.run(args[2..]);
+            if (code != 0) std.process.exit(code);
+            return;
+        }
+        if (std.mem.eql(u8, second, "netscale")) {
+            var buffer: [512]u8 = undefined;
+            var stdout = platform.Stdout.init(&buffer);
+            var err_buffer: [512]u8 = undefined;
+            var stderr = std.Io.File.stderr().writerStreaming(platform.io, &err_buffer);
+            const code = try netscale.run(args[2..], stdout.writer(), &stderr.interface);
+            try stdout.writer().flush();
+            try stderr.interface.flush();
             if (code != 0) std.process.exit(code);
             return;
         }

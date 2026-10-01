@@ -7,6 +7,23 @@ pub const MateScore: i32 = 888888;
 
 pub const UseNNUE = true;
 
+pub const DEFAULT_EVAL_SCALE: i32 = 1000;
+pub const MIN_EVAL_SCALE: i32 = 500;
+pub const MAX_EVAL_SCALE: i32 = 2000;
+
+/// Permille multiplier on the network output (UCI `EvalScale`), which brings a
+/// network onto the eval scale the search margins are tuned to.
+pub var eval_scale: i32 = DEFAULT_EVAL_SCALE;
+
+pub inline fn scale_network_output(raw: i32) i32 {
+    return @divTrunc(raw * eval_scale, DEFAULT_EVAL_SCALE);
+}
+
+/// Whether the network, rather than the classical endgame evaluation, scores `pos`.
+pub inline fn network_evaluates(pos: *const position.Position) bool {
+    return UseNNUE and (pos.phase() >= 3 or pos.has_pawns());
+}
+
 pub const Mateiral: [6][2]i32 = .{
     .{ 82, 94 },
     .{ 337, 281 },
@@ -345,9 +362,10 @@ pub inline fn evaluate_comptime(pos: *position.Position, comptime color: types.C
 pub fn evaluate_mode(pos: *position.Position, comptime color: types.Color, comptime mode: EvalMode) i32 {
     const phase = pos.phase();
     var result: i32 = 0;
-    if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
+    if (network_evaluates(pos)) {
         result = evaluate_nnue_comptime(pos, color);
         if (mode == .raw) return result;
+        result = scale_network_output(result);
     } else {
         if (!pos.evaluator.need_hce) {
             pos.evaluator.need_hce = true;
@@ -411,6 +429,7 @@ pub fn evaluate_mode(pos: *position.Position, comptime color: types.Color, compt
     return result;
 }
 
+/// The network's output for the side to move, without `eval_scale`.
 pub inline fn evaluate_nnue(pos: *position.Position) i32 {
     return pos.evaluator.nnue_evaluator.evaluate(pos.turn, pos);
 }

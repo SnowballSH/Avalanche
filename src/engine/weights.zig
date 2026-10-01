@@ -89,6 +89,15 @@ pub fn do_nnue() void {
     validate(std.mem.asBytes(MODEL)) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
 }
 
+/// Replaces the active network's weights with `bytes`, a whole network file,
+/// keeping its name. The active network is untouched on error. Callers must
+/// refresh every position's accumulators afterwards. Not for wasm, which reads
+/// the embedded network in place.
+pub fn install(bytes: []const u8) NetworkError!void {
+    try validate(bytes);
+    @memcpy(std.mem.asBytes(&model_storage), bytes);
+}
+
 /// Replaces the active network with the file at `path`, or with the embedded
 /// network for `EMBEDDED_NAME`. The active network is untouched on error.
 /// Callers must refresh every position's accumulators afterwards.
@@ -101,8 +110,7 @@ pub fn load(path: []const u8) !void {
     }
     const bytes = try std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(@sizeOf(NNUEWeights) + 1));
     defer platform.allocator.free(bytes);
-    try validate(bytes);
-    @memcpy(std.mem.asBytes(&model_storage), bytes);
+    try install(bytes);
 
     const file_name = std.fs.path.basename(path);
     @memcpy(active_name_buf[0..file_name.len], file_name);

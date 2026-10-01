@@ -125,3 +125,33 @@ WDL tables assume a zero fifty-move counter. A tablebase win recorded in a drawn
 counter was already high, although such a win may not be convertible before the fifty-move rule; telling the two
 apart needs DTZ tables. On an endgame-book sample (400k positions), about 6% of positions were masked, 98% of them
 with a non-zero counter; an independent check with python-chess's Syzygy prober agreed on every probed position.
+
+## Network eval scale
+
+Search margins are tuned to the production network's eval scale, and every newly trained network comes out slightly
+louder or quieter, which mis-measures it in an SPRT. Measure the candidate against the production network:
+
+```
+Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd> [limit=<n>]
+```
+
+then give the candidate `EvalScale=<eval_scale>` in the SPRT (the reference keeps the default 1000).
+
+For both networks the tool takes the mean absolute raw network output (centipawns for the side to move, before
+`EvalScale`, the eval post-scaling, the drawish division and correction history) over the positions the engine would
+evaluate with the network. Positions in check are skipped, and so are positions with no pawns and a phase below 3,
+which the engine scores with its classical endgame evaluation instead. `limit` uses only the first `n` positions
+that remain. An invalid position line is an error naming the line. Use a representative set of quiet positions
+(for example a sample of the positions the network was trained on, or a large opening book), not a handful of lines:
+the factor is an average and depends on the mix of material and game phase.
+
+It prints one JSON line: `positions`, `ref_mean_abs`, `candidate_mean_abs`, `factor` (`ref_mean_abs /
+candidate_mean_abs`) and `eval_scale` (`factor` in permille, rounded). When `eval_scale` falls outside the option's
+500–2000 range the line is still printed, with a warning and exit code 1. Exit code 2 means bad options.
+
+`EvalScale` multiplies the network output as it enters the static evaluation (`raw * EvalScale / 1000`, truncated),
+so the post-scaling, correction history and the hash table all see the scaled value; the default is an exact
+identity. The network file is never rewritten: output weights are small integers (at most 127 in magnitude), so
+re-rounding them adds eval noise of about 10 cp RMS per position that a mean cannot show, and networks whose weights
+already sit at the 127 clip, the production network included, could not be scaled up at all. Datagen and `netscale`
+run at the default scale and record the unscaled output.

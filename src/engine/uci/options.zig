@@ -7,6 +7,7 @@ const wdl = @import("../wdl.zig");
 const parameters = @import("../parameters.zig");
 const strength = @import("../strength.zig");
 const weights = @import("../weights.zig");
+const hce = @import("../hce.zig");
 const position = @import("../../chess/position.zig");
 const numa = @import("../numa.zig");
 
@@ -86,6 +87,7 @@ const OPTIONS = [_]Option{
     .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = 7, .min = 1, .max = 7 } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
     .{ .name = "Syzygy50MoveRule", .kind = .{ .check = true }, .apply = set_syzygy_rule50, .available = syzygy.supported },
     .{ .name = "EvalFile", .kind = .{ .string = weights.EMBEDDED_NAME }, .apply = set_eval_file, .available = weights.supports_eval_file },
+    .{ .name = "EvalScale", .kind = .{ .spin = .{ .default = hce.DEFAULT_EVAL_SCALE, .min = hce.MIN_EVAL_SCALE, .max = hce.MAX_EVAL_SCALE } }, .apply = set_eval_scale },
     .{ .name = "UCI_ShowWDL", .kind = .{ .check = false }, .apply = set_show_wdl },
     .{ .name = "Contempt", .kind = .{ .spin = .{ .default = 0, .min = -search.MAX_CONTEMPT, .max = search.MAX_CONTEMPT } }, .apply = set_contempt },
 };
@@ -259,6 +261,15 @@ fn set_eval_file(ctx: Context, value: Value) !void {
     };
     ctx.position.refresh_evaluation();
     try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{weights.active_network()});
+}
+
+fn set_eval_scale(_: Context, value: Value) !void {
+    const scale: i32 = @intCast(value.spin);
+    if (scale != hce.eval_scale) {
+        hce.eval_scale = scale;
+        // Stored static evals were computed with the previous scale.
+        tt.GlobalTT.clear();
+    }
 }
 
 fn set_show_wdl(_: Context, value: Value) !void {

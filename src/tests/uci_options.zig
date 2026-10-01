@@ -137,3 +137,88 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     try expectEqual(embedded_eval, hce.evaluate_nnue(f.pos));
     try std.testing.expectEqualStrings(build_options.net_name, weights.active_network());
 }
+
+test "options: EvalScale parses, clamps to its bounds and is advertised" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    defer hce.eval_scale = hce.DEFAULT_EVAL_SCALE;
+
+    try expectEqual(@as(i32, 1000), hce.eval_scale);
+    try f.set("name EvalScale value 1234");
+    try expectEqual(@as(i32, 1234), hce.eval_scale);
+    try f.set("name evalscale value 100");
+    try expectEqual(@as(i32, 500), hce.eval_scale);
+    try f.set("name EvalScale value 99999");
+    try expectEqual(@as(i32, 2000), hce.eval_scale);
+    try std.testing.expectError(options.SetOptionError.InvalidValue, f.set("name EvalScale value loud"));
+    try expectEqual(@as(i32, 2000), hce.eval_scale);
+
+    var listing: [16 * 1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&listing);
+    try options.print_all(&w);
+    try expect(std.mem.indexOf(u8, w.buffered(), "option name EvalScale type spin default 1000 min 500 max 2000") != null);
+}
+
+const EVAL_SCALE_FENS = [_][]const u8{
+    types.DEFAULT_FEN,
+    "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+    "2r3k1/5ppp/p3p3/1p1n4/3P4/P4N2/1P3PPP/2R3K1 b - - 0 24",
+    "6k1/5ppp/8/8/8/8/5PPP/R5K1 w - - 0 1",
+    "6k1/5ppp/8/8/8/8/5PPP/R5K1 b - - 0 1",
+    "8/5k2/8/8/q7/8/5K2/8 b - - 0 1",
+};
+
+fn static_eval(pos: *position.Position) i32 {
+    return if (pos.turn == types.Color.White) hce.evaluate_comptime(pos, types.Color.White) else hce.evaluate_comptime(pos, types.Color.Black);
+}
+
+test "options: EvalScale 1000 leaves every evaluation unchanged" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    defer hce.eval_scale = hce.DEFAULT_EVAL_SCALE;
+
+    for (EVAL_SCALE_FENS) |fen| {
+        f.pos.set_fen(fen);
+        const raw = hce.evaluate_nnue(f.pos);
+        const before = static_eval(f.pos);
+        try f.set("name EvalScale value 700");
+        try f.set("name EvalScale value 1000");
+        try expectEqual(raw, hce.scale_network_output(raw));
+        try expectEqual(raw, hce.evaluate_nnue(f.pos));
+        try expectEqual(before, static_eval(f.pos));
+    }
+}
+
+test "options: EvalScale 800 scales the network output to exactly raw * 800 / 1000" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    defer hce.eval_scale = hce.DEFAULT_EVAL_SCALE;
+
+    var negative: usize = 0;
+    for (EVAL_SCALE_FENS) |fen| {
+        f.pos.set_fen(fen);
+        const raw = hce.evaluate_nnue(f.pos);
+        const unscaled = static_eval(f.pos);
+        negative += @intFromBool(raw < 0);
+
+        try f.set("name EvalScale value 800");
+        try expectEqual(@divTrunc(raw * 800, 1000), hce.scale_network_output(raw));
+        try expectEqual(raw, hce.evaluate_nnue(f.pos));
+        // The rest of the static evaluation is applied to the scaled output.
+        const scaled = static_eval(f.pos);
+        try expect(@abs(scaled) <= @abs(unscaled));
+        if (@abs(unscaled) >= 100) {
+            try std.testing.expectApproxEqRel(@as(f64, @floatFromInt(unscaled)) * 0.8, @as(f64, @floatFromInt(scaled)), 0.02);
+        }
+        try f.set("name EvalScale value 1000");
+    }
+    try expect(negative > 0);
+
+    try f.set("name EvalScale value 800");
+    try expectEqual(@as(i32, -80), hce.scale_network_output(-101));
+    try expectEqual(@as(i32, 80), hce.scale_network_output(101));
+    try expectEqual(@as(i32, 0), hce.scale_network_output(-1));
+}
