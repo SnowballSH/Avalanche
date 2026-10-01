@@ -17,6 +17,7 @@ const expect = std.testing.expect;
 test {
     _ = @import("tests/frc.zig");
     _ = @import("tests/search_features.zig");
+    _ = @import("tests/correction_history.zig");
     _ = @import("engine/strength.zig");
     _ = @import("engine/uci/go.zig");
     _ = @import("tests/uci_options.zig");
