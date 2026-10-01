@@ -124,7 +124,7 @@ pub fn active_network() []const u8 {
 /// system and reads the embedded network in place.
 pub const supports_eval_file = !platform.is_wasm;
 
-pub const NetworkError = error{ WrongSize, WrongArchitecture, UnsupportedHeader, OutputWeightOutOfRange, WeightOutOfRange, BiasOutOfRange };
+pub const NetworkError = error{ NotANetwork, WrongSize, WrongArchitecture, UnsupportedHeader, OutputWeightOutOfRange, WeightOutOfRange, BiasOutOfRange };
 
 /// Checks that `bytes` is a network of architecture `kind`: the exact
 /// quantised layout with every weight inside the range inference assumes.
@@ -133,7 +133,11 @@ pub fn validate_as(comptime kind: Head, bytes: []const u8) NetworkError!void {
     switch (kind) {
         .single => if (has_magic(bytes)) return NetworkError.WrongArchitecture,
         .multi => {
-            if (!has_magic(bytes)) return NetworkError.WrongArchitecture;
+            // Without the magic it is a single-layer network only if it has
+            // exactly that size; anything else is not a network at all.
+            if (!has_magic(bytes)) {
+                return if (bytes.len == @sizeOf(Network(.single))) NetworkError.WrongArchitecture else NetworkError.NotANetwork;
+            }
             if (bytes.len < HEADER_SIZE or !std.mem.eql(u8, bytes[0..HEADER_SIZE], &MULTI_HEADER)) return NetworkError.UnsupportedHeader;
         },
     }
@@ -155,8 +159,9 @@ pub fn explain(err: anyerror) []const u8 {
     return switch (err) {
         NetworkError.WrongArchitecture => switch (HEAD) {
             .single => "it is a multi-layer network, but this build runs the single-layer " ++ ARCHITECTURE ++ "; build with -Dhead=multi -Dnet=<file>",
-            .multi => "it has no multi-layer network header, but this build runs " ++ ARCHITECTURE ++ "; a single-layer network needs a -Dhead=single build",
+            .multi => "it has the size of a single-layer network and no multi-layer header, but this build runs " ++ ARCHITECTURE ++ "; a single-layer network needs a -Dhead=single build",
         },
+        NetworkError.NotANetwork => "it is not a network of either architecture: no multi-layer header, and not the size of a single-layer network",
         NetworkError.UnsupportedHeader => "its header describes a different multi-layer architecture or format version than " ++ ARCHITECTURE,
         NetworkError.WrongSize => "its size does not match " ++ ARCHITECTURE,
         NetworkError.OutputWeightOutOfRange, NetworkError.WeightOutOfRange, NetworkError.BiasOutOfRange => "a weight is outside the range the integer inference allows",

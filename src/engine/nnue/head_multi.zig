@@ -104,8 +104,8 @@ inline fn pairwise(a: i16, b: i16) u8 {
     return @intCast((ca * cb + FT_ROUND) >> FT_SHIFT);
 }
 
-fn activate_scalar(own: *const arch.Accumulator, opp: *const arch.Accumulator, out: *Activations) void {
-    for ([_]*const arch.Accumulator{ own, opp }, 0..) |acc, side| {
+fn activate_scalar(own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, out: *Activations) void {
+    for ([_]arch.AccumulatorPtr{ own, opp }, 0..) |acc, side| {
         for (0..PAIRS) |i| out[side * PAIRS + i] = pairwise(acc[i], acc[i + PAIRS]);
     }
 }
@@ -120,7 +120,7 @@ inline fn round_shift(value: i32, comptime bits: comptime_int) i32 {
 }
 
 /// The reference implementation: one plain loop per stage of docs/NNUE.md.
-pub fn evaluate_scalar(head: *const Weights, own: *const arch.Accumulator, opp: *const arch.Accumulator, bucket: usize) i32 {
+pub fn evaluate_scalar(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     var activations: Activations = undefined;
     activate_scalar(own, opp, &activations);
 
@@ -167,7 +167,7 @@ comptime {
     std.debug.assert(L1_SIZE * 4 == DOT_CHUNKS * DOT_LANES);
 }
 
-fn activate_simd(own: *const arch.Accumulator, opp: *const arch.Accumulator, out: *align(64) Activations) void {
+fn activate_simd(own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, out: *align(64) Activations) void {
     const I16 = @Vector(PAIR_LANES, i16);
     const U16 = @Vector(PAIR_LANES, u16);
     const zero: I16 = @splat(0);
@@ -208,6 +208,10 @@ const use_maddubs = builtin.mode != .Debug and builtin.cpu.arch.isX86() and swit
     else => false,
 };
 const use_sdot = builtin.mode != .Debug and builtin.cpu.arch == .aarch64 and DOT_LANES == 16 and builtin.cpu.has(.aarch64, .dotprod);
+
+/// Which L1 dot product this build compiled; the tests report when it is
+/// only the portable one.
+pub const L1_PATH: enum { maddubs, sdot, portable } = if (use_maddubs) .maddubs else if (use_sdot) .sdot else .portable;
 
 /// `sum[i] + dot(inputs[4i..4i+4], block_weights[4i..4i+4])`. `inputs` holds
 /// activations, 0..127. The intrinsic paths cannot saturate in that range, so
@@ -257,7 +261,7 @@ fn l1_simd(head: *const Weights, activations: *align(64) const Activations, buck
 }
 
 /// Same value as `evaluate_scalar`, with vectors.
-pub fn evaluate_simd(head: *const Weights, own: *const arch.Accumulator, opp: *const arch.Accumulator, bucket: usize) i32 {
+pub fn evaluate_simd(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     var activations: Activations align(64) = undefined;
     activate_simd(own, opp, &activations);
 
@@ -282,7 +286,7 @@ pub fn evaluate_simd(head: *const Weights, own: *const arch.Accumulator, opp: *c
 }
 
 /// Evaluation in centipawns for the side to move, whose accumulator is `own`.
-pub inline fn evaluate(head: *const Weights, own: *const arch.Accumulator, opp: *const arch.Accumulator, bucket: usize) i32 {
+pub inline fn evaluate(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     return evaluate_simd(head, own, opp, bucket);
 }
 
@@ -297,7 +301,7 @@ pub const FloatMode = enum {
 /// The forward pass in floating point, in centipawns, from the quantised
 /// weights of `head` and accumulators of the quantised feature transformer.
 /// It never rounds an intermediate value.
-pub fn evaluate_float(head: *const Weights, own: *const arch.Accumulator, opp: *const arch.Accumulator, bucket: usize, mode: FloatMode) f64 {
+pub fn evaluate_float(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize, mode: FloatMode) f64 {
     const one: f64 = @floatFromInt(ONE);
     const weight_one: f64 = @floatFromInt(1 << WEIGHT_BITS);
     const sum_one: f64 = @floatFromInt(1 << SUM_BITS);
@@ -305,7 +309,7 @@ pub fn evaluate_float(head: *const Weights, own: *const arch.Accumulator, opp: *
 
     var z1: [L1_SIZE]f64 = undefined;
     for (&z1, head.l1_bias[bucket]) |*sum, bias| sum.* = @as(f64, @floatFromInt(bias)) / one;
-    for ([_]*const arch.Accumulator{ own, opp }, 0..) |acc, side| {
+    for ([_]arch.AccumulatorPtr{ own, opp }, 0..) |acc, side| {
         for (0..PAIRS) |i| {
             const activation: f64 = switch (mode) {
                 .trainer => blk: {

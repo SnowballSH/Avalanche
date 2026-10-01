@@ -10,3 +10,6 @@ pub const QA: i32 = 255;
 pub const SCALE: i32 = 400;
 
 pub const Accumulator = [HIDDEN_SIZE]i16;
+/// How a head receives an accumulator: aligned, as the engine stores them, so
+/// that vector loads from it are aligned loads.
+pub const AccumulatorPtr = *align(64) const Accumulator;

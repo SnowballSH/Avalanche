@@ -70,7 +70,7 @@ inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
 }
 
 /// Evaluation in centipawns for the side to move, whose accumulator is `own`.
-pub inline fn evaluate(head: *const Weights, own: *const arch.Accumulator, opp: *const arch.Accumulator, bucket: usize) i32 {
+pub inline fn evaluate(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     const w2 = &head.layer_2[bucket];
 
     const zero: OutputI16 = @splat(0);

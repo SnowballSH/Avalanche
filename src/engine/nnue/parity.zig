@@ -62,8 +62,8 @@ pub const Evaluation = struct {
 };
 
 pub fn evaluate(net: *const Net, pos: *const position.Position) Evaluation {
-    var white: arch.Accumulator = undefined;
-    var black: arch.Accumulator = undefined;
+    var white: arch.Accumulator align(64) = undefined;
+    var black: arch.Accumulator align(64) = undefined;
     accumulate(net, pos, types.Color.White, &white);
     accumulate(net, pos, types.Color.Black, &black);
     const own = if (pos.turn == types.Color.White) &white else &black;
@@ -152,6 +152,12 @@ fn parse_line(raw: []const u8) ?Line {
     return .{ .fen = fen, .expected = expected };
 }
 
+fn max_abs(values: []const i32) u32 {
+    var result: u32 = 0;
+    for (values) |value| result = @max(result, @abs(value));
+    return result;
+}
+
 fn run_parity(args: []const []const u8, out: *std.Io.Writer) !u8 {
     if (args.len < 1) {
         try out.writeAll(USAGE);
@@ -210,6 +216,15 @@ fn run_parity(args: []const []const u8, out: *std.Io.Writer) !u8 {
     try out.print("nnue-parity: {s}, {d} positions, mean |eval| {d:.1} cp, max |eval| {d:.1} cp\n", .{ args[0], lines.items.len, magnitude.mean(), magnitude.max });
     try out.print("  integer vs float forward pass:        max {d:.3} cp, mean {d:.3} cp\n", .{ trainer.max, trainer.mean() });
     try out.print("  integer vs float, quantised pairwise: max {d:.3} cp, mean {d:.3} cp\n", .{ quantised.max, quantised.mean() });
+    var l1_max: u32 = 0;
+    for (std.mem.asBytes(&net.head.l1_weights)) |byte| l1_max = @max(l1_max, @abs(@as(i32, @as(i8, @bitCast(byte)))));
+    try out.print("  largest stored weight:                l1 {d}/127, l2 {d}/{d}, l3 {d}/{d}\n", .{
+        l1_max,
+        max_abs(std.mem.bytesAsSlice(i32, std.mem.asBytes(&net.head.l2_weights))),
+        head_multi.WEIGHT_LIMIT,
+        max_abs(std.mem.bytesAsSlice(i32, std.mem.asBytes(&net.head.l3_weights))),
+        head_multi.WEIGHT_LIMIT,
+    });
     if (expected.count > 0) {
         try out.print("  integer vs trainer evaluations:       max {d:.3} cp, mean {d:.3} cp ({d} positions)\n", .{ expected.max, expected.mean(), expected.count });
     }

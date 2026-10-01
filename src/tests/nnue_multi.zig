@@ -63,6 +63,14 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
     try expect(distinct.count() > 1000);
 }
 
+test "multi head: the SIMD comparison covers an L1 intrinsic path" {
+    // Skipped, so that the summary shows it, when this build only has the
+    // portable L1: Debug builds, wasm, and x86 without SSSE3. The comparison
+    // above then says nothing about pmaddubsw or sdot; run it again with
+    // -Doptimize=ReleaseSafe.
+    if (head_multi.L1_PATH == .portable) return error.SkipZigTest;
+}
+
 test "multi head: saturated weights cannot overflow" {
     const head = try std.testing.allocator.create(head_multi.Weights);
     defer std.testing.allocator.destroy(head);
@@ -230,7 +238,12 @@ test "multi net: the loaders reject the other architecture and damaged files" {
     try weights.validate_as(.single, single);
     try expectError(weights.NetworkError.WrongArchitecture, weights.validate_as(.single, multi));
     try expectError(weights.NetworkError.WrongArchitecture, weights.validate_as(.multi, single));
-    try expectError(weights.NetworkError.WrongArchitecture, weights.validate_as(.multi, ""));
+    // Neither kind: empty, garbage, and a truncated single-layer file.
+    try expectError(weights.NetworkError.NotANetwork, weights.validate_as(.multi, ""));
+    try expectError(weights.NetworkError.NotANetwork, weights.validate_as(.multi, "not a network"));
+    try expectError(weights.NetworkError.NotANetwork, weights.validate_as(.multi, single[0 .. single.len - 64]));
+    try expectError(weights.NetworkError.WrongSize, weights.validate_as(.single, "not a network"));
+    try expect(std.mem.indexOf(u8, weights.explain(weights.NetworkError.NotANetwork), "-Dhead") == null);
     try expectError(weights.NetworkError.UnsupportedHeader, weights.validate_as(.multi, weights.MAGIC));
     try expectError(weights.NetworkError.WrongSize, weights.validate_as(.multi, multi[0 .. multi.len - 64]));
 

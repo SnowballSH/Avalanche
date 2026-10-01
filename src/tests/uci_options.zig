@@ -115,7 +115,7 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     const short_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "short.nnue", &path_buf)];
     var args_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
     try f.set(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{short_path}));
-    try expect(std.mem.indexOf(u8, f.output(), if (weights.HEAD == .single) "WrongSize" else "WrongArchitecture") != null);
+    try expect(std.mem.indexOf(u8, f.output(), if (weights.HEAD == .single) "WrongSize" else "NotANetwork") != null);
     try expectEqual(embedded_eval, hce.evaluate_nnue(f.pos));
 
     // A valid network with shifted output biases must change the evaluation.
