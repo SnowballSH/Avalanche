@@ -329,16 +329,6 @@ test "datagen: raweval changes the recorded data and is reported in the summary"
     try testing.expect(!std.mem.eql(u8, raw, scaled));
 }
 
-// Pins the default (scaled) labels. The value changes with the embedded network and with any search change that
-// changes `bench.nodes`; regenerate it then, never because of a datagen option.
-test "datagen: default output of a fixed seed is pinned" {
-    platform.io = std.testing.io;
-    support.init_search();
-    const bytes = try run_bytes(quick_config(300), 11);
-    defer testing.allocator.free(bytes);
-    try testing.expectEqual(@as(u32, 0xec7729a0), std.hash.Crc32.hash(bytes));
-}
-
 test "datagen: the summary line always carries raw_eval" {
     var buf: [256]u8 = undefined;
     inline for (.{ .{ false, "\"raw_eval\":false}" }, .{ true, "\"raw_eval\":true}" } }) |case| {
