@@ -234,6 +234,12 @@ pub fn reset_helper_heuristics() void {
     helper_pool.reset_heuristics();
 }
 
+/// Required after the network weights change: helpers keep their own Finny tables.
+pub fn discard_helper_evaluation_caches() void {
+    std.debug.assert(!helpers_are_live());
+    for (0..helper_pool.count()) |i| helper(i).root_board.evaluator.nnue_evaluator.finny_ready = false;
+}
+
 pub fn shutdown_helpers() void {
     helper_pool.deinit();
 }
@@ -287,6 +293,7 @@ pub const Searcher = struct {
     thread_id: usize = 0,
     silent_output: bool = false,
     age_pending: bool = false,
+    root_evaluation_pending: bool = false,
     has_searched: bool = false,
 
     node_spent_table: [64][64]u64 = undefined,
@@ -624,6 +631,7 @@ pub const Searcher = struct {
             helper(ti).nodes = 0;
             helper(ti).tbhits = 0;
             helper(ti).age_pending = helper(ti).has_searched;
+            helper(ti).adopt_root(self, pos);
         }
 
         const limited = self.strength.is_limited();
@@ -1093,7 +1101,6 @@ pub const Searcher = struct {
 
     pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
         @atomicStore(bool, &helpers_live, true, .release);
-        const root_accumulator = pos.evaluator.nnue_evaluator.current().*;
         for (0..NUM_THREADS) |i| {
             const id: usize = i + 1;
             const h = helper(i);
@@ -1106,15 +1113,7 @@ pub const Searcher = struct {
             h.parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
             h.root_history_len = self.root_history_len;
             h.copy_root_candidates(self);
-            const helper_stack = h.root_board.evaluator.nnue_evaluator.stack;
-            h.root_board.* = pos.*;
-            const helper_nnue = &h.root_board.evaluator.nnue_evaluator;
-            helper_nnue.stack = helper_stack;
-            helper_nnue.depth = 0;
-            helper_nnue.frame_written = true;
-            helper_nnue.current().* = root_accumulator;
-            h.hash_history.clearRetainingCapacity();
-            h.hash_history.appendSlice(self.hash_history.items) catch {};
+            std.debug.assert(h.root_board.hash == pos.hash and h.hash_history.items.len == self.hash_history.items.len);
             @atomicStore(bool, &h.stop, false, .monotonic);
             helper_pool.start_search(i, .{
                 .color = color,
@@ -1124,6 +1123,16 @@ pub const Searcher = struct {
                 .beta = beta_,
             });
         }
+    }
+
+    /// Takes over the main thread's root once per search; every job unwinds
+    /// back to it, so aspiration attempts need no further copying. The
+    /// evaluator is rebuilt later on the helper's own thread.
+    pub fn adopt_root(self: *Searcher, main: *const Searcher, pos: *const position.Position) void {
+        self.root_board.copy_game_state(pos);
+        self.root_evaluation_pending = true;
+        self.hash_history.clearRetainingCapacity();
+        self.hash_history.appendSlice(main.hash_history.items) catch {};
     }
 
     fn copy_root_candidates(self: *Searcher, main: *const Searcher) void {
@@ -1140,6 +1149,10 @@ pub const Searcher = struct {
         if (self.age_pending) {
             self.age_pending = false;
             self.reset_heuristics(false);
+        }
+        if (self.root_evaluation_pending) {
+            self.root_evaluation_pending = false;
+            self.root_board.rebuild_evaluation();
         }
         self.time_stop = false;
         self.best_move = types.Move.empty();
