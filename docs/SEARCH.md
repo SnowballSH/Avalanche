@@ -28,4 +28,5 @@
   residual stops once the corrected eval agrees with the search.
 - The correction is computed once per `negamax` node (0 in check) and its
   magnitude is a measure of how unreliable the static eval is. LMR reduces
-  `|correction| / 32` plies less (reductions are whole plies).
+  `|correction| / 32` plies less (reductions are whole plies), and the reverse
+  futility margin widens by `|correction| * 16 / 8`.

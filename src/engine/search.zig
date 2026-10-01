@@ -168,6 +168,8 @@ const PAWN_CORRHIST_WEIGHT: i32 = 8;
 const NONPAWN_CORRHIST_WEIGHT: i32 = 6;
 // A large |correction| marks an unreliable static eval: LMR reduces one ply less per this many cp.
 const CORRHIST_LMR_DIVISOR: i32 = 32;
+// The RFP margin widens by this many 1/CORRHIST_WEIGHT_SCALE cp per cp of |correction|.
+const CORRHIST_RFP_WEIGHT: i32 = 16;
 
 pub fn weighted_correction(pawn: i32, nonpawn_white: i32, nonpawn_black: i32) i32 {
     return @divTrunc(PAWN_CORRHIST_WEIGHT * pawn + NONPAWN_CORRHIST_WEIGHT * (nonpawn_white + nonpawn_black), CORRHIST_GRAIN * CORRHIST_WEIGHT_SCALE);
@@ -1344,6 +1346,7 @@ pub const Searcher = struct {
                 if (improving) {
                     n -= parameters.RFPImprovingDeduction;
                 }
+                n += @divTrunc(@as(i32, @intCast(@abs(correction))) * CORRHIST_RFP_WEIGHT, CORRHIST_WEIGHT_SCALE);
                 if (static_eval - n >= beta) {
                     return beta;
                 }
