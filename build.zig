@@ -123,7 +123,9 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    const test_filter = b.option([]const u8, "test-filter", "Run only the unit tests whose name contains this text");
     const exe_tests = b.addTest(.{
+        .filters = if (test_filter) |filter| b.dupeStrings(&.{filter}) else &.{},
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tests.zig"),
             .target = target,

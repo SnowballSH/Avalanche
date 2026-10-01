@@ -14,6 +14,12 @@ const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
 const expect = std.testing.expect;
 
+// The C tablebase code links against callbacks syzygy.zig exports. Reference
+// it here so that they exist whichever tests -Dtest-filter keeps.
+comptime {
+    _ = @import("engine/syzygy.zig");
+}
+
 test {
     _ = @import("tests/frc.zig");
     _ = @import("tests/search_features.zig");
