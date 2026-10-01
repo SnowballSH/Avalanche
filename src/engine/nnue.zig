@@ -5,11 +5,6 @@ pub const weights = @import("weights.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 
-const QA: i32 = 255;
-const QB: i32 = 64;
-const QAB: i32 = QA * QB;
-const SCALE: i32 = 400;
-
 const FeaturePair = struct {
     white: usize,
     black: usize,
@@ -122,42 +117,9 @@ fn feature_index_pov(
     return state.weight_offset + feature * weights.HIDDEN_SIZE;
 }
 
-// Wide source vectors let LLVM unroll accumulator updates aggressively. Output
-// inference separately uses the target's native vector width.
+// Wide source vectors let LLVM unroll accumulator updates aggressively. Each
+// head picks its own vector width for inference.
 const UPDATE_LANES: usize = 32;
-const OUTPUT_LANES = @min(std.simd.suggestVectorLength(i16) orelse 8, 32);
-const OutputI16 = @Vector(OUTPUT_LANES, i16);
-const OutputI32 = @Vector(OUTPUT_LANES / 2, i32);
-
-comptime {
-    std.debug.assert(weights.HIDDEN_SIZE % (OUTPUT_LANES * 4) == 0);
-}
-
-/// Pairwise signed i16 dot product. Optimized x86 builds use pmaddwd directly;
-/// Debug and other architectures retain the portable expression. LLVM leaves
-/// x86 intrinsics unresolved at -ODebug, hence the explicit mode guard.
-inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
-    if (comptime builtin.mode != .Debug and builtin.cpu.arch.isX86()) {
-        if (comptime OUTPUT_LANES == 32 and builtin.cpu.has(.x86, .avx512f) and builtin.cpu.has(.x86, .avx512bw)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.avx512.pmaddw.d.512" }).*(a, b);
-        }
-        if (comptime OUTPUT_LANES == 16 and builtin.cpu.has(.x86, .avx2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.avx2.pmadd.wd" }).*(a, b);
-        }
-        if (comptime OUTPUT_LANES == 8 and builtin.cpu.has(.x86, .sse2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.sse2.pmadd.wd" }).*(a, b);
-        }
-    }
-    if (comptime builtin.mode != .Debug and builtin.cpu.arch.isWasm() and OUTPUT_LANES == 8) {
-        return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.wasm.dot" }).*(a, b);
-    }
-
-    const a_parts = std.simd.deinterlace(2, a);
-    const b_parts = std.simd.deinterlace(2, b);
-    const even = @as(OutputI32, @intCast(a_parts[0])) * @as(OutputI32, @intCast(b_parts[0]));
-    const odd = @as(OutputI32, @intCast(a_parts[1])) * @as(OutputI32, @intCast(b_parts[1]));
-    return even + odd;
-}
 
 pub const Accumulator = struct {
     white: [weights.HIDDEN_SIZE]i16 align(64),
@@ -492,31 +454,8 @@ pub const NNUE = struct {
         }
         const bucket = @min((self.piece_count -| 2) / 4, weights.OUTPUT_SIZE - 1);
 
-        const w2 = &weights.MODEL.layer_2[bucket];
         const own = if (turn == types.Color.White) &acc.white else &acc.black;
         const opp = if (turn == types.Color.White) &acc.black else &acc.white;
-
-        const zero: OutputI16 = @splat(0);
-        const cap: OutputI16 = @splat(QA);
-
-        var sums: [4]OutputI32 = @splat(@splat(0));
-        var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) {
-            inline for (&sums) |*sum| {
-                const own_activation = std.math.clamp(@as(OutputI16, own[i..][0..OUTPUT_LANES].*), zero, cap);
-                const opp_activation = std.math.clamp(@as(OutputI16, opp[i..][0..OUTPUT_LANES].*), zero, cap);
-                const own_weights: OutputI16 = w2[i..][0..OUTPUT_LANES].*;
-                const opp_weights: OutputI16 = w2[weights.HIDDEN_SIZE + i ..][0..OUTPUT_LANES].*;
-
-                sum.* += madd_i16(own_activation *% own_weights, own_activation) +
-                    madd_i16(opp_activation *% opp_weights, opp_activation);
-                i += OUTPUT_LANES;
-            }
-        }
-
-        var sum = sums[0];
-        inline for (sums[1..]) |partial| sum += partial;
-        const result = @reduce(.Add, sum);
-        return @divTrunc((@divTrunc(result, QA) + @as(i32, weights.MODEL.layer_2_bias[bucket])) * SCALE, QAB);
+        return weights.evaluate(own, opp, bucket);
     }
 };

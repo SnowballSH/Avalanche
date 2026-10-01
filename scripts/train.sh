@@ -6,6 +6,11 @@
 #
 # Tunables (env vars, all optional — defaults are the current best recipe):
 #   TRAIN_NET_ID (net), TRAIN_INPUT (buckets16), TRAIN_HIDDEN (1024),
+#   TRAIN_ARCH (single|multi; the head, see docs/NNUE.md. multi needs TRAIN_INPUT=buckets16, and the
+#     engine picks the matching head from the saved file's header),
+#   TRAIN_L1_SPARSITY (0 = off; TRAIN_ARCH=multi only. Adds coefficient x mean pairwise activation to the
+#     training loss, for fewer non-zero inputs to the engine's sparse L1; bullet's advanced example uses
+#     0.005. The printed training loss includes the penalty, the validation loss does not),
 #   TRAIN_SUPERBATCHES (40),
 #   TRAIN_WDL (0.25), TRAIN_WDL_END (=WDL; set != WDL for LinearWDL),
 #   TRAIN_LR_SCHEDULE (cosine|cosine-legacy|constant), TRAIN_LR_INITIAL (0.001), TRAIN_LR_FINAL (1e-7),
@@ -24,6 +29,9 @@
 #     before training with n = TRAIN_START_SB - 1. Only a failure of that first pass stops the run),
 #   TRAIN_VALIDATION_BATCHES (64; validation batches of TRAIN_BATCH_SIZE, always the first filtered
 #     positions of the held-out files in sorted file order; fewer than that many is a startup error).
+#   TRAIN_PARITY_FENS (unset or empty = train. A file of FENs: instead of training, write the evaluation of each
+#     by the net of TRAIN_RESUME_FROM (required), as "<fen> | <centipawns>", to TRAIN_PARITY_OUT (parity.txt), for
+#     `Avalanche nnue-parity`; see docs/NNUE.md).
 #   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh
 #   (HIDDEN is runtime here; the Zig engine's weights.zig must match at build time.)
 #

@@ -15,7 +15,9 @@ const datagen = @import("datagen.zig");
 const USAGE =
     \\Usage: Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd> [limit=<n>]
     \\  net=PATH        network to measure
-    \\  ref=PATH        network whose eval scale is the target
+    \\  ref=PATH        network whose eval scale is the target; both networks must have
+    \\                  this build's architecture,
+++ " " ++ weights.ARCHITECTURE ++ "\n" ++
     \\  positions=PATH  EPD/FEN file, one position per line; positions the engine does not
     \\                  evaluate with the network (in check, bare endgames) are skipped
     \\  limit=N         use at most the first N remaining positions (default: all)
@@ -139,13 +141,15 @@ pub fn measure(candidate: []const u8, reference: []const u8, fens: []const []con
     };
 }
 
+/// A network file this build can run. Both networks are evaluated by the build's own head, so each must have the
+/// build's architecture; the loader's checks say so when one does not.
 fn read_network(path: []const u8, err: *std.Io.Writer) !?[]u8 {
-    const bytes = std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(@sizeOf(weights.NNUEWeights) + 1)) catch |failure| {
+    const bytes = weights.read_file(path) catch |failure| {
         try err.print("netscale: cannot read network '{s}': {s}\n", .{ path, @errorName(failure) });
         return null;
     };
     weights.validate(bytes) catch |failure| {
-        try err.print("netscale: '{s}' is not a {s} network this build can run: {s}\n", .{ path, weights.ARCHITECTURE, @errorName(failure) });
+        try err.print("netscale: cannot use network '{s}' ({s}: {s})\n", .{ path, @errorName(failure), weights.explain(failure) });
         platform.allocator.free(bytes);
         return null;
     };

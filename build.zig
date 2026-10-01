@@ -74,6 +74,11 @@ pub fn build(b: *std.Build) void {
         @panic("-Dbuckets must be 1 (Chess768) or 16 (ChessBucketsMirrored)");
     }
 
+    // The layers after the feature transformer; see docs/NNUE.md. `auto` reads
+    // it off the embedded network's header.
+    const HeadOption = enum { auto, single, multi };
+    const head = b.option(HeadOption, "head", "NNUE head: auto (from the -Dnet file, default), single or multi") orelse .auto;
+
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
@@ -88,6 +93,7 @@ pub fn build(b: *std.Build) void {
         dtToString(timestamp2DateTime(now_seconds), &buf);
     build_options.addOption([]const u8, "version", version);
     build_options.addOption(usize, "input_buckets", inputBuckets);
+    build_options.addOption(HeadOption, "head", head);
     build_options.addOption([]const u8, "net_name", std.fs.path.stem(netPath));
 
     const exe = b.addExecutable(.{
@@ -117,7 +123,9 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    const test_filter = b.option([]const u8, "test-filter", "Run only the unit tests whose name contains this text");
     const exe_tests = b.addTest(.{
+        .filters = if (test_filter) |filter| b.dupeStrings(&.{filter}) else &.{},
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/tests.zig"),
             .target = target,

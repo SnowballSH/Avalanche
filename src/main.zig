@@ -9,6 +9,7 @@ const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
 const interface = @import("engine/interface.zig");
 const weights = @import("engine/weights.zig");
+const nnue_parity = @import("engine/nnue/parity.zig");
 const bench = @import("engine/bench.zig");
 const datagen = @import("engine/datagen.zig");
 const datagen_options = @import("engine/datagen/options.zig");
@@ -96,6 +97,13 @@ pub fn main(init: std.process.Init) anyerror!void {
         }
         if (std.mem.eql(u8, second, "datagen")) {
             return run_datagen(args[2..]);
+        }
+
+        // Network tools; docs/NNUE.md.
+        if (std.mem.startsWith(u8, second, "nnue-")) {
+            const code = nnue_parity.run(second, args[2..]);
+            if (code != 0) std.process.exit(code);
+            return;
         }
 
         if (std.mem.eql(u8, second, "tbfilter")) {

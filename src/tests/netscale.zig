@@ -34,16 +34,26 @@ fn embedded_copy() ![]u8 {
     return testing.allocator.dupe(u8, std.mem.asBytes(weights.MODEL));
 }
 
-/// Multiplies the output layer of the network file `net` by `factor`, as a stand-in for a network trained to a
-/// different eval scale.
+fn scale_cells(comptime Int: type, cells: []u8, factor: f64) void {
+    var offset: usize = 0;
+    while (offset < cells.len) : (offset += @sizeOf(Int)) {
+        const cell = cells[offset..][0..@sizeOf(Int)];
+        const scaled = @round(@as(f64, @floatFromInt(std.mem.readInt(Int, cell, .little))) * factor);
+        std.mem.writeInt(Int, cell, @intFromFloat(scaled), .little);
+    }
+}
+
+/// Multiplies the last layer of the network file `net`, weights and biases, by `factor`, as a stand-in for a network
+/// trained to a different eval scale. Either head's output is linear in that layer.
 fn scale_output_layer(net: []u8, factor: f64) void {
-    const start = @offsetOf(weights.NNUEWeights, "layer_2");
-    const end = @offsetOf(weights.NNUEWeights, "layer_2_bias") + @sizeOf(@FieldType(weights.NNUEWeights, "layer_2_bias"));
-    var offset: usize = start;
-    while (offset < end) : (offset += 2) {
-        const cell = net[offset..][0..2];
-        const scaled = @round(@as(f64, @floatFromInt(std.mem.readInt(i16, cell, .little))) * factor);
-        std.mem.writeInt(i16, cell, @intFromFloat(scaled), .little);
+    const Head = @FieldType(weights.NNUEWeights, "head");
+    const head = net[@offsetOf(weights.NNUEWeights, "head")..][0..@sizeOf(Head)];
+    const fields, const Int = switch (weights.HEAD) {
+        .single => .{ .{ "layer_2", "layer_2_bias" }, i16 },
+        .multi => .{ .{ "l3_weights", "l3_bias" }, i32 },
+    };
+    inline for (fields) |field| {
+        scale_cells(Int, head[@offsetOf(Head, field)..][0..@sizeOf(@FieldType(Head, field))], factor);
     }
 }
 
@@ -124,7 +134,7 @@ test "netscale: measuring restores the active network, on errors too" {
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
     try testing.expectError(error.NoPositions, netscale.measure(embedded, embedded, &.{CHECK_FEN}, 0));
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
-    try testing.expectError(error.WrongSize, netscale.measure(embedded[1..], embedded, &FENS, 0));
+    try testing.expectError(error.WrongSize, netscale.measure(embedded[0 .. embedded.len - 64], embedded, &FENS, 0));
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
 }
 
@@ -173,6 +183,13 @@ test "netscale: run reports the result as JSON and failures through its exit cod
     try f.write("net.nnue", embedded);
     try f.write("quiet.nnue", quiet);
     try f.write("short.nnue", "not a network");
+    // A network of the architecture this build does not run: a multi-layer one has the magic, a single-layer one
+    // has its size and no magic.
+    const other_bytes = try testing.allocator.alloc(u8, @sizeOf(weights.Network(.single)));
+    defer testing.allocator.free(other_bytes);
+    @memset(other_bytes, 0);
+    if (weights.HEAD == .single) @memcpy(other_bytes[0..weights.MAGIC.len], weights.MAGIC);
+    try f.write("other.nnue", other_bytes);
     try f.write("book.epd", FENS[0] ++ "\n" ++ FENS[1] ++ "\n" ++ CHECK_FEN ++ "\n" ++ FENS[2] ++ "\n");
     try f.write("bad.epd", FENS[0] ++ "\nnot a position\n");
     try f.write("check.epd", CHECK_FEN ++ "\n");
@@ -212,6 +229,15 @@ test "netscale: run reports the result as JSON and failures through its exit cod
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "bad.epd" } }, &.{})).code);
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "missing.epd" } }, &.{})).code);
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "check.epd" } }, &.{})).code);
+
+    // Both networks run on this build's head, so one of the other architecture is refused as EvalFile refuses it.
+    inline for (.{ .{ "other.nnue", "net.nnue" }, .{ "net.nnue", "other.nnue" } }) |nets| {
+        const other = try f.run(&.{ .{ "net", nets[0] }, .{ "ref", nets[1] }, .{ "positions", "book.epd" } }, &.{});
+        try testing.expectEqual(@as(u8, 1), other.code);
+        try testing.expectEqualStrings("", other.output);
+        try testing.expect(std.mem.indexOf(u8, other.errors, "other.nnue' (WrongArchitecture: ") != null);
+        try testing.expect(std.mem.indexOf(u8, other.errors, weights.explain(weights.NetworkError.WrongArchitecture)) != null);
+    }
 
     try testing.expectEqualSlices(u8, embedded, std.mem.asBytes(weights.MODEL));
 }
