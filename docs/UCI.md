@@ -29,6 +29,7 @@
 | Skill Level | spin | 20 | 0–20 |
 | SyzygyPath, SyzygyProbeDepth, SyzygyProbeLimit, Syzygy50MoveRule | | | tablebases |
 | EvalFile | string | `<embedded>` | load a network file at runtime (same architecture as the embedded net); `<embedded>` restores the built-in net; unavailable on wasm |
+| EvalScale | spin | 1000 | 500–2000, permille multiplier on the network output, see [DATAGEN.md](DATAGEN.md#network-eval-scale); changing it clears the hash |
 | UCI_ShowWDL | check | false | |
 | Contempt | spin | 0 | |
 

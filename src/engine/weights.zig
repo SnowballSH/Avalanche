@@ -14,15 +14,6 @@ pub const OUTPUT_SIZE: usize = 8;
 pub const OUTPUT_WEIGHT_MIN: i16 = -128;
 pub const OUTPUT_WEIGHT_MAX: i16 = 127;
 
-pub const ByteRange = struct {
-    start: usize,
-    len: usize,
-
-    pub fn of(comptime self: ByteRange, bytes: anytype) @TypeOf(bytes[self.start..][0..self.len]) {
-        return bytes[self.start..][0..self.len];
-    }
-};
-
 pub const NNUEWeights = struct {
     layer_1: [INPUT_SIZE * HIDDEN_SIZE]i16 align(64),
     layer_1_bias: [HIDDEN_SIZE]i16 align(64),
@@ -36,10 +27,6 @@ var model_storage: NNUEWeights align(MODEL_ALIGN) = undefined;
 // Read in place on wasm to avoid a second 25 MB copy in linear memory. It must
 // be a var: through a const, every MODEL access would be folded at comptime.
 var embedded_model: [@sizeOf(NNUEWeights)]u8 align(@alignOf(NNUEWeights)) = NNUE_SOURCE[0..@sizeOf(NNUEWeights)].*;
-
-/// Where the output layer's little-endian i16 weights and biases sit in a network file.
-pub const OUTPUT_WEIGHT_BYTES: ByteRange = .{ .start = @offsetOf(NNUEWeights, "layer_2"), .len = @sizeOf(@FieldType(NNUEWeights, "layer_2")) };
-pub const OUTPUT_BIAS_BYTES: ByteRange = .{ .start = @offsetOf(NNUEWeights, "layer_2_bias"), .len = @sizeOf(@FieldType(NNUEWeights, "layer_2_bias")) };
 
 pub const MODEL: *const NNUEWeights = if (platform.is_wasm) @ptrCast(&embedded_model) else &model_storage;
 
@@ -76,7 +63,7 @@ pub const NetworkError = error{ WrongSize, OutputWeightOutOfRange };
 /// range the SIMD inference assumes.
 pub fn validate(bytes: []const u8) NetworkError!void {
     if (bytes.len != @sizeOf(NNUEWeights)) return NetworkError.WrongSize;
-    const layer_2 = OUTPUT_WEIGHT_BYTES.of(bytes);
+    const layer_2 = bytes[@offsetOf(NNUEWeights, "layer_2")..][0..@sizeOf(@FieldType(NNUEWeights, "layer_2"))];
     var i: usize = 0;
     while (i < layer_2.len) : (i += 2) {
         const weight = std.mem.readInt(i16, layer_2[i..][0..2], .little);
@@ -104,9 +91,9 @@ pub fn do_nnue() void {
 
 /// Replaces the active network's weights with `bytes`, a whole network file,
 /// keeping its name. The active network is untouched on error. Callers must
-/// refresh every position's accumulators afterwards.
+/// refresh every position's accumulators afterwards. Not for wasm, which reads
+/// the embedded network in place.
 pub fn install(bytes: []const u8) NetworkError!void {
-    if (comptime !supports_eval_file) @compileError("the network is read in place on wasm");
     try validate(bytes);
     @memcpy(std.mem.asBytes(&model_storage), bytes);
 }

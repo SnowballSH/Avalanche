@@ -105,7 +105,13 @@ pub fn main(init: std.process.Init) anyerror!void {
             return;
         }
         if (std.mem.eql(u8, second, "netscale")) {
-            const code = try netscale.run(args[2..]);
+            var buffer: [512]u8 = undefined;
+            var stdout = platform.Stdout.init(&buffer);
+            var err_buffer: [512]u8 = undefined;
+            var stderr = std.Io.File.stderr().writerStreaming(platform.io, &err_buffer);
+            const code = try netscale.run(args[2..], stdout.writer(), &stderr.interface);
+            try stdout.writer().flush();
+            try stderr.interface.flush();
             if (code != 0) std.process.exit(code);
             return;
         }

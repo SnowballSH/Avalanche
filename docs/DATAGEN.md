@@ -129,19 +129,29 @@ with a non-zero counter; an independent check with python-chess's Syzygy prober 
 ## Network eval scale
 
 Search margins are tuned to the production network's eval scale, and every newly trained network comes out slightly
-louder or quieter. Before an SPRT, rescale the candidate to the production network:
+louder or quieter, which mis-measures it in an SPRT. Measure the candidate against the production network:
 
 ```
-Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd> out=<scaled.nnue> [limit=<n>]
+Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd> [limit=<n>]
 ```
 
-For both networks the tool takes the mean absolute raw network output (centipawns for the side to move, before the
-eval post-scaling, the drawish division and correction history) over the positions that are not in check, each
-evaluated from a fresh accumulator. `out` is a copy of `net` whose output-layer weights and biases are multiplied by
-`factor = ref_mean_abs / candidate_mean_abs` and rounded to nearest; every other byte is identical. `limit` uses only
-the first `n` positions not in check. An invalid position line is an error naming the line.
+then give the candidate `EvalScale=<eval_scale>` in the SPRT (the reference keeps the default 1000).
 
-It prints one JSON line: `positions`, `ref_mean_abs`, `candidate_mean_abs`, `factor` and `scaled_mean_abs`, the last
-measured on the written network to show the rounding error. Nothing is written, and the exit code is non-zero, when
-a scaled output weight would leave [-128, 127] (inference multiplies a weight by an activation of up to 255 in an
-i16, and `EvalFile` rejects weights outside that range) or a scaled bias would overflow i16.
+For both networks the tool takes the mean absolute raw network output (centipawns for the side to move, before
+`EvalScale`, the eval post-scaling, the drawish division and correction history) over the positions the engine would
+evaluate with the network. Positions in check are skipped, and so are positions with no pawns and a phase below 3,
+which the engine scores with its classical endgame evaluation instead. `limit` uses only the first `n` positions
+that remain. An invalid position line is an error naming the line. Use a representative set of quiet positions
+(for example a sample of the positions the network was trained on, or a large opening book), not a handful of lines:
+the factor is an average and depends on the mix of material and game phase.
+
+It prints one JSON line: `positions`, `ref_mean_abs`, `candidate_mean_abs`, `factor` (`ref_mean_abs /
+candidate_mean_abs`) and `eval_scale` (`factor` in permille, rounded). When `eval_scale` falls outside the option's
+500–2000 range the line is still printed, with a warning and exit code 1. Exit code 2 means bad options.
+
+`EvalScale` multiplies the network output as it enters the static evaluation (`raw * EvalScale / 1000`, truncated),
+so the post-scaling, correction history and the hash table all see the scaled value; the default is an exact
+identity. The network file is never rewritten: output weights are small integers (at most 127 in magnitude), so
+re-rounding them adds eval noise of about 10 cp RMS per position that a mean cannot show, and networks whose weights
+already sit at the 127 clip, the production network included, could not be scaled up at all. Datagen and `netscale`
+run at the default scale and record the unscaled output.
