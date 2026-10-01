@@ -179,15 +179,31 @@ where
     )
 }
 
-/// The model's summed batch loss as a forward-only function, after bullet's `ModelEvaluator`, which is
-/// fixed to a batch size of 1 and exposes the net output rather than the loss.
+/// The summed batch loss from a forward-only function, after bullet's `ModelEvaluator`, which is fixed
+/// to a batch size of 1.
+///
+/// It runs the model up to its output and applies the loss on the host: `(sigmoid(output) - target)²`,
+/// the loss of both of this trainer's nets. The model's own loss node is not used, so a term a net adds
+/// to its training loss (`TRAIN_L1_SPARSITY`) is not part of the validation loss, which stays comparable
+/// between runs with different penalties.
 struct LossEvaluator {
     stream: Arc<Stream<ExecutionContext>>,
     function: Function<ExecutionContext>,
     bound: BTreeMap<NodeId, DeviceBuffer>,
     weights: BTreeMap<String, NodeId>,
     inputs: BTreeMap<String, NodeId>,
-    loss: DeviceBuffer,
+    output: DeviceBuffer,
+    batch_size: usize,
+}
+
+/// A device buffer that must hold one f32 per position of a batch.
+fn batch_values(buffer: &DeviceBuffer, batch_size: usize, name: &str) -> Result<Vec<f32>, String> {
+    match buffer.to_host().map_err(describe)? {
+        TValue::F32(values) if values.len() == batch_size => Ok(values),
+        other => Err(format!(
+            "unexpected {name} tensor for a batch of {batch_size}: {other:?}"
+        )),
+    }
 }
 
 impl LossEvaluator {
@@ -197,14 +213,19 @@ impl LossEvaluator {
     ) -> Result<Self, String> {
         let definition = optimiser.definition();
         let device = optimiser.device();
-        let loss_node = definition.loss().ok_or("the model defines no loss")?;
+        let output_node = definition
+            .outputs()
+            .iter()
+            .find(|(_, name)| name == "output")
+            .map(|(node, _)| *node)
+            .ok_or("the model defines no output")?;
 
-        let loss_only = ModelDefinition::new(
+        let output_only = ModelDefinition::new(
             definition.ir().clone(),
             None,
-            [(loss_node, String::from("loss"))],
+            [(output_node, String::from("output"))],
         );
-        let forward = loss_only
+        let forward = output_only
             .lower_forward(batch_size)
             .map_err(|err| err.to_string())?;
         let lowered = |node: &NodeId| {
@@ -212,7 +233,7 @@ impl LossEvaluator {
                 .map()
                 .get(node)
                 .copied()
-                .ok_or_else(|| format!("model node {node:?} is missing from the lowered loss"))
+                .ok_or_else(|| format!("model node {node:?} is missing from the lowered model"))
         };
 
         let weights = definition
@@ -228,9 +249,9 @@ impl LossEvaluator {
             .map(|(node, name)| Ok((name.clone(), lowered(node)?)))
             .collect::<Result<_, String>>()?;
 
-        let loss_id = lowered(&loss_node)?;
-        let loss = Buffer::zeroed(&device, DType::F32, 1).map_err(describe)?;
-        let bound = BTreeMap::from([(loss_id, loss.clone())]);
+        let output_id = lowered(&output_node)?;
+        let output = Buffer::zeroed(&device, DType::F32, batch_size).map_err(describe)?;
+        let bound = BTreeMap::from([(output_id, output.clone())]);
 
         let stream = device.new_stream().map_err(describe)?;
         let mut function =
@@ -243,7 +264,8 @@ impl LossEvaluator {
             bound,
             weights,
             inputs,
-            loss,
+            output,
+            batch_size,
         })
     }
 
@@ -261,7 +283,7 @@ impl LossEvaluator {
         &mut self,
         weights: &TensorMap<ExecutionContext>,
         batch: &TensorMap<ExecutionContext>,
-    ) -> Result<f32, String> {
+    ) -> Result<f64, String> {
         self.bind(weights, batch);
         self.function
             .execute(self.stream.clone(), &self.bound)
@@ -269,10 +291,17 @@ impl LossEvaluator {
             .value()
             .map_err(describe)?;
 
-        match self.loss.to_host().map_err(describe)? {
-            TValue::F32(values) if values.len() == 1 => Ok(values[0]),
-            other => Err(format!("unexpected loss tensor {other:?}")),
-        }
+        let outputs = batch_values(&self.output, self.batch_size, "output")?;
+        let targets = batch
+            .get("targets")
+            .ok_or("the batch has no targets")
+            .map_err(String::from)
+            .and_then(|buffer| batch_values(buffer, self.batch_size, "targets"))?;
+        Ok(outputs
+            .iter()
+            .zip(&targets)
+            .map(|(&output, &target)| f64::from(sigmoid(output) - target).powi(2))
+            .sum())
     }
 }
 
@@ -305,7 +334,8 @@ impl Validator {
     }
 
     /// Mean loss per position, normalised like the training loss bullet reports. Targets use the WDL
-    /// blend of `step`, so the value is comparable to the training loss of the same superbatch.
+    /// blend of `step`, so the value is comparable to the training loss of the same superbatch, less
+    /// any `TRAIN_L1_SPARSITY` penalty, which only the training loss contains.
     fn mean_loss<Opt: OptimiserState<ExecutionContext>>(
         &mut self,
         optimiser: &Optimiser<ExecutionContext, Opt>,
@@ -319,7 +349,7 @@ impl Validator {
                 .map(&self.pool, batch, step, self.threads)
                 .map_err(describe)?;
             let on_device = host.to_device(&device).map_err(describe)?;
-            total += f64::from(self.evaluator.batch_loss(optimiser.weights(), &on_device)?);
+            total += self.evaluator.batch_loss(optimiser.weights(), &on_device)?;
         }
         Ok((total / self.positions.len() as f64) as f32)
     }

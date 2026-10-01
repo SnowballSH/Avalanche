@@ -211,6 +211,22 @@ TRAIN_ARCH=multi TRAIN_NET_ID=mynet TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
 zig build --release=fast -Dnet=training/checkpoints/mynet-40/quantised.bin
 ```
 
+Two things differ from the single-layer recipe:
+
+- **Initialisation.** The feature transformer is initialised as if it had 32 inputs
+  (`init_with_effective_input_size(32)`, as in bullet's multi-layer example), because the default,
+  scaled for all 12288 inputs, starts every pairwise product near zero.
+- **`TRAIN_L1_SPARSITY`** (default 0, off). A coefficient `c > 0` adds `c * mean(p)` to the training
+  loss of each position, `p` being its 1024 pairwise activations in 0..1. Fewer non-zero activations
+  are fewer blocks for the engine's sparse L1. bullet's advanced example uses 0.005. The training loss
+  bullet prints, and the `log.txt` of a checkpoint, **include** the penalty. The validation loss
+  (`TRAIN_VALIDATION_DIR`) **does not**: it is always the plain `(sigmoid(output) - target)²`, so it is
+  comparable between runs with different coefficients, and with a coefficient above 0 it is no longer
+  comparable with the training loss of the same run. The variable is an error with `TRAIN_ARCH=single`.
+
+`TRAIN_RESUME_FROM` with a checkpoint of the other architecture is refused, by the header of the
+checkpoint's `quantised.bin`.
+
 `quantised.bin` is the file above. bullet at the pinned revision expresses the whole network with
 its builder: sliced-affine pairwise, `concat`, `crelu`, the square as `x * x`, and
 `select(output_buckets)` for the three bucketed layers. The save format reorders `l1w` and `l2w`

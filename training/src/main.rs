@@ -2,7 +2,10 @@ mod multilayer;
 mod schedule;
 mod validation;
 
-use std::{io::Write, str::FromStr};
+use std::{
+    io::{Read, Write},
+    str::FromStr,
+};
 
 use bullet::{
     game::{
@@ -144,6 +147,15 @@ enum Arch {
     Multi,
 }
 
+impl Arch {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Multi => "multi",
+        }
+    }
+}
+
 impl FromStr for Arch {
     type Err = String;
 
@@ -171,6 +183,8 @@ struct TrainConfig {
     save_rate: usize,
     threads: usize,
     use_factoriser: bool,
+    /// `TRAIN_L1_SPARSITY`; 0 is off. Only the multi-layer net has the pairwise activations it penalises.
+    l1_sparsity: f32,
     dataset_paths: Vec<String>,
     shuffle_mb: usize,
     start_superbatch: usize,
@@ -220,6 +234,21 @@ fn warmup_superbatches_from_env(superbatches: usize) -> Result<usize, String> {
         ));
     }
     Ok(warmup)
+}
+
+fn l1_sparsity_from_env(arch: Arch) -> Result<f32, String> {
+    let coefficient: f32 = env_strict("TRAIN_L1_SPARSITY", 0.0)?;
+    if !coefficient.is_finite() || coefficient < 0.0 {
+        return Err(format!(
+            "TRAIN_L1_SPARSITY={coefficient} must be a finite number, 0 or more"
+        ));
+    }
+    if coefficient > 0.0 && arch == Arch::Single {
+        return Err(String::from(
+            "TRAIN_L1_SPARSITY needs TRAIN_ARCH=multi: the single-layer net has no sparse L1 to help",
+        ));
+    }
+    Ok(coefficient)
 }
 
 fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
@@ -285,6 +314,7 @@ fn main() {
     let save_rate = env_usize("TRAIN_SAVE_RATE", 10);
     let threads = env_usize("TRAIN_THREADS", num_cpus());
     let use_factoriser = env_bool("TRAIN_FACTORISER", true);
+    let l1_sparsity = l1_sparsity_from_env(arch).unwrap_or_else(|err| fail(&err));
 
     let cfg = TrainConfig {
         hidden_size,
@@ -301,6 +331,7 @@ fn main() {
         save_rate,
         threads,
         use_factoriser,
+        l1_sparsity,
         dataset_paths,
         shuffle_mb,
         start_superbatch,
@@ -379,6 +410,12 @@ where
 {
     let cfg = session.cfg;
     if let Ok(fens) = std::env::var("TRAIN_PARITY_FENS") {
+        if std::env::var("TRAIN_RESUME_FROM").is_err() {
+            fail(
+                "TRAIN_PARITY_FENS needs TRAIN_RESUME_FROM=<checkpoint>: without it the positions \
+                 would be evaluated by a freshly initialised, random net",
+            );
+        }
         let out = env_string("TRAIN_PARITY_OUT", "parity.txt");
         write_parity(session.trainer, &fens, &out).unwrap_or_else(|err| fail(&err));
         return;
@@ -540,12 +577,36 @@ where
     optimiser.set_params_for_weight("l0f", stricter_clipping);
 }
 
-fn resume_from_env<Opt, I>(trainer: &mut ValueTrainer<Opt, I, OutputBuckets>)
+/// The architecture of the checkpoint at `path`, read off the `quantised.bin` bullet saves next to
+/// the weights; `None` when that file is missing or unreadable.
+fn checkpoint_arch(path: &str) -> Option<Arch> {
+    let mut first_bytes = [0; 8];
+    let mut file = std::fs::File::open(format!("{path}/quantised.bin")).ok()?;
+    file.read_exact(&mut first_bytes).ok()?;
+    Some(if multilayer::is_multilayer_file(&first_bytes) {
+        Arch::Multi
+    } else {
+        Arch::Single
+    })
+}
+
+fn resume_from_env<Opt, I>(trainer: &mut ValueTrainer<Opt, I, OutputBuckets>, arch: Arch)
 where
     Opt: OptimiserState<ExecutionContext>,
     I: SparseInputType,
 {
     if let Ok(resume_path) = std::env::var("TRAIN_RESUME_FROM") {
+        if let Some(saved) = checkpoint_arch(&resume_path)
+            && saved != arch
+        {
+            fail(&format!(
+                "TRAIN_RESUME_FROM={resume_path} is a {} checkpoint, but this run is TRAIN_ARCH={}; \
+                 set TRAIN_ARCH={} to resume it",
+                saved.name(),
+                arch.name(),
+                saved.name()
+            ));
+        }
         println!("Resuming from checkpoint: {resume_path}");
         trainer.load_from_checkpoint(&resume_path);
     }
@@ -584,7 +645,7 @@ fn run_chess768(cfg: TrainConfig) {
             l1.forward(hidden_layer).select(output_buckets)
         });
 
-    resume_from_env(&mut trainer);
+    resume_from_env(&mut trainer, Arch::Single);
     run_trainer(Session {
         trainer: &mut trainer,
         inputs: Chess768,
@@ -650,7 +711,7 @@ fn run_buckets16(cfg: TrainConfig) {
         clip_factorised_feature_transformer(&mut trainer.optimiser);
     }
 
-    resume_from_env(&mut trainer);
+    resume_from_env(&mut trainer, Arch::Single);
     run_trainer(Session {
         trainer: &mut trainer,
         inputs,

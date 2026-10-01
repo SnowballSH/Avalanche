@@ -16,7 +16,7 @@ use bullet::{
 };
 
 use crate::{
-    BUCKET_LAYOUT_16, EVAL_SCALE, NUM_OUTPUT_BUCKETS, QA, Session, TrainConfig,
+    Arch, BUCKET_LAYOUT_16, EVAL_SCALE, NUM_OUTPUT_BUCKETS, QA, Session, TrainConfig,
     feature_transformer_format, print_banner, resume_from_env, run_trainer,
 };
 
@@ -38,6 +38,16 @@ const FORMAT_VERSION: u32 = 1;
 const HEAD_MULTI: u32 = 1;
 const MAGIC: &[u8; 8] = b"AVALNNUE";
 const HEADER_SIZE: usize = 64;
+
+/// Whether a saved quantised network is a multi-layer one: only those start with the magic.
+pub fn is_multilayer_file(first_bytes: &[u8]) -> bool {
+    first_bytes.starts_with(MAGIC)
+}
+
+/// Kaiming initialisation of the feature transformer as if it had this many inputs, about the number
+/// of pieces on a board, as bullet's examples/progression/4_multi_layer.rs does. The default, for all
+/// 12288 inputs, starts the pairwise products near zero.
+const FT_EFFECTIVE_INPUTS: usize = 32;
 
 /// An L1 weight is stored as `round(w * L1_WEIGHT_SCALE)`: a pairwise product of 1.0 is the integer
 /// `255 * 255 / 2^FT_SHIFT`, and the L1 sum has to land on `2^ACT_BITS`.
@@ -169,6 +179,14 @@ pub fn run(cfg: TrainConfig) {
             "pairwise -> {L1_SIZE}x2 -> {L2_SIZE} -> 1, each x{NUM_OUTPUT_BUCKETS} material buckets"
         ),
     );
+    let l1_sparsity = cfg.l1_sparsity;
+    if l1_sparsity > 0.0 {
+        println!(
+            "L1 sparsity penalty: {l1_sparsity} x mean pairwise activation, added to the training loss"
+        );
+        println!("  (the printed training loss includes it; the validation loss does not)");
+        println!();
+    }
 
     let save_format = save_format(NUM_INPUT_BUCKETS, hidden_size, use_factoriser);
     let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
@@ -180,33 +198,48 @@ pub fn run(cfg: TrainConfig) {
         .inputs(inputs)
         .output_buckets(MaterialCount::<NUM_OUTPUT_BUCKETS>)
         .save_format(&save_format)
-        .loss_fn(|output, target| output.sigmoid().squared_error(target))
-        .build(move |builder, stm_inputs, ntm_inputs, output_buckets| {
-            let mut l0 = builder.new_affine("l0", 768 * NUM_INPUT_BUCKETS, hidden_size);
-            if use_factoriser {
-                let l0f =
-                    builder.new_weights("l0f", Shape::new(hidden_size, 768), InitSettings::Zeroed);
-                l0.weights = l0.weights + l0f.repeat(NUM_INPUT_BUCKETS);
-            }
-            let l1 = builder.new_affine("l1", hidden_size, NUM_OUTPUT_BUCKETS * L1_SIZE);
-            let l2 = builder.new_affine("l2", L2_INPUTS, NUM_OUTPUT_BUCKETS * L2_SIZE);
-            let l3 = builder.new_affine("l3", L2_SIZE, NUM_OUTPUT_BUCKETS);
+        .build_custom(
+            move |builder, (stm_inputs, ntm_inputs, output_buckets), target| {
+                let mut l0 = builder.new_affine("l0", 768 * NUM_INPUT_BUCKETS, hidden_size);
+                l0.init_with_effective_input_size(FT_EFFECTIVE_INPUTS);
+                if use_factoriser {
+                    let l0f = builder.new_weights(
+                        "l0f",
+                        Shape::new(hidden_size, 768),
+                        InitSettings::Zeroed,
+                    );
+                    l0.weights = l0.weights + l0f.repeat(NUM_INPUT_BUCKETS);
+                }
+                let l1 = builder.new_affine("l1", hidden_size, NUM_OUTPUT_BUCKETS * L1_SIZE);
+                let l2 = builder.new_affine("l2", L2_INPUTS, NUM_OUTPUT_BUCKETS * L2_SIZE);
+                let l3 = builder.new_affine("l3", L2_SIZE, NUM_OUTPUT_BUCKETS);
 
-            // Pairwise: neuron i times neuron i + H/2, per perspective. Slicing the affine layer is
-            // bullet's faster spelling of `l0.forward(x).crelu().pairwise_mul()`.
-            let half = hidden_size / 2;
-            let ft = |input, start, end| l0.slice(start, end).forward(input).crelu();
-            let stm_hidden = ft(stm_inputs, 0, half) * ft(stm_inputs, half, hidden_size);
-            let ntm_hidden = ft(ntm_inputs, 0, half) * ft(ntm_inputs, half, hidden_size);
+                // Pairwise: neuron i times neuron i + H/2, per perspective. Slicing the affine layer is
+                // bullet's faster spelling of `l0.forward(x).crelu().pairwise_mul()`.
+                let half = hidden_size / 2;
+                let ft = |input, start, end| l0.slice(start, end).forward(input).crelu();
+                let stm_hidden = ft(stm_inputs, 0, half) * ft(stm_inputs, half, hidden_size);
+                let ntm_hidden = ft(ntm_inputs, 0, half) * ft(ntm_inputs, half, hidden_size);
 
-            let l1_out = l1
-                .forward(stm_hidden.concat(ntm_hidden))
-                .select(output_buckets)
-                .crelu();
-            let dual = l1_out.concat(l1_out * l1_out);
-            let l2_out = l2.forward(dual).select(output_buckets).crelu();
-            l3.forward(l2_out).select(output_buckets)
-        });
+                let pairwise = stm_hidden.concat(ntm_hidden);
+
+                let l1_out = l1.forward(pairwise).select(output_buckets).crelu();
+                let dual = l1_out.concat(l1_out * l1_out);
+                let l2_out = l2.forward(dual).select(output_buckets).crelu();
+                let output = l3.forward(l2_out).select(output_buckets);
+
+                // The same loss as the single-layer net. validation.rs recomputes exactly this from the
+                // output, so the penalty below never reaches the validation loss.
+                let mut loss = output.sigmoid().squared_error(target);
+                if l1_sparsity > 0.0 {
+                    // As bullet's examples/advanced/main.rs: fewer non-zero pairwise activations are
+                    // fewer blocks for the engine's sparse L1.
+                    let mean_activation = pairwise.reduce_sum_rows() / (hidden_size as f32);
+                    loss = loss + l1_sparsity * mean_activation;
+                }
+                (output, loss)
+            },
+        );
 
     if use_factoriser {
         crate::clip_factorised_feature_transformer(&mut trainer.optimiser);
@@ -225,7 +258,7 @@ pub fn run(cfg: TrainConfig) {
             .set_params_for_weight(weights, clip(WEIGHT_CLIP));
     }
 
-    resume_from_env(&mut trainer);
+    resume_from_env(&mut trainer, Arch::Multi);
     run_trainer(Session {
         trainer: &mut trainer,
         inputs,
