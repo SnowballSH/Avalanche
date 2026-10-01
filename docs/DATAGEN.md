@@ -12,14 +12,16 @@ Avalanche datagen <threads> [book.epd | book=path] [key=value ...]
   ttmb=N        TT MiB per side per thread (default 4)
   positions=N   stop after at least N positions, at a game boundary (default: unbounded)
   seed=N        deterministic seed (default: random)
+  raweval=BOOL  true labels with the unscaled network output (default false)
   out=PATH      output file, must not exist (default data_<seed>.viribin)
   format=viri|bullet (default viri)
 ```
 
-The thread count is required (the old implicit default of 7 is gone). Malformed or unknown options, an unreadable
-or empty book, a book line that is not a legal position (datagen names the line and the reason), and an existing
-output file are errors: datagen prints the reason and exits with status 2. A worker thread that fails (for example on
-a write error) stops the whole run, names the worker and the error, and exits with status 1.
+The thread count is required (the old implicit default of 7 is gone). Malformed, unknown or repeated options (a key
+given twice, or two books), an unreadable or empty book, a book line that is not a legal position (datagen names the
+line and the reason), and an existing output file are errors: datagen prints the reason and exits with status 2. A
+worker thread that fails (for example on a write error) stops the whole run, names the worker and the error, and
+exits with status 1.
 
 ## Output
 
@@ -34,11 +36,38 @@ exited with status 0). The output file is created exclusively and is never overw
 On success the only stdout output is one JSON line:
 
 ```json
-{"positions":2154,"games":19,"white_wins":8,"draws":5,"black_wins":6,"seconds":1.44,"seed":1}
+{"positions":2154,"games":19,"white_wins":8,"draws":5,"black_wins":6,"seconds":1.44,"seed":1,"raw_eval":false}
 ```
 
 The banner and per-thread progress go to stderr. `positions` counts `(move, score)` pairs, i.e. positions before
-training filters.
+training filters. `raw_eval` is always present and repeats the `raweval` option.
+
+## Raw evaluation
+
+The engine post-processes the network output before the search sees it: a division by 8 for drawish material, a
+scaling by `(700 + phase_material / 32 - 5 * fifty) / 1024`, and contempt. With the default `raweval=false` the
+recorded scores carry those transformations, so a network trained on them learns the scaled values and the engine
+then scales its output a second time at inference. `raweval=true` generates labels on the network's own scale: the
+datagen searches use the network output as is, and contempt is forced to 0. Positions the network is not used for
+(no pawns and at most a rook or two minor pieces in total) keep the hand-crafted evaluation with its usual
+corrections in both modes.
+
+Nothing is rescaled to compensate: the adjudication thresholds, the opening rejection threshold (600 cp), the
+bulletformat recording window and the stored scores all operate on raw-scale scores, which are larger in magnitude
+than scaled ones (by about 1024/900 with full material and more as material comes off or the fifty-move counter
+grows). Datasets generated with and without `raweval=true` therefore label the same position differently and must
+not be mixed blindly; tell them apart by the `raw_eval` field of the summary line and the `Eval:` banner line.
+
+The search itself is not retuned, so raw-eval searches behave a little differently. Pruning margins and the
+correction-history limits are fixed centipawn amounts and are therefore relatively tighter against the larger raw
+scores. Without the fifty-move decay the scores of shuffling positions do not drift towards zero, so draw
+adjudication fires less often, and win adjudication at 2500 cp is reached earlier. Positions without pawns and with
+phase below 3 keep their scaled hand-crafted labels inside a raw dataset; filtering them out of raw datasets is
+recommended.
+
+Each worker owns two transposition tables, one per side, shared with no other worker. They are aged, not cleared,
+between games, so entries (including static evaluations) outlive a game. This is safe because the evaluation mode is
+fixed for the whole run; if the mode ever becomes switchable per game, the tables must be cleared on a switch.
 
 ## Determinism
 

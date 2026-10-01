@@ -4,12 +4,14 @@ const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const numa = @import("numa.zig");
+const hce = @import("hce.zig");
 const Searcher = @import("search.zig").Searcher;
 
 const STACK_SIZE = 64 * 1024 * 1024;
 
 pub const SearchJob = struct {
     color: types.Color,
+    mode: hce.EvalMode,
     depth: usize,
     alpha: i32,
     beta: i32,
@@ -78,7 +80,7 @@ pub const Worker = struct {
                     self.searcher.has_searched = false;
                     self.searcher.reset_heuristics(true);
                 },
-                .search => |job| self.searcher.start_helper(job.color, job.depth, job.alpha, job.beta),
+                .search => |job| self.searcher.start_helper(job.color, job.mode, job.depth, job.alpha, job.beta),
                 .quit => {
                     self.searcher.deinit();
                     platform.allocator.destroy(self.searcher);

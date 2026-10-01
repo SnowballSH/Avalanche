@@ -334,11 +334,20 @@ pub inline fn distance_eval(pos: *position.Position, comptime white_winning: boo
     return score;
 }
 
-pub fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i32 {
+/// `.raw` returns the network output untouched, for self-play data generation. Positions the network is not used
+/// for keep the full `.scaled` evaluation in both modes.
+pub const EvalMode = enum { scaled, raw };
+
+pub inline fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i32 {
+    return evaluate_mode(pos, color, .scaled);
+}
+
+pub fn evaluate_mode(pos: *position.Position, comptime color: types.Color, comptime mode: EvalMode) i32 {
     const phase = pos.phase();
     var result: i32 = 0;
     if (UseNNUE and (phase >= 3 or pos.has_pawns())) {
         result = evaluate_nnue_comptime(pos, color);
+        if (mode == .raw) return result;
     } else {
         if (!pos.evaluator.need_hce) {
             pos.evaluator.need_hce = true;
