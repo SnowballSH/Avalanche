@@ -62,7 +62,7 @@ Avalanche also has a lichess account (though not often played): https://lichess.
 
 Avalanche follows the UCI protocol and is not a full chess application. You should use Avalanche with a UCI-compatible GUI interface. If you need to use the CLI, make sure to send \n at the end of your input (^\n on windows command prompt).
 
-Supported features include Chess960 and Double Fischer Random Chess, pondering, MultiPV, `searchmoves`, `go mate`, Syzygy tablebases, `EvalFile`, a persistent NUMA-aware thread pool, live `currmove`/bound reporting, and strength limiting via `Skill Level` or `UCI_LimitStrength`/`UCI_Elo`. See [docs/UCI.md](docs/UCI.md), [docs/CHESS960.md](docs/CHESS960.md), [docs/THREADS.md](docs/THREADS.md) and [docs/STRENGTH.md](docs/STRENGTH.md). Training-data generation is described in [docs/DATAGEN.md](docs/DATAGEN.md).
+Supported features include Chess960 and Double Fischer Random Chess, pondering, MultiPV, `searchmoves`, `go mate`, Syzygy tablebases, `EvalFile`, a persistent NUMA-aware thread pool, live `currmove`/bound reporting, and strength limiting via `Skill Level` or `UCI_LimitStrength`/`UCI_Elo`. See [docs/UCI.md](docs/UCI.md), [docs/CHESS960.md](docs/CHESS960.md), [docs/THREADS.md](docs/THREADS.md) and [docs/STRENGTH.md](docs/STRENGTH.md). Training-data generation is described in [docs/DATAGEN.md](docs/DATAGEN.md), the network architectures and file formats in [docs/NNUE.md](docs/NNUE.md).
 
 ## Past Versions
 
