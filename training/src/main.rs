@@ -1,7 +1,8 @@
+mod multilayer;
 mod schedule;
 mod validation;
 
-use std::str::FromStr;
+use std::{io::Write, str::FromStr};
 
 use bullet::{
     game::{
@@ -23,7 +24,10 @@ use bullet::{
         loader::{DirectSequentialDataLoader, ViriBinpackLoader, viribinpack::ViriFilter},
     },
 };
-use bullet_trainer::{optimiser::OptimiserState, reader::DataReader};
+use bullet_trainer::{
+    optimiser::{Optimiser, OptimiserState},
+    reader::DataReader,
+};
 use schedule::{BaseLr, LinearWarmup, LrKind};
 use validation::ValidationConfig;
 use viriformat::{
@@ -131,6 +135,27 @@ fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
     !VIRI_FILTER.should_filter(mv, eval as i32, board, wdl, &mut rng)
 }
 
+/// The layers after the feature transformer; docs/NNUE.md specifies both.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Arch {
+    /// `(inputs -> H)x2 -> SCReLU -> 1x8`.
+    Single,
+    /// `(inputs -> H)x2 -> pairwise CReLU -> 16 -> dual activation -> 32 -> 1`, bucketed; see multilayer.rs.
+    Multi,
+}
+
+impl FromStr for Arch {
+    type Err = String;
+
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        match name {
+            "single" => Ok(Self::Single),
+            "multi" => Ok(Self::Multi),
+            _ => Err(String::from("supported: single, multi")),
+        }
+    }
+}
+
 struct TrainConfig {
     hidden_size: usize,
     superbatches: usize,
@@ -231,6 +256,7 @@ fn main() {
     }
 
     let input_mode = env_string("TRAIN_INPUT", "buckets16");
+    let arch = env_strict("TRAIN_ARCH", Arch::Single).unwrap_or_else(|err| fail(&err));
     let hidden_size = env_usize("TRAIN_HIDDEN", 1024);
     if matches!(input_mode.as_str(), "buckets16" | "buckets") && hidden_size != 1024 {
         eprintln!(
@@ -281,10 +307,12 @@ fn main() {
         validation,
     };
 
-    match input_mode.as_str() {
-        "chess768" | "768" => run_chess768(cfg),
-        "buckets16" | "buckets" => run_buckets16(cfg),
-        other => {
+    match (input_mode.as_str(), arch) {
+        ("chess768" | "768", Arch::Single) => run_chess768(cfg),
+        ("chess768" | "768", Arch::Multi) => fail("TRAIN_ARCH=multi needs TRAIN_INPUT=buckets16"),
+        ("buckets16" | "buckets", Arch::Single) => run_buckets16(cfg),
+        ("buckets16" | "buckets", Arch::Multi) => multilayer::run(cfg),
+        (other, _) => {
             eprintln!("Error: unknown TRAIN_INPUT={other:?}");
             eprintln!("Supported: buckets16 (default), chess768");
             std::process::exit(1);
@@ -292,14 +320,15 @@ fn main() {
     }
 }
 
-fn print_banner(cfg: &TrainConfig, arch: &str) {
+/// The head of `Arch::Single`, as `print_banner` shows it.
+const SINGLE_HEAD: &str = "1x8";
+const _: () = assert!(NUM_OUTPUT_BUCKETS == 8);
+
+fn print_banner(cfg: &TrainConfig, input: &str, head: &str) {
     println!("=== Avalanche NNUE Trainer ===");
     println!("net_id: {}", cfg.net_id);
-    println!("Input: {arch}");
-    println!(
-        "Architecture: ({arch} -> {})x2 -> 1x{NUM_OUTPUT_BUCKETS}",
-        cfg.hidden_size
-    );
+    println!("Input: {input}");
+    println!("Architecture: ({input} -> {})x2 -> {head}", cfg.hidden_size);
     println!("Data: {:?}", cfg.dataset_paths);
     println!("Superbatches: {}", cfg.superbatches);
     println!("Batch size: {}", cfg.batch_size);
@@ -349,6 +378,11 @@ where
     I: SparseInputType<RequiredDataType = ChessBoard>,
 {
     let cfg = session.cfg;
+    if let Ok(fens) = std::env::var("TRAIN_PARITY_FENS") {
+        let out = env_string("TRAIN_PARITY_OUT", "parity.txt");
+        write_parity(session.trainer, &fens, &out).unwrap_or_else(|err| fail(&err));
+        return;
+    }
     let (start, end) = (cfg.wdl_proportion, cfg.wdl_end);
     if (end - start).abs() > 1e-6 {
         run_with_wdl(session, wdl::LinearWDL { start, end });
@@ -356,6 +390,39 @@ where
         run_with_wdl(session, wdl::ConstantWDL { value: start });
     }
     println!("Training complete. net_id={}", cfg.net_id);
+}
+
+/// Instead of training: the unquantised net's evaluation of every FEN of `fens_path`, in centipawns for
+/// the side to move, written to `out_path` as `<fen> | <centipawns>`. `Avalanche nnue-parity` compares
+/// the engine against that file; docs/NNUE.md has the commands.
+fn write_parity<Opt, I>(
+    trainer: &mut ValueTrainer<Opt, I, OutputBuckets>,
+    fens_path: &str,
+    out_path: &str,
+) -> Result<(), String>
+where
+    Opt: OptimiserState<ExecutionContext>,
+    I: SparseInputType<RequiredDataType = ChessBoard>,
+{
+    let fens = std::fs::read_to_string(fens_path)
+        .map_err(|err| format!("cannot read TRAIN_PARITY_FENS {fens_path}: {err}"))?;
+    let mut out = std::fs::File::create(out_path)
+        .map_err(|err| format!("cannot create TRAIN_PARITY_OUT {out_path}: {err}"))?;
+
+    let mut count = 0;
+    for line in fens.lines() {
+        // Accepts its own output, so a parity file can be regenerated in place.
+        let fen = line.split('|').next().unwrap_or_default().trim();
+        if fen.is_empty() || fen.starts_with('#') {
+            continue;
+        }
+        let centipawns = EVAL_SCALE * trainer.eval(fen);
+        writeln!(out, "{fen} | {centipawns}")
+            .map_err(|err| format!("cannot write {out_path}: {err}"))?;
+        count += 1;
+    }
+    println!("Wrote the evaluations of {count} positions to {out_path}");
+    Ok(())
 }
 
 fn run_with_wdl<Opt, I>(session: Session<Opt, I>, wdl_scheduler: impl wdl::WdlScheduler)
@@ -439,8 +506,53 @@ fn run_with_reader<Opt, I>(
     .unwrap_or_else(|err| fail(&err));
 }
 
+/// The file's first two sections, `l0w` then `l0b`, with the factoriser folded into the weights.
+fn feature_transformer_format(use_factoriser: bool, input_buckets: usize) -> [SavedFormat; 2] {
+    let weights = if use_factoriser {
+        SavedFormat::id("l0w").transform(move |store, weights| {
+            let factoriser = store.get("l0f").values.f32().repeat(input_buckets);
+            weights
+                .into_iter()
+                .zip(factoriser)
+                .map(|(a, b)| a + b)
+                .collect()
+        })
+    } else {
+        SavedFormat::id("l0w")
+    };
+    [
+        weights.round().quantise::<i16>(QA),
+        SavedFormat::id("l0b").round().quantise::<i16>(QA),
+    ]
+}
+
+/// Match bullet examples/progression/3_input_buckets.rs: the saved weight is `l0w + l0f`.
+fn clip_factorised_feature_transformer<Opt>(optimiser: &mut Optimiser<ExecutionContext, Opt>)
+where
+    Opt: OptimiserState<ExecutionContext, Params = AdamWParams>,
+{
+    let stricter_clipping = AdamWParams {
+        max_weight: 0.99,
+        min_weight: -0.99,
+        ..Default::default()
+    };
+    optimiser.set_params_for_weight("l0w", stricter_clipping);
+    optimiser.set_params_for_weight("l0f", stricter_clipping);
+}
+
+fn resume_from_env<Opt, I>(trainer: &mut ValueTrainer<Opt, I, OutputBuckets>)
+where
+    Opt: OptimiserState<ExecutionContext>,
+    I: SparseInputType,
+{
+    if let Ok(resume_path) = std::env::var("TRAIN_RESUME_FROM") {
+        println!("Resuming from checkpoint: {resume_path}");
+        trainer.load_from_checkpoint(&resume_path);
+    }
+}
+
 fn run_chess768(cfg: TrainConfig) {
-    print_banner(&cfg, "768");
+    print_banner(&cfg, "768", SINGLE_HEAD);
     let hidden_size = cfg.hidden_size;
 
     let save_format = [
@@ -472,10 +584,7 @@ fn run_chess768(cfg: TrainConfig) {
             l1.forward(hidden_layer).select(output_buckets)
         });
 
-    if let Ok(resume_path) = std::env::var("TRAIN_RESUME_FROM") {
-        println!("Resuming from checkpoint: {resume_path}");
-        trainer.load_from_checkpoint(&resume_path);
-    }
+    resume_from_env(&mut trainer);
     run_trainer(Session {
         trainer: &mut trainer,
         inputs: Chess768,
@@ -493,7 +602,7 @@ fn run_buckets16(cfg: TrainConfig) {
     } else {
         format!("768x{NUM_INPUT_BUCKETS}hm")
     };
-    print_banner(&cfg, &arch);
+    print_banner(&cfg, &arch, SINGLE_HEAD);
     println!("King buckets: {NUM_INPUT_BUCKETS} (ChessBucketsMirrored, half-board layout)");
     println!("Factoriser: {}", cfg.use_factoriser);
     println!();
@@ -501,37 +610,14 @@ fn run_buckets16(cfg: TrainConfig) {
     let hidden_size = cfg.hidden_size;
     let use_factoriser = cfg.use_factoriser;
 
-    let save_format: Vec<SavedFormat> = if use_factoriser {
-        vec![
-            SavedFormat::id("l0w")
-                .transform(|store, weights| {
-                    let factoriser = store.get("l0f").values.f32().repeat(NUM_INPUT_BUCKETS);
-                    weights
-                        .into_iter()
-                        .zip(factoriser)
-                        .map(|(a, b)| a + b)
-                        .collect()
-                })
-                .round()
-                .quantise::<i16>(QA),
-            SavedFormat::id("l0b").round().quantise::<i16>(QA),
-            SavedFormat::id("l1w")
-                .round()
-                .quantise::<i16>(QB)
-                .transpose(),
-            SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
-        ]
-    } else {
-        vec![
-            SavedFormat::id("l0w").round().quantise::<i16>(QA),
-            SavedFormat::id("l0b").round().quantise::<i16>(QA),
-            SavedFormat::id("l1w")
-                .round()
-                .quantise::<i16>(QB)
-                .transpose(),
-            SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
-        ]
-    };
+    let mut save_format = feature_transformer_format(use_factoriser, NUM_INPUT_BUCKETS).to_vec();
+    save_format.extend([
+        SavedFormat::id("l1w")
+            .round()
+            .quantise::<i16>(QB)
+            .transpose(),
+        SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
+    ]);
 
     let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
     // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
@@ -561,24 +647,10 @@ fn run_buckets16(cfg: TrainConfig) {
         });
 
     if use_factoriser {
-        // Match bullet examples/progression/3_input_buckets.rs
-        let stricter_clipping = AdamWParams {
-            max_weight: 0.99,
-            min_weight: -0.99,
-            ..Default::default()
-        };
-        trainer
-            .optimiser
-            .set_params_for_weight("l0w", stricter_clipping);
-        trainer
-            .optimiser
-            .set_params_for_weight("l0f", stricter_clipping);
+        clip_factorised_feature_transformer(&mut trainer.optimiser);
     }
 
-    if let Ok(resume_path) = std::env::var("TRAIN_RESUME_FROM") {
-        println!("Resuming from checkpoint: {resume_path}");
-        trainer.load_from_checkpoint(&resume_path);
-    }
+    resume_from_env(&mut trainer);
     run_trainer(Session {
         trainer: &mut trainer,
         inputs,
