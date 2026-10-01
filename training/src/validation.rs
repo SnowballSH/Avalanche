@@ -1,14 +1,7 @@
 //! Held-out validation. bullet's `ValueTrainer::run` has neither a validation pass nor a superbatch hook,
 //! so a validated run drives `bullet_trainer::run::train` directly, the layer `ValueTrainer::run` wraps.
 
-use std::{
-    cell::RefCell,
-    collections::BTreeMap,
-    fmt::Debug,
-    fs::File,
-    io::{BufRead, BufReader},
-    sync::Arc,
-};
+use std::{cell::RefCell, collections::BTreeMap, fmt::Debug, sync::Arc};
 
 use bullet::{
     game::{formats::bulletformat::ChessBoard, inputs::SparseInputType, outputs::OutputBuckets},
@@ -31,16 +24,10 @@ use bullet_trainer::{
     reader::{DataReader, ReadMapLoader},
     run::{self, HostPool, Step, logger},
 };
-use viriformat::{
-    chess::{board::Board, chessmove::Move},
-    dataformat::{Game, WDL},
-};
+
+use crate::heldout::{self, PositionFilter};
 
 type DeviceBuffer = Arc<Buffer<ExecutionContext>>;
-
-/// Same shape as bullet's `ViriFilter::Custom`: whether to keep a position, given its game result as
-/// 1.0, 0.5 or 0.0.
-pub type PositionFilter = fn(&Board, Move, i16, f32) -> bool;
 
 pub struct ValidationConfig {
     pub files: Vec<String>,
@@ -55,68 +42,6 @@ fn describe(error: impl Debug) -> String {
 
 fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
-}
-
-fn result_score(wdl: WDL) -> f32 {
-    match wdl {
-        WDL::Win => 1.0,
-        WDL::Draw => 0.5,
-        WDL::Loss => 0.0,
-    }
-}
-
-/// Appends the positions of `path` that pass `filter`, game by game in file order, stopping after the
-/// game that brings `positions` to `count`.
-fn append_file_positions(
-    path: &str,
-    filter: PositionFilter,
-    count: usize,
-    positions: &mut Vec<ChessBoard>,
-) -> Result<(), String> {
-    let invalid = |err: &dyn std::fmt::Display| format!("validation file {path}: {err}");
-    let file = File::open(path).map_err(|err| invalid(&err))?;
-    let mut reader = BufReader::new(file);
-    let mut moves = Vec::new();
-
-    while positions.len() < count && !reader.fill_buf().map_err(|err| invalid(&err))?.is_empty() {
-        let game = Game::deserialise_from(&mut reader, moves).map_err(|err| invalid(&err))?;
-        game.splat_to_bulletformat_with_filter_callback(
-            |position| {
-                positions.push(position);
-                Ok(())
-            },
-            |mv, eval, board, wdl, _| !filter(board, mv, eval as i16, result_score(wdl)),
-        )
-        .map_err(|err| invalid(&err))?;
-        moves = game.moves;
-    }
-    Ok(())
-}
-
-/// The first `count` positions of `files` that pass `filter`, in file and game order.
-///
-/// The files are parsed here rather than through bullet's `ViriBinpackLoader`, which shuffles with a
-/// time seed and loops over its files forever: this way the set is identical on every run and resume
-/// for any batch size, and held-out files that are too small are an error instead of repeated positions.
-fn load_positions(
-    files: &[String],
-    filter: PositionFilter,
-    count: usize,
-) -> Result<Vec<ChessBoard>, String> {
-    let mut positions = Vec::with_capacity(count);
-    for path in files {
-        append_file_positions(path, filter, count, &mut positions)?;
-    }
-
-    if positions.len() < count {
-        return Err(format!(
-            "the validation files hold {} positions that pass the filter, but TRAIN_VALIDATION_BATCHES \
-             x TRAIN_BATCH_SIZE needs {count}",
-            positions.len()
-        ));
-    }
-    positions.truncate(count);
-    Ok(positions)
 }
 
 /// Mirrors the mapper `ValueTrainer` builds privately for a scalar-output net without datapoint weights
@@ -322,7 +247,8 @@ impl Validator {
         batch_size: usize,
         threads: u8,
     ) -> Result<Self, String> {
-        let positions = load_positions(&config.files, config.filter, config.batches * batch_size)?;
+        let positions =
+            heldout::load_positions(&config.files, config.filter, config.batches * batch_size)?;
         Ok(Self {
             positions,
             batch_size,

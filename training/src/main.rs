@@ -1,3 +1,4 @@
+mod heldout;
 mod multilayer;
 mod schedule;
 mod validation;
@@ -251,6 +252,10 @@ fn l1_sparsity_from_env(arch: Arch) -> Result<f32, String> {
     Ok(coefficient)
 }
 
+fn canonical_dir(key: &str, dir: &str) -> Result<std::path::PathBuf, String> {
+    std::fs::canonicalize(dir).map_err(|err| format!("cannot resolve {key} {dir}: {err}"))
+}
+
 fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
     let dir = std::env::var("TRAIN_VALIDATION_DIR").unwrap_or_default();
     if dir.is_empty() {
@@ -259,6 +264,15 @@ fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
     let batches = env_strict("TRAIN_VALIDATION_BATCHES", 64)?;
     if batches == 0 {
         return Err(String::from("TRAIN_VALIDATION_BATCHES must be at least 1"));
+    }
+    if let Ok(data_dir) = std::env::var("TRAIN_DATA_DIR")
+        && canonical_dir("TRAIN_VALIDATION_DIR", &dir)?
+            == canonical_dir("TRAIN_DATA_DIR", &data_dir)?
+    {
+        return Err(format!(
+            "TRAIN_VALIDATION_DIR {dir} is the same directory as TRAIN_DATA_DIR {data_dir}: the \
+             validation loss would not be held-out"
+        ));
     }
     Ok(Some(ValidationConfig {
         files: viribin_files("TRAIN_VALIDATION_DIR", &dir)?,

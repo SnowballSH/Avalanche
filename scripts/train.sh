@@ -25,10 +25,11 @@
 #   TRAIN_SHUFFLE_MB (128; shuffle buffer of the .viribin loader, 16384 positions per MB),
 #   TRAIN_START_SB (1; with TRAIN_RESUME_FROM, the superbatch to resume at, keeping the LR schedule),
 #   TRAIN_VALIDATION_DIR (unset or empty = off; a directory of held-out .viribin files, filtered like the
-#     training data. Prints "validation superbatch <n> loss <value>" after every superbatch, and once
+#     training data; it must not be TRAIN_DATA_DIR. Prints "validation superbatch <n> loss <value>" after every superbatch, and once
 #     before training with n = TRAIN_START_SB - 1. Only a failure of that first pass stops the run),
-#   TRAIN_VALIDATION_BATCHES (64; validation batches of TRAIN_BATCH_SIZE, always the first filtered
-#     positions of the held-out files in sorted file order; fewer than that many is a startup error).
+#   TRAIN_VALIDATION_BATCHES (64; validation batches of TRAIN_BATCH_SIZE, always the same positions: an
+#     equal share from every held-out file, evenly spaced over its filtered positions and interleaved
+#     across files; fewer than that many in total is a startup error).
 #   TRAIN_PARITY_FENS (unset or empty = train. A file of FENs: instead of training, write the evaluation of each
 #     by the net of TRAIN_RESUME_FROM (required), as "<fen> | <centipawns>", to TRAIN_PARITY_OUT (parity.txt), for
 #     `Avalanche nnue-parity`; see docs/NNUE.md).
