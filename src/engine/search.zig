@@ -166,6 +166,9 @@ const CORRHIST_MAX_BONUS: i32 = CORRHIST_LIMIT / 4;
 const CORRHIST_WEIGHT_SCALE: i32 = 8;
 const PAWN_CORRHIST_WEIGHT: i32 = 8;
 const NONPAWN_CORRHIST_WEIGHT: i32 = 6;
+// A large |correction| marks an unreliable static eval: the RFP margin widens by this many
+// 1/CORRHIST_WEIGHT_SCALE cp per cp of |correction|.
+const CORRHIST_RFP_WEIGHT: i32 = 16;
 
 pub fn weighted_correction(pawn: i32, nonpawn_white: i32, nonpawn_black: i32) i32 {
     return @divTrunc(PAWN_CORRHIST_WEIGHT * pawn + NONPAWN_CORRHIST_WEIGHT * (nonpawn_white + nonpawn_black), CORRHIST_GRAIN * CORRHIST_WEIGHT_SCALE);
@@ -362,12 +365,15 @@ pub const Searcher = struct {
         return &self.nonpawn_correction[@intFromEnum(color)][@intFromEnum(key_color)][@as(usize, @intCast(pos.nonpawn_hash[@intFromEnum(key_color)] % CORRHIST_SIZE))];
     }
 
-    inline fn corrected_eval(self: *Searcher, pos: *const position.Position, comptime color: types.Color, raw_eval: i32) i32 {
-        const correction = weighted_correction(
+    inline fn eval_correction(self: *Searcher, pos: *const position.Position, comptime color: types.Color) i32 {
+        return weighted_correction(
             self.pawn_correction_entry(pos, color).*,
             self.nonpawn_correction_entry(pos, color, .White).*,
             self.nonpawn_correction_entry(pos, color, .Black).*,
         );
+    }
+
+    inline fn corrected_eval(raw_eval: i32, correction: i32) i32 {
         return std.math.clamp(raw_eval + correction, -SCORE_PLY_ADJ + 1, SCORE_PLY_ADJ - 1);
     }
 
@@ -1327,7 +1333,8 @@ pub const Searcher = struct {
         }
 
         const raw_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (is_null) -self.raw_eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.raw_eval_history[self.ply] else hce.evaluate_mode(pos, color, mode);
-        const static_eval: i32 = if (in_check) raw_eval else self.corrected_eval(pos, color, raw_eval);
+        const correction: i32 = if (in_check) 0 else self.eval_correction(pos, color);
+        const static_eval: i32 = if (in_check) raw_eval else corrected_eval(raw_eval, correction);
 
         var best_score: i32 = static_eval;
 
@@ -1356,6 +1363,7 @@ pub const Searcher = struct {
                 if (improving) {
                     n -= parameters.RFPImprovingDeduction;
                 }
+                n += @divTrunc(@as(i32, @intCast(@abs(correction))) * CORRHIST_RFP_WEIGHT, CORRHIST_WEIGHT_SCALE);
                 if (static_eval - n >= beta) {
                     return beta;
                 }
@@ -1910,7 +1918,7 @@ pub const Searcher = struct {
         var raw_eval = best_score;
         if (!in_check) {
             raw_eval = hce.evaluate_mode(pos, color, mode);
-            best_score = self.corrected_eval(pos, color, raw_eval);
+            best_score = corrected_eval(raw_eval, self.eval_correction(pos, color));
 
             // Step 2.1: Stand Pat pruning
             if (best_score >= beta) {
