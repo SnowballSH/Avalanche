@@ -121,6 +121,7 @@ pub const Position = struct {
     /// for, so the existing table is reused whatever position it last saw.
     pub fn rebuild_evaluation(self: *Position) void {
         self.evaluator.nnue_evaluator.depth = 0;
+        self.evaluator.need_hce = false;
         self.evaluator.full_refresh(self);
     }
 
