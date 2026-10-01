@@ -256,7 +256,7 @@ fn set_syzygy_rule50(_: Context, value: Value) !void {
 fn set_eval_file(ctx: Context, value: Value) !void {
     const path = if (value.string.len == 0) weights.EMBEDDED_NAME else value.string;
     weights.load(path) catch |err| {
-        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}), keeping the current network" ++ search.line_ending, .{ path, @errorName(err) });
+        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}: {s}), keeping the current network" ++ search.line_ending, .{ path, @errorName(err), weights.explain(err) });
         return;
     };
     ctx.position.refresh_evaluation();

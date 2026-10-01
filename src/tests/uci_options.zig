@@ -115,16 +115,22 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     const short_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "short.nnue", &path_buf)];
     var args_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
     try f.set(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{short_path}));
-    try expect(std.mem.indexOf(u8, f.output(), "WrongSize") != null);
+    try expect(std.mem.indexOf(u8, f.output(), if (weights.HEAD == .single) "WrongSize" else "WrongArchitecture") != null);
     try expectEqual(embedded_eval, hce.evaluate_nnue(f.pos));
 
     // A valid network with shifted output biases must change the evaluation.
     const altered = try std.testing.allocator.dupe(u8, std.mem.asBytes(weights.MODEL));
     defer std.testing.allocator.free(altered);
-    const bias_offset = @offsetOf(weights.NNUEWeights, "layer_2_bias");
-    for (0..weights.OUTPUT_SIZE) |bucket| {
-        const bytes = altered[bias_offset + 2 * bucket ..][0..2];
-        std.mem.writeInt(i16, bytes, std.mem.readInt(i16, bytes, .little) +% 500, .little);
+    const head_offset = @offsetOf(weights.NNUEWeights, "head");
+    switch (weights.HEAD) {
+        .single => for (0..weights.OUTPUT_SIZE) |bucket| {
+            const bytes = altered[head_offset + @offsetOf(weights.head_single.Weights, "layer_2_bias") + 2 * bucket ..][0..2];
+            std.mem.writeInt(i16, bytes, std.mem.readInt(i16, bytes, .little) +% 500, .little);
+        },
+        .multi => for (0..weights.OUTPUT_SIZE) |bucket| {
+            const bytes = altered[head_offset + @offsetOf(weights.head_multi.Weights, "l3_bias") + 4 * bucket ..][0..4];
+            std.mem.writeInt(i32, bytes, std.mem.readInt(i32, bytes, .little) + (1 << 20), .little);
+        },
     }
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "altered.nnue", .data = altered });
     const altered_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "altered.nnue", &path_buf)];

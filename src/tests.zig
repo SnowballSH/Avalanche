@@ -720,27 +720,42 @@ test "eval: nnue weights load and dimensions" {
     try expect(weights.HIDDEN_SIZE == 1024);
     try expect(weights.OUTPUT_SIZE == 8);
     try expect(weights.INPUT_SIZE == 768 * weights.NUM_INPUT_BUCKETS);
-    for (&weights.MODEL.layer_2) |bucket| {
-        for (bucket) |weight| {
-            try expect(weight >= weights.OUTPUT_WEIGHT_MIN);
-            try expect(weight <= weights.OUTPUT_WEIGHT_MAX);
-        }
-    }
+    try weights.validate(std.mem.asBytes(weights.MODEL));
+    const single = weights.Network(.single);
+    const multi = weights.Network(.multi);
+    try expect(@sizeOf(weights.NNUEWeights) == @sizeOf(weights.Network(weights.HEAD)));
     if (weights.NUM_INPUT_BUCKETS == 1) {
-        try expect(@sizeOf(weights.NNUEWeights) == 1607744);
+        try expect(@sizeOf(single) == 1607744);
     } else {
         try expect(weights.NUM_INPUT_BUCKETS == 16);
-        try expect(@sizeOf(weights.NNUEWeights) == 25200704);
+        try expect(@sizeOf(single) == 25200704);
+        try expect(@sizeOf(multi) == 25334400);
     }
+    // The file layouts of docs/NNUE.md.
+    try expect(@offsetOf(single, "layer_1") == 0);
+    try expect(@offsetOf(single, "layer_1_bias") == weights.INPUT_SIZE * weights.HIDDEN_SIZE * 2);
+    try expect(@offsetOf(single, "head") == @offsetOf(single, "layer_1_bias") + 2048);
+    try expect(@offsetOf(weights.head_single.Weights, "layer_2_bias") == 32768);
+    try expect(@offsetOf(multi, "layer_1") == 64);
+    try expect(@offsetOf(multi, "head") == 64 + weights.INPUT_SIZE * weights.HIDDEN_SIZE * 2 + 2048);
+    const head = weights.head_multi.Weights;
+    try expect(@offsetOf(head, "l1_weights") == 0);
+    try expect(@offsetOf(head, "l1_bias") == 131072);
+    try expect(@offsetOf(head, "l2_weights") == 131584);
+    try expect(@offsetOf(head, "l2_bias") == 164352);
+    try expect(@offsetOf(head, "l3_weights") == 165376);
+    try expect(@offsetOf(head, "l3_bias") == 166400);
+    try expect(@sizeOf(head) == 166464);
 }
 
 fn evaluate_nnue_scalar(pos: *position.Position, comptime turn: types.Color) i32 {
     const accumulator = pos.evaluator.nnue_evaluator.current();
     const pieces = types.popcount_usize(pos.all_all_pieces());
     const bucket = @min((pieces -| 2) / 4, weights.OUTPUT_SIZE - 1);
-    const output_weights = &weights.MODEL.layer_2[bucket];
     const own = if (turn == types.Color.White) &accumulator.white else &accumulator.black;
     const opp = if (turn == types.Color.White) &accumulator.black else &accumulator.white;
+    if (weights.HEAD == .multi) return weights.head_multi.evaluate_scalar(&weights.MODEL.head, own, opp, bucket);
+    const output_weights = &weights.MODEL.head.layer_2[bucket];
 
     var result: i32 = 0;
     for (0..weights.HIDDEN_SIZE) |i| {
@@ -750,10 +765,10 @@ fn evaluate_nnue_scalar(pos: *position.Position, comptime turn: types.Color) i32
         result += opp_activation * opp_activation * @as(i32, output_weights[weights.HIDDEN_SIZE + i]);
     }
 
-    return @divTrunc((@divTrunc(result, 255) + @as(i32, weights.MODEL.layer_2_bias[bucket])) * 400, 255 * 64);
+    return @divTrunc((@divTrunc(result, 255) + @as(i32, weights.MODEL.head.layer_2_bias[bucket])) * 400, 255 * 64);
 }
 
-test "eval: SIMD inference matches scalar SCReLU" {
+test "eval: SIMD inference matches the scalar head" {
     tables.init_all();
     zobrist.init_zobrist();
     weights.do_nnue();

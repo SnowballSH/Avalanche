@@ -34,16 +34,26 @@ fn embedded_copy() ![]u8 {
     return testing.allocator.dupe(u8, std.mem.asBytes(weights.MODEL));
 }
 
-/// Multiplies the output layer of the network file `net` by `factor`, as a stand-in for a network trained to a
-/// different eval scale.
+fn scale_cells(comptime Int: type, cells: []u8, factor: f64) void {
+    var offset: usize = 0;
+    while (offset < cells.len) : (offset += @sizeOf(Int)) {
+        const cell = cells[offset..][0..@sizeOf(Int)];
+        const scaled = @round(@as(f64, @floatFromInt(std.mem.readInt(Int, cell, .little))) * factor);
+        std.mem.writeInt(Int, cell, @intFromFloat(scaled), .little);
+    }
+}
+
+/// Multiplies the last layer of the network file `net`, weights and biases, by `factor`, as a stand-in for a network
+/// trained to a different eval scale. Either head's output is linear in that layer.
 fn scale_output_layer(net: []u8, factor: f64) void {
-    const start = @offsetOf(weights.NNUEWeights, "layer_2");
-    const end = @offsetOf(weights.NNUEWeights, "layer_2_bias") + @sizeOf(@FieldType(weights.NNUEWeights, "layer_2_bias"));
-    var offset: usize = start;
-    while (offset < end) : (offset += 2) {
-        const cell = net[offset..][0..2];
-        const scaled = @round(@as(f64, @floatFromInt(std.mem.readInt(i16, cell, .little))) * factor);
-        std.mem.writeInt(i16, cell, @intFromFloat(scaled), .little);
+    const Head = @FieldType(weights.NNUEWeights, "head");
+    const head = net[@offsetOf(weights.NNUEWeights, "head")..][0..@sizeOf(Head)];
+    const fields, const Int = switch (weights.HEAD) {
+        .single => .{ .{ "layer_2", "layer_2_bias" }, i16 },
+        .multi => .{ .{ "l3_weights", "l3_bias" }, i32 },
+    };
+    inline for (fields) |field| {
+        scale_cells(Int, head[@offsetOf(Head, field)..][0..@sizeOf(@FieldType(Head, field))], factor);
     }
 }
 
