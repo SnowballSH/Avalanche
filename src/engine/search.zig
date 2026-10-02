@@ -285,6 +285,7 @@ pub const Searcher = struct {
 
     counter_moves: [2][64][64]types.Move = undefined,
     continuation: *[12][64][64][64]i16,
+    capture_history: [12][64][6]i16 = undefined,
     pawn_correction: [2][CORRHIST_SIZE]i16 = undefined,
     nonpawn_correction: [2][2][CORRHIST_SIZE]i16 = undefined,
 
@@ -378,6 +379,12 @@ pub const Searcher = struct {
         return self.continuation[self.moved_piece_history[ply - plies_ago - 1].pure_index()][prev.to][move.from][move.to];
     }
 
+    pub inline fn capture_history_entry(self: *Searcher, pos: *const position.Position, move: types.Move) *i16 {
+        const victim = pos.mailbox[move.to];
+        const victim_type = if (victim == types.Piece.NO_PIECE) types.PieceType.Pawn else victim.piece_type();
+        return &self.capture_history[pos.mailbox[move.from].pure_index()][move.to][victim_type.index()];
+    }
+
     inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
         if (self.tt_store_is_ambiguous(score, flag)) return;
 
@@ -441,6 +448,11 @@ pub const Searcher = struct {
                     }
                 }
             }
+        }
+
+        const capture_entries: *[12 * 64 * 6]i16 = @ptrCast(&self.capture_history);
+        for (capture_entries) |*entry| {
+            entry.* = if (total_reset) 0 else @divTrunc(entry.*, 2);
         }
 
         if (total_reset) {
@@ -1523,6 +1535,11 @@ pub const Searcher = struct {
         var quiet_moves = std.array_list.Managed(types.Move).initCapacity(quiet_fba.allocator(), 218) catch unreachable;
         defer quiet_moves.deinit();
 
+        var capture_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
+        var capture_fba = std.heap.FixedBufferAllocator.init(&capture_bytes);
+        var capture_moves = std.array_list.Managed(types.Move).initCapacity(capture_fba.allocator(), 218) catch unreachable;
+        defer capture_moves.deinit();
+
         self.killer[self.ply + 1][0] = types.Move.empty();
         self.killer[self.ply + 1][1] = types.Move.empty();
 
@@ -1674,7 +1691,7 @@ pub const Searcher = struct {
 
             var score: i32 = 0;
             const min_lmr_move: usize = if (on_pv) parameters.LMRMinMovePV else parameters.LMRMinMoveNonPV;
-            const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCapture - 200;
+            const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCaptureFloor;
             if (on_pv and legals == 1) {
                 score = -self.negamax(pos, opp_color, mode, new_depth, -beta, -alpha, false, NodeType.PV, false);
             } else {
@@ -1737,7 +1754,9 @@ pub const Searcher = struct {
             pos.undo_move(color, move);
             _ = self.hash_history.pop();
 
-            if (!is_capture) {
+            if (is_capture) {
+                capture_moves.append(move) catch unreachable;
+            } else {
                 quiet_moves.append(move) catch unreachable;
             }
 
@@ -1774,14 +1793,22 @@ pub const Searcher = struct {
             }
         }
 
+        const adj: i32 = @max(@as(i32, 0), @min(parameters.HistoryBonusMax, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * parameters.HistoryBonusMultiplier - parameters.HistoryBonusOffset));
+
+        if (alpha >= beta) {
+            for (capture_moves.items) |m| {
+                const slot = self.capture_history_entry(pos, m);
+                const bonus = if (m.to_u16() == best_move.to_u16()) adj else -adj;
+                slot.* += @intCast(bonus - @divTrunc(@as(i32, slot.*) * adj, parameters.HistoryGravityMax));
+            }
+        }
+
         if (alpha >= beta and !best_move.is_capture() and !best_move.is_promotion()) {
             var temp = self.killer[self.ply][0];
             if (temp.to_u16() != best_move.to_u16()) {
                 self.killer[self.ply][0] = best_move;
                 self.killer[self.ply][1] = temp;
             }
-
-            const adj: i32 = @max(@as(i32, 0), @min(parameters.HistoryBonusMax, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * parameters.HistoryBonusMultiplier - parameters.HistoryBonusOffset));
 
             if (!is_null and self.ply >= 1) {
                 const last = self.move_history[self.ply - 1];
@@ -1994,7 +2021,7 @@ pub const Searcher = struct {
 
             if (!in_check and is_capture and index > 0) {
                 const see_score = evallist.items[index];
-                if (see_score < movepick.SortWinningCapture - 2048) {
+                if (see_score < movepick.SortWinningCaptureFloor) {
                     continue;
                 }
                 if (!see.see_threshold(pos, move, -parameters.QSSEEMargin)) {

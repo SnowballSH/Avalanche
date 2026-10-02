@@ -46,3 +46,15 @@
 - The improving flag, the eval history, move-loop futility pruning and the
   ProbCut threshold keep the static eval, so they stay comparable from ply to
   ply.
+
+## Capture history
+
+- A table indexed by moving piece, target square and captured piece type is
+  added to the ordering score of captures: `MVV-LVA * 32 + history`. The scale
+  keeps the victim term dominant, so the history only orders captures of
+  similar material value. An en passant capture counts as a pawn.
+- On a beta cutoff every capture searched at the node is updated with the same
+  bonus and gravity rule as the quiet history: the cutoff move up, the other
+  captures down. Captures are updated whether a capture or a quiet move cut.
+- The table is halved between searches and cleared on a new game, like the
+  other histories.
