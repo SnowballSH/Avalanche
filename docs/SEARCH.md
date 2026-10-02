@@ -26,3 +26,12 @@
 - The bonus uses the corrected eval: the gravity rule accumulates, so a
   raw-based bonus would drive any consistent error to the limit, while the
   residual stops once the corrected eval agrees with the search.
+
+## Late move reductions
+
+- The history term that shortens or lengthens a reduction is, for quiet moves,
+  the main history plus the one-ply and two-ply continuation histories of the
+  move, divided by `LMRHistoryDivisor`. Captures use the main history alone.
+- The three tables share one bonus and gravity rule, so their sum spans about
+  three times the range of one; the divisor was widened from 5164 to 8192 with
+  the change and has not been tuned since.
