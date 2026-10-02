@@ -35,3 +35,12 @@
 - The three tables share one bonus and gravity rule, so their sum spans about
   three times the range of one; the divisor was widened from 5164 to 8192 with
   the change and has not been tuned since.
+
+## Quiet move pruning depth
+
+- The futility margin and the SEE threshold of quiet moves scale with
+  `lmr_depth = max(depth - 1 - QuietLMR[depth][index], 0)`, the depth the move
+  would be searched to after its base reduction. The depth limits of both
+  prunings, late move pruning, history pruning and the SEE threshold of
+  captures still use `depth`. `FPBase`, `FPMargin` and `SEEQuietMargin` were
+  tuned for `depth` and have not been retuned.

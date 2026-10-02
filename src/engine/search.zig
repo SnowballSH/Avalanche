@@ -1564,12 +1564,14 @@ pub const Searcher = struct {
             }
 
             if (!DATAGEN and !is_root and index > 1 and !in_check and !on_pv and has_non_pawns) {
+                const lmr_depth: i32 = @max(@as(i32, @intCast(depth)) - 1 - QuietLMR[@min(depth, 63)][@min(index, 63)], 0);
+
                 // Step 5.4d: SEE Pruning
                 if (!is_important and depth <= parameters.SEEPruningDepth) {
                     const see_margin = if (is_capture)
                         -parameters.SEENoisyMargin * @as(i32, @intCast(depth)) * @as(i32, @intCast(depth))
                     else
-                        -parameters.SEEQuietMargin * @as(i32, @intCast(depth));
+                        -parameters.SEEQuietMargin * lmr_depth;
                     if (!see.see_threshold(pos, move, see_margin)) {
                         continue;
                     }
@@ -1597,7 +1599,7 @@ pub const Searcher = struct {
                 // Step 5.4b: Futility Pruning
                 if (!is_important and !is_capture and depth <= parameters.FPDepth and
                     @as(i32, @intCast(@abs(alpha))) < hce.MateScore - hce.MaxMate and
-                    static_eval + parameters.FPBase + parameters.FPMargin * @as(i32, @intCast(depth)) <= alpha)
+                    static_eval + parameters.FPBase + parameters.FPMargin * lmr_depth <= alpha)
                 {
                     skip_quiet = true;
                 }
