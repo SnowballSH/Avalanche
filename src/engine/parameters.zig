@@ -69,7 +69,7 @@ pub const TunableParams = [_]Tunable{
 
     // -- History pruning --
     .{ .name = "HistPruningDepth", .value = 4, .min_value = 2, .max_value = 8, .c_end = 0.5, .worth_tuning = false },
-    .{ .name = "HistPruningMargin", .value = 1730, .min_value = 600, .max_value = 4000, .c_end = 170, .worth_tuning = true },
+    .{ .name = "HistPruningMargin", .value = 2744, .min_value = 600, .max_value = 6000, .c_end = 170, .worth_tuning = true },
 
     // -- Futility pruning --
     .{ .name = "FPDepth", .value = 8, .min_value = 4, .max_value = 12, .c_end = 0.5, .worth_tuning = false },

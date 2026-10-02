@@ -1587,9 +1587,9 @@ pub const Searcher = struct {
                     }
 
                     // Step 5.4c: History Pruning
-                    if (depth <= parameters.HistPruningDepth and
-                        self.history[@intFromEnum(color)][move.from][move.to] < -parameters.HistPruningMargin * @as(i32, @intCast(depth)))
-                    {
+                    const quiet_history = self.history[@intFromEnum(color)][move.from][move.to] +
+                        self.continuation_history(self.ply, move, 0) + self.continuation_history(self.ply, move, 1);
+                    if (depth <= parameters.HistPruningDepth and quiet_history < -parameters.HistPruningMargin * @as(i32, @intCast(depth))) {
                         skip_quiet = true;
                     }
                 }

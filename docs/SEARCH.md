@@ -35,3 +35,10 @@
 - The three tables share one bonus and gravity rule, so their sum spans about
   three times the range of one; the divisor was widened from 5164 to 8192 with
   the change and has not been tuned since.
+
+## History pruning
+
+- The history that prunes late quiet moves at low depth is the same sum as in
+  late move reductions: main history plus the one-ply and two-ply continuation
+  histories. `HistPruningMargin` was widened from 1730 to 2744, the ratio the
+  LMR divisor was widened by, and has not been tuned since.
