@@ -98,14 +98,32 @@ pub const Difference = struct {
 /// How feature-transformer weights are drawn by `fill_random`: small enough
 /// that 32 pieces cannot overflow an i16 accumulator.
 const RANDOM_FT_WEIGHT = 48;
-const RANDOM_FT_BIAS = 128;
+
+/// How many pairwise activations of a random network are non-zero, which is
+/// what the cost of the sparse L1 depends on.
+pub const Activity = enum {
+    /// About nine L1 blocks in ten are non-zero on the bench positions.
+    dense,
+    /// About one in four, as a sparsity penalty in training aims for.
+    sparse,
+
+    /// Range of the feature-transformer biases: the lower they are, the fewer
+    /// accumulator values are positive.
+    fn bias_range(self: Activity) [2]i16 {
+        return switch (self) {
+            .dense => .{ 0, 128 },
+            .sparse => .{ -144, -16 },
+        };
+    }
+};
 
 /// A random network with a valid header. `range` bounds the head's weights.
-pub fn fill_random(net: *Net, random: std.Random, range: head_multi.RandomRange) void {
+pub fn fill_random(net: *Net, random: std.Random, range: head_multi.RandomRange, activity: Activity) void {
     @memset(std.mem.asBytes(net), 0);
     net.header = weights.multi_header(range.l1_shift);
     for (&net.layer_1) |*weight| weight.* = random.intRangeAtMost(i16, -RANDOM_FT_WEIGHT, RANDOM_FT_WEIGHT);
-    for (&net.layer_1_bias) |*bias| bias.* = random.intRangeAtMost(i16, 0, RANDOM_FT_BIAS);
+    const bias_range = activity.bias_range();
+    for (&net.layer_1_bias) |*bias| bias.* = random.intRangeAtMost(i16, bias_range[0], bias_range[1]);
     head_multi.fill_random(&net.head, random, range);
 }
 
@@ -134,7 +152,9 @@ fn load(path: []const u8) !*Net {
 const USAGE =
     \\usage: nnue-parity <net> [positions|bench] [verbose]
     \\                                       compare the integer head with the float forward pass
-    \\       nnue-random <out> [seed] [full] write a random multi-layer network (full = whole weight range)
+    \\       nnue-random <out> [seed] [full] [sparse]
+    \\                                       write a random multi-layer network (full = whole weight
+    \\                                       range, sparse = few non-zero pairwise activations)
     \\       nnue-speed                      time this build's head on the bench positions
     \\
     \\positions: one FEN per line, optionally followed by "| <centipawns>", the
@@ -244,20 +264,96 @@ fn run_random(args: []const []const u8, out: *std.Io.Writer) !u8 {
         return 1;
     }
     const seed = if (args.len >= 2) std.fmt.parseInt(u64, args[1], 10) catch 1 else 1;
-    const full = args.len >= 3 and std.mem.eql(u8, args[2], "full");
+    var full = false;
+    var activity: Activity = .dense;
+    for (args[@min(args.len, 2)..]) |flag| {
+        if (std.mem.eql(u8, flag, "full")) full = true;
+        if (std.mem.eql(u8, flag, "sparse")) activity = .sparse;
+    }
     const net = try platform.allocator.create(Net);
     defer platform.allocator.destroy(net);
     var prng = std.Random.DefaultPrng.init(seed);
-    fill_random(net, prng.random(), if (full) .{} else REALISTIC_RANGE);
+    fill_random(net, prng.random(), if (full) .{} else REALISTIC_RANGE, activity);
     try std.Io.Dir.cwd().writeFile(platform.io, .{ .sub_path = args[0], .data = std.mem.asBytes(net) });
     try out.print("nnue-random: wrote {s} ({d} bytes, seed {d})\n", .{ args[0], @sizeOf(Net), seed });
     return 0;
 }
 
+const SPEED_ROUNDS = 40_000;
+/// Samples per batch of a stage timing: about 6 KiB each.
+const STAGE_BATCH = 4;
+
+/// The accumulators of one bench position, and for the multi-layer head what
+/// each of its stages produces from them, so that a stage can be timed alone.
+const SpeedSample = struct {
+    white: arch.Accumulator align(64),
+    black: arch.Accumulator align(64),
+    bucket: usize,
+    activations: head_multi.Activations align(64) = undefined,
+    indices: head_multi.BlockIndices = undefined,
+    sums: head_multi.L1Vector = undefined,
+};
+
+/// The stages of `head_multi.evaluate_simd`, each from the stored output of
+/// the one before it.
+const MultiStage = enum {
+    pairwise,
+    nonzero_search,
+    l1,
+    l2_l3,
+
+    fn run(comptime self: MultiStage, sample: *SpeedSample) void {
+        const head = &weights.MODEL.head;
+        switch (self) {
+            .pairwise => {
+                head_multi.activate(&sample.white, &sample.black, &sample.activations);
+                std.mem.doNotOptimizeAway(&sample.activations);
+            },
+            .nonzero_search => std.mem.doNotOptimizeAway(head_multi.nonzero_blocks(&sample.activations, &sample.indices)),
+            .l1 => {
+                sample.sums = head_multi.l1_sums(head, &sample.activations, sample.bucket);
+                std.mem.doNotOptimizeAway(&sample.sums);
+            },
+            .l2_l3 => std.mem.doNotOptimizeAway(head_multi.finish(head, weights.l1_shift(&weights.MODEL.header), sample.bucket, sample.sums)),
+        }
+    }
+
+    /// Per call, with the samples taken a few at a time so that a stage finds
+    /// its input in the first-level cache, as it does in the search.
+    fn nanoseconds(comptime self: MultiStage, samples: []SpeedSample) f64 {
+        const timer = types.Timer.start();
+        var first: usize = 0;
+        while (first < samples.len) : (first += STAGE_BATCH) {
+            const batch = samples[first..@min(first + STAGE_BATCH, samples.len)];
+            for (0..SPEED_ROUNDS) |_| {
+                for (batch) |*sample| self.run(sample);
+            }
+        }
+        return @as(f64, @floatFromInt(timer.read())) / @as(f64, @floatFromInt(SPEED_ROUNDS * samples.len));
+    }
+};
+
+/// Where the time of the multi-layer head goes. The stages are timed in
+/// order, so each one finds the output of the one before it in the samples.
+fn report_multi_stages(samples: []SpeedSample, out: *std.Io.Writer) !void {
+    const pairwise = MultiStage.pairwise.nanoseconds(samples);
+    const nonzero_search = MultiStage.nonzero_search.nanoseconds(samples);
+    const l1 = MultiStage.l1.nanoseconds(samples);
+    const l2_l3 = MultiStage.l2_l3.nanoseconds(samples);
+
+    var nonzero: usize = 0;
+    for (samples) |*sample| nonzero += head_multi.nonzero_blocks(&sample.activations, &sample.indices);
+    try out.print("nnue-speed: {s}; {d:.1} of {d} L1 blocks non-zero\n", .{
+        head_multi.SIMD_DESCRIPTION,
+        @as(f64, @floatFromInt(nonzero)) / @as(f64, @floatFromInt(samples.len)),
+        head_multi.L1_BLOCKS,
+    });
+    try out.print("nnue-speed: stages, inputs in cache: pairwise {d:.1} ns, L1 {d:.1} ns (of which the non-zero search {d:.1} ns), L2 and L3 {d:.1} ns\n", .{ pairwise, l1, nonzero_search, l2_l3 });
+}
+
 /// Times the active build's head on the accumulators of the bench positions.
 fn run_speed(out: *std.Io.Writer) !u8 {
-    const Sample = struct { white: arch.Accumulator align(64), black: arch.Accumulator align(64), bucket: usize };
-    const samples = try platform.allocator.alloc(Sample, bench.FENS.len);
+    const samples = try platform.allocator.alloc(SpeedSample, bench.FENS.len);
     defer platform.allocator.free(samples);
 
     const pos = try platform.allocator.create(position.Position);
@@ -266,21 +362,24 @@ fn run_speed(out: *std.Io.Writer) !u8 {
     defer pos.deinit();
     for (bench.FENS, samples) |fen, *sample| {
         pos.set_fen(fen);
+        sample.* = .{
+            .white = undefined,
+            .black = undefined,
+            .bucket = @min((types.popcount_usize(pos.all_all_pieces()) -| 2) / 4, arch.OUTPUT_SIZE - 1),
+        };
         accumulate(weights.MODEL, pos, types.Color.White, &sample.white);
         accumulate(weights.MODEL, pos, types.Color.Black, &sample.black);
-        sample.bucket = @min((types.popcount_usize(pos.all_all_pieces()) -| 2) / 4, arch.OUTPUT_SIZE - 1);
     }
 
-    const rounds = 40_000;
     var checksum: i64 = 0;
     const timer = types.Timer.start();
-    for (0..rounds) |_| {
+    for (0..SPEED_ROUNDS) |_| {
         for (samples) |*sample| {
             checksum += weights.evaluate(&sample.white, &sample.black, sample.bucket);
         }
     }
     const elapsed = timer.read();
-    const evals = rounds * samples.len;
+    const evals = SPEED_ROUNDS * samples.len;
     try out.print("nnue-speed: {s} head, {d} evaluations, {d:.1} ns each, {d} per second (checksum {d})\n", .{
         @tagName(weights.HEAD),
         evals,
@@ -288,6 +387,7 @@ fn run_speed(out: *std.Io.Writer) !u8 {
         evals * std.time.ns_per_s / elapsed,
         checksum,
     });
+    if (comptime weights.HEAD == .multi) try report_multi_stages(samples, out);
     return 0;
 }
 

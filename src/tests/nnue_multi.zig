@@ -67,12 +67,136 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
     try expect(distinct.count() > 1000);
 }
 
-test "multi head: the SIMD comparison covers an L1 intrinsic path" {
-    // Skipped, so that the summary shows it, when this build only has the
-    // portable L1: Debug builds, wasm, and x86 without SSSE3. The comparison
-    // above then says nothing about pmaddubsw or sdot; run it again with
-    // -Doptimize=ReleaseSafe.
-    if (head_multi.L1_PATH == .portable) return error.SkipZigTest;
+test "multi head: the SIMD comparisons cover the intrinsic paths" {
+    // Skipped, so that the summary shows it, when this build has a portable
+    // pairwise product or L1: Debug builds, wasm, and x86 without SSSE3. The
+    // comparisons then say nothing about the instructions a release binary
+    // runs; run them again with -Doptimize=ReleaseSafe.
+    if (head_multi.L1_PATH == .portable or head_multi.PAIRWISE_PATH == .portable) return error.SkipZigTest;
+}
+
+fn expect_pairwise(acc: *const Accumulators) !void {
+    var activations: head_multi.Activations align(64) = undefined;
+    head_multi.activate(&acc.own, &acc.opp, &activations);
+    for ([_]*const arch.Accumulator{ &acc.own, &acc.opp }, 0..) |side_acc, side| {
+        for (0..head_multi.PAIRS) |i| {
+            try expectEqual(head_multi.pairwise(side_acc[i], side_acc[i + head_multi.PAIRS]), activations[side * head_multi.PAIRS + i]);
+        }
+    }
+}
+
+test "multi head: the SIMD pairwise products equal the scalar ones" {
+    // Every pair of values around the clamp, where the rounding and the
+    // saturation of each path differ, and the extremes of an i16.
+    const edges = [_]i16{ std.math.minInt(i16), -256, -255, 256, 257, 511, 512, std.math.maxInt(i16) };
+    const FIRST = -3;
+    const SPAN = 262;
+    var values: [SPAN + edges.len]i16 = undefined;
+    for (values[0..SPAN], 0..) |*value, i| value.* = @intCast(FIRST + @as(i32, @intCast(i)));
+    @memcpy(values[SPAN..], &edges);
+
+    // Each accumulator holds PAIRS pairs: lane i gets (values[x], values[y])
+    // for the next pair (x, y) of the product set, in both perspectives.
+    var acc: Accumulators = undefined;
+    var pair: usize = 0;
+    while (pair < values.len * values.len) : (pair += head_multi.PAIRS) {
+        for (0..head_multi.PAIRS) |i| {
+            const current = (pair + i) % (values.len * values.len);
+            acc.own[i] = values[current / values.len];
+            acc.own[i + head_multi.PAIRS] = values[current % values.len];
+            acc.opp[i] = values[current % values.len];
+            acc.opp[i + head_multi.PAIRS] = values[current / values.len];
+        }
+        try expect_pairwise(&acc);
+    }
+
+    var prng = std.Random.DefaultPrng.init(0x5eed_0006);
+    for (0..50) |round| try expect_pairwise(&random_accumulators(prng.random(), round));
+}
+
+/// Activations with exactly the blocks of `blocks` non-zero.
+fn activations_with_blocks(random: std.Random, blocks: []const usize, value: ?u8) head_multi.Activations {
+    var activations: head_multi.Activations = @splat(0);
+    for (blocks) |block| {
+        const inputs = activations[block * 4 ..][0..4];
+        for (inputs) |*input| input.* = value orelse random.uintAtMost(u8, 127);
+        // At least one input of the block is not zero, at any of the four places.
+        if (value == null) inputs[random.uintLessThan(usize, 4)] |= 1;
+    }
+    return activations;
+}
+
+fn expect_l1(head: *const head_multi.Weights, activations: *align(64) const head_multi.Activations, blocks: []const usize, bucket: usize) !void {
+    var indices: head_multi.BlockIndices = undefined;
+    try expectEqual(blocks.len, head_multi.nonzero_blocks(activations, &indices));
+    for (blocks, indices[0..blocks.len]) |block, index| try expectEqual(block, @as(usize, index));
+
+    var sums = head.l1_bias[bucket];
+    for (activations, 0..) |input, i| {
+        for (&sums, &head.l1_weights[bucket][i / 4]) |*sum, *block_weights| sum.* += @as(i32, input) * block_weights[i % 4];
+    }
+    try expectEqual(sums, @as([head_multi.L1_SIZE]i32, head_multi.l1_sums(head, activations, bucket)));
+}
+
+test "multi head: the sparse L1 equals the plain sum for every number of non-zero blocks" {
+    var prng = std.Random.DefaultPrng.init(0x5eed_0007);
+    const random = prng.random();
+    const head = try std.testing.allocator.create(head_multi.Weights);
+    defer std.testing.allocator.destroy(head);
+
+    var order: [head_multi.L1_BLOCKS]usize = undefined;
+    for (&order, 0..) |*block, i| block.* = i;
+
+    for (0..3) |net| {
+        switch (net) {
+            // The whole i8 range, then the two weights that bring a
+            // saturating instruction closest to its limit.
+            0 => head_multi.fill_random(head, random, .{}),
+            1 => @memset(std.mem.asBytes(&head.l1_weights), @bitCast(@as(i8, -128))),
+            else => @memset(std.mem.asBytes(&head.l1_weights), 127),
+        }
+        // Every count from none to all, so every remainder of the vector
+        // width and of the unrolled loop; the blocks are a random subset.
+        for (0..head_multi.L1_BLOCKS + 1) |count| {
+            random.shuffle(usize, &order);
+            const blocks = order[0..count];
+            std.mem.sort(usize, blocks, {}, std.sort.asc(usize));
+            const value: ?u8 = if (net == 0) null else 127;
+            const activations: head_multi.Activations align(64) = activations_with_blocks(random, blocks, value);
+            try expect_l1(head, &activations, blocks, count % arch.OUTPUT_SIZE);
+        }
+    }
+}
+
+test "multi head: the non-zero block search finds a block by any single input" {
+    const head = try std.testing.allocator.create(head_multi.Weights);
+    defer std.testing.allocator.destroy(head);
+    var prng = std.Random.DefaultPrng.init(0x5eed_0008);
+    head_multi.fill_random(head, prng.random(), .{});
+
+    for (0..head_multi.L1_INPUTS) |input| {
+        var activations: head_multi.Activations align(64) = @splat(0);
+        activations[input] = if (input % 2 == 0) 1 else 127;
+        try expect_l1(head, &activations, &.{input / 4}, input % arch.OUTPUT_SIZE);
+    }
+}
+
+test "multi head: accumulators of all zeros and of all ones" {
+    var prng = std.Random.DefaultPrng.init(0x5eed_0009);
+    const head = try std.testing.allocator.create(head_multi.Weights);
+    defer std.testing.allocator.destroy(head);
+    head_multi.fill_random(head, prng.random(), .{});
+
+    var acc: Accumulators = undefined;
+    for ([_][2]i16{ .{ 0, 0 }, .{ 255, 255 }, .{ 0, 255 }, .{ -1, 1000 }, .{ 1000, 1000 } }) |fill| {
+        @memset(&acc.own, fill[0]);
+        @memset(&acc.opp, fill[1]);
+        try expect_pairwise(&acc);
+        for (0..arch.OUTPUT_SIZE) |bucket| {
+            const scalar = head_multi.evaluate_scalar(head, 0, &acc.own, &acc.opp, bucket);
+            try expectEqual(scalar, head_multi.evaluate_simd(head, 0, &acc.own, &acc.opp, bucket));
+        }
+    }
 }
 
 test "multi head: saturated weights cannot overflow" {
@@ -224,7 +348,7 @@ test "multi head: small L1 weights are stored with a shift and stay close to the
 fn random_network(seed: u64, range: head_multi.RandomRange) !*parity.Net {
     const net = try std.testing.allocator.create(parity.Net);
     var prng = std.Random.DefaultPrng.init(seed);
-    parity.fill_random(net, prng.random(), range);
+    parity.fill_random(net, prng.random(), range, .dense);
     return net;
 }
 
