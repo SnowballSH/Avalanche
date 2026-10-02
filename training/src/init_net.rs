@@ -53,10 +53,10 @@ const SECTIONS: [Section; 4] = [
     },
 ];
 
-/// The float whose `round(weight * quantum)`, the save format's quantisation, is `stored` again: the
-/// f32 nearest `stored / quantum` is off by a relative 2^-24, far less than half a quantum for any i16.
+/// A float whose `round(weight * quantum)`, the save format's quantisation, is `stored` again: an f32
+/// quotient is off by a relative 2^-24, far less than half a quantum for any i16.
 fn dequantise(stored: i16, quantum: i16) -> f32 {
-    (f64::from(stored) / f64::from(quantum)) as f32
+    f32::from(stored) / f32::from(quantum)
 }
 
 /// Inverse of bullet's `SavedFormat::transpose`.

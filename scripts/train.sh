@@ -35,7 +35,7 @@
 #     equal share from every held-out file, evenly spaced over its filtered positions and interleaved
 #     across files; fewer than that many in total is a startup error).
 #   TRAIN_PARITY_FENS (unset or empty = train. A file of FENs: instead of training, write the evaluation of each
-#     by the net of TRAIN_RESUME_FROM (required), as "<fen> | <centipawns>", to TRAIN_PARITY_OUT (parity.txt), for
+#     by the net of TRAIN_RESUME_FROM or TRAIN_INIT_NET (one is required), as "<fen> | <centipawns>", to TRAIN_PARITY_OUT (parity.txt), for
 #     `Avalanche nnue-parity`; see docs/NNUE.md).
 #   e.g. TRAIN_NET_ID=mynet TRAIN_SUPERBATCHES=40 TRAIN_WDL=0.25 ./scripts/train.sh
 #   (HIDDEN is runtime here; the Zig engine's weights.zig must match at build time.)

@@ -465,10 +465,11 @@ where
         .ok()
         .filter(|fens| !fens.is_empty());
     if let Some(fens) = parity_fens {
-        if std::env::var("TRAIN_RESUME_FROM").is_err() {
+        if std::env::var("TRAIN_RESUME_FROM").is_err() && cfg.init_net.is_none() {
             fail(
-                "TRAIN_PARITY_FENS needs TRAIN_RESUME_FROM=<checkpoint>: without it the positions \
-                 would be evaluated by a freshly initialised, random net",
+                "TRAIN_PARITY_FENS needs the net to evaluate, TRAIN_RESUME_FROM=<checkpoint> or \
+                 TRAIN_INIT_NET=<net file>: without one the positions would be evaluated by a \
+                 freshly initialised, random net",
             );
         }
         let out = env_string("TRAIN_PARITY_OUT", "parity.txt");

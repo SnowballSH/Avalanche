@@ -312,7 +312,25 @@ Saving without a training step writes the input file again, byte for byte: a flo
   given. The clip is ±1.98 for every weight, except ±0.99 for the feature weights when a factoriser
   is trained (so that bucketed weight plus factoriser stays within ±1.98). A net that was trained
   with a factoriser has merged feature weights up to ±1.98, so it needs `TRAIN_FACTORISER=0`:
-  `nets/nezha.nnue` has 16036 feature weights beyond ±0.99.
+  `nets/nezha.nnue` has 16036 feature weights beyond ±0.99. Refusing is a choice, not a limit: such
+  weights can be split exactly into a non-zero factoriser plus a remainder within the clip whenever
+  the buckets of one feature weight span at most 1.98, and that split is not implemented.
+
+**Checking the load on the GPU.** `TRAIN_PARITY_FENS` accepts `TRAIN_INIT_NET` in place of
+`TRAIN_RESUME_FROM`: the trainer loads the net, evaluates the positions with bullet's graph on the
+device, writes `TRAIN_PARITY_OUT` and exits. No training step runs and no training data is read,
+but the trainer still wants a data path that exists (`TRAIN_DATA_DIR` with at least one `.viribin`
+file, or any existing file as the argument).
+
+```
+cd training
+TRAIN_INIT_NET="$PWD/../nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_PARITY_FENS=fens.txt \
+    TRAIN_PARITY_OUT=parity.txt TRAIN_DATA_DIR=/path/to/viribin ./target/release/avalanche-trainer
+```
+
+`parity.txt` holds `<fen> | <centipawns>` for the side to move. `Avalanche nnue-parity` reads only
+multi-layer nets, so a single-layer net is compared through the engine built with it: the UCI
+`eval` command prints `NNUE evaluation <cp> (white side)` for the current position.
 
 **What stays the caller's job.** The learning rate is whatever the schedule says: the defaults,
 `TRAIN_LR_INITIAL=0.001` on a cosine to `TRAIN_LR_FINAL`, are for a net trained from scratch and
