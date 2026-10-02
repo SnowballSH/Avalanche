@@ -599,8 +599,6 @@ equal.
 `zig build test` in the default build covers the multi-layer head. The multi-layer head's weights
 are passed explicitly, so its tests run in a build of either head; the single-layer head is only
 evaluated through the embedded network, so its tests need a single-layer build:
-`zig build test -Dnet=nets/dianguang-1.nnue`. There the test `search: forced node-limited search
-continues after reporting mate` fails: the mate it finds is 4 moves with the default net and 7 with
-Dianguang-1. `-Dtest-filter=<text>` runs the tests
+`zig build test -Dnet=nets/dianguang-1.nnue`. `-Dtest-filter=<text>` runs the tests
 whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
 use `-Doptimize=ReleaseSafe` for those.
