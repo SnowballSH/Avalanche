@@ -278,6 +278,52 @@ its builder: sliced-affine pairwise, `concat`, `crelu`, the square as `x * x`, a
 `select(output_buckets)` for the three bucketed layers. The save format reorders `l1w` and `l2w`
 from bullet's column-major layout and scales `l1w` (`training/src/multilayer.rs`).
 
+### Fine-tuning from a shipped net
+
+`TRAIN_INIT_NET=<path to .nnue>` starts a single-layer run from the weights of a quantised net file
+instead of a random initialisation:
+
+```
+TRAIN_INIT_NET="$PWD/nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_LR_INITIAL=0.0001 TRAIN_WARMUP_SB=1 \
+    TRAIN_NET_ID=nezha-ft TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
+```
+
+**Why.** bullet's checkpoints hold float weights and the optimiser state, and `TRAIN_RESUME_FROM`
+needs one. A shipped net is only the quantised file, and after several generations of fine-tuning
+its float checkpoints may be gone. Starting a run on new data from the shipped net's weights tells
+"this data is worse" apart from "a net trained from scratch is behind a fine-tuned lineage".
+
+**What it does** (`training/src/init_net.rs`). The file is read as the single-layer layout above
+and each stored integer is divided by its scale: `l0w` and `l0b` by 255, `l1w` by 64 (and put back
+from the file's `[bucket][input]` order into bullet's column-major one), `l1b` by 255 * 64. The
+file's feature weights already contain the factoriser, so with `TRAIN_FACTORISER=1` the bucketed
+weights get the file's values and the factoriser starts at zero. The optimiser state is fresh.
+Saving without a training step writes the input file again, byte for byte: a float is
+`stored / scale` to within a relative 2^-24, and the save rounds `float * scale` back to `stored`.
+`cargo test` checks that on `nets/nezha.nnue`, with and without the factoriser.
+
+**What it refuses**, each with a message naming the reason:
+
+- `TRAIN_ARCH=multi`, and a file in the multi-layer format (magic `AVALNNUE`).
+- `TRAIN_RESUME_FROM`, or a `TRAIN_START_SB` other than 1: those continue a run, this starts one.
+- A file whose size is not exactly that of this run's input layout and `TRAIN_HIDDEN`.
+- A net with weights outside the range the optimiser clips to, when the clip would change their
+  stored value: the first step would move them, and the run would not start from the net it was
+  given. The clip is ±1.98 for every weight, except ±0.99 for the feature weights when a factoriser
+  is trained (so that bucketed weight plus factoriser stays within ±1.98). A net that was trained
+  with a factoriser has merged feature weights up to ±1.98, so it needs `TRAIN_FACTORISER=0`:
+  `nets/nezha.nnue` has 16036 feature weights beyond ±0.99.
+
+**What stays the caller's job.** The learning rate is whatever the schedule says: the defaults,
+`TRAIN_LR_INITIAL=0.001` on a cosine to `TRAIN_LR_FINAL`, are for a net trained from scratch and
+are high for a trained one, so lower `TRAIN_LR_INITIAL` (and choose `TRAIN_LR_SCHEDULE` and
+`TRAIN_SUPERBATCHES` for the length of the fine-tune). `TRAIN_WARMUP_SB` defaults to 0, so the first
+batch already runs at the full initial rate while Adam's moment estimates are still empty; set it
+for a ramp from near zero. `TRAIN_WDL` is not taken from the net either.
+
+The path is resolved from `training/`, where `scripts/train.sh` runs the trainer; pass an absolute
+one.
+
 ## Parity
 
 Three commands of the engine binary, available in every build:

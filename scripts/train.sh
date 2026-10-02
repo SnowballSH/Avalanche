@@ -24,6 +24,10 @@
 #   TRAIN_DATA_DIR (a directory of .viribin chunks, read with games interleaved across files),
 #   TRAIN_SHUFFLE_MB (128; shuffle buffer of the .viribin loader, 16384 positions per MB),
 #   TRAIN_START_SB (1; with TRAIN_RESUME_FROM, the superbatch to resume at, keeping the LR schedule),
+#   TRAIN_INIT_NET (unset or empty = random initialisation. A quantised single-layer .nnue, absolute path:
+#     the run starts from its weights, with a fresh optimiser state. TRAIN_ARCH=single only, and not with
+#     TRAIN_RESUME_FROM or TRAIN_START_SB. Lower TRAIN_LR_INITIAL for it; a net trained with a factoriser
+#     needs TRAIN_FACTORISER=0. See "Fine-tuning from a shipped net" in docs/NNUE.md),
 #   TRAIN_VALIDATION_DIR (unset or empty = off; a directory of held-out .viribin files, filtered like the
 #     training data; it must not be TRAIN_DATA_DIR. Prints "validation superbatch <n> loss <value>" after every superbatch, and once
 #     before training with n = TRAIN_START_SB - 1. Only a failure of that first pass stops the run),
