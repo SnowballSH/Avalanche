@@ -31,10 +31,15 @@
 
 - The history term that shortens or lengthens a reduction is, for quiet moves,
   the main history plus the one-ply and two-ply continuation histories of the
-  move, divided by `LMRHistoryDivisor`. Captures use the main history alone.
+  move, divided by `LMRHistoryDivisor`.
 - The three tables share one bonus and gravity rule, so their sum spans about
   three times the range of one; the divisor was widened from 5164 to 8192 with
   the change and has not been tuned since.
+- A reduced capture (one that is not a winning capture by the ordering score)
+  uses its capture history entry instead, divided by
+  `LMRCaptureHistoryDivisor`. That is one table with the gravity limit of the
+  quiet history, so the divisor is 5164, the value the quiet divisor had when
+  it divided a single table; it is untuned.
 
 ## Pruning eval
 

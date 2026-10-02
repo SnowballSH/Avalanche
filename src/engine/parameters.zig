@@ -102,6 +102,7 @@ pub const TunableParams = [_]Tunable{
     .{ .name = "LMRTTDepth", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRCheck", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRHistoryDivisor", .value = 8192, .min_value = 3072, .max_value = 16384, .c_end = 460, .worth_tuning = true },
+    .{ .name = "LMRCaptureHistoryDivisor", .value = 5164, .min_value = 2048, .max_value = 16384, .c_end = 400, .worth_tuning = true },
 
     // -- History updates --
     .{ .name = "HistoryBonusMultiplier", .value = 404, .min_value = 160, .max_value = 700, .c_end = 27, .worth_tuning = true },
@@ -219,6 +220,7 @@ pub var LMRNonPV: i32 = intDefault("LMRNonPV");
 pub var LMRTTDepth: i32 = intDefault("LMRTTDepth");
 pub var LMRCheck: i32 = intDefault("LMRCheck");
 pub var LMRHistoryDivisor: i32 = intDefault("LMRHistoryDivisor");
+pub var LMRCaptureHistoryDivisor: i32 = intDefault("LMRCaptureHistoryDivisor");
 
 // -- History updates --
 pub var HistoryBonusMultiplier: i32 = intDefault("HistoryBonusMultiplier");
