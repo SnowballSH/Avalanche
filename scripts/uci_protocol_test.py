@@ -164,7 +164,7 @@ def test_search_names_the_network(engine: Engine) -> None:
     output, _ = engine.search("position startpos", "go depth 2")
     announcements = [line for line in output if line.startswith("info string NNUE evaluation using ")]
     assert len(announcements) == 1, output
-    assert re.search(r"using \S+ \(768x\d+->\d+->\d+, \d+ MiB\)$", announcements[0]), announcements[0]
+    assert re.search(r"using \S+ \(768x\d+->\d+->(\d+|pairwise->\d+x2->\d+->1x\d+), \d+ MiB\)$", announcements[0]), announcements[0]
 
 
 def test_live_currmove_after_delay(engine: Engine) -> None:

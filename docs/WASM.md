@@ -112,7 +112,9 @@ All of these are comptime-resolved, so native builds compile to the same code as
 
 ## Wasm-specific performance work
 
-- `nnue.madd_i16` lowers to `i32x4.dot_i16x8_s` via the `llvm.wasm.dot` intrinsic (+36% nps).
+- The single-layer head's `madd_i16` lowers to `i32x4.dot_i16x8_s` via the `llvm.wasm.dot` intrinsic (+36% nps).
+- The multi-layer head, which the default net uses, has no wasm-specific path: it runs the `portable`
+  paths of [NNUE.md](NNUE.md).
 - Release builds are stripped: ~300 KB of code next to the 25 MB network. The network is referenced at
   runtime only through the in-place `embedded_model`; touching the `@embedFile` bytes at runtime would
   emit a second copy (a web test asserts the module stays under 1.1x the network size).

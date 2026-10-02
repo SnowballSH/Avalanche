@@ -5,12 +5,12 @@ time.
 
 | Head | Network | Selected by |
 |---|---|---|
-| single (default) | `(768x16hm -> 1024)x2 -> SCReLU -> 1x8` | `-Dhead=single`, `TRAIN_ARCH=single` |
-| multi | `(768x16hm -> 1024)x2 -> pairwise CReLU -> L1(1024 -> 16) -> [CReLU, CReLU²] -> L2(32 -> 32) CReLU -> L3(32 -> 1)`, L1 to L3 x8 | `-Dhead=multi`, `TRAIN_ARCH=multi` |
+| single | `(768x16hm -> 1024)x2 -> SCReLU -> 1x8` | `-Dhead=single`, `TRAIN_ARCH=single` |
+| multi (default build) | `(768x16hm -> 1024)x2 -> pairwise CReLU -> L1(1024 -> 16) -> [CReLU, CReLU²] -> L2(32 -> 32) CReLU -> L3(32 -> 1)`, L1 to L3 x8 | `-Dhead=multi`, `TRAIN_ARCH=multi` |
 
 `-Dhead` defaults to `auto`: the head of the `-Dnet` file, recognised by its header. So
 `zig build -Dnet=multi.nnue` and `make EVALFILE=multi.nnue` build a multi-layer engine with no other
-flag, and the default build (`nets/dianguang-1.nnue`) is single-layer. An explicit `-Dhead` that
+flag, and the default build (`nets/dianguang-2.nnue`) is multi-layer. An explicit `-Dhead` that
 contradicts the file is a compile error.
 
 `setoption name EvalFile` loads a network of the build's architecture. A file of the other
@@ -333,7 +333,7 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 | x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | yes, natively on an EPYC 9R14 |
 | x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | yes, on an EPYC 9R14 |
 | x86 at 256 bits with AVX-VNNI (`alderlake`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | **no** |
-| wasm simd128 | `portable` | `portable` | compiled only |
+| wasm simd128 | `portable` | `portable` | yes, by the `web/` tests (`bench` equal to native) |
 
 The EPYC 9R14 runs were at commit 37fa538, with random weights and with two trained multi-layer
 nets as `-Dnet`.
@@ -596,7 +596,11 @@ equal.
 
 ## Tests
 
-`zig build test` in the default build covers both heads: the multi-layer head's weights are passed
-explicitly, so its tests do not need a multi-layer build. `-Dtest-filter=<text>` runs the tests
+`zig build test` in the default build covers the multi-layer head. The multi-layer head's weights
+are passed explicitly, so its tests run in a build of either head; the single-layer head is only
+evaluated through the embedded network, so its tests need a single-layer build:
+`zig build test -Dnet=nets/dianguang-1.nnue`. There the test `search: forced node-limited search
+continues after reporting mate` fails: the mate it finds is 4 moves with the default net and 7 with
+Dianguang-1. `-Dtest-filter=<text>` runs the tests
 whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
 use `-Doptimize=ReleaseSafe` for those.
