@@ -99,6 +99,7 @@ pub const TunableParams = [_]Tunable{
     .{ .name = "LMRCutnode", .value = 2, .min_value = 0, .max_value = 3, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRImproving", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRNonPV", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
+    .{ .name = "LMRTTPV", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRTTDepth", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRCheck", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRHistoryDivisor", .value = 5164, .min_value = 3072, .max_value = 12288, .c_end = 460, .worth_tuning = true },
@@ -216,6 +217,7 @@ pub var LMRMinMoveNonPV: usize = intDefault("LMRMinMoveNonPV");
 pub var LMRCutnode: i32 = intDefault("LMRCutnode");
 pub var LMRImproving: i32 = intDefault("LMRImproving");
 pub var LMRNonPV: i32 = intDefault("LMRNonPV");
+pub var LMRTTPV: i32 = intDefault("LMRTTPV");
 pub var LMRTTDepth: i32 = intDefault("LMRTTDepth");
 pub var LMRCheck: i32 = intDefault("LMRCheck");
 pub var LMRHistoryDivisor: i32 = intDefault("LMRHistoryDivisor");
