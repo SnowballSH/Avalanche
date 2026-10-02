@@ -220,32 +220,137 @@ Why no i32 sum can overflow:
 
 `head_multi.evaluate_scalar` is the formula above, one loop per stage. `evaluate_simd` is what the
 engine calls; it must return the same number for every input, and the tests compare the two on
-random weights and accumulators.
+random weights and accumulators, stage by stage and end to end.
 
-| Stage | SIMD |
-|---|---|
-| pairwise | `@Vector` u16 multiply (255² + 256 fits), portable |
-| non-zero blocks | `@Vector(16, u32) != 0` to a bit mask, portable |
-| L1 | x86: `pmaddubsw` + `pmaddwd` (SSSE3, AVX2, AVX-512BW). AArch64: `sdot`. Otherwise, wasm included, and in Debug builds: widening `@Vector` multiply |
-| dual activation, L2, L3 | `@Vector` i32, portable |
+`evaluate_simd` is three functions: `activate` (step 1), `l1_sums` (step 2 before the shift) and
+`finish` (the rest). Vectors are as wide as `std.simd.suggestVectorLength(u8)` says for the target:
+512 bits with AVX-512 unless the CPU model prefers 256 (`x86_64_v4` and Intel's server models do),
+256 with AVX2, 128 otherwise. The paths are chosen at compile time from the target's features:
 
-Only L1 uses target intrinsics, and its three variants compute an exact i32 sum, so the result does
-not depend on the target. AVX-512 VNNI (`vpdpbusd`) would be one instruction instead of two; it is
-not used because no machine was available to test it.
+| Stage | Path | Target | Instructions |
+|---|---|---|---|
+| pairwise | `mulhrs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmulhrsw`, `packuswb` |
+| | `umull` | AArch64 | `sqxtun`, `umull` |
+| | `portable` | anything else, wasm, Debug | `@Vector` u16 multiply |
+| non-zero blocks | | x86, wasm, Debug | compare to a bit mask, table lookup |
+| | | AArch64 | `umaxp`, a multiplication for the mask, table lookup |
+| L1 | `dpbusd` | AVX-512 VNNI (512 bits); AVX-512 VNNI + VL or AVX-VNNI (256 bits) | `vpdpbusd` |
+| | `maddubs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmaddubsw`, `pmaddwd` |
+| | `sdot` | AArch64 with dotprod | `sdot` |
+| | `portable` | anything else, wasm, Debug | widening `@Vector` multiply |
+| dual activation, L2, L3 | | all | `@Vector` i32 |
+
+`Avalanche nnue-speed` prints the paths of the build it is. Every path computes exact integers, so
+the result does not depend on the target:
+
+- **Pairwise, `mulhrs`.** `pmulhrsw(x, y)` is `(x * y + 2^14) >> 15`. With `x = clamp(a, 0, 255) << 6`
+  that is `(a * b + 256) >> 9`, the formula, in one instruction and without leaving 16 bits. `b` is
+  only capped at 255: a negative `b` gives a result of at most 0, and `packuswb`, which narrows two
+  vectors of i16 to one of bytes with saturation to 0..255, makes it 0. `packuswb` works within
+  128-bit lanes, so a shuffle of 8-byte groups puts its result back in order.
+- **Pairwise, `umull`.** `sqxtun` narrows with saturation to 0..255, which is the clamp. `umull` is
+  the u8 x u8 -> u16 product `p`, and `(p + 256) >> 9 = ((p >> 8) + 1) >> 1`: the high bytes of two
+  vectors of products with one `uzp2`, then one rounding halving of 16 bytes.
+- **Non-zero blocks.** Eight blocks (32 activations) give an 8-bit mask. A table of 256 entries
+  holds, for each mask, the positions of its set bits packed in a u64, and their number. The search
+  adds the index of the first block of the group to all eight bytes, writes the u64 at the end of
+  the list and advances by the number: no branch depends on the activations. A block index fits a
+  byte because there are 256 blocks. AArch64 has no instruction that turns a comparison into a
+  mask: `umaxp` twice reduces 32 activations to the 8 block maxima in a u64, and a multiplication
+  gathers one bit of each byte.
+- **L1.** The weights of a block are 64 adjacent bytes, the 16 outputs' weights for its four
+  inputs, so a non-zero block is one broadcast of its four activations and 64 byte products.
+  `vpdpbusd` and `sdot` add the products into the i32 sums; they take several cycles, so the blocks
+  go round-robin into independent partial sums (8 vectors with `vpdpbusd`, 16 with `sdot`), added
+  at the end. `pmaddubsw` + `pmaddwd` cannot saturate with activations up to 127 (see "Integer
+  formula") and feed a plain addition, so one sum is enough there.
+
+### Performance
+
+`Avalanche nnue-speed` times the head on the accumulators of the 50 bench positions. Its first
+line is the whole evaluation, with the accumulators read from the second-level cache (50 positions
+of 4 KiB). The stage times that follow are taken four positions at a time, with the inputs in the
+first-level cache as they are in the search, so they add up to less than the first line.
+
+Apple M4, `--release=fast`, random networks from `nnue-random` with seed 1, best of five runs (all
+five within 6% of it). "Before" is the implementation this one replaced (commit 6137e9d). The search
+column is `go nodes 12000000` from the start position, three runs, same node counts before and
+after.
+
+| Network | Non-zero L1 blocks | Before | After | Search |
+|---|---|---|---|---|
+| `sparse` | 60.4 of 256 | 206.1 ns | 134.3 ns | 1.42-1.44M -> 1.96-1.98M nps |
+| default (dense) | 233.5 of 256 | 410.6 ns | 238.4 ns | 1.19-1.20M -> 1.77-1.81M nps |
+| `full` (dense) | 233.5 of 256 | 413.6 ns | 237.2 ns | |
+
+AMD EPYC 9R14 (Zen 4; 512-bit `mulhrs` and `dpbusd`), trained nets, single thread: `nnue-speed`
+226.5 -> 146.8 ns and `bench` 1.22M -> 1.53M nps (+26%) for the net trained with the sparsity
+penalty, 310.6 -> 171.5 ns and 1.10M -> 1.46M nps (+32%) for the one without; checksums and node
+counts unchanged. The single-layer net of that comparison ran at 1.79M nps.
+
+Stages after the change, inputs in the first-level cache: pairwise 34 ns, non-zero search 17 ns,
+L1 products 33 ns (sparse) or 124 ns (dense), L2 and L3 29 ns. What changed, with the stages of the
+dense network timed the way the first line is, before and after:
+
+- **Non-zero search, 143 ns to 22 ns.** It was a loop over the set bits of a mask, one iteration
+  per non-zero block, whose exit depended on the activations. `nnue-speed` repeats the same 50
+  positions, which a branch predictor learns and a search does not offer, so the search gained
+  more than the benchmark did.
+- **L1 products, 175 ns to 137 ns.** There was one sum per output vector, so every block waited
+  for the `sdot` of the one before it. What is left is the throughput of `sdot` on the M4: four
+  per block, two per cycle. x86 gained `vpdpbusd`, one instruction for `pmaddubsw` + `pmaddwd`.
+- **Pairwise, 64 ns to 48 ns.** It clamped both factors, multiplied, added and shifted in 16 bits.
+- L2 and L3 are unchanged, 26 to 29 ns.
+
+Tried on the M4 and left out: a loop over all blocks without the index list for dense inputs
+(6 ns of 240 on the dense networks, nothing below about 200 non-zero blocks), and partial sums in
+L2 (no gain: 256 i32 multiply-accumulates at two per cycle are the limit). Not tried, for a
+machine that can run them: `vpcompressb` instead of the table for the index list, and `pmaddwd`
+for L2 on Intel, where `pmulld` is two micro-operations.
+
+### What has been executed
 
 The intrinsics are compiled only outside Debug (LLVM leaves them unresolved at `-ODebug`). So a
-plain `zig build test` compares the scalar path with the *portable* L1 only, and reports the test
-`multi head: the SIMD comparison covers an L1 intrinsic path` as skipped. To test the path a release
+plain `zig build test` compares the scalar path with the *portable* paths only, and reports the test
+`multi head: the SIMD comparisons cover the intrinsic paths` as skipped. To test the paths a release
 binary runs:
 
 ```
 zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi "
 ```
 
-What has run this way: `sdot` on Apple Silicon, `pmaddubsw` with AVX2 and with SSSE3 under
-Rosetta, and the AVX-512BW path on an AMD EPYC 9R45 (Zen 5) at commit `9aeed3b`. Rerun the
-command on a machine of each kind after changing the L1 code: CI machines do not reliably have
-AVX-512, and OpenBench workers built with `-Dcpu=native` on such a machine use that path.
+On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_64-macos` and
+`-Dcpu=haswell` (AVX2), `-Dcpu=nehalem` (SSSE3) or `-Dcpu=x86_64` (portable).
+
+| Build | Pairwise | L1 | Executed |
+|---|---|---|---|
+| Apple Silicon | `umull` | `sdot` | yes, natively |
+| AArch64 without dotprod (`-Dcpu=apple_m4-dotprod`) | `umull` | `portable` | yes, natively |
+| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | yes, under Rosetta |
+| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | yes, under Rosetta |
+| x86 SSE2 (`x86_64`); Debug | `portable` | `portable` | yes |
+| x86 AVX-512BW without VNNI (`-Dcpu=znver5-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | yes, on an EPYC 9R14 (Zen 4) |
+| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | yes, natively on an EPYC 9R14 |
+| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | yes, on an EPYC 9R14 |
+| x86 at 256 bits with AVX-VNNI (`alderlake`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | **no** |
+| wasm simd128 | `portable` | `portable` | compiled only |
+
+The EPYC 9R14 runs were at commit 37fa538, with random weights and with two trained multi-layer
+nets as `-Dnet`.
+
+**The VEX-encoded `vpdpbusd` of AVX-VNNI has not been executed.** It is what a 256-bit build
+without AVX-512 uses (Alder Lake and later Intel desktop CPUs with `-Dcpu=native`). Zen 4 has no
+AVX-VNNI, so the `alderlake` build stops there on an illegal instruction, and Rosetta has none
+either. It differs from the tested EVEX path only in the encoding of that one instruction, and the
+generated code was read. To close it, on an Alder Lake or Zen 5 machine:
+
+```
+zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi " -Dcpu=alderlake
+```
+
+The `nnue-speed` checksum of a given network must be the same on every machine and path.
+Rerun the command on a machine of each kind after changing the head's code: CI machines do not
+reliably have AVX-512, and OpenBench workers built with `-Dcpu=native` use the path of their CPU.
 
 ## Training
 
@@ -348,7 +453,7 @@ Three commands of the engine binary, available in every build:
 
 ```
 Avalanche nnue-parity <net> [positions|bench] [verbose]
-Avalanche nnue-random <out> [seed] [full]
+Avalanche nnue-random <out> [seed] [full] [sparse]
 Avalanche nnue-speed
 ```
 
@@ -368,8 +473,13 @@ the report adds the difference between the integer evaluation and the given numb
 
 `nnue-random` writes a random network: by default with head weights of the magnitude of a trained
 network (`|l1w| <= 0.19`, stored as up to 96 at `e = 3`; `|l2w|, |l3w| <= 400`), with `full` over
-the whole valid range at `e = 0`.
-`nnue-speed` times the build's head on the bench positions.
+the whole valid range at `e = 0`. Both are dense: about nine L1 blocks in ten are non-zero on the
+bench positions, because the feature-transformer biases are drawn from 0..128. `sparse` draws them
+from -144..-16, which leaves about one block in four non-zero, as a network trained with
+`TRAIN_L1_SPARSITY` aims for; it combines with `full`.
+`nnue-speed` times the build's head on the bench positions; in a multi-layer build it also prints
+the SIMD paths, the mean number of non-zero L1 blocks and the time of each stage (see
+"Performance").
 
 ### Tolerances
 
@@ -393,7 +503,9 @@ the whole valid range at `e = 0`.
   engine's pairwise products. Measured 8.1 cp max, 1.2 cp mean; without the shift, 81 and 17.
 
 The unit tests (`src/tests/nnue_multi.zig`) assert the first two rows on random accumulators, and
-the scalar-against-SIMD equality on both weight ranges at every L1 shift.
+the scalar-against-SIMD equality on both weight ranges at every L1 shift. Each SIMD stage also has
+its own comparison: the pairwise products for every pair of values around the clamp, the non-zero
+search and the L1 sums for every number of non-zero blocks from 0 to 256.
 
 ### Trainer against engine, on a GPU machine
 
@@ -479,12 +591,12 @@ zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="options: EvalF
 ```
 
 which repeat the network tests of this document with the trained net embedded and the intrinsic
-L1 path compiled in, and `Avalanche bench` on an x86 and an ARM machine: the node counts must be
+paths compiled in, and `Avalanche bench` on an x86 and an ARM machine: the node counts must be
 equal.
 
 ## Tests
 
 `zig build test` in the default build covers both heads: the multi-layer head's weights are passed
 explicitly, so its tests do not need a multi-layer build. `-Dtest-filter=<text>` runs the tests
-whose name contains the text. In Debug the L1 intrinsics are not compiled, see "Inference paths";
+whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
 use `-Doptimize=ReleaseSafe` for those.
