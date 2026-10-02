@@ -101,7 +101,7 @@ pub const TunableParams = [_]Tunable{
     .{ .name = "LMRNonPV", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRTTDepth", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRCheck", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
-    .{ .name = "LMRHistoryDivisor", .value = 5164, .min_value = 3072, .max_value = 12288, .c_end = 460, .worth_tuning = true },
+    .{ .name = "LMRHistoryDivisor", .value = 8192, .min_value = 3072, .max_value = 16384, .c_end = 460, .worth_tuning = true },
 
     // -- History updates --
     .{ .name = "HistoryBonusMultiplier", .value = 404, .min_value = 160, .max_value = 700, .c_end = 27, .worth_tuning = true },
