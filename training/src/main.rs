@@ -1,4 +1,5 @@
 mod heldout;
+mod init_net;
 mod multilayer;
 mod schedule;
 mod validation;
@@ -15,7 +16,7 @@ use bullet::{
         outputs::MaterialCount,
     },
     nn::{
-        ExecutionContext, InitSettings, Shape,
+        ExecutionContext, InitSettings, ModelBuilder, ModelNode, Shape,
         optimiser::{AdamW, AdamWParams},
     },
     trainer::{
@@ -190,6 +191,8 @@ struct TrainConfig {
     shuffle_mb: usize,
     start_superbatch: usize,
     validation: Option<ValidationConfig>,
+    /// `TRAIN_INIT_NET`: a quantised single-layer net to start from instead of a random initialisation.
+    init_net: Option<String>,
 }
 
 /// Every `*.viribin` file in the directory named by the env variable `key`, sorted, so a directory of
@@ -250,6 +253,35 @@ fn l1_sparsity_from_env(arch: Arch) -> Result<f32, String> {
         ));
     }
     Ok(coefficient)
+}
+
+/// Empty is unset, as for a variable a wrapper script exports unconditionally.
+fn init_net_from_env(arch: Arch, start_superbatch: usize) -> Result<Option<String>, String> {
+    let Some(path) = std::env::var("TRAIN_INIT_NET")
+        .ok()
+        .filter(|path| !path.is_empty())
+    else {
+        return Ok(None);
+    };
+    if arch != Arch::Single {
+        return Err(format!(
+            "TRAIN_INIT_NET needs TRAIN_ARCH=single: only a single-layer net can be read back into \
+             a graph, and this run is TRAIN_ARCH={}",
+            arch.name()
+        ));
+    }
+    if std::env::var("TRAIN_RESUME_FROM").is_ok() {
+        return Err(String::from(
+            "TRAIN_INIT_NET and TRAIN_RESUME_FROM both set the starting weights; use one of them",
+        ));
+    }
+    if start_superbatch != 1 {
+        return Err(format!(
+            "TRAIN_INIT_NET starts a new run, but TRAIN_START_SB={start_superbatch} continues one; \
+             leave TRAIN_START_SB unset"
+        ));
+    }
+    Ok(Some(path))
 }
 
 fn canonical_dir(key: &str, dir: &str) -> Result<std::path::PathBuf, String> {
@@ -329,6 +361,7 @@ fn main() {
     let threads = env_usize("TRAIN_THREADS", num_cpus());
     let use_factoriser = env_bool("TRAIN_FACTORISER", true);
     let l1_sparsity = l1_sparsity_from_env(arch).unwrap_or_else(|err| fail(&err));
+    let init_net = init_net_from_env(arch, start_superbatch).unwrap_or_else(|err| fail(&err));
 
     let cfg = TrainConfig {
         hidden_size,
@@ -350,6 +383,7 @@ fn main() {
         shuffle_mb,
         start_superbatch,
         validation,
+        init_net,
     };
 
     match (input_mode.as_str(), arch) {
@@ -397,6 +431,9 @@ fn print_banner(cfg: &TrainConfig, input: &str, head: &str) {
     if cfg.warmup_superbatches > 0 {
         println!("LR warmup: linear over {} sb", cfg.warmup_superbatches);
     }
+    if let Some(init_net) = &cfg.init_net {
+        println!("Initial weights: {init_net}");
+    }
     if let Some(validation) = &cfg.validation {
         println!(
             "Validation: {} batches from {:?}",
@@ -428,10 +465,11 @@ where
         .ok()
         .filter(|fens| !fens.is_empty());
     if let Some(fens) = parity_fens {
-        if std::env::var("TRAIN_RESUME_FROM").is_err() {
+        if std::env::var("TRAIN_RESUME_FROM").is_err() && cfg.init_net.is_none() {
             fail(
-                "TRAIN_PARITY_FENS needs TRAIN_RESUME_FROM=<checkpoint>: without it the positions \
-                 would be evaluated by a freshly initialised, random net",
+                "TRAIN_PARITY_FENS needs the net to evaluate, TRAIN_RESUME_FROM=<checkpoint> or \
+                 TRAIN_INIT_NET=<net file>: without one the positions would be evaluated by a \
+                 freshly initialised, random net",
             );
         }
         let out = env_string("TRAIN_PARITY_OUT", "parity.txt");
@@ -581,14 +619,18 @@ fn feature_transformer_format(use_factoriser: bool, input_buckets: usize) -> [Sa
     ]
 }
 
+/// Clip of `l0w` and of `l0f` when a factoriser is trained, so that their sum stays in bullet's default
+/// range.
+const FACTORISED_CLIP: f32 = 0.99;
+
 /// Match bullet examples/progression/3_input_buckets.rs: the saved weight is `l0w + l0f`.
 fn clip_factorised_feature_transformer<Opt>(optimiser: &mut Optimiser<ExecutionContext, Opt>)
 where
     Opt: OptimiserState<ExecutionContext, Params = AdamWParams>,
 {
     let stricter_clipping = AdamWParams {
-        max_weight: 0.99,
-        min_weight: -0.99,
+        max_weight: FACTORISED_CLIP,
+        min_weight: -FACTORISED_CLIP,
         ..Default::default()
     };
     optimiser.set_params_for_weight("l0w", stricter_clipping);
@@ -630,6 +672,21 @@ where
     }
 }
 
+/// `feature_weight_clip` is the clip the optimiser applies to `l0w`.
+fn init_from_net<Opt>(
+    optimiser: &mut Optimiser<ExecutionContext, Opt>,
+    cfg: &TrainConfig,
+    feature_weight_clip: f32,
+) where
+    Opt: OptimiserState<ExecutionContext>,
+{
+    if let Some(path) = &cfg.init_net {
+        init_net::init_optimiser(optimiser, path, feature_weight_clip)
+            .unwrap_or_else(|err| fail(&format!("TRAIN_INIT_NET={path}: {err}")));
+        println!("Initialised the weights from net: {path}");
+    }
+}
+
 fn run_chess768(cfg: TrainConfig) {
     print_banner(&cfg, "768", SINGLE_HEAD);
     let hidden_size = cfg.hidden_size;
@@ -664,6 +721,11 @@ fn run_chess768(cfg: TrainConfig) {
         });
 
     resume_from_env(&mut trainer, Arch::Single);
+    init_from_net(
+        &mut trainer.optimiser,
+        &cfg,
+        AdamWParams::default().max_weight,
+    );
     run_trainer(Session {
         trainer: &mut trainer,
         inputs: Chess768,
@@ -672,10 +734,46 @@ fn run_chess768(cfg: TrainConfig) {
     });
 }
 
-fn run_buckets16(cfg: TrainConfig) {
-    const NUM_INPUT_BUCKETS: usize = get_num_buckets(&BUCKET_LAYOUT_16);
-    assert_eq!(NUM_INPUT_BUCKETS, 16);
+const NUM_INPUT_BUCKETS: usize = get_num_buckets(&BUCKET_LAYOUT_16);
+const _: () = assert!(NUM_INPUT_BUCKETS == 16);
 
+fn buckets16_save_format(use_factoriser: bool) -> Vec<SavedFormat> {
+    let mut save_format = feature_transformer_format(use_factoriser, NUM_INPUT_BUCKETS).to_vec();
+    save_format.extend([
+        SavedFormat::id("l1w")
+            .round()
+            .quantise::<i16>(QB)
+            .transpose(),
+        SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
+    ]);
+    save_format
+}
+
+/// `(768x16hm -> hidden_size)x2 -> SCReLU -> 1x8`, the graph of `Arch::Single` on bucketed inputs.
+fn bucketed_single_head<'a>(
+    builder: &'a ModelBuilder,
+    stm_inputs: ModelNode<'a>,
+    ntm_inputs: ModelNode<'a>,
+    output_buckets: ModelNode<'a>,
+    hidden_size: usize,
+    use_factoriser: bool,
+) -> ModelNode<'a> {
+    let mut l0 = builder.new_affine("l0", 768 * NUM_INPUT_BUCKETS, hidden_size);
+    if use_factoriser {
+        let l0f = builder.new_weights("l0f", Shape::new(hidden_size, 768), InitSettings::Zeroed);
+        let expanded_factoriser = l0f.repeat(NUM_INPUT_BUCKETS);
+        l0.weights = l0.weights + expanded_factoriser;
+    }
+
+    let l1 = builder.new_affine("l1", 2 * hidden_size, NUM_OUTPUT_BUCKETS);
+
+    let stm_hidden = l0.forward(stm_inputs).screlu();
+    let ntm_hidden = l0.forward(ntm_inputs).screlu();
+    let hidden_layer = stm_hidden.concat(ntm_hidden);
+    l1.forward(hidden_layer).select(output_buckets)
+}
+
+fn run_buckets16(cfg: TrainConfig) {
     let arch = if cfg.use_factoriser {
         format!("768x{NUM_INPUT_BUCKETS}hm+factoriser")
     } else {
@@ -688,15 +786,7 @@ fn run_buckets16(cfg: TrainConfig) {
 
     let hidden_size = cfg.hidden_size;
     let use_factoriser = cfg.use_factoriser;
-
-    let mut save_format = feature_transformer_format(use_factoriser, NUM_INPUT_BUCKETS).to_vec();
-    save_format.extend([
-        SavedFormat::id("l1w")
-            .round()
-            .quantise::<i16>(QB)
-            .transpose(),
-        SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
-    ]);
+    let save_format = buckets16_save_format(use_factoriser);
 
     let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
     // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
@@ -709,27 +799,25 @@ fn run_buckets16(cfg: TrainConfig) {
         .save_format(&save_format)
         .loss_fn(|output, target| output.sigmoid().squared_error(target))
         .build(move |builder, stm_inputs, ntm_inputs, output_buckets| {
-            let mut l0 = builder.new_affine("l0", 768 * NUM_INPUT_BUCKETS, hidden_size);
-            if use_factoriser {
-                let l0f =
-                    builder.new_weights("l0f", Shape::new(hidden_size, 768), InitSettings::Zeroed);
-                let expanded_factoriser = l0f.repeat(NUM_INPUT_BUCKETS);
-                l0.weights = l0.weights + expanded_factoriser;
-            }
-
-            let l1 = builder.new_affine("l1", 2 * hidden_size, NUM_OUTPUT_BUCKETS);
-
-            let stm_hidden = l0.forward(stm_inputs).screlu();
-            let ntm_hidden = l0.forward(ntm_inputs).screlu();
-            let hidden_layer = stm_hidden.concat(ntm_hidden);
-            l1.forward(hidden_layer).select(output_buckets)
+            bucketed_single_head(
+                builder,
+                stm_inputs,
+                ntm_inputs,
+                output_buckets,
+                hidden_size,
+                use_factoriser,
+            )
         });
 
-    if use_factoriser {
+    let feature_weight_clip = if use_factoriser {
         clip_factorised_feature_transformer(&mut trainer.optimiser);
-    }
+        FACTORISED_CLIP
+    } else {
+        AdamWParams::default().max_weight
+    };
 
     resume_from_env(&mut trainer, Arch::Single);
+    init_from_net(&mut trainer.optimiser, &cfg, feature_weight_clip);
     run_trainer(Session {
         trainer: &mut trainer,
         inputs,
