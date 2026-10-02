@@ -35,3 +35,14 @@
 - The three tables share one bonus and gravity rule, so their sum spans about
   three times the range of one; the divisor was widened from 5164 to 8192 with
   the change and has not been tuned since.
+
+## Pruning eval
+
+- Reverse futility pruning, null move pruning (its condition and its reduction
+  term) and razoring compare against the TT score instead of the corrected
+  static eval when the entry bounds the score on the useful side: an exact
+  entry, a lower bound above the eval, or an upper bound below it. Mate and
+  tablebase scores are never used this way.
+- The improving flag, the eval history, move-loop futility pruning and the
+  ProbCut threshold keep the static eval, so they stay comparable from ply to
+  ply.
