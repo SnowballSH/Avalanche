@@ -1645,7 +1645,7 @@ pub const Searcher = struct {
                 }
             }
 
-            const new_depth = @as(usize, @intCast(@as(i32, @intCast(depth)) + extension - 1));
+            var new_depth = @as(usize, @intCast(@as(i32, @intCast(depth)) + extension - 1));
 
             const nodes_before = self.nodes;
 
@@ -1703,6 +1703,12 @@ pub const Searcher = struct {
                     score = -self.negamax(pos, opp_color, mode, rd, -alpha - 1, -alpha, false, NodeType.NonPV, true);
 
                     do_full_search = score > alpha and rd < new_depth;
+                    if (do_full_search) {
+                        const do_deeper = score > best_score + parameters.LMRDeeperBase + parameters.LMRDeeperDepthMultiplier * @as(i32, @intCast(new_depth));
+                        const do_shallower = score < best_score + parameters.LMRShallowerMargin;
+                        new_depth = new_depth + @intFromBool(do_deeper) - @intFromBool(do_shallower);
+                        do_full_search = rd < new_depth;
+                    }
                 }
 
                 if (do_full_search) {

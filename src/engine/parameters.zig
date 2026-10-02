@@ -101,6 +101,9 @@ pub const TunableParams = [_]Tunable{
     .{ .name = "LMRNonPV", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRTTDepth", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
     .{ .name = "LMRCheck", .value = 1, .min_value = 0, .max_value = 2, .c_end = 0.5, .worth_tuning = false },
+    .{ .name = "LMRDeeperBase", .value = 40, .min_value = 0, .max_value = 120, .c_end = 6, .worth_tuning = true },
+    .{ .name = "LMRDeeperDepthMultiplier", .value = 2, .min_value = 0, .max_value = 6, .c_end = 0.5, .worth_tuning = false },
+    .{ .name = "LMRShallowerMargin", .value = 8, .min_value = 0, .max_value = 40, .c_end = 2, .worth_tuning = true },
     .{ .name = "LMRHistoryDivisor", .value = 5164, .min_value = 3072, .max_value = 12288, .c_end = 460, .worth_tuning = true },
 
     // -- History updates --
@@ -218,6 +221,9 @@ pub var LMRImproving: i32 = intDefault("LMRImproving");
 pub var LMRNonPV: i32 = intDefault("LMRNonPV");
 pub var LMRTTDepth: i32 = intDefault("LMRTTDepth");
 pub var LMRCheck: i32 = intDefault("LMRCheck");
+pub var LMRDeeperBase: i32 = intDefault("LMRDeeperBase");
+pub var LMRDeeperDepthMultiplier: i32 = intDefault("LMRDeeperDepthMultiplier");
+pub var LMRShallowerMargin: i32 = intDefault("LMRShallowerMargin");
 pub var LMRHistoryDivisor: i32 = intDefault("LMRHistoryDivisor");
 
 // -- History updates --
