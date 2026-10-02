@@ -1174,7 +1174,7 @@ test "search: forced node-limited search continues after reporting mate" {
 
     try expect(s.total_nodes() >= s.max_nodes.?);
     try expect(score > 0);
-    try expect(mate_moves == 9);
+    try expect(mate_moves == 7);
 }
 
 test "search: stalemate scores as draw" {

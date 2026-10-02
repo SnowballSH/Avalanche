@@ -10,7 +10,7 @@ time.
 
 `-Dhead` defaults to `auto`: the head of the `-Dnet` file, recognised by its header. So
 `zig build -Dnet=multi.nnue` and `make EVALFILE=multi.nnue` build a multi-layer engine with no other
-flag, and the default build (`nets/nezha.nnue`) is single-layer. An explicit `-Dhead` that
+flag, and the default build (`nets/dianguang-1.nnue`) is single-layer. An explicit `-Dhead` that
 contradicts the file is a compile error.
 
 `setoption name EvalFile` loads a network of the build's architecture. A file of the other
