@@ -371,7 +371,7 @@ pub const Searcher = struct {
         return std.math.clamp(raw_eval + correction, -SCORE_PLY_ADJ + 1, SCORE_PLY_ADJ - 1);
     }
 
-    inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
+    inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound, tt_pv: bool) void {
         if (self.tt_store_is_ambiguous(score, flag)) return;
 
         var stored = score;
@@ -386,7 +386,7 @@ pub const Searcher = struct {
             .bestmove = move,
             .flag = flag,
             .depth = 0,
-            .was_pv = 0,
+            .was_pv = @intFromBool(tt_pv),
             .key = @as(u32, @truncate(pos.hash)),
             .age = self.ttable.age,
         });
@@ -1246,6 +1246,7 @@ pub const Searcher = struct {
         var hashmove = types.Move.empty();
         var tthit = false;
         var tt_eval: i32 = 0;
+        var tt_pv = on_pv;
         const entry = self.ttable.get(pos.hash);
 
         if (entry != null) {
@@ -1258,6 +1259,7 @@ pub const Searcher = struct {
             }
             tt_eval = self.tt_score(tt_eval, entry.?.flag);
             hashmove = entry.?.bestmove;
+            tt_pv = tt_pv or entry.?.was_pv == 1;
             if (is_root and !self.is_root_excluded(hashmove)) {
                 self.best_move = hashmove;
             }
@@ -1310,7 +1312,7 @@ pub const Searcher = struct {
                         .bestmove = types.Move.empty(),
                         .flag = tb_flag,
                         .depth = @as(u8, @intCast(@min(depth, 255))),
-                        .was_pv = 0,
+                        .was_pv = @intFromBool(tt_pv),
                         .key = @as(u32, @truncate(pos.hash)),
                         .age = self.ttable.age,
                     });
@@ -1478,7 +1480,7 @@ pub const Searcher = struct {
                                     .bestmove = move,
                                     .flag = tt.Bound.Lower,
                                     .depth = @as(u8, @intCast(@min(depth - parameters.ProbCutReduction + 1, 255))),
-                                    .was_pv = 0,
+                                    .was_pv = @intFromBool(tt_pv),
                                     .key = @as(u32, @truncate(pos.hash)),
                                     .age = self.ttable.age,
                                 });
@@ -1680,6 +1682,10 @@ pub const Searcher = struct {
                         reduction += parameters.LMRNonPV;
                     }
 
+                    if (tt_pv and !on_pv) {
+                        reduction -= parameters.LMRTTPV;
+                    }
+
                     // Expected fail-high (cut) nodes: reduce more.
                     if (cutnode) {
                         reduction += parameters.LMRCutnode;
@@ -1841,7 +1847,7 @@ pub const Searcher = struct {
                 .bestmove = best_move,
                 .flag = tt_flag,
                 .depth = @as(u8, @intCast(@min(depth, 255))),
-                .was_pv = if (on_pv) @as(u1, 1) else @as(u1, 0),
+                .was_pv = @intFromBool(tt_pv),
                 .key = @as(u32, @truncate(pos.hash)),
                 .age = self.ttable.age,
             });
@@ -1925,6 +1931,7 @@ pub const Searcher = struct {
         var hashmove = types.Move.empty();
         var best_move = types.Move.empty();
         const entry = self.ttable.get(pos.hash);
+        const tt_pv = entry != null and entry.?.was_pv == 1;
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
@@ -2005,7 +2012,7 @@ pub const Searcher = struct {
                 if (score > alpha) {
                     best_move = move;
                     if (score >= beta) {
-                        self.qsearch_store(pos, best_score, raw_eval, best_move, tt.Bound.Lower);
+                        self.qsearch_store(pos, best_score, raw_eval, best_move, tt.Bound.Lower, tt_pv);
                         return if (self.tt_store_is_ambiguous(best_score, tt.Bound.Lower))
                             best_score
                         else
@@ -2018,7 +2025,7 @@ pub const Searcher = struct {
         }
 
         if (best_move.to_u16() != 0) {
-            self.qsearch_store(pos, best_score, raw_eval, best_move, tt.Bound.Upper);
+            self.qsearch_store(pos, best_score, raw_eval, best_move, tt.Bound.Upper, tt_pv);
         }
 
         return best_score;
