@@ -58,3 +58,12 @@
   captures down. Captures are updated whether a capture or a quiet move cut.
 - The table is halved between searches and cleared on a new game, like the
   other histories.
+
+## Quiet move pruning depth
+
+- The futility margin and the SEE threshold of quiet moves scale with
+  `lmr_depth = max(depth - 1 - QuietLMR[depth][index], 0)`, the depth the move
+  would be searched to after its base reduction. The depth limits of both
+  prunings, late move pruning, history pruning and the SEE threshold of
+  captures still use `depth`. `FPBase`, `FPMargin` and `SEEQuietMargin` were
+  tuned for `depth` and have not been retuned.
