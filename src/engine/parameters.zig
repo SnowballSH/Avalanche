@@ -112,6 +112,7 @@ pub const TunableParams = [_]Tunable{
     // -- Move ordering and quiescence --
     .{ .name = "MovepickSEEMargin", .value = 97, .min_value = 0, .max_value = 220, .c_end = 11, .worth_tuning = true },
     .{ .name = "QSSEEMargin", .value = 26, .min_value = 0, .max_value = 120, .c_end = 6, .worth_tuning = true },
+    .{ .name = "QSFutilityMargin", .value = 150, .min_value = 50, .max_value = 400, .c_end = 15, .worth_tuning = true },
     .{ .name = "ContHistWeight1", .value = 189, .min_value = 32, .max_value = 256, .c_end = 11, .worth_tuning = true },
     .{ .name = "ContHistWeight2", .value = 135, .min_value = 32, .max_value = 256, .c_end = 11, .worth_tuning = true },
     .{ .name = "ContHistWeight4", .value = 134, .min_value = 32, .max_value = 256, .c_end = 11, .worth_tuning = true },
@@ -229,6 +230,7 @@ pub var HistoryGravityMax: i32 = intDefault("HistoryGravityMax");
 // -- Move ordering and quiescence --
 pub var MovepickSEEMargin: i32 = intDefault("MovepickSEEMargin");
 pub var QSSEEMargin: i32 = intDefault("QSSEEMargin");
+pub var QSFutilityMargin: i32 = intDefault("QSFutilityMargin");
 pub var ContHistWeight1: i32 = intDefault("ContHistWeight1");
 pub var ContHistWeight2: i32 = intDefault("ContHistWeight2");
 pub var ContHistWeight4: i32 = intDefault("ContHistWeight4");

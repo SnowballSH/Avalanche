@@ -35,3 +35,9 @@
 - The three tables share one bonus and gravity rule, so their sum spans about
   three times the range of one; the divisor was widened from 5164 to 8192 with
   the change and has not been tuned since.
+
+## Quiescence futility
+
+- Out of check, a capture that is not a promotion is skipped when
+  `stand_pat + QSFutilityMargin + value of the captured piece <= alpha`, with
+  the piece values of `see.SeeWeight`. `QSFutilityMargin` is 150, untuned.

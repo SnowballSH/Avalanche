@@ -1932,6 +1932,8 @@ pub const Searcher = struct {
             }
         }
 
+        const stand_pat = best_score;
+
         // >> Step 3: TT Probe
         var hashmove = types.Move.empty();
         var best_move = types.Move.empty();
@@ -1983,6 +1985,13 @@ pub const Searcher = struct {
         while (index < move_size) : (index += 1) {
             var move = movepick.getNextBest(&movelist, &evallist, index);
             const is_capture = move.is_capture();
+
+            if (!in_check and is_capture and !move.is_promotion()) {
+                const captured: types.PieceType = if (move.get_flags() == types.MoveFlags.EN_PASSANT) .Pawn else pos.mailbox[move.to].piece_type();
+                if (stand_pat + parameters.QSFutilityMargin + see.SeeWeight[captured.index()] <= alpha) {
+                    continue;
+                }
+            }
 
             if (!in_check and is_capture and index > 0) {
                 const see_score = evallist.items[index];
