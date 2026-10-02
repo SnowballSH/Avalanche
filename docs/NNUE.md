@@ -242,10 +242,10 @@ binary runs:
 zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi "
 ```
 
-What has run this way: `sdot` on Apple Silicon, and `pmaddubsw` with AVX2 and with SSSE3 under
-Rosetta. **The AVX-512BW path is untested**: it compiles, and nothing has executed it. Run the
-command above on an AVX-512 machine before trusting a build made there (OpenBench workers built
-with `-Dcpu=native` on such a machine use this path).
+What has run this way: `sdot` on Apple Silicon, `pmaddubsw` with AVX2 and with SSSE3 under
+Rosetta, and the AVX-512BW path on an AMD EPYC 9R45 (Zen 5) at commit `9aeed3b`. Rerun the
+command on a machine of each kind after changing the L1 code: CI machines do not reliably have
+AVX-512, and OpenBench workers built with `-Dcpu=native` on such a machine use that path.
 
 ## Training
 
