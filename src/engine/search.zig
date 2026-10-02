@@ -371,6 +371,13 @@ pub const Searcher = struct {
         return std.math.clamp(raw_eval + correction, -SCORE_PLY_ADJ + 1, SCORE_PLY_ADJ - 1);
     }
 
+    inline fn continuation_history(self: *const Searcher, ply: u32, move: types.Move, comptime plies_ago: u32) i32 {
+        if (ply < plies_ago + 1) return 0;
+        const prev = self.move_history[ply - plies_ago - 1];
+        if (prev.to_u16() == 0) return 0;
+        return self.continuation[self.moved_piece_history[ply - plies_ago - 1].pure_index()][prev.to][move.from][move.to];
+    }
+
     inline fn qsearch_store(self: *Searcher, pos: *position.Position, score: i32, static_eval_val: i32, move: types.Move, flag: tt.Bound) void {
         if (self.tt_store_is_ambiguous(score, flag)) return;
 
@@ -1695,7 +1702,11 @@ pub const Searcher = struct {
                         reduction -= parameters.LMRCheck;
                     }
 
-                    reduction -= @divTrunc(self.history[@intFromEnum(color)][move.from][move.to], parameters.LMRHistoryDivisor);
+                    var lmr_history = self.history[@intFromEnum(color)][move.from][move.to];
+                    if (!is_capture and !is_null) {
+                        lmr_history += self.continuation_history(self.ply - 1, move, 0) + self.continuation_history(self.ply - 1, move, 1);
+                    }
+                    reduction -= @divTrunc(lmr_history, parameters.LMRHistoryDivisor);
 
                     const rd: usize = @as(usize, @intCast(std.math.clamp(@as(i32, @intCast(new_depth)) - reduction, 1, new_depth + 1)));
 
