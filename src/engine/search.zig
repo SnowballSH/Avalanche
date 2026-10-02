@@ -1755,19 +1755,24 @@ pub const Searcher = struct {
             }
         }
 
-        if (alpha >= beta and !best_move.is_capture() and !best_move.is_promotion()) {
+        const quiet_cutoff = alpha >= beta and !best_move.is_capture() and !best_move.is_promotion();
+        const capture_cutoff = alpha >= beta and best_move.is_capture();
+
+        if (quiet_cutoff) {
             var temp = self.killer[self.ply][0];
             if (temp.to_u16() != best_move.to_u16()) {
                 self.killer[self.ply][0] = best_move;
                 self.killer[self.ply][1] = temp;
             }
 
-            const adj: i32 = @max(@as(i32, 0), @min(parameters.HistoryBonusMax, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * parameters.HistoryBonusMultiplier - parameters.HistoryBonusOffset));
-
             if (!is_null and self.ply >= 1) {
                 const last = self.move_history[self.ply - 1];
                 self.counter_moves[@intFromEnum(color)][last.from][last.to] = best_move;
             }
+        }
+
+        if (quiet_cutoff or capture_cutoff) {
+            const adj: i32 = @max(@as(i32, 0), @min(parameters.HistoryBonusMax, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * parameters.HistoryBonusMultiplier - parameters.HistoryBonusOffset));
 
             const b = best_move.to_u16();
             const max_history: i32 = parameters.HistoryGravityMax;
