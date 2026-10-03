@@ -14,6 +14,7 @@ pub const SortWinningCapture: i32 = 1_000_000;
 pub const SortLosingCapture: i32 = 0;
 pub const SortWinningCaptureFloor: i32 = SortWinningCapture - 32768;
 pub const CaptureVictimScale: i32 = 32;
+pub const CaptureHistoryDivisor: i32 = 12;
 pub const SortQuiet: i32 = 0;
 pub const SortKiller1: i32 = 900_000;
 pub const SortKiller2: i32 = 800_000;
@@ -38,11 +39,11 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
             score += SortHash;
         } else if (move.is_capture()) {
             if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
-                score += SortWinningCapture + MVV_LVA[0][0] * CaptureVictimScale + searcher.capture_history_entry(pos, move.*).*;
+                score += SortWinningCapture + MVV_LVA[0][0] * CaptureVictimScale + @divTrunc(searcher.capture_history_entry(pos, move.*).*, CaptureHistoryDivisor);
             } else {
                 const see_value = see.see_threshold(pos, move.*, -parameters.MovepickSEEMargin);
 
-                score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()] * CaptureVictimScale + searcher.capture_history_entry(pos, move.*).*;
+                score += MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()] * CaptureVictimScale + @divTrunc(searcher.capture_history_entry(pos, move.*).*, CaptureHistoryDivisor);
 
                 if (see_value) {
                     score += SortWinningCapture;
