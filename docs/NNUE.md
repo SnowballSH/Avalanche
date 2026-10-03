@@ -13,10 +13,13 @@ time.
 flag, and the default build (`nets/dianguang-3.nnue`) is multi-layer. An explicit `-Dhead` that
 contradicts the file is a compile error.
 
-`setoption name EvalFile` loads a network of the build's architecture. A file of the other
-architecture is refused with `WrongArchitecture`, and a file that is neither (truncated, garbage)
-with `NotANetwork` in a multi-layer build or `WrongSize` in a single-layer one. The current network
-stays in use.
+`setoption name EvalFile` loads a network of the build's architecture and refuses anything else,
+keeping the current network. A multi-layer build answers `WrongArchitecture` to a file with the
+exact size of a single-layer network and no multi-layer header, `NotANetwork` to any other file
+without that header, `UnsupportedHeader` to one whose header differs (or is cut short), and
+`WrongSize` to one with a valid header and another length. A single-layer build answers
+`WrongArchitecture` to a file with the multi-layer header and `WrongSize` to any other length. A
+file larger than both layouts is not read at all (`StreamTooLong`).
 
 Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
 `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig` (file layouts, loading),
@@ -578,7 +581,7 @@ the SIMD paths, the mean number of non-zero L1 blocks and the time of each stage
 
 | Comparison | Tolerance | Measured on random weights |
 |---|---|---|
-| integer vs float with quantised pairwise | 0.75 cp | max 0.53 cp, any weight range |
+| integer vs float with quantised pairwise | 0.75 cp | max 0.53 cp, any weight range (the unit test asserts it for weights of trained magnitude) |
 | integer vs float, trained-magnitude weights | 16 cp | max 6.0 cp, mean 1.2 cp, mean abs eval 100 to 180 cp |
 | integer vs float, full-range weights | none | max 143 cp, mean 18 cp, mean abs eval 1200 cp |
 
