@@ -115,8 +115,8 @@ All of these are comptime-resolved, so native builds compile to the same code as
 - The single-layer head's `madd_i16` lowers to `i32x4.dot_i16x8_s` via the `llvm.wasm.dot` intrinsic (+36% nps).
 - The multi-layer head, which the default net uses, has its own wasm paths for every stage (pairwise
   `q15mulr_sat_s`, L1 `extadd_pairwise`, L2 `dot_i16x8_s`); see
-  "Inference paths" in [NNUE.md](NNUE.md). `bench` under Node 26 on an Apple M4: 0.98M to 1.47M nps
-  (+49%) against the portable paths, same node count.
+  "Inference paths" in [NNUE.md](NNUE.md). `bench` under Node 26 on an Apple M4: 1.00M to 1.47M nps
+  (+47%) against the portable paths, same node count.
 - Timing a stage in isolation under V8 needs `node --no-liftoff`: wasm functions are not replaced on
   the stack, so a loop inside one long-running call stays in the baseline compiler's code. `bench`
   is not affected, the search calls its functions many times.

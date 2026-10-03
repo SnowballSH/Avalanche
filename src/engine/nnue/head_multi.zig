@@ -422,10 +422,7 @@ pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *Block
 /// `a[2i] * b[2i] + a[2i + 1] * b[2i + 1]` in i32, which cannot overflow for
 /// an L1 output's value and square with their two L2 weights.
 inline fn pair_products(a: DotI16, b: DotI16) DotI32 {
-    if (PAIR_PRODUCTS_INTRINSIC) |name| return @extern(*const fn (DotI16, DotI16) callconv(.c) DotI32, .{ .name = name }).*(a, b);
-    const a_parts = std.simd.deinterlace(2, a);
-    const b_parts = std.simd.deinterlace(2, b);
-    return @as(DotI32, a_parts[0]) * @as(DotI32, b_parts[0]) + @as(DotI32, a_parts[1]) * @as(DotI32, b_parts[1]);
+    return @extern(*const fn (DotI16, DotI16) callconv(.c) DotI32, .{ .name = PAIR_PRODUCTS_INTRINSIC.? }).*(a, b);
 }
 
 /// The running sum of one vector of dot products: the i32 sums themselves,
