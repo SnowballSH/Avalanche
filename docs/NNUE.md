@@ -411,10 +411,13 @@ the measurement that decided it:
   move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
   -3.5% on an EPYC 9R45, and by -0.2% to -11% on the M4.
 - **Reordering the feature-transformer outputs so that active ones share blocks.** It changes no
-  evaluation. Sorting by how often each is non-zero (measured on the evaluations of a `bench` run,
-  checked on the other half) lowers the non-zero blocks from 85.3 to 77.5, a greedy grouping by
-  co-activation to 82.7: about 4 ns of 150, for a second version of every network file.
-
+  evaluation: output `i` and its partner `i + 512` move together in the feature weights and in
+  the L1 weights. Measured on the evaluations of a `bench` run of Dianguang-2 and checked on the
+  other half of them: sorting the outputs by how often they are non-zero lowers the non-zero
+  blocks from 85.3 to 78.0, and exchanging outputs between blocks for as long as it helps (three
+  million tries, 1300 kept) to 70.7. That is 17% of the L1 products, 7 to 10 ns of an evaluation
+  on the machines above, about 1% in nodes per second, for a second version of every network
+  file. It belongs in the step that writes a network, not in the engine.
 - **A search step of 16 blocks** (one mask, two table lookups; one `vptestmd` with AVX-512, one
   `bitmask` on wasm after narrowing). The search alone was 4 ns slower on an EPYC 9R14 at 256 and
   at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing in the
