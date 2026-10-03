@@ -1851,6 +1851,7 @@ pub const Searcher = struct {
 
         if (self.exclude_move[self.ply].to_u16() == 0 and !(is_root and self.root_excluded_count > 0)) {
             if (!in_check and
+                @as(i32, @intCast(@abs(best_score))) < SCORE_PLY_ADJ and
                 !(is_root and self.root_restricted) and
                 !(best_score > alpha_ and (best_move.is_capture() or best_move.is_promotion())) and
                 !(best_score >= beta_ and best_score <= static_eval) and

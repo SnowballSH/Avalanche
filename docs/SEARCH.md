@@ -20,9 +20,9 @@
 - Update at the end of `negamax`, the same bonus to all three entries:
   `bonus = clamp((best - eval) * depth, ±2048)`,
   `entry += bonus - entry * |bonus| / 8192`. Skipped in check, in singular
-  verification, at a restricted root, when a capture or promotion raised alpha,
-  and when the result is bounded on the wrong side of the eval. qsearch only
-  reads.
+  verification, at a restricted root, when the result is a mate or tablebase
+  score, when a capture or promotion raised alpha, and when the result is
+  bounded on the wrong side of the eval. qsearch only reads.
 - The bonus uses the corrected eval: the gravity rule accumulates, so a
   raw-based bonus would drive any consistent error to the limit, while the
   residual stops once the corrected eval agrees with the search.
