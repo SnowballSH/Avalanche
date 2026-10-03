@@ -244,9 +244,8 @@ random weights and accumulators, stage by stage and end to end.
 | | | wasm simd128 | `i16x8.q15mulr_sat_s`, `i8x16.narrow_i16x8_u` |
 | | `umull` | AArch64 | `sqxtun`, `umull` |
 | | `portable` | anything else, Debug | `@Vector` u16 multiply |
-| non-zero blocks | | x86, Debug | compare to a bit mask, table lookup |
+| non-zero blocks | | x86, wasm, Debug | compare to a bit mask, table lookup |
 | | | AArch64 | `umaxp`, a multiplication for the mask, table lookup |
-| | | wasm simd128 | saturating narrowing, an i32 multiplication for the mask, table lookup |
 | L1 | `dpbusd` | AVX-512 VNNI (512 bits); AVX-512 VNNI + VL or AVX-VNNI (256 bits) | `vpdpbusd` |
 | | `maddubs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmaddubsw`, `pmaddwd` |
 | | `sdot` | AArch64 with dotprod | `sdot` |
@@ -270,16 +269,13 @@ the result does not depend on the target:
   vectors of products with one `uzp2`, then one rounding halving of 16 bytes.
 - **Pairwise on wasm.** `i16x8.q15mulr_sat_s` is `pmulhrsw` (it differs only for
   -32768 x -32768, which cannot occur), and the narrowing has no lanes to put back in order.
-- **Non-zero blocks.** Sixteen blocks (64 activations) give a 16-bit mask per step, used as two
-  bytes. A table of 256 entries holds, for each byte, the positions of its set bits packed in a
-  u64, and their number. The search adds the index of the first block of the group to all eight
-  bytes, writes the u64 at the end of the list and advances by the number: no branch depends on
-  the activations. A block index fits a byte because there are 256 blocks. With AVX-512 the mask
-  is one `vptestmd`. AArch64 has no instruction that turns a comparison into a mask: `umaxp` twice
-  reduces 64 activations to the 16 block maxima, and a multiplication per u64 gathers one bit of
-  each byte. Wasm has `bitmask`, but a host without such an instruction (AArch64) runs it slowly:
-  a block, read as an i32, is positive, so two saturating narrowings leave a non-zero byte per
-  non-zero block, and an i32 multiplication, which every host has, gathers four flags at a time.
+- **Non-zero blocks.** Eight blocks (32 activations) give an 8-bit mask. A table of 256 entries
+  holds, for each mask, the positions of its set bits packed in a u64, and their number. The search
+  adds the index of the first block of the group to all eight bytes, writes the u64 at the end of
+  the list and advances by the number: no branch depends on the activations. A block index fits a
+  byte because there are 256 blocks. AArch64 has no instruction that turns a comparison into a
+  mask: `umaxp` twice reduces 32 activations to the 8 block maxima in a u64, and a multiplication
+  gathers one bit of each byte.
 - **L1.** The weights of a block are 64 adjacent bytes, the 16 outputs' weights for its four
   inputs, so a non-zero block is one broadcast of its four activations and 64 byte products.
   `vpdpbusd` and `sdot` add the products into the i32 sums; they take several cycles, so the blocks
@@ -337,11 +333,36 @@ dense network timed the way the first line is, before and after:
 - **Pairwise, 64 ns to 48 ns.** It clamped both factors, multiplied, added and shifted in 16 bits.
 - L2 and L3 are unchanged, 26 to 29 ns.
 
+A later change (the `pairs` L2 and the wasm paths) left the M4 where it was,
+since AArch64 keeps the `wide` L2: 150 ns per evaluation on the default net (84.7 of 256 blocks
+non-zero; pairwise 35 ns, L1 63 ns of which the search 17 ns, L2 and L3 29 ns). It is for x86 and
+wasm: X86_RESULT
+
+On the M4 the head is at what the core can do in 128-bit vectors: the pairwise step and the L1
+products are limited by loads per cycle, L2 by the multiplier.
+
 Tried on the M4 and left out: a loop over all blocks without the index list for dense inputs
 (6 ns of 240 on the dense networks, nothing below about 200 non-zero blocks), and partial sums in
-L2 (no gain: 256 i32 multiply-accumulates at two per cycle are the limit). Not tried, for a
-machine that can run them: `vpcompressb` instead of the table for the index list, and `pmaddwd`
-for L2 on Intel, where `pmulld` is two micro-operations.
+L2 (no gain: 256 i32 multiply-accumulates at two per cycle are the limit). Also left out, with
+the measurement that decided it:
+
+- **Skipping zero L1 outputs in L2.** 12.4 of 16 are non-zero on the bench positions; the loop
+  over the non-zero ones was slower than the full one (44 ns against 34 for L2 and L3).
+- **Lazy accumulator updates.** Of the 15.8M accumulator frames of a `bench` run, 14.9M are
+  evaluated or have an evaluated descendant, so at most 5% of the updates could be skipped.
+- **Prefetching the weight rows of an accumulator update.** 1.5% slower in `bench`: the rows of a
+  move are read sequentially already.
+- **Reordering the feature-transformer outputs so that active ones share blocks.** It changes no
+  evaluation. Sorting by how often each is non-zero (measured on the evaluations of a `bench` run,
+  checked on the other half) lowers the non-zero blocks from 85.3 to 77.5, a greedy grouping by
+  co-activation to 82.7: about 4 ns of 150, for a second version of every network file.
+
+- **A search step of 16 blocks** (one mask, two table lookups; one `vptestmd` with AVX-512, one
+  `bitmask` on wasm after narrowing). The search alone was 4 ns slower on an EPYC 9R14 at 256 and
+  at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing in the
+  whole L1 under wasm.
+
+Not tried: `vpcompressb` instead of the table for the index list.
 
 ### What has been executed
 

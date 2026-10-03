@@ -191,15 +191,12 @@ const DotI8 = @Vector(VECTOR_BYTES, i8);
 const DotI16 = @Vector(VECTOR_BYTES / 2, i16);
 const DotI32 = @Vector(VECTOR_BYTES / 4, i32);
 const DotU32 = @Vector(VECTOR_BYTES / 4, u32);
-/// Blocks located per table lookup of the non-zero block search, and blocks
-/// examined per step: one mask, two lookups.
+/// Blocks examined per step of the non-zero block search: one table lookup.
 const NNZ_BLOCKS = 8;
-const NNZ_STEP = 2 * NNZ_BLOCKS;
-const NnzMask = std.meta.Int(.unsigned, NNZ_STEP);
 
 comptime {
     std.debug.assert(PAIRS % VECTOR_BYTES == 0);
-    std.debug.assert(L1_BLOCKS % NNZ_STEP == 0);
+    std.debug.assert(L1_BLOCKS % NNZ_BLOCKS == 0);
     std.debug.assert(L1_SIZE * 4 == DOT_CHUNKS * VECTOR_BYTES);
 }
 
@@ -387,45 +384,22 @@ const SET_BITS: SetBits = blk: {
 };
 
 /// Bit i is set when block i, four activations from the lowest, is not zero.
-inline fn nonzero_mask(activations: *const [NNZ_STEP * 4]u8) NnzMask {
-    const Blocks = @Vector(NNZ_STEP, u32);
+inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
+    if (comptime !(intrinsics and builtin.cpu.arch == .aarch64 and builtin.cpu.has(.aarch64, .neon))) {
+        const blocks: @Vector(NNZ_BLOCKS, u32) = @bitCast(activations.*);
+        return @bitCast(blocks != @as(@Vector(NNZ_BLOCKS, u32), @splat(0)));
+    }
+    // AArch64 has no instruction for the mask of a comparison. `umaxp` twice
+    // leaves the largest activation of each block in one byte of a u64, and
+    // the minimum with 1 makes it a flag.
     const Bytes = @Vector(16, u8);
-    if (comptime intrinsics and builtin.cpu.arch == .aarch64 and builtin.cpu.has(.aarch64, .neon)) {
-        // AArch64 has no instruction for the mask of a comparison. `umaxp`
-        // twice leaves the largest activation of each block in one byte,
-        // and the minimum with 1 makes it a flag.
-        const umaxp = @extern(*const fn (Bytes, Bytes) callconv(.c) Bytes, .{ .name = "llvm.aarch64.neon.umaxp.v16i8" });
-        const low = umaxp.*(activations[0..16].*, activations[16..32].*);
-        const high = umaxp.*(activations[32..48].*, activations[48..64].*);
-        // Typed, because @min would otherwise narrow the element type.
-        const flag_bytes: Bytes = @min(umaxp.*(low, high), @as(Bytes, @splat(1)));
-        const flags: [2]u64 = @bitCast(flag_bytes);
-        // The multiplication moves bit 8i to bit 56 + i.
-        const gather = 0x0102_0408_1020_4080;
-        return @truncate(((flags[0] *% gather) >> 56) | (((flags[1] *% gather) >> 56) << 8));
-    }
-    if (comptime intrinsics and wasm_simd) {
-        // No `bitmask`: it is slow on a host without such an instruction.
-        // A block is a positive i32, activations being at most 127, so the
-        // saturating narrowing to a byte keeps it non-zero.
-        const Quarter = @Vector(4, i32);
-        const narrow_i32 = @extern(*const fn (Quarter, Quarter) callconv(.c) @Vector(8, i16), .{ .name = "llvm.wasm.narrow.signed.v8i16.v4i32" });
-        const narrow_i16 = @extern(*const fn (@Vector(8, i16), @Vector(8, i16)) callconv(.c) Bytes, .{ .name = "llvm.wasm.narrow.signed.v16i8.v8i16" });
-        var blocks: [4]Quarter = undefined;
-        inline for (&blocks, 0..) |*quarter, i| quarter.* = @bitCast(activations[i * 16 ..][0..16].*);
-        const block_bytes = narrow_i16.*(narrow_i32.*(blocks[0], blocks[1]), narrow_i32.*(blocks[2], blocks[3]));
-        // Four flag bytes to four bits: the multiplication moves bit 8i to
-        // bit 24 + i, and i32 lanes multiply natively on every host.
-        // Typed, because @min would otherwise narrow the element type.
-        const flags: Bytes = @min(block_bytes, @as(Bytes, @splat(1)));
-        const flag_bytes: @Vector(4, u32) = @bitCast(flags);
-        const nibbles: [2]u64 = @bitCast((flag_bytes *% @as(@Vector(4, u32), @splat(0x0102_0408))) >> @splat(24));
-        const low = (nibbles[0] | nibbles[0] >> 28) & 0xff;
-        const high = (nibbles[1] | nibbles[1] >> 28) & 0xff;
-        return @truncate(low | high << 8);
-    }
-    const blocks: Blocks = @bitCast(activations.*);
-    return @bitCast(blocks != @as(Blocks, @splat(0)));
+    const umaxp = @extern(*const fn (Bytes, Bytes) callconv(.c) Bytes, .{ .name = "llvm.aarch64.neon.umaxp.v16i8" });
+    const pairs = umaxp.*(activations[0..16].*, activations[16..32].*);
+    // Typed, because @min would otherwise narrow the element type.
+    const flag_bytes: Bytes = @min(umaxp.*(pairs, pairs), @as(Bytes, @splat(1)));
+    const flags: u64 = @as(@Vector(2, u64), @bitCast(flag_bytes))[0];
+    // The multiplication moves bit 8i to bit 56 + i.
+    return @truncate((flags *% 0x0102_0408_1020_4080) >> 56);
 }
 
 /// Indices of the four-input blocks with a non-zero activation, in ascending
@@ -433,18 +407,14 @@ inline fn nonzero_mask(activations: *const [NNZ_STEP * 4]u8) NnzMask {
 pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *BlockIndices) usize {
     var count: usize = 0;
     var base: usize = 0;
-    while (base < L1_BLOCKS) : (base += NNZ_STEP) {
-        const mask = nonzero_mask(activations[base * 4 ..][0 .. NNZ_STEP * 4]);
+    while (base < L1_BLOCKS) : (base += NNZ_BLOCKS) {
+        const mask = nonzero_mask(activations[base * 4 ..][0 .. NNZ_BLOCKS * 4]);
         // A whole group is written whatever the mask holds and only the used
         // bytes are kept, so there is no data-dependent branch. After n blocks
         // `count <= n`, so the write stays inside `indices`. No byte carries:
-        // a position plus the group's first block is a block index.
-        inline for (0..NNZ_STEP / NNZ_BLOCKS) |group| {
-            const group_mask: u8 = @truncate(mask >> (group * NNZ_BLOCKS));
-            const first = base + group * NNZ_BLOCKS;
-            std.mem.writeInt(IndexGroup, indices[count..][0..NNZ_BLOCKS], SET_BITS.positions[group_mask] + @as(IndexGroup, first) * BYTE_ONES, .little);
-            count += SET_BITS.counts[group_mask];
-        }
+        // a position plus `base` is a block index.
+        std.mem.writeInt(IndexGroup, indices[count..][0..NNZ_BLOCKS], SET_BITS.positions[mask] + @as(IndexGroup, base) * BYTE_ONES, .little);
+        count += SET_BITS.counts[mask];
     }
     return count;
 }
