@@ -420,7 +420,7 @@ pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *Block
 }
 
 /// `a[2i] * b[2i] + a[2i + 1] * b[2i + 1]` in i32, which cannot overflow for
-/// an activation pair with a pair of L2 weights, or for two L1 products.
+/// an L1 output's value and square with their two L2 weights.
 inline fn pair_products(a: DotI16, b: DotI16) DotI32 {
     if (PAIR_PRODUCTS_INTRINSIC) |name| return @extern(*const fn (DotI16, DotI16) callconv(.c) DotI32, .{ .name = name }).*(a, b);
     const a_parts = std.simd.deinterlace(2, a);
