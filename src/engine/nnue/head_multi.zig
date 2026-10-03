@@ -207,13 +207,15 @@ fn x86_has(comptime feature: std.Target.x86.Feature) bool {
     return builtin.cpu.arch.isX86() and builtin.cpu.has(.x86, feature);
 }
 
+const wasm_simd = builtin.cpu.arch.isWasm() and builtin.cpu.has(.wasm, .simd128);
+
 /// Which pairwise product this build compiled.
 pub const PAIRWISE_PATH: enum { mulhrs, umull, portable } = if (!intrinsics)
     .portable
 else if (switch (VECTOR_BYTES) {
     64 => x86_has(.avx512bw),
     32 => x86_has(.avx2),
-    16 => x86_has(.ssse3),
+    16 => x86_has(.ssse3) or wasm_simd,
     else => false,
 })
     .mulhrs
@@ -224,7 +226,7 @@ else
 
 /// Which L1 dot product this build compiled; the tests report when it is
 /// only the portable one.
-pub const L1_PATH: enum { dpbusd, maddubs, sdot, portable } = if (!intrinsics)
+pub const L1_PATH: enum { dpbusd, maddubs, sdot, extadd, portable } = if (!intrinsics)
     .portable
 else if (switch (VECTOR_BYTES) {
     64 => x86_has(.avx512vnni),
@@ -241,11 +243,29 @@ else if (switch (VECTOR_BYTES) {
     .maddubs
 else if (builtin.cpu.arch == .aarch64 and VECTOR_BYTES == 16 and builtin.cpu.has(.aarch64, .dotprod))
     .sdot
+else if (wasm_simd and VECTOR_BYTES == 16)
+    .extadd
 else
     .portable;
 
+/// The instruction that multiplies i16 lanes and adds adjacent products.
+const PAIR_PRODUCTS_INTRINSIC: ?[]const u8 = if (!intrinsics)
+    null
+else if (wasm_simd and VECTOR_BYTES == 16)
+    "llvm.wasm.dot"
+else switch (VECTOR_BYTES) {
+    64 => if (x86_has(.avx512bw)) "llvm.x86.avx512.pmaddw.d.512" else null,
+    32 => if (x86_has(.avx2)) "llvm.x86.avx2.pmadd.wd" else null,
+    16 => if (x86_has(.sse2)) "llvm.x86.sse2.pmadd.wd" else null,
+    else => null,
+};
+
+/// Which L2 product this build compiled: `pairs` where that instruction
+/// exists, `wide` i32 multiplies elsewhere.
+pub const L2_PATH: enum { pairs, wide } = if (PAIR_PRODUCTS_INTRINSIC != null) .pairs else .wide;
+
 /// The compiled paths, for reports.
-pub const SIMD_DESCRIPTION = std.fmt.comptimePrint("{d}-bit vectors, pairwise {s}, L1 {s}", .{ VECTOR_BYTES * 8, @tagName(PAIRWISE_PATH), @tagName(L1_PATH) });
+pub const SIMD_DESCRIPTION = std.fmt.comptimePrint("{d}-bit vectors, pairwise {s}, L1 {s}, L2 {s}", .{ VECTOR_BYTES * 8, @tagName(PAIRWISE_PATH), @tagName(L1_PATH), @tagName(L2_PATH) });
 
 const HALF_LANES = VECTOR_BYTES / 2;
 const HalfI16 = @Vector(HALF_LANES, i16);
@@ -276,7 +296,7 @@ inline fn pairwise_lanes(a: PairI16, b: PairI16) PairU8 {
             const mulhrs = @extern(*const fn (HalfI16, HalfI16) callconv(.c) HalfI16, .{ .name = switch (VECTOR_BYTES) {
                 64 => "llvm.x86.avx512.pmul.hr.sw.512",
                 32 => "llvm.x86.avx2.pmul.hr.sw",
-                16 => "llvm.x86.ssse3.pmul.hr.sw.128",
+                16 => if (wasm_simd) "llvm.wasm.q15mulr.sat.signed" else "llvm.x86.ssse3.pmul.hr.sw.128",
                 else => unreachable,
             } });
             // With a scaled by 2^(15 - FT_SHIFT) that is (a * b + FT_ROUND) >> FT_SHIFT.
@@ -289,7 +309,7 @@ inline fn pairwise_lanes(a: PairI16, b: PairI16) PairU8 {
             const packus = @extern(*const fn (HalfI16, HalfI16) callconv(.c) PairU8, .{ .name = switch (VECTOR_BYTES) {
                 64 => "llvm.x86.avx512.packuswb.512",
                 32 => "llvm.x86.avx2.packuswb",
-                16 => "llvm.x86.sse2.packuswb.128",
+                16 => if (wasm_simd) "llvm.wasm.narrow.unsigned.v16i8.v8i16" else "llvm.x86.sse2.packuswb.128",
                 else => unreachable,
             } });
             const interleaved: PackedGroups = @bitCast(packus.*(mulhrs.*(scaled[0], capped[0]), mulhrs.*(scaled[1], capped[1])));
@@ -399,10 +419,31 @@ pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *Block
     return count;
 }
 
+/// `a[2i] * b[2i] + a[2i + 1] * b[2i + 1]` in i32, which cannot overflow for
+/// an L1 output's value and square with their two L2 weights.
+inline fn pair_products(a: DotI16, b: DotI16) DotI32 {
+    return @extern(*const fn (DotI16, DotI16) callconv(.c) DotI32, .{ .name = PAIR_PRODUCTS_INTRINSIC.? }).*(a, b);
+}
+
+/// The running sum of one vector of dot products: the i32 sums themselves,
+/// except on the `extadd` path, which keeps each one as two halves.
+const DotSum = if (L1_PATH == .extadd) [2]DotI32 else DotI32;
+
+inline fn add_sums(a: DotSum, b: DotSum) DotSum {
+    if (L1_PATH != .extadd) return a + b;
+    return .{ a[0] + b[0], a[1] + b[1] };
+}
+
+inline fn output_sums(sum: DotSum) DotI32 {
+    if (L1_PATH != .extadd) return sum;
+    const halves_of = std.simd.deinterlace(2, std.simd.join(sum[0], sum[1]));
+    return halves_of[0] + halves_of[1];
+}
+
 /// `sum[i] + dot(inputs[4i..4i+4], block_weights[4i..4i+4])`. `inputs` holds
 /// activations, 0..127. No intrinsic path can saturate in that range, so
 /// every path gives the exact sum.
-inline fn dot_accumulate(sum: DotI32, inputs: DotI8, block_weights: DotI8) DotI32 {
+inline fn dot_accumulate(sum: DotSum, inputs: DotI8, block_weights: DotI8) DotSum {
     switch (L1_PATH) {
         .dpbusd => {
             const name = switch (VECTOR_BYTES) {
@@ -428,6 +469,19 @@ inline fn dot_accumulate(sum: DotI32, inputs: DotI8, block_weights: DotI8) DotI3
             return sum + maddwd.*(maddubs.*(inputs, block_weights), @splat(1));
         },
         .sdot => return @extern(*const fn (DotI32, DotI8, DotI8) callconv(.c) DotI32, .{ .name = "llvm.aarch64.neon.sdot.v4i32.v16i8" }).*(sum, inputs, block_weights),
+        .extadd => {
+            // Wasm has no byte dot product. A product fits an i16, and the
+            // pairwise widening addition leaves two i32 per output; they
+            // are kept apart until `output_sums`, which needs a shuffle.
+            const extadd = @extern(*const fn (HalfI16) callconv(.c) DotI32, .{ .name = "llvm.wasm.extadd.pairwise.signed.v4i32" });
+            var result = sum;
+            inline for (&result, 0..) |*pair_sums, half| {
+                const half_inputs: @Vector(HALF_LANES, i8) = std.simd.extract(inputs, half * HALF_LANES, HALF_LANES);
+                const half_weights: @Vector(HALF_LANES, i8) = std.simd.extract(block_weights, half * HALF_LANES, HALF_LANES);
+                pair_sums.* += extadd.*(@as(HalfI16, half_inputs) *% @as(HalfI16, half_weights));
+            }
+            return result;
+        },
         .portable => {
             const Wide = @Vector(VECTOR_BYTES, i16);
             const products = std.simd.deinterlace(4, @as(Wide, inputs) * @as(Wide, block_weights));
@@ -439,7 +493,7 @@ inline fn dot_accumulate(sum: DotI32, inputs: DotI8, block_weights: DotI8) DotI3
 }
 
 /// The 16 L1 sums as `DOT_CHUNKS` vectors.
-const L1Sums = [DOT_CHUNKS]DotI32;
+const L1Sums = [DOT_CHUNKS]DotSum;
 pub const L1Vector = @Vector(L1_SIZE, i32);
 const BlockWeights = [L1_SIZE * 4]i8;
 
@@ -449,7 +503,7 @@ const BlockWeights = [L1_SIZE * 4]i8;
 const L1_CHAINS = switch (L1_PATH) {
     .dpbusd => 8 / DOT_CHUNKS,
     .sdot => 4,
-    .maddubs, .portable => 1,
+    .maddubs, .extadd, .portable => 1,
 };
 const L1Chains = [L1_CHAINS]L1Sums;
 
@@ -485,32 +539,81 @@ pub fn l1_sums(head: *const Weights, activations: *align(64) const Activations, 
     const count = nonzero_blocks(activations, &indices);
 
     const l1_weights: *const [L1_BLOCKS]BlockWeights = @ptrCast(&head.l1_weights[bucket]);
-    var chains: L1Chains = @splat(@splat(@splat(0)));
-    chains[0] = @bitCast(head.l1_bias[bucket]);
+    var chains: L1Chains = std.mem.zeroes(L1Chains);
     add_listed_blocks(&chains, activations, l1_weights, indices[0..count]);
 
-    inline for (chains[1..]) |*chain| {
-        inline for (&chains[0], chain) |*total, part| total.* += part;
+    var outputs: [DOT_CHUNKS]DotI32 = undefined;
+    inline for (&outputs, 0..) |*output, chunk| {
+        var total = chains[0][chunk];
+        inline for (chains[1..]) |*chain| total = add_sums(total, chain[chunk]);
+        output.* = output_sums(total);
     }
-    return @bitCast(chains[0]);
+    return @as(L1Vector, @bitCast(outputs)) + @as(L1Vector, head.l1_bias[bucket]);
+}
+
+/// The 32 L2 sums as vectors of the dot product's width.
+const L2_CHUNKS = L2_SIZE * 4 / VECTOR_BYTES;
+const L2Sums = [L2_CHUNKS]DotI32;
+/// The L2 weights of one L1 output: for each L2 output, the weight of the
+/// CReLU value, then the weight of its square.
+const L2PairWeights = [L2_SIZE][2]i16;
+
+/// What the engine derives from a network once, when the network is installed.
+pub const Prepared = struct {
+    l1_shift: L1Shift,
+    /// `[bucket][L1 output]`: `l2_weights` narrowed to i16, which the
+    /// validated range fits, and interleaved for `pair_products`.
+    l2_pairs: [OUTPUT_SIZE][L1_SIZE]L2PairWeights align(64),
+
+    pub fn init(head: *const Weights, l1_shift: L1Shift) Prepared {
+        var self: Prepared = .{ .l1_shift = l1_shift, .l2_pairs = undefined };
+        for (&self.l2_pairs, &head.l2_weights) |*bucket_pairs, *bucket_weights| {
+            for (bucket_pairs, 0..) |*pairs, j| {
+                for (pairs, bucket_weights[j], bucket_weights[L1_SIZE + j]) |*pair, linear, squared| {
+                    pair.* = .{ @intCast(linear), @intCast(squared) };
+                }
+            }
+        }
+        return self;
+    }
+};
+
+comptime {
+    std.debug.assert(WEIGHT_LIMIT <= std.math.maxInt(i16) and ONE <= std.math.maxInt(i16));
 }
 
 /// Steps 3 to 6 of docs/NNUE.md: from the L1 sums to centipawns.
-pub fn finish(head: *const Weights, l1_shift: L1Shift, bucket: usize, sums: L1Vector) i32 {
+pub fn finish(head: *const Weights, prepared: *const Prepared, bucket: usize, sums: L1Vector) i32 {
     const L1 = L1Vector;
     const L2 = @Vector(L2_SIZE, i32);
 
-    const half: i32 = (@as(i32, 1) << l1_shift) >> 1;
-    const z1 = (sums + @as(L1, @splat(half))) >> @splat(l1_shift);
+    const half: i32 = (@as(i32, 1) << prepared.l1_shift) >> 1;
+    const z1 = (sums + @as(L1, @splat(half))) >> @splat(prepared.l1_shift);
     // Typed, because @min would otherwise narrow the element type.
     const clipped: L1 = @min(@max(z1, @as(L1, @splat(0))), @as(L1, @splat(ONE)));
     const squared: L1 = (clipped * clipped + @as(L1, @splat(1 << (ACT_BITS - 1)))) >> @splat(ACT_BITS);
-    const hidden: [L2_INPUTS]i32 = @bitCast([2]L1{ clipped, squared });
 
-    var z2: L2 = head.l2_bias[bucket];
-    inline for (hidden, &head.l2_weights[bucket]) |input, *column| {
-        z2 += @as(L2, @splat(input)) * @as(L2, column.*);
-    }
+    const z2: L2 = switch (L2_PATH) {
+        .pairs => blk: {
+            // Each output's value and square as two adjacent i16.
+            const pairs: [L1_SIZE]u32 = @bitCast(clipped | squared << @splat(16));
+            var sums_2: L2Sums = @bitCast(head.l2_bias[bucket]);
+            inline for (pairs, &prepared.l2_pairs[bucket]) |pair, *weights| {
+                const inputs: DotI16 = @bitCast(@as(DotU32, @splat(pair)));
+                const pair_weights: *const [L2_CHUNKS]DotI16 = @ptrCast(weights);
+                inline for (&sums_2, pair_weights) |*sum, chunk| sum.* += pair_products(inputs, chunk);
+            }
+            break :blk @bitCast(sums_2);
+        },
+        .wide => blk: {
+            const hidden: [L2_INPUTS]i32 = @bitCast([2]L1{ clipped, squared });
+            var sums_2: L2 = head.l2_bias[bucket];
+            inline for (hidden, &head.l2_weights[bucket]) |input, *column| {
+                sums_2 += @as(L2, @splat(input)) * @as(L2, column.*);
+            }
+            break :blk sums_2;
+        },
+    };
 
     const rounded: L2 = (z2 + @as(L2, @splat(1 << (WEIGHT_BITS - 1)))) >> @splat(WEIGHT_BITS);
     const activated: L2 = @min(@max(rounded, @as(L2, @splat(0))), @as(L2, @splat(ONE)));
@@ -519,15 +622,15 @@ pub fn finish(head: *const Weights, l1_shift: L1Shift, bucket: usize, sums: L1Ve
 }
 
 /// Same value as `evaluate_scalar`, with vectors.
-pub fn evaluate_simd(head: *const Weights, l1_shift: L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
+pub fn evaluate_simd(head: *const Weights, prepared: *const Prepared, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     var activations: Activations align(64) = undefined;
     activate(own, opp, &activations);
-    return finish(head, l1_shift, bucket, l1_sums(head, &activations, bucket));
+    return finish(head, prepared, bucket, l1_sums(head, &activations, bucket));
 }
 
 /// Evaluation in centipawns for the side to move, whose accumulator is `own`.
-pub inline fn evaluate(head: *const Weights, l1_shift: L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
-    return evaluate_simd(head, l1_shift, own, opp, bucket);
+pub inline fn evaluate(head: *const Weights, prepared: *const Prepared, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
+    return evaluate_simd(head, prepared, own, opp, bucket);
 }
 
 pub const FloatMode = enum {

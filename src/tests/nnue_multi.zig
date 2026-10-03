@@ -58,8 +58,8 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
             const acc = random_accumulators(random, round);
             const bucket = round % arch.OUTPUT_SIZE;
             const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, bucket);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, shift, &acc.own, &acc.opp, bucket));
-            try expectEqual(scalar, head_multi.evaluate(head, shift, &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
             try distinct.put(scalar, {});
         }
     }
@@ -69,10 +69,29 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
 
 test "multi head: the SIMD comparisons cover the intrinsic paths" {
     // Skipped, so that the summary shows it, when this build has a portable
-    // pairwise product or L1: Debug builds, wasm, and x86 without SSSE3. The
+    // pairwise product or L1: Debug builds and x86 without SSSE3. The
     // comparisons then say nothing about the instructions a release binary
     // runs; run them again with -Doptimize=ReleaseSafe.
     if (head_multi.L1_PATH == .portable or head_multi.PAIRWISE_PATH == .portable) return error.SkipZigTest;
+}
+
+test "multi head: the prepared L2 weights are the file's, in pairs" {
+    var prng = std.Random.DefaultPrng.init(0x5eed_0009);
+    const head = try std.testing.allocator.create(head_multi.Weights);
+    defer std.testing.allocator.destroy(head);
+    head_multi.fill_random(head, prng.random(), .{});
+
+    const prepared: head_multi.Prepared = .init(head, 5);
+    try expectEqual(@as(head_multi.L1Shift, 5), prepared.l1_shift);
+    for (0..arch.OUTPUT_SIZE) |bucket| {
+        for (0..head_multi.L1_SIZE) |j| {
+            for (0..head_multi.L2_SIZE) |o| {
+                const pair = prepared.l2_pairs[bucket][j][o];
+                try expectEqual(head.l2_weights[bucket][j][o], @as(i32, pair[0]));
+                try expectEqual(head.l2_weights[bucket][head_multi.L1_SIZE + j][o], @as(i32, pair[1]));
+            }
+        }
+    }
 }
 
 fn expect_pairwise(acc: *const Accumulators) !void {
@@ -194,7 +213,7 @@ test "multi head: accumulators of all zeros and of all ones" {
         try expect_pairwise(&acc);
         for (0..arch.OUTPUT_SIZE) |bucket| {
             const scalar = head_multi.evaluate_scalar(head, 0, &acc.own, &acc.opp, bucket);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, 0, &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, 0), &acc.own, &acc.opp, bucket));
         }
     }
 }
@@ -220,7 +239,7 @@ test "multi head: saturated weights cannot overflow" {
         try head_multi.validate(std.mem.asBytes(head));
         for ([_]head_multi.L1Shift{ 0, 1, head_multi.L1_SHIFT_MAX }) |shift| {
             const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, 0);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, shift, &acc.own, &acc.opp, 0));
+            try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, shift), &acc.own, &acc.opp, 0));
         }
     }
 
@@ -251,7 +270,7 @@ test "multi head: the integer formula follows the float forward pass" {
             // Dense rounds only: `random.int(i16)` rounds are all 0 or 255.
             const acc = random_accumulators(random, round % 3);
             const bucket = round % arch.OUTPUT_SIZE;
-            const engine: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, bucket));
+            const engine: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
             trainer.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .trainer));
             quantised.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .quantised_pairwise));
             magnitude.add(engine, 0);
@@ -328,9 +347,9 @@ test "multi head: small L1 weights are stored with a shift and stay close to the
             quantise_l1(head, shift, l1_weights, &bias);
             // docs/NNUE.md: the chosen shift puts the largest weight at 64..127 levels.
             try expect(@abs(@as(i32, head.l1_weights[0][0][0][0])) >= 64);
-            const with_shift: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, 0));
+            const with_shift: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, 0));
             quantise_l1(head, 0, l1_weights, &bias);
-            const without: f64 = @floatFromInt(head_multi.evaluate(head, 0, &acc.own, &acc.opp, 0));
+            const without: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, 0), &acc.own, &acc.opp, 0));
             shifted.add(with_shift, float);
             unshifted.add(without, float);
             magnitude.add(float, 0);

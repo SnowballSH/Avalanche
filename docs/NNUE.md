@@ -193,8 +193,9 @@ Version 1 had no L1 shift (it was version 2 with `e = 0` and a reserved field in
 network of it was ever used.
 
 The engine compares all 64 bytes, except the L1 shift, with the header of its own architecture,
-and requires the shift to be at most 7. It reads the shift from the header of the active network
-at every evaluation, so an embedded network and one loaded with `EvalFile` work the same way. A file that does not
+and requires the shift to be at most 7. Whenever a network becomes the active one, embedded or
+loaded with `EvalFile`, the engine derives `head_multi.Prepared` from it: the shift, and the L2
+weights in the order the `pairs` path below multiplies them. A file that does not
 start with `AVALNNUE` is not a multi-layer network: `WrongArchitecture` if it has exactly the size
 of a single-layer file, `NotANetwork` otherwise. One that starts with it but differs later is
 `UnsupportedHeader`. A single-layer file has no header: its first bytes are
@@ -240,15 +241,20 @@ random weights and accumulators, stage by stage and end to end.
 | Stage | Path | Target | Instructions |
 |---|---|---|---|
 | pairwise | `mulhrs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmulhrsw`, `packuswb` |
+| | | wasm simd128 | `i16x8.q15mulr_sat_s`, `i8x16.narrow_i16x8_u` |
 | | `umull` | AArch64 | `sqxtun`, `umull` |
-| | `portable` | anything else, wasm, Debug | `@Vector` u16 multiply |
+| | `portable` | anything else, Debug | `@Vector` u16 multiply |
 | non-zero blocks | | x86, wasm, Debug | compare to a bit mask, table lookup |
 | | | AArch64 | `umaxp`, a multiplication for the mask, table lookup |
 | L1 | `dpbusd` | AVX-512 VNNI (512 bits); AVX-512 VNNI + VL or AVX-VNNI (256 bits) | `vpdpbusd` |
 | | `maddubs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmaddubsw`, `pmaddwd` |
 | | `sdot` | AArch64 with dotprod | `sdot` |
-| | `portable` | anything else, wasm, Debug | widening `@Vector` multiply |
-| dual activation, L2, L3 | | all | `@Vector` i32 |
+| | `extadd` | wasm simd128 | `i16x8.mul`, `i32x4.extadd_pairwise_i16x8_s` |
+| | `portable` | anything else, Debug | widening `@Vector` multiply |
+| L2 | `pairs` | x86 (SSE2, AVX2 or AVX-512BW) | `pmaddwd` |
+| | | wasm simd128 | `i32x4.dot_i16x8_s` |
+| | `wide` | anything else, Debug | `@Vector` i32 multiply |
+| dual activation, L3 | | all | `@Vector` i32 |
 
 `Avalanche nnue-speed` prints the paths of the build it is. Every path computes exact integers, so
 the result does not depend on the target:
@@ -261,6 +267,8 @@ the result does not depend on the target:
 - **Pairwise, `umull`.** `sqxtun` narrows with saturation to 0..255, which is the clamp. `umull` is
   the u8 x u8 -> u16 product `p`, and `(p + 256) >> 9 = ((p >> 8) + 1) >> 1`: the high bytes of two
   vectors of products with one `uzp2`, then one rounding halving of 16 bytes.
+- **Pairwise on wasm.** `i16x8.q15mulr_sat_s` is `pmulhrsw` (it differs only for
+  -32768 x -32768, which cannot occur), and the narrowing has no lanes to put back in order.
 - **Non-zero blocks.** Eight blocks (32 activations) give an 8-bit mask. A table of 256 entries
   holds, for each mask, the positions of its set bits packed in a u64, and their number. The search
   adds the index of the first block of the group to all eight bytes, writes the u64 at the end of
@@ -274,6 +282,19 @@ the result does not depend on the target:
   go round-robin into independent partial sums (8 vectors with `vpdpbusd`, 16 with `sdot`), added
   at the end. `pmaddubsw` + `pmaddwd` cannot saturate with activations up to 127 (see "Integer
   formula") and feed a plain addition, so one sum is enough there.
+- **L1, `extadd`.** Wasm has no byte dot product. A product of an activation and a weight fits an
+  i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes, and
+  `extadd_pairwise` adds neighbours into i32. That leaves each output as two i32, which are
+  accumulated apart and added once, after the last block, because adding them needs a shuffle.
+- **L2, `pairs`.** `pmaddwd` multiplies i16 lanes and adds neighbours into i32, so it does two of
+  the 32 x 32 products per i32 lane where an i32 multiply does one (and `pmulld` is two
+  micro-operations on Intel). An activation is at most 8192 and a weight at most 2047, so both fit
+  an i16 and the sum of two products fits an i32. L1 output `j` contributes two L2 inputs, its
+  CReLU value and its square, so `Prepared` stores their weights side by side for each L2 output,
+  and one `pmaddwd` with the pair `(value, square)` in every lane adds both. AArch64 gains nothing
+  from it (`smlal` handles as many lanes as `mla`), and keeps the i32 multiplies. About 12 of the
+  16 L1 outputs are non-zero on the bench positions, too many for skipping the zeros to pay for
+  the unpredictable loop.
 
 ### Performance
 
@@ -312,11 +333,50 @@ dense network timed the way the first line is, before and after:
 - **Pairwise, 64 ns to 48 ns.** It clamped both factors, multiplied, added and shifted in 16 bits.
 - L2 and L3 are unchanged, 26 to 29 ns.
 
+A later change (the `pairs` L2 and the wasm paths) left the M4 where it was, since AArch64 keeps
+the `wide` L2: 150 ns per evaluation on the default net (84.6 of 256 blocks non-zero; pairwise
+33 ns, L1 63 ns of which the search 17 ns, L2 and L3 29 ns). It is for x86 and wasm. AMD EPYC 9R14
+(Zen 4), default net (Dianguang-3), three alternating runs, node counts and checksums equal:
+
+| Build | `nnue-speed` | L2 and L3 | `bench` |
+|---|---|---|---|
+| native (512 bits, `dpbusd`) | 145.8 -> 128.1 ns | 34.1 -> 18.5 ns | 1.548M -> 1.587M nps (+2.5%) |
+| `-Dcpu=haswell` (256 bits, `maddubs`) | 168.0 -> 144.6 ns | 34.9 -> 19.4 ns | 1.445M -> 1.524M nps (+5.5%) |
+
+The other stages did not move: pairwise 32 ns at 512 bits and 28 ns at 256, L1 70 and 80 ns, of
+which the search 20 and 25 ns. Zen 4 runs a 512-bit operation as two of 256, which is why the
+pairwise step gains nothing from the wider vectors there. Wasm under Node 26 on the M4: `bench`
+1.00M -> 1.47M nps (+47%).
+
+On the M4 the head is at what the core can do in 128-bit vectors: the pairwise step and the L1
+products are limited by loads per cycle, L2 by the multiplier.
+
 Tried on the M4 and left out: a loop over all blocks without the index list for dense inputs
 (6 ns of 240 on the dense networks, nothing below about 200 non-zero blocks), and partial sums in
-L2 (no gain: 256 i32 multiply-accumulates at two per cycle are the limit). Not tried, for a
-machine that can run them: `vpcompressb` instead of the table for the index list, and `pmaddwd`
-for L2 on Intel, where `pmulld` is two micro-operations.
+L2 (no gain: 256 i32 multiply-accumulates at two per cycle are the limit). Also left out, with
+the measurement that decided it:
+
+- **Skipping zero L1 outputs in L2.** 12.4 of 16 are non-zero on the bench positions; the loop
+  over the non-zero ones was slower than the full one (44 ns against 34 for L2 and L3).
+- **Lazy accumulator updates.** Of the 15.8M accumulator frames of a `bench` run, 14.9M are
+  evaluated or have an evaluated descendant, so at most 5% of the updates could be skipped.
+- **Prefetching the weight rows of an accumulator update.** 1.5% slower in `bench`: the rows of a
+  move are read sequentially already.
+- **Reordering the feature-transformer outputs so that active ones share blocks.** It changes no
+  evaluation. Sorting by how often each is non-zero (measured on the evaluations of a `bench` run,
+  checked on the other half) lowers the non-zero blocks from 85.3 to 77.5, a greedy grouping by
+  co-activation to 82.7: about 4 ns of 150, for a second version of every network file.
+
+- **A search step of 16 blocks** (one mask, two table lookups; one `vptestmd` with AVX-512, one
+  `bitmask` on wasm after narrowing). The search alone was 4 ns slower on an EPYC 9R14 at 256 and
+  at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing in the
+  whole L1 under wasm.
+
+- **A last L1 round without a branch.** The blocks left when fewer than a round of chains remain
+  were added with zeroed inputs instead of a branch per chain: +0.1% in `bench` on the EPYC 9R14
+  (range 0.0 to 0.2%, seven runs), nothing on the M4.
+
+Not tried: `vpcompressb` instead of the table for the index list.
 
 ### What has been executed
 
@@ -332,21 +392,22 @@ zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi "
 On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_64-macos` and
 `-Dcpu=haswell` (AVX2), `-Dcpu=nehalem` (SSSE3) or `-Dcpu=x86_64` (portable).
 
-| Build | Pairwise | L1 | Executed |
-|---|---|---|---|
-| Apple Silicon | `umull` | `sdot` | yes, natively |
-| AArch64 without dotprod (`-Dcpu=apple_m4-dotprod`) | `umull` | `portable` | yes, natively |
-| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | yes, under Rosetta |
-| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | yes, under Rosetta |
-| x86 SSE2 (`x86_64`); Debug | `portable` | `portable` | yes |
-| x86 AVX-512BW without VNNI (`-Dcpu=znver5-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | yes, on an EPYC 9R14 (Zen 4) |
-| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | yes, natively on an EPYC 9R14 |
-| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | yes, on an EPYC 9R14 |
-| x86 at 256 bits with AVX-VNNI (`alderlake`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | **no** |
-| wasm simd128 | `portable` | `portable` | yes, by the `web/` tests (`bench` equal to native) |
+| Build | Pairwise | L1 | L2 | Executed |
+|---|---|---|---|---|
+| Apple Silicon | `umull` | `sdot` | `wide` | yes, natively |
+| AArch64 without dotprod (`-Dcpu=apple_m4-dotprod`) | `umull` | `portable` | `wide` | yes, natively |
+| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on an EPYC 9R14 (Zen 4) |
+| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
+| x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
+| Debug | `portable` | `portable` | `wide` | yes |
+| x86 AVX-512BW without VNNI (`-Dcpu=znver4-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | `pairs`, 512 bits | yes, on an EPYC 9R14 |
+| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | `pairs`, 512 bits | yes, natively on an EPYC 9R14 |
+| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`, `x86_64_v4`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | `pairs`, 256 bits | yes, on an EPYC 9R14 |
+| x86 at 256 bits with AVX-VNNI (`alderlake`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | **no** |
+| wasm simd128 | `mulhrs` | `extadd` | `pairs` | yes, by the `web/` tests (`bench` equal to native) |
 
-The EPYC 9R14 runs were at commit 37fa538, with random weights and with two trained multi-layer
-nets as `-Dnet`.
+The EPYC 9R14 runs were repeated when the `pairs` L2 was added, with random weights and the default net
+embedded.
 
 **The VEX-encoded `vpdpbusd` of AVX-VNNI has not been executed.** It is what a 256-bit build
 without AVX-512 uses (Alder Lake and later Intel desktop CPUs with `-Dcpu=native`). Zen 4 has no
