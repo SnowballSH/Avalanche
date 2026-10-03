@@ -281,15 +281,18 @@ the result does not depend on the target:
   comparisons of their activations give one mask bit per block, and `vpcompressb` packs the bytes
   of a vector of block indices that the mask selects at the front. The whole vector is stored at
   the end of the list. Four steps at 512 bits, against 32 table lookups. The register form with
-  zeroing is used; the form that writes to memory is slow on Zen 4.
+  zeroing is used; the form that writes to memory is slow on Zen 4. In a 256-bit build LLVM still
+  compares in 512-bit registers when the target has them, as it does in the accumulator updates
+  and the other `@Vector` code wider than 256 bits: the width only fixes which intrinsics run.
 - **L1.** The weights of a block are 64 adjacent bytes, the 16 outputs' weights for its four
   inputs, so a non-zero block is one broadcast of its four activations and 64 byte products.
   `vpdpbusd` and `sdot` add the products into the i32 sums; they take several cycles, so the blocks
   go round-robin into independent partial sums (8 vectors with `vpdpbusd`, 16 with `sdot`), added
   at the end. The indices of a round of blocks are read from the list with one load and taken
   apart with shifts: the loop is limited by loads (the index, the activations and the weights of
-  every block), on the M4 and on Zen 4 alike. `pmaddubsw` + `pmaddwd` cannot saturate with activations up to 127 (see "Integer
-  formula") and feed a plain addition, so one sum is enough there.
+  every block), on the M4 and on Zen 4 alike. `pmaddubsw` + `pmaddwd` cannot saturate with
+  activations up to 127 (see "Integer formula") and feed a plain addition, so one sum is enough
+  there.
 - **L1, `extadd`.** Wasm has no byte dot product. A product of an activation and a weight fits an
   i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes, and
   `extadd_pairwise` adds neighbours into i32. That leaves each output as two i32, which are
