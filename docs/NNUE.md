@@ -300,6 +300,8 @@ the result does not depend on the target:
   i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes, and
   `extadd_pairwise` adds neighbours into i32. That leaves each output as two i32, which are
   accumulated apart and added once, after the last block, because adding them needs a shuffle.
+  The blocks are taken two at a time: the products of two blocks still fit an i16 when added
+  (`2 * 127 * 128`), so one widening addition serves both (+1.9% in `bench` under Node).
 - **L2, `pairs`.** `pmaddwd` multiplies i16 lanes and adds neighbours into i32, so it does two of
   the 32 x 32 products per i32 lane where an i32 multiply does one (and `pmulld` is two
   micro-operations on Intel). An activation is at most 8192 and a weight at most 2047, so both fit

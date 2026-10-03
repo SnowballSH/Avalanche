@@ -467,6 +467,18 @@ inline fn output_sums(sum: DotSum) DotI32 {
     return halves_of[0] + halves_of[1];
 }
 
+/// The i16 products of one half of a vector of activations and weights.
+inline fn byte_products(inputs: DotI8, block_weights: DotI8, comptime half: usize) HalfI16 {
+    const half_inputs: @Vector(HALF_LANES, i8) = std.simd.extract(inputs, half * HALF_LANES, HALF_LANES);
+    const half_weights: @Vector(HALF_LANES, i8) = std.simd.extract(block_weights, half * HALF_LANES, HALF_LANES);
+    return @as(HalfI16, half_inputs) *% @as(HalfI16, half_weights);
+}
+
+/// The sums of adjacent i16 lanes, as i32.
+inline fn widened_pairs(products: HalfI16) DotI32 {
+    return @extern(*const fn (HalfI16) callconv(.c) DotI32, .{ .name = "llvm.wasm.extadd.pairwise.signed.v4i32" }).*(products);
+}
+
 /// `sum[i] + dot(inputs[4i..4i+4], block_weights[4i..4i+4])`. `inputs` holds
 /// activations, 0..127. No intrinsic path can saturate in that range, so
 /// every path gives the exact sum.
@@ -500,13 +512,8 @@ inline fn dot_accumulate(sum: DotSum, inputs: DotI8, block_weights: DotI8) DotSu
             // Wasm has no byte dot product. A product fits an i16, and the
             // pairwise widening addition leaves two i32 per output; they
             // are kept apart until `output_sums`, which needs a shuffle.
-            const extadd = @extern(*const fn (HalfI16) callconv(.c) DotI32, .{ .name = "llvm.wasm.extadd.pairwise.signed.v4i32" });
             var result = sum;
-            inline for (&result, 0..) |*pair_sums, half| {
-                const half_inputs: @Vector(HALF_LANES, i8) = std.simd.extract(inputs, half * HALF_LANES, HALF_LANES);
-                const half_weights: @Vector(HALF_LANES, i8) = std.simd.extract(block_weights, half * HALF_LANES, HALF_LANES);
-                pair_sums.* += extadd.*(@as(HalfI16, half_inputs) *% @as(HalfI16, half_weights));
-            }
+            inline for (&result, 0..) |*pair_sums, half| pair_sums.* += widened_pairs(byte_products(inputs, block_weights, half));
             return result;
         },
         .portable => {
@@ -546,8 +553,30 @@ inline fn add_indexed_block(sums: *L1Sums, activations: *align(64) const Activat
     add_block(sums, @splat(std.mem.readInt(u32, activations[block * 4 ..][0..4], .little)), &l1_weights[block]);
 }
 
+/// Two blocks at once on the `extadd` path: the products of both fit an i16
+/// together (2 * 127 * 128), so one widening addition serves the two.
+inline fn add_block_pair(sums: *L1Sums, activations: *align(64) const Activations, l1_weights: *const [L1_BLOCKS]BlockWeights, blocks: [2]usize) void {
+    @setEvalBranchQuota(10_000);
+    var inputs: [2]DotI8 = undefined;
+    inline for (&inputs, blocks) |*lanes, block| {
+        lanes.* = @bitCast(@as(DotU32, @splat(std.mem.readInt(u32, activations[block * 4 ..][0..4], .little))));
+    }
+    inline for (sums, 0..) |*sum, chunk| {
+        inline for (sum, 0..) |*pair_sums, half| {
+            var products: HalfI16 = @splat(0);
+            inline for (inputs, blocks) |lanes, block| {
+                products +%= byte_products(lanes, l1_weights[block][chunk * VECTOR_BYTES ..][0..VECTOR_BYTES].*, half);
+            }
+            pair_sums.* += widened_pairs(products);
+        }
+    }
+}
+
 fn add_listed_blocks(chains: *L1Chains, activations: *align(64) const Activations, l1_weights: *const [L1_BLOCKS]BlockWeights, indices: []const u8) void {
     var i: usize = 0;
+    if (L1_PATH == .extadd) {
+        while (i + 2 <= indices.len) : (i += 2) add_block_pair(&chains[0], activations, l1_weights, .{ indices[i], indices[i + 1] });
+    }
     while (i + L1_CHAINS <= indices.len) : (i += L1_CHAINS) {
         // One load for the indices of a round: loads are what limits it.
         const round = std.mem.readInt(std.meta.Int(.unsigned, 8 * L1_CHAINS), indices[i..][0..L1_CHAINS], .little);
