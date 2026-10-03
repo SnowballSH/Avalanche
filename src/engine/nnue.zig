@@ -8,6 +8,10 @@ const position = @import("../chess/position.zig");
 const FeaturePair = struct {
     white: usize,
     black: usize,
+
+    inline fn row(self: FeaturePair, comptime color: types.Color) usize {
+        return if (color == types.Color.White) self.white else self.black;
+    }
 };
 
 const HALF_BUCKET_LAYOUT: [32]usize = .{
@@ -121,66 +125,33 @@ fn feature_index_pov(
 // head picks its own vector width for inference.
 const UPDATE_LANES: usize = 32;
 
+const Perspective = [weights.HIDDEN_SIZE]i16;
+
+/// `dst = src + the added feature rows - the removed ones`. The arithmetic
+/// wraps: only the result has to fit, not every partial sum.
+fn apply_rows(comptime added: usize, comptime removed: usize, dst: *align(64) Perspective, src: *align(64) const Perspective, add_rows: [added]usize, sub_rows: [removed]usize) void {
+    const V = @Vector(UPDATE_LANES, i16);
+    const m1 = &weights.MODEL.layer_1;
+    var i: usize = 0;
+    while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
+        var lanes: V = src[i..][0..UPDATE_LANES].*;
+        inline for (add_rows) |row| lanes +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
+        inline for (sub_rows) |row| lanes -%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
+        dst[i..][0..UPDATE_LANES].* = lanes;
+    }
+}
+
 pub const Accumulator = struct {
-    white: [weights.HIDDEN_SIZE]i16 align(64),
-    black: [weights.HIDDEN_SIZE]i16 align(64),
+    white: Perspective align(64),
+    black: Perspective align(64),
 
     pub inline fn clear(self: *Accumulator) void {
         self.white = weights.MODEL.layer_1_bias;
         self.black = weights.MODEL.layer_1_bias;
     }
 
-    fn update_weights(self: *Accumulator, src: *const Accumulator, comptime on: bool, data: FeaturePair) void {
-        const V = @Vector(UPDATE_LANES, i16);
-        const m1 = &weights.MODEL.layer_1;
-        var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-            const ww: V = src.white[i..][0..UPDATE_LANES].*;
-            const wb: V = src.black[i..][0..UPDATE_LANES].*;
-            const mw: V = m1[data.white + i ..][0..UPDATE_LANES].*;
-            const mb: V = m1[data.black + i ..][0..UPDATE_LANES].*;
-            if (on) {
-                self.white[i..][0..UPDATE_LANES].* = ww + mw;
-                self.black[i..][0..UPDATE_LANES].* = wb + mb;
-            } else {
-                self.white[i..][0..UPDATE_LANES].* = ww - mw;
-                self.black[i..][0..UPDATE_LANES].* = wb - mb;
-            }
-        }
-    }
-
-    fn exchange_weights(self: *Accumulator, src: *const Accumulator, from: FeaturePair, to: FeaturePair) void {
-        const V = @Vector(UPDATE_LANES, i16);
-        const m1 = &weights.MODEL.layer_1;
-        var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-            const fw: V = m1[from.white + i ..][0..UPDATE_LANES].*;
-            const tw: V = m1[to.white + i ..][0..UPDATE_LANES].*;
-            const fb: V = m1[from.black + i ..][0..UPDATE_LANES].*;
-            const tb: V = m1[to.black + i ..][0..UPDATE_LANES].*;
-            const ww: V = src.white[i..][0..UPDATE_LANES].*;
-            const wb: V = src.black[i..][0..UPDATE_LANES].*;
-            self.white[i..][0..UPDATE_LANES].* = ww + tw - fw;
-            self.black[i..][0..UPDATE_LANES].* = wb + tb - fb;
-        }
-    }
-
-    fn capture_weights(self: *Accumulator, src: *const Accumulator, captured: FeaturePair, from: FeaturePair, to: FeaturePair) void {
-        const V = @Vector(UPDATE_LANES, i16);
-        const m1 = &weights.MODEL.layer_1;
-        var i: usize = 0;
-        while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-            const cw: V = m1[captured.white + i ..][0..UPDATE_LANES].*;
-            const fw: V = m1[from.white + i ..][0..UPDATE_LANES].*;
-            const tw: V = m1[to.white + i ..][0..UPDATE_LANES].*;
-            const cb: V = m1[captured.black + i ..][0..UPDATE_LANES].*;
-            const fb: V = m1[from.black + i ..][0..UPDATE_LANES].*;
-            const tb: V = m1[to.black + i ..][0..UPDATE_LANES].*;
-            const ww: V = src.white[i..][0..UPDATE_LANES].*;
-            const wb: V = src.black[i..][0..UPDATE_LANES].*;
-            self.white[i..][0..UPDATE_LANES].* = ww - cw - fw + tw;
-            self.black[i..][0..UPDATE_LANES].* = wb - cb - fb + tb;
-        }
+    inline fn perspective(self: anytype, comptime color: types.Color) @TypeOf(&self.white) {
+        return if (color == types.Color.White) &self.white else &self.black;
     }
 };
 
@@ -217,6 +188,9 @@ pub const NNUE = struct {
     piece_count: u8 = 0,
     king_state: [2]KingBucketState = .{ .{}, .{} },
     king_state_ready: bool = weights.NUM_INPUT_BUCKETS == 1,
+    /// Set for a perspective whose king left its bucket in the move being
+    /// played: `reconcile_king_buckets` rebuilds it, so updates skip it.
+    refresh_pending: [2]bool = .{ false, false },
     finny: FinnyTable = if (weights.NUM_INPUT_BUCKETS > 1) undefined else {},
     finny_ready: bool = false,
 
@@ -280,6 +254,28 @@ pub const NNUE = struct {
         return nnue_index_buckets(piece, sq, w, b);
     }
 
+    /// Applies one piece change of the move being played to both perspectives.
+    fn update(self: *NNUE, comptime added: usize, comptime removed: usize, adds: [added]FeaturePair, subs: [removed]FeaturePair) void {
+        const t = self.update_target();
+        inline for (.{ types.Color.White, types.Color.Black }) |color| {
+            if (!self.refresh_pending[@intFromEnum(color)]) {
+                var add_rows: [added]usize = undefined;
+                var sub_rows: [removed]usize = undefined;
+                inline for (&add_rows, adds) |*row, feature| row.* = feature.row(color);
+                inline for (&sub_rows, subs) |*row, feature| row.* = feature.row(color);
+                apply_rows(added, removed, t.dst.perspective(color), t.src.perspective(color), add_rows, sub_rows);
+            }
+        }
+    }
+
+    inline fn note_king_move(self: *NNUE, pc: types.Piece, to: types.Square) void {
+        if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
+        if (pc.piece_type() != types.PieceType.King) return;
+        const color = @intFromEnum(pc.color());
+        const king_pov = if (pc.color() == types.Color.White) to.index() else to.index() ^ 56;
+        if (!self.king_state[color].same_slot(KingBucketState.from_king(king_pov))) self.refresh_pending[color] = true;
+    }
+
     pub inline fn toggle(self: *NNUE, comptime on: bool, piece: types.Piece, sq: types.Square) void {
         if (on) {
             self.piece_count += 1;
@@ -290,19 +286,23 @@ pub const NNUE = struct {
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
             if (!self.king_state_ready) return;
         }
-        const t = self.update_target();
-        t.dst.update_weights(t.src, on, self.index_cached(piece, sq));
+        const feature = self.index_cached(piece, sq);
+        if (on) self.update(1, 0, .{feature}, .{}) else self.update(0, 1, .{}, .{feature});
     }
 
     pub fn refresh_accumulator(self: *NNUE, pos: *position.Position) void {
         self.frame_written = true;
+        self.refresh_pending = .{ false, false };
         self.piece_count = @intCast(types.popcount_usize(pos.all_all_pieces()));
         if (comptime weights.NUM_INPUT_BUCKETS == 1) {
             const acc = self.current();
             acc.clear();
             for (pos.mailbox, 0..) |pc, i| {
                 if (pc == types.Piece.NO_PIECE) continue;
-                acc.update_weights(acc, true, nnue_index_flat(pc, @as(types.Square, @enumFromInt(i))));
+                const feature = nnue_index_flat(pc, @as(types.Square, @enumFromInt(i)));
+                inline for (.{ types.Color.White, types.Color.Black }) |color| {
+                    apply_rows(1, 0, acc.perspective(color), acc.perspective(color), .{feature.row(color)}, .{});
+                }
             }
         } else {
             self.ensure_finny();
@@ -342,6 +342,7 @@ pub const NNUE = struct {
             self.refresh_perspective(pos, color);
             self.king_state[@intFromEnum(color)] = now;
         }
+        self.refresh_pending[@intFromEnum(color)] = false;
     }
 
     fn refresh_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
@@ -382,45 +383,17 @@ pub const NNUE = struct {
             }
         }
 
+        // One pass brings the cached accumulator up to date and copies it.
         const V = @Vector(UPDATE_LANES, i16);
         const m1 = &weights.MODEL.layer_1;
-        const min_n = @min(add_n, sub_n);
-        var n: usize = 0;
-        while (n < min_n) : (n += 1) {
-            const a = adds[n];
-            const s = subs[n];
-            var i: usize = 0;
-            while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-                const av: V = m1[a + i ..][0..UPDATE_LANES].*;
-                const sv: V = m1[s + i ..][0..UPDATE_LANES].*;
-                const dv: V = entry.acc[i..][0..UPDATE_LANES].*;
-                entry.acc[i..][0..UPDATE_LANES].* = dv + av - sv;
-            }
-        }
-        while (n < add_n) : (n += 1) {
-            const a = adds[n];
-            var i: usize = 0;
-            while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-                const av: V = m1[a + i ..][0..UPDATE_LANES].*;
-                const dv: V = entry.acc[i..][0..UPDATE_LANES].*;
-                entry.acc[i..][0..UPDATE_LANES].* = dv + av;
-            }
-        }
-        n = min_n;
-        while (n < sub_n) : (n += 1) {
-            const s = subs[n];
-            var i: usize = 0;
-            while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
-                const sv: V = m1[s + i ..][0..UPDATE_LANES].*;
-                const dv: V = entry.acc[i..][0..UPDATE_LANES].*;
-                entry.acc[i..][0..UPDATE_LANES].* = dv - sv;
-            }
-        }
-
-        if (perspective == types.Color.White) {
-            self.current().white = entry.acc;
-        } else {
-            self.current().black = entry.acc;
+        const dst = self.current().perspective(perspective);
+        var i: usize = 0;
+        while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
+            var lanes: V = entry.acc[i..][0..UPDATE_LANES].*;
+            for (adds[0..add_n]) |row| lanes +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
+            for (subs[0..sub_n]) |row| lanes -%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
+            entry.acc[i..][0..UPDATE_LANES].* = lanes;
+            dst[i..][0..UPDATE_LANES].* = lanes;
         }
     }
 
@@ -429,8 +402,8 @@ pub const NNUE = struct {
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
             if (!self.king_state_ready) return;
         }
-        const t = self.update_target();
-        t.dst.exchange_weights(t.src, self.index_cached(pc, from), self.index_cached(pc, to));
+        self.note_king_move(pc, to);
+        self.update(1, 1, .{self.index_cached(pc, to)}, .{self.index_cached(pc, from)});
     }
 
     pub inline fn capture(self: *NNUE, captured: types.Piece, pc: types.Piece, from: types.Square, to: types.Square) void {
@@ -439,8 +412,8 @@ pub const NNUE = struct {
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
             if (!self.king_state_ready) return;
         }
-        const t = self.update_target();
-        t.dst.capture_weights(t.src, self.index_cached(captured, to), self.index_cached(pc, from), self.index_cached(pc, to));
+        self.note_king_move(pc, to);
+        self.update(1, 2, .{self.index_cached(pc, to)}, .{ self.index_cached(pc, from), self.index_cached(captured, to) });
     }
 
     pub inline fn evaluate(self: *const NNUE, turn: types.Color, pos: *const position.Position) i32 {

@@ -34,6 +34,16 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
+**Accumulator updates** (`src/engine/nnue.zig`). A move writes its position's accumulators into
+the next frame of a stack, each perspective in one pass: the parent's values plus the rows of the
+features that appeared, minus those that disappeared (two rows for a quiet move, three for a
+capture). When a king moves to another bucket or crosses the mirror line, every feature of that
+king's perspective changes. That perspective is then not updated at all: it is rebuilt from the
+"Finny table", a cache with one accumulator per perspective, mirror side and bucket and the piece
+sets it was computed for. The rebuild adds and removes only the rows by which the position
+differs from the cached one, and writes the result to the cache and to the frame in the same pass.
+Wrapping arithmetic makes the order of the additions irrelevant.
+
 All integers in a file are little-endian. bullet pads a file with the bytes `bullet...` to a
 multiple of 64 bytes; the engine ignores the padding.
 

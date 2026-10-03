@@ -975,6 +975,36 @@ test "eval: nnue black castling OOO matches fresh" {
     try expect_nnue_matches_fresh(pos);
 }
 
+test "eval: nnue king capture into another bucket, then further moves, matches fresh" {
+    tables.init_all();
+    zobrist.init_zobrist();
+    weights.do_nnue();
+
+    const pos = try std.testing.allocator.create(position.Position);
+    defer std.testing.allocator.destroy(pos);
+    pos.init();
+    pos.set_fen("4k3/8/8/8/8/8/3p3P/4K3 w - -"[0..]);
+
+    const capture = types.Move.new_from_string(pos, "e1d2"[0..]);
+    pos.play_move(types.Color.White, capture);
+    try expect_nnue_matches_fresh(pos);
+
+    // The move after a king move updates both perspectives again.
+    const reply = types.Move.new_from_string(pos, "e8e7"[0..]);
+    pos.play_move(types.Color.Black, reply);
+    try expect_nnue_matches_fresh(pos);
+
+    const push = types.Move.new_from_string(pos, "h2h4"[0..]);
+    pos.play_move(types.Color.White, push);
+    try expect_nnue_matches_fresh(pos);
+
+    pos.undo_move(types.Color.White, push);
+    pos.undo_move(types.Color.Black, reply);
+    try expect_nnue_matches_fresh(pos);
+    pos.undo_move(types.Color.White, capture);
+    try expect_nnue_matches_fresh(pos);
+}
+
 test "eval: nnue finny revisit after leaving and returning to bucket" {
     tables.init_all();
     zobrist.init_zobrist();
