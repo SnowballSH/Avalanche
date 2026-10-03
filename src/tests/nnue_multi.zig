@@ -16,20 +16,36 @@ const expectError = std.testing.expectError;
 
 const Accumulators = struct { own: arch.Accumulator align(64), opp: arch.Accumulator align(64) };
 
-/// Accumulators that reach every branch of the pairwise step: values below 0
-/// and above 255, runs of zero products (whole blocks the sparse L1 skips),
-/// and the extremes.
-fn random_accumulators(random: std.Random, round: usize) Accumulators {
+/// How the values of `random_accumulators` are drawn.
+const Density = enum {
+    /// Around the clamp: below 0, inside 0..255 and above it.
+    mixed,
+    /// Mostly at or below zero: whole blocks the sparse L1 skips.
+    sparse,
+    /// Around the upper clamp.
+    high,
+    /// Any i16: nearly every activation is 0 or 255.
+    extreme,
+    /// Zero, with a few values at 255.
+    isolated,
+
+    fn of_round(round: usize) Density {
+        return @enumFromInt(round % @typeInfo(Density).@"enum".fields.len);
+    }
+};
+
+/// Accumulators that reach every branch of the pairwise step. Some rounds
+/// have a side of all zeros or of all 255.
+fn random_accumulators(random: std.Random, density: Density, round: usize) Accumulators {
     var result: Accumulators = undefined;
-    const density = round % 5;
     for ([_]*arch.Accumulator{ &result.own, &result.opp }) |acc| {
         for (acc) |*value| {
             value.* = switch (density) {
-                0 => random.intRangeAtMost(i16, -300, 600),
-                1 => if (random.uintLessThan(u8, 8) == 0) random.intRangeAtMost(i16, 0, 255) else random.intRangeAtMost(i16, -200, 0),
-                2 => random.intRangeAtMost(i16, 200, 300),
-                3 => random.int(i16),
-                else => if (random.uintLessThan(u8, 40) == 0) 255 else 0,
+                .mixed => random.intRangeAtMost(i16, -300, 600),
+                .sparse => if (random.uintLessThan(u8, 8) == 0) random.intRangeAtMost(i16, 0, 255) else random.intRangeAtMost(i16, -200, 0),
+                .high => random.intRangeAtMost(i16, 200, 300),
+                .extreme => random.int(i16),
+                .isolated => if (random.uintLessThan(u8, 40) == 0) 255 else 0,
             };
         }
     }
@@ -55,7 +71,7 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
         head_multi.fill_random(head, random, range);
         try head_multi.validate(std.mem.asBytes(head));
         for (0..200) |round| {
-            const acc = random_accumulators(random, round);
+            const acc = random_accumulators(random, .of_round(round), round);
             const bucket = round % arch.OUTPUT_SIZE;
             const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, bucket);
             try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
@@ -130,7 +146,7 @@ test "multi head: the SIMD pairwise products equal the scalar ones" {
     }
 
     var prng = std.Random.DefaultPrng.init(0x5eed_0006);
-    for (0..50) |round| try expect_pairwise(&random_accumulators(prng.random(), round));
+    for (0..50) |round| try expect_pairwise(&random_accumulators(prng.random(), .of_round(round), round));
 }
 
 /// Activations with exactly the blocks of `blocks` non-zero.
@@ -250,6 +266,10 @@ test "multi head: saturated weights cannot overflow" {
     try expectError(head_multi.ValidateError.BiasOutOfRange, head_multi.validate(std.mem.asBytes(head)));
 }
 
+/// The densities with activations between the extremes, which the float
+/// comparisons need: an activation of 0 or 255 has no rounding error.
+const DENSE = [_]Density{ .mixed, .sparse, .high };
+
 test "multi head: the integer formula follows the float forward pass" {
     var prng = std.Random.DefaultPrng.init(0x5eed_0002);
     const random = prng.random();
@@ -267,8 +287,7 @@ test "multi head: the integer formula follows the float forward pass" {
         range.l1_weight = @as(i8, 12) << shift;
         head_multi.fill_random(head, random, range);
         for (0..250) |round| {
-            // Dense rounds only: `random.int(i16)` rounds are all 0 or 255.
-            const acc = random_accumulators(random, round % 3);
+            const acc = random_accumulators(random, DENSE[round % DENSE.len], round);
             const bucket = round % arch.OUTPUT_SIZE;
             const engine: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
             trainer.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .trainer));
@@ -332,7 +351,7 @@ test "multi head: small L1 weights are stored with a shift and stay close to the
         l1_weights[0][0] = max_weight;
 
         for (0..100) |round| {
-            const acc = random_accumulators(random, round % 3);
+            const acc = random_accumulators(random, DENSE[round % DENSE.len], round);
             // The float model: exact L1 weights on the engine's pairwise
             // products, so that only the weight rounding is measured.
             var z1 = bias;

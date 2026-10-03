@@ -210,7 +210,7 @@ comptime {
     if (build_options.head != .auto and has_magic(NNUE_SOURCE) != (HEAD == .multi)) {
         @compileError("-Dhead=" ++ @tagName(HEAD) ++ " does not match the embedded network, which is a " ++ (if (has_magic(NNUE_SOURCE)) "multi" else "single") ++ "-layer one; check -Dnet");
     }
-    if (HEAD == .multi and !header_supported(NNUE_SOURCE[0..HEADER_SIZE])) {
+    if (HEAD == .multi and NNUE_SOURCE.len >= HEADER_SIZE and !header_supported(NNUE_SOURCE[0..HEADER_SIZE])) {
         @compileError("The embedded multi-layer network's header does not match this build's architecture (" ++ ARCHITECTURE ++ "); see docs/NNUE.md");
     }
     if (NNUE_SOURCE.len != @sizeOf(NNUEWeights)) {

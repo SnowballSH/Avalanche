@@ -48,7 +48,7 @@ pub fn accumulate(net: anytype, pos: *const position.Position, perspective: type
         const side: usize = if (piece.color() == perspective) 0 else 384;
         const oriented = sq ^ rank_flip ^ @as(usize, if (mirrored) 7 else 0);
         const feature = bucket * 768 + side + 64 * @as(usize, piece.piece_type().index()) + oriented;
-        for (out, net.layer_1[feature * arch.HIDDEN_SIZE ..][0..arch.HIDDEN_SIZE]) |*sum, weight| sum.* += weight;
+        for (out, net.layer_1[feature * arch.HIDDEN_SIZE ..][0..arch.HIDDEN_SIZE]) |*sum, weight| sum.* +%= weight;
     }
 }
 
@@ -263,12 +263,23 @@ fn run_random(args: []const []const u8, out: *std.Io.Writer) !u8 {
         try out.writeAll(USAGE);
         return 1;
     }
-    const seed = if (args.len >= 2) std.fmt.parseInt(u64, args[1], 10) catch 1 else 1;
+    var seed: u64 = 1;
     var full = false;
     var activity: Activity = .dense;
-    for (args[@min(args.len, 2)..]) |flag| {
-        if (std.mem.eql(u8, flag, "full")) full = true;
-        if (std.mem.eql(u8, flag, "sparse")) activity = .sparse;
+    for (args[1..], 1..) |arg, index| {
+        if (std.mem.eql(u8, arg, "full")) {
+            full = true;
+        } else if (std.mem.eql(u8, arg, "sparse")) {
+            activity = .sparse;
+        } else if (index == 1) {
+            seed = std.fmt.parseInt(u64, arg, 10) catch {
+                try out.print("nnue-random: '{s}' is not a seed, 'full' or 'sparse'\n", .{arg});
+                return 1;
+            };
+        } else {
+            try out.print("nnue-random: unknown option '{s}'\n", .{arg});
+            return 1;
+        }
     }
     const net = try platform.allocator.create(Net);
     defer platform.allocator.destroy(net);
