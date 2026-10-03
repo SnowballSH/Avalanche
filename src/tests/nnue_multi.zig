@@ -69,10 +69,29 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
 
 test "multi head: the SIMD comparisons cover the intrinsic paths" {
     // Skipped, so that the summary shows it, when this build has a portable
-    // pairwise product or L1: Debug builds, wasm, and x86 without SSSE3. The
+    // pairwise product or L1: Debug builds and x86 without SSSE3. The
     // comparisons then say nothing about the instructions a release binary
     // runs; run them again with -Doptimize=ReleaseSafe.
     if (head_multi.L1_PATH == .portable or head_multi.PAIRWISE_PATH == .portable) return error.SkipZigTest;
+}
+
+test "multi head: the prepared L2 weights are the file's, in pairs" {
+    var prng = std.Random.DefaultPrng.init(0x5eed_0009);
+    const head = try std.testing.allocator.create(head_multi.Weights);
+    defer std.testing.allocator.destroy(head);
+    head_multi.fill_random(head, prng.random(), .{});
+
+    const prepared: head_multi.Prepared = .init(head, 5);
+    try expectEqual(@as(head_multi.L1Shift, 5), prepared.l1_shift);
+    for (0..arch.OUTPUT_SIZE) |bucket| {
+        for (0..head_multi.L1_SIZE) |j| {
+            for (0..head_multi.L2_SIZE) |o| {
+                const pair = prepared.l2_pairs[bucket][j][o];
+                try expectEqual(head.l2_weights[bucket][j][o], @as(i32, pair[0]));
+                try expectEqual(head.l2_weights[bucket][head_multi.L1_SIZE + j][o], @as(i32, pair[1]));
+            }
+        }
+    }
 }
 
 fn expect_pairwise(acc: *const Accumulators) !void {

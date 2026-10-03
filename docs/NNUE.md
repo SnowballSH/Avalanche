@@ -193,8 +193,9 @@ Version 1 had no L1 shift (it was version 2 with `e = 0` and a reserved field in
 network of it was ever used.
 
 The engine compares all 64 bytes, except the L1 shift, with the header of its own architecture,
-and requires the shift to be at most 7. It reads the shift from the header of the active network
-at every evaluation, so an embedded network and one loaded with `EvalFile` work the same way. A file that does not
+and requires the shift to be at most 7. Whenever a network becomes the active one, embedded or
+loaded with `EvalFile`, the engine derives `head_multi.Prepared` from it: the shift, and the L2
+weights in the order the `pairs` path below multiplies them. A file that does not
 start with `AVALNNUE` is not a multi-layer network: `WrongArchitecture` if it has exactly the size
 of a single-layer file, `NotANetwork` otherwise. One that starts with it but differs later is
 `UnsupportedHeader`. A single-layer file has no header: its first bytes are
@@ -240,15 +241,21 @@ random weights and accumulators, stage by stage and end to end.
 | Stage | Path | Target | Instructions |
 |---|---|---|---|
 | pairwise | `mulhrs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmulhrsw`, `packuswb` |
+| | | wasm simd128 | `i16x8.q15mulr_sat_s`, `i8x16.narrow_i16x8_u` |
 | | `umull` | AArch64 | `sqxtun`, `umull` |
-| | `portable` | anything else, wasm, Debug | `@Vector` u16 multiply |
-| non-zero blocks | | x86, wasm, Debug | compare to a bit mask, table lookup |
+| | `portable` | anything else, Debug | `@Vector` u16 multiply |
+| non-zero blocks | | x86, Debug | compare to a bit mask, table lookup |
 | | | AArch64 | `umaxp`, a multiplication for the mask, table lookup |
+| | | wasm simd128 | saturating narrowing, an i32 multiplication for the mask, table lookup |
 | L1 | `dpbusd` | AVX-512 VNNI (512 bits); AVX-512 VNNI + VL or AVX-VNNI (256 bits) | `vpdpbusd` |
 | | `maddubs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmaddubsw`, `pmaddwd` |
 | | `sdot` | AArch64 with dotprod | `sdot` |
-| | `portable` | anything else, wasm, Debug | widening `@Vector` multiply |
-| dual activation, L2, L3 | | all | `@Vector` i32 |
+| | `extadd` | wasm simd128 | `i16x8.mul`, `i32x4.extadd_pairwise_i16x8_s` |
+| | `portable` | anything else, Debug | widening `@Vector` multiply |
+| L2 | `pairs` | x86 (SSE2, AVX2 or AVX-512BW) | `pmaddwd` |
+| | | wasm simd128 | `i32x4.dot_i16x8_s` |
+| | `wide` | anything else, Debug | `@Vector` i32 multiply |
+| dual activation, L3 | | all | `@Vector` i32 |
 
 `Avalanche nnue-speed` prints the paths of the build it is. Every path computes exact integers, so
 the result does not depend on the target:
@@ -261,19 +268,37 @@ the result does not depend on the target:
 - **Pairwise, `umull`.** `sqxtun` narrows with saturation to 0..255, which is the clamp. `umull` is
   the u8 x u8 -> u16 product `p`, and `(p + 256) >> 9 = ((p >> 8) + 1) >> 1`: the high bytes of two
   vectors of products with one `uzp2`, then one rounding halving of 16 bytes.
-- **Non-zero blocks.** Eight blocks (32 activations) give an 8-bit mask. A table of 256 entries
-  holds, for each mask, the positions of its set bits packed in a u64, and their number. The search
-  adds the index of the first block of the group to all eight bytes, writes the u64 at the end of
-  the list and advances by the number: no branch depends on the activations. A block index fits a
-  byte because there are 256 blocks. AArch64 has no instruction that turns a comparison into a
-  mask: `umaxp` twice reduces 32 activations to the 8 block maxima in a u64, and a multiplication
-  gathers one bit of each byte.
+- **Pairwise on wasm.** `i16x8.q15mulr_sat_s` is `pmulhrsw` (it differs only for
+  -32768 x -32768, which cannot occur), and the narrowing has no lanes to put back in order.
+- **Non-zero blocks.** Sixteen blocks (64 activations) give a 16-bit mask per step, used as two
+  bytes. A table of 256 entries holds, for each byte, the positions of its set bits packed in a
+  u64, and their number. The search adds the index of the first block of the group to all eight
+  bytes, writes the u64 at the end of the list and advances by the number: no branch depends on
+  the activations. A block index fits a byte because there are 256 blocks. With AVX-512 the mask
+  is one `vptestmd`. AArch64 has no instruction that turns a comparison into a mask: `umaxp` twice
+  reduces 64 activations to the 16 block maxima, and a multiplication per u64 gathers one bit of
+  each byte. Wasm has `bitmask`, but a host without such an instruction (AArch64) runs it slowly:
+  a block, read as an i32, is positive, so two saturating narrowings leave a non-zero byte per
+  non-zero block, and an i32 multiplication, which every host has, gathers four flags at a time.
 - **L1.** The weights of a block are 64 adjacent bytes, the 16 outputs' weights for its four
   inputs, so a non-zero block is one broadcast of its four activations and 64 byte products.
   `vpdpbusd` and `sdot` add the products into the i32 sums; they take several cycles, so the blocks
   go round-robin into independent partial sums (8 vectors with `vpdpbusd`, 16 with `sdot`), added
   at the end. `pmaddubsw` + `pmaddwd` cannot saturate with activations up to 127 (see "Integer
   formula") and feed a plain addition, so one sum is enough there.
+- **L1, `extadd`.** Wasm has no byte dot product. A product of an activation and a weight fits an
+  i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes, and
+  `extadd_pairwise` adds neighbours into i32. That leaves each output as two i32, which are
+  accumulated apart and added once, after the last block, because adding them needs a shuffle.
+- **L2, `pairs`.** `pmaddwd` multiplies i16 lanes and adds neighbours into i32, so it does two of
+  the 32 x 32 products per i32 lane where an i32 multiply does one (and `pmulld` is two
+  micro-operations on Intel). An activation is at most 8192 and a weight at most 2047, so both fit
+  an i16 and the sum of two products fits an i32. L1 output `j` contributes two L2 inputs, its
+  CReLU value and its square, so `Prepared` stores their weights side by side for each L2 output,
+  and one `pmaddwd` with the pair `(value, square)` in every lane adds both. AArch64 gains nothing
+  from it (`smlal` handles as many lanes as `mla`), and keeps the i32 multiplies. About 12 of the
+  16 L1 outputs are non-zero on the bench positions, too many for skipping the zeros to pay for
+  the unpredictable loop.
 
 ### Performance
 

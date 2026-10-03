@@ -191,12 +191,15 @@ const DotI8 = @Vector(VECTOR_BYTES, i8);
 const DotI16 = @Vector(VECTOR_BYTES / 2, i16);
 const DotI32 = @Vector(VECTOR_BYTES / 4, i32);
 const DotU32 = @Vector(VECTOR_BYTES / 4, u32);
-/// Blocks examined per step of the non-zero block search: one table lookup.
+/// Blocks located per table lookup of the non-zero block search, and blocks
+/// examined per step: one mask, two lookups.
 const NNZ_BLOCKS = 8;
+const NNZ_STEP = 2 * NNZ_BLOCKS;
+const NnzMask = std.meta.Int(.unsigned, NNZ_STEP);
 
 comptime {
     std.debug.assert(PAIRS % VECTOR_BYTES == 0);
-    std.debug.assert(L1_BLOCKS % NNZ_BLOCKS == 0);
+    std.debug.assert(L1_BLOCKS % NNZ_STEP == 0);
     std.debug.assert(L1_SIZE * 4 == DOT_CHUNKS * VECTOR_BYTES);
 }
 
@@ -226,7 +229,7 @@ else
 
 /// Which L1 dot product this build compiled; the tests report when it is
 /// only the portable one.
-pub const L1_PATH: enum { dpbusd, maddubs, sdot, dot_i16, portable } = if (!intrinsics)
+pub const L1_PATH: enum { dpbusd, maddubs, sdot, extadd, portable } = if (!intrinsics)
     .portable
 else if (switch (VECTOR_BYTES) {
     64 => x86_has(.avx512vnni),
@@ -244,7 +247,7 @@ else if (switch (VECTOR_BYTES) {
 else if (builtin.cpu.arch == .aarch64 and VECTOR_BYTES == 16 and builtin.cpu.has(.aarch64, .dotprod))
     .sdot
 else if (wasm_simd and VECTOR_BYTES == 16)
-    .dot_i16
+    .extadd
 else
     .portable;
 
@@ -384,22 +387,45 @@ const SET_BITS: SetBits = blk: {
 };
 
 /// Bit i is set when block i, four activations from the lowest, is not zero.
-inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
-    if (comptime !(intrinsics and builtin.cpu.arch == .aarch64 and builtin.cpu.has(.aarch64, .neon))) {
-        const blocks: @Vector(NNZ_BLOCKS, u32) = @bitCast(activations.*);
-        return @bitCast(blocks != @as(@Vector(NNZ_BLOCKS, u32), @splat(0)));
-    }
-    // AArch64 has no instruction for the mask of a comparison. `umaxp` twice
-    // leaves the largest activation of each block in one byte of a u64, and
-    // the minimum with 1 makes it a flag.
+inline fn nonzero_mask(activations: *const [NNZ_STEP * 4]u8) NnzMask {
+    const Blocks = @Vector(NNZ_STEP, u32);
     const Bytes = @Vector(16, u8);
-    const umaxp = @extern(*const fn (Bytes, Bytes) callconv(.c) Bytes, .{ .name = "llvm.aarch64.neon.umaxp.v16i8" });
-    const pairs = umaxp.*(activations[0..16].*, activations[16..32].*);
-    // Typed, because @min would otherwise narrow the element type.
-    const flag_bytes: Bytes = @min(umaxp.*(pairs, pairs), @as(Bytes, @splat(1)));
-    const flags: u64 = @as(@Vector(2, u64), @bitCast(flag_bytes))[0];
-    // The multiplication moves bit 8i to bit 56 + i.
-    return @truncate((flags *% 0x0102_0408_1020_4080) >> 56);
+    if (comptime intrinsics and builtin.cpu.arch == .aarch64 and builtin.cpu.has(.aarch64, .neon)) {
+        // AArch64 has no instruction for the mask of a comparison. `umaxp`
+        // twice leaves the largest activation of each block in one byte,
+        // and the minimum with 1 makes it a flag.
+        const umaxp = @extern(*const fn (Bytes, Bytes) callconv(.c) Bytes, .{ .name = "llvm.aarch64.neon.umaxp.v16i8" });
+        const low = umaxp.*(activations[0..16].*, activations[16..32].*);
+        const high = umaxp.*(activations[32..48].*, activations[48..64].*);
+        // Typed, because @min would otherwise narrow the element type.
+        const flag_bytes: Bytes = @min(umaxp.*(low, high), @as(Bytes, @splat(1)));
+        const flags: [2]u64 = @bitCast(flag_bytes);
+        // The multiplication moves bit 8i to bit 56 + i.
+        const gather = 0x0102_0408_1020_4080;
+        return @truncate(((flags[0] *% gather) >> 56) | (((flags[1] *% gather) >> 56) << 8));
+    }
+    if (comptime intrinsics and wasm_simd) {
+        // No `bitmask`: it is slow on a host without such an instruction.
+        // A block is a positive i32, activations being at most 127, so the
+        // saturating narrowing to a byte keeps it non-zero.
+        const Quarter = @Vector(4, i32);
+        const narrow_i32 = @extern(*const fn (Quarter, Quarter) callconv(.c) @Vector(8, i16), .{ .name = "llvm.wasm.narrow.signed.v8i16.v4i32" });
+        const narrow_i16 = @extern(*const fn (@Vector(8, i16), @Vector(8, i16)) callconv(.c) Bytes, .{ .name = "llvm.wasm.narrow.signed.v16i8.v8i16" });
+        var blocks: [4]Quarter = undefined;
+        inline for (&blocks, 0..) |*quarter, i| quarter.* = @bitCast(activations[i * 16 ..][0..16].*);
+        const block_bytes = narrow_i16.*(narrow_i32.*(blocks[0], blocks[1]), narrow_i32.*(blocks[2], blocks[3]));
+        // Four flag bytes to four bits: the multiplication moves bit 8i to
+        // bit 24 + i, and i32 lanes multiply natively on every host.
+        // Typed, because @min would otherwise narrow the element type.
+        const flags: Bytes = @min(block_bytes, @as(Bytes, @splat(1)));
+        const flag_bytes: @Vector(4, u32) = @bitCast(flags);
+        const nibbles: [2]u64 = @bitCast((flag_bytes *% @as(@Vector(4, u32), @splat(0x0102_0408))) >> @splat(24));
+        const low = (nibbles[0] | nibbles[0] >> 28) & 0xff;
+        const high = (nibbles[1] | nibbles[1] >> 28) & 0xff;
+        return @truncate(low | high << 8);
+    }
+    const blocks: Blocks = @bitCast(activations.*);
+    return @bitCast(blocks != @as(Blocks, @splat(0)));
 }
 
 /// Indices of the four-input blocks with a non-zero activation, in ascending
@@ -407,14 +433,18 @@ inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
 pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *BlockIndices) usize {
     var count: usize = 0;
     var base: usize = 0;
-    while (base < L1_BLOCKS) : (base += NNZ_BLOCKS) {
-        const mask = nonzero_mask(activations[base * 4 ..][0 .. NNZ_BLOCKS * 4]);
+    while (base < L1_BLOCKS) : (base += NNZ_STEP) {
+        const mask = nonzero_mask(activations[base * 4 ..][0 .. NNZ_STEP * 4]);
         // A whole group is written whatever the mask holds and only the used
         // bytes are kept, so there is no data-dependent branch. After n blocks
         // `count <= n`, so the write stays inside `indices`. No byte carries:
-        // a position plus `base` is a block index.
-        std.mem.writeInt(IndexGroup, indices[count..][0..NNZ_BLOCKS], SET_BITS.positions[mask] + @as(IndexGroup, base) * BYTE_ONES, .little);
-        count += SET_BITS.counts[mask];
+        // a position plus the group's first block is a block index.
+        inline for (0..NNZ_STEP / NNZ_BLOCKS) |group| {
+            const group_mask: u8 = @truncate(mask >> (group * NNZ_BLOCKS));
+            const first = base + group * NNZ_BLOCKS;
+            std.mem.writeInt(IndexGroup, indices[count..][0..NNZ_BLOCKS], SET_BITS.positions[group_mask] + @as(IndexGroup, first) * BYTE_ONES, .little);
+            count += SET_BITS.counts[group_mask];
+        }
     }
     return count;
 }
@@ -428,10 +458,25 @@ inline fn pair_products(a: DotI16, b: DotI16) DotI32 {
     return @as(DotI32, a_parts[0]) * @as(DotI32, b_parts[0]) + @as(DotI32, a_parts[1]) * @as(DotI32, b_parts[1]);
 }
 
+/// The running sum of one vector of dot products: the i32 sums themselves,
+/// except on the `extadd` path, which keeps each one as two halves.
+const DotSum = if (L1_PATH == .extadd) [2]DotI32 else DotI32;
+
+inline fn add_sums(a: DotSum, b: DotSum) DotSum {
+    if (L1_PATH != .extadd) return a + b;
+    return .{ a[0] + b[0], a[1] + b[1] };
+}
+
+inline fn output_sums(sum: DotSum) DotI32 {
+    if (L1_PATH != .extadd) return sum;
+    const halves_of = std.simd.deinterlace(2, std.simd.join(sum[0], sum[1]));
+    return halves_of[0] + halves_of[1];
+}
+
 /// `sum[i] + dot(inputs[4i..4i+4], block_weights[4i..4i+4])`. `inputs` holds
 /// activations, 0..127. No intrinsic path can saturate in that range, so
 /// every path gives the exact sum.
-inline fn dot_accumulate(sum: DotI32, inputs: DotI8, block_weights: DotI8) DotI32 {
+inline fn dot_accumulate(sum: DotSum, inputs: DotI8, block_weights: DotI8) DotSum {
     switch (L1_PATH) {
         .dpbusd => {
             const name = switch (VECTOR_BYTES) {
@@ -457,16 +502,18 @@ inline fn dot_accumulate(sum: DotI32, inputs: DotI8, block_weights: DotI8) DotI3
             return sum + maddwd.*(maddubs.*(inputs, block_weights), @splat(1));
         },
         .sdot => return @extern(*const fn (DotI32, DotI8, DotI8) callconv(.c) DotI32, .{ .name = "llvm.aarch64.neon.sdot.v4i32.v16i8" }).*(sum, inputs, block_weights),
-        .dot_i16 => {
-            // Each i32 of a dot product is two of a block's four products.
-            var pair_sums: [2]DotI32 = undefined;
-            inline for (&pair_sums, 0..) |*pairs, half| {
+        .extadd => {
+            // Wasm has no byte dot product. A product fits an i16, and the
+            // pairwise widening addition leaves two i32 per output; they
+            // are kept apart until `output_sums`, which needs a shuffle.
+            const extadd = @extern(*const fn (HalfI16) callconv(.c) DotI32, .{ .name = "llvm.wasm.extadd.pairwise.signed.v4i32" });
+            var result = sum;
+            inline for (&result, 0..) |*pair_sums, half| {
                 const half_inputs: @Vector(HALF_LANES, i8) = std.simd.extract(inputs, half * HALF_LANES, HALF_LANES);
                 const half_weights: @Vector(HALF_LANES, i8) = std.simd.extract(block_weights, half * HALF_LANES, HALF_LANES);
-                pairs.* = pair_products(@as(HalfI16, half_inputs), @as(HalfI16, half_weights));
+                pair_sums.* += extadd.*(@as(HalfI16, half_inputs) *% @as(HalfI16, half_weights));
             }
-            const parts = std.simd.deinterlace(2, std.simd.join(pair_sums[0], pair_sums[1]));
-            return sum + parts[0] + parts[1];
+            return result;
         },
         .portable => {
             const Wide = @Vector(VECTOR_BYTES, i16);
@@ -479,7 +526,7 @@ inline fn dot_accumulate(sum: DotI32, inputs: DotI8, block_weights: DotI8) DotI3
 }
 
 /// The 16 L1 sums as `DOT_CHUNKS` vectors.
-const L1Sums = [DOT_CHUNKS]DotI32;
+const L1Sums = [DOT_CHUNKS]DotSum;
 pub const L1Vector = @Vector(L1_SIZE, i32);
 const BlockWeights = [L1_SIZE * 4]i8;
 
@@ -489,7 +536,7 @@ const BlockWeights = [L1_SIZE * 4]i8;
 const L1_CHAINS = switch (L1_PATH) {
     .dpbusd => 8 / DOT_CHUNKS,
     .sdot => 4,
-    .maddubs, .dot_i16, .portable => 1,
+    .maddubs, .extadd, .portable => 1,
 };
 const L1Chains = [L1_CHAINS]L1Sums;
 
@@ -525,14 +572,16 @@ pub fn l1_sums(head: *const Weights, activations: *align(64) const Activations, 
     const count = nonzero_blocks(activations, &indices);
 
     const l1_weights: *const [L1_BLOCKS]BlockWeights = @ptrCast(&head.l1_weights[bucket]);
-    var chains: L1Chains = @splat(@splat(@splat(0)));
-    chains[0] = @bitCast(head.l1_bias[bucket]);
+    var chains: L1Chains = std.mem.zeroes(L1Chains);
     add_listed_blocks(&chains, activations, l1_weights, indices[0..count]);
 
-    inline for (chains[1..]) |*chain| {
-        inline for (&chains[0], chain) |*total, part| total.* += part;
+    var outputs: [DOT_CHUNKS]DotI32 = undefined;
+    inline for (&outputs, 0..) |*output, chunk| {
+        var total = chains[0][chunk];
+        inline for (chains[1..]) |*chain| total = add_sums(total, chain[chunk]);
+        output.* = output_sums(total);
     }
-    return @bitCast(chains[0]);
+    return @as(L1Vector, @bitCast(outputs)) + @as(L1Vector, head.l1_bias[bucket]);
 }
 
 /// The 32 L2 sums as vectors of the dot product's width.
