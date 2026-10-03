@@ -383,6 +383,16 @@ const SET_BITS: SetBits = blk: {
     break :blk table;
 };
 
+/// The instruction that packs the selected bytes of a vector at its front,
+/// where the non-zero search uses it instead of the table.
+const NNZ_COMPRESS: ?[]const u8 = if (!intrinsics or !x86_has(.avx512vbmi2) or L1_BLOCKS % VECTOR_BYTES != 0)
+    null
+else switch (VECTOR_BYTES) {
+    64 => "llvm.x86.avx512.mask.compress.v64i8",
+    32 => if (x86_has(.avx512vl)) "llvm.x86.avx512.mask.compress.v32i8" else null,
+    else => null,
+};
+
 /// Bit i is set when block i, four activations from the lowest, is not zero.
 inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
     if (comptime !(intrinsics and builtin.cpu.arch == .aarch64 and builtin.cpu.has(.aarch64, .neon))) {
@@ -406,6 +416,23 @@ inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
 /// order; returns how many there are.
 pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *BlockIndices) usize {
     var count: usize = 0;
+    if (NNZ_COMPRESS) |vpcompressb| {
+        // One vector of block indices per step, of which `vpcompressb` keeps
+        // those of the non-zero blocks, packed at the front. The whole vector
+        // is stored; as below, `count` never passes the step's first block.
+        const compress = @extern(*const fn (PairU8, PairU8, @Vector(VECTOR_BYTES, bool)) callconv(.c) PairU8, .{ .name = vpcompressb });
+        const Blocks = @Vector(VECTOR_BYTES, u32);
+        var block_indices: PairU8 = std.simd.iota(u8, VECTOR_BYTES);
+        var first: usize = 0;
+        while (first < L1_BLOCKS) : (first += VECTOR_BYTES) {
+            const blocks: Blocks = @bitCast(activations[first * 4 ..][0 .. VECTOR_BYTES * 4].*);
+            const nonzero = blocks != @as(Blocks, @splat(0));
+            indices[count..][0..VECTOR_BYTES].* = compress.*(block_indices, @splat(0), nonzero);
+            count += std.simd.countTrues(nonzero);
+            block_indices +%= @splat(VECTOR_BYTES);
+        }
+        return count;
+    }
     var base: usize = 0;
     while (base < L1_BLOCKS) : (base += NNZ_BLOCKS) {
         const mask = nonzero_mask(activations[base * 4 ..][0 .. NNZ_BLOCKS * 4]);
