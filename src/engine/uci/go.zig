@@ -26,13 +26,13 @@ pub const GoCommand = struct {
             } else if (eql(token, "ponder")) {
                 cmd.ponder = true;
             } else if (eql(token, "wtime")) {
-                cmd.time[@intFromEnum(types.Color.White)] = parse_clock(tokens.next());
+                cmd.time[@backingInt(types.Color.White)] = parse_clock(tokens.next());
             } else if (eql(token, "btime")) {
-                cmd.time[@intFromEnum(types.Color.Black)] = parse_clock(tokens.next());
+                cmd.time[@backingInt(types.Color.Black)] = parse_clock(tokens.next());
             } else if (eql(token, "winc")) {
-                cmd.increment[@intFromEnum(types.Color.White)] = parse_number(u64, tokens.next());
+                cmd.increment[@backingInt(types.Color.White)] = parse_number(u64, tokens.next());
             } else if (eql(token, "binc")) {
-                cmd.increment[@intFromEnum(types.Color.Black)] = parse_number(u64, tokens.next());
+                cmd.increment[@backingInt(types.Color.Black)] = parse_number(u64, tokens.next());
             } else if (eql(token, "movestogo")) {
                 cmd.moves_to_go = parse_number(u64, tokens.next());
                 if (cmd.moves_to_go == 0) cmd.moves_to_go = null;
@@ -75,8 +75,8 @@ pub const TimeBudget = struct {
 pub fn allocate_time(cmd: *const GoCommand, turn: types.Color, overhead_ms: u64) TimeBudget {
     var budget = TimeBudget{ .ideal_ms = 1 << 60, .maximum_ms = 1 << 60, .managed = false };
 
-    if (cmd.time[@intFromEnum(turn)]) |remaining| {
-        const clock = clock_budget(remaining, cmd.increment[@intFromEnum(turn)] orelse 0, cmd.moves_to_go, overhead_ms);
+    if (cmd.time[@backingInt(turn)]) |remaining| {
+        const clock = clock_budget(remaining, cmd.increment[@backingInt(turn)] orelse 0, cmd.moves_to_go, overhead_ms);
         budget = .{ .ideal_ms = clock.ideal_ms, .maximum_ms = clock.maximum_ms, .managed = true };
     }
     if (cmd.move_time) |move_time| {

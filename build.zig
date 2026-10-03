@@ -1,65 +1,49 @@
 const std = @import("std");
 
-// Simple DateTime lib
-// https://gist.github.com/WoodyAtHome/3ef50b17f0fa2860ac52b97af12f8d15
-// Translated from German to English
-pub const DateTime = struct { day: u8, month: u8, year: u16, hour: u8, minute: u8, second: u8 };
+const Translator = @import("translate_c").Translator;
 
-pub fn timestamp2DateTime(timestamp: i64) DateTime {
-    const unixtime = @as(u64, @intCast(timestamp));
-    const SECONDS_PER_DAY = 86400;
-    const DAYS_IN_COMMON_YEAR = 365;
-    const DAYS_IN_4_YEARS = 1461;
-    const DAYS_IN_100_YEARS = 36524;
-    const DAYS_IN_400_YEARS = 146097;
-    const DAYS_ON_1970_01_01 = 719468;
+fn buildTimestamp(b: *std.Build) []const u8 {
+    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
+    defer io_threaded.deinit();
+    const now: std.time.epoch.EpochSeconds = .{ .secs = @intCast(std.Io.Clock.real.now(io_threaded.io()).toSeconds()) };
+    const year_day = now.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_seconds = now.getDaySeconds();
+    return b.fmt("Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2} UTC", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        day_seconds.getHoursIntoDay(),
+        day_seconds.getMinutesIntoHour(),
+    });
+}
 
-    var dayN: u64 = DAYS_ON_1970_01_01 + unixtime / SECONDS_PER_DAY;
-    const seconds_since_midnight: u64 = unixtime % SECONDS_PER_DAY;
-    var temp: u64 = 0;
+const Pyrrhic = struct {
+    bindings: *std.Build.Module,
+    include_path: std.Build.LazyPath,
+    source: std.Build.LazyPath,
 
-    temp = 4 * (dayN + DAYS_IN_100_YEARS + 1) / DAYS_IN_400_YEARS - 1;
-    var year = @as(u16, @intCast(100 * temp));
-    dayN -= DAYS_IN_100_YEARS * temp + temp / 4;
-
-    temp = 4 * (dayN + DAYS_IN_COMMON_YEAR + 1) / DAYS_IN_4_YEARS - 1;
-    year += @as(u16, @intCast(temp));
-    dayN -= DAYS_IN_COMMON_YEAR * temp + temp / 4;
-
-    var month = @as(u8, @intCast((5 * dayN + 2) / 153));
-    const day = @as(u8, @intCast(dayN - (@as(u64, @intCast(month)) * 153 + 2) / 5 + 1));
-
-    month += 3;
-    if (month > 12) {
-        month -= 12;
-        year += 1;
+    fn init(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) Pyrrhic {
+        const translator: Translator = .init(b.dependency("translate_c", .{}), .{
+            .c_source_file = b.path("src/pyrrhic/tbprobe.h"),
+            .target = target,
+            .optimize = optimize,
+        });
+        return .{
+            .bindings = translator.mod,
+            .include_path = b.path("src/pyrrhic"),
+            .source = b.path("src/pyrrhic/tbprobe.c"),
+        };
     }
 
-    const hour = @as(u8, @intCast(seconds_since_midnight / 3600));
-    const minute = @as(u8, @intCast(seconds_since_midnight % 3600 / 60));
-    const second = @as(u8, @intCast(seconds_since_midnight % 60));
-
-    return DateTime{ .day = day, .month = month, .year = year, .hour = hour, .minute = minute, .second = second };
-}
-// End of Simple DateTime lib
-
-fn dtToString(dt: DateTime, buf: []u8) []const u8 {
-    return std.fmt.bufPrint(buf, "Compiled at {:0>4}-{:0>2}-{:0>2}-{:0>2}:{:0>2} UTC", .{ dt.year, dt.month, dt.day, dt.hour, dt.minute }) catch unreachable;
-}
-
-fn addPyrrhic(b: *std.Build, compile: *std.Build.Step.Compile) void {
-    compile.root_module.addCSourceFile(.{
-        .file = b.path("src/pyrrhic/tbprobe.c"),
-        .flags = &.{ "-O3", "-std=gnu11" },
-    });
-    compile.root_module.addIncludePath(b.path("src/pyrrhic"));
-}
+    fn addTo(pyrrhic: Pyrrhic, module: *std.Build.Module) void {
+        module.addImport("pyrrhic", pyrrhic.bindings);
+        module.addIncludePath(pyrrhic.include_path);
+        module.addCSourceFile(.{ .file = pyrrhic.source, .flags = &.{ "-O3", "-std=gnu11" } });
+    }
+};
 
 pub fn build(b: *std.Build) void {
-    // Standard target options allows the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
     const targetName = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
@@ -79,18 +63,14 @@ pub fn build(b: *std.Build) void {
     const HeadOption = enum { auto, single, multi };
     const head = b.option(HeadOption, "head", "NNUE head: auto (from the -Dnet file, default), single or multi") orelse .auto;
 
-    // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
     const optimize = b.standardOptimizeOption(.{});
 
     const build_options = b.addOptions();
     // Dev builds identify themselves by build time; releases pass -Dversion=X.Y.Z.
-    var buf: [64]u8 = undefined;
-    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer io_threaded.deinit();
-    const now_seconds = std.Io.Clock.real.now(io_threaded.io()).toSeconds();
-    const version = b.option([]const u8, "version", "Release version reported by `uci` (default: build timestamp)") orelse
-        dtToString(timestamp2DateTime(now_seconds), &buf);
+    const version = b.option([]const u8, "version", "Release version reported by `uci` (default: build timestamp)") orelse version: {
+        b.graph.poisonCache();
+        break :version buildTimestamp(b);
+    };
     build_options.addOption([]const u8, "version", version);
     build_options.addOption(usize, "input_buckets", inputBuckets);
     build_options.addOption(HeadOption, "head", head);
@@ -110,15 +90,14 @@ pub fn build(b: *std.Build) void {
         .root_source_file = net,
     });
 
-    addPyrrhic(b, exe);
+    const pyrrhic: Pyrrhic = .init(b, target, optimize);
+    pyrrhic.addTo(exe.root_module);
 
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
 
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
@@ -139,7 +118,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = net,
     });
 
-    addPyrrhic(b, exe_tests);
+    pyrrhic.addTo(exe_tests.root_module);
 
     const wasm = b.addExecutable(.{
         .name = "avalanche",
@@ -153,7 +132,7 @@ pub fn build(b: *std.Build) void {
             }),
             .optimize = optimize,
             .single_threaded = true,
-            .strip = optimize != .Debug,
+            .strip = optimize != .debug,
         }),
     });
     wasm.entry = .disabled;

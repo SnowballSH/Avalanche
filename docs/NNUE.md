@@ -47,6 +47,14 @@ sets it was computed for. The rebuild adds and removes only the rows by which th
 differs from the cached one, and writes the result to the cache and to the frame in the same pass.
 Wrapping arithmetic makes the order of the additions irrelevant.
 
+**Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
+instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of
+unknown length that subtracts into a vector is unrolled into four partial sums that are then
+combined with the wrong sign, so the row-by-row form gives wrong accumulators in `fast` builds
+(`safe`, `small`, generic AArch64 and x86-64 builds are not affected). A loop of additions is
+compiled correctly. `zig build test -Doptimize=fast` covers it: the tests named "refresh" and
+"smp root" fail on an Apple CPU if the subtraction loop comes back.
+
 All integers in a file are little-endian. bullet pads a file with the bytes `bullet...` to a
 multiple of 64 bytes; the engine ignores the padding.
 
@@ -443,7 +451,7 @@ plain `zig build test` compares the scalar path with the *portable* paths only, 
 binary runs:
 
 ```
-zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi "
+zig build test -Doptimize=safe -Dtest-filter="multi "
 ```
 
 On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_64-macos` and
@@ -475,7 +483,7 @@ either. It differs from the tested EVEX path only in the encoding of that one in
 generated code was read. To close it, on an Alder Lake or Zen 5 machine:
 
 ```
-zig build test -Doptimize=ReleaseSafe -Dtest-filter="multi " -Dcpu=alderlake
+zig build test -Doptimize=safe -Dtest-filter="multi " -Dcpu=alderlake
 ```
 
 The `nnue-speed` checksum of a given network must be the same on every machine and path.
@@ -715,9 +723,9 @@ step is quantisation-aware training of L1, not more bits.
 Then build the engine from that file (`zig build --release=fast -Dnet=...`) and run
 
 ```
-zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="multi "
-zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="eval: "
-zig build test -Doptimize=ReleaseSafe -Dnet=<file> -Dtest-filter="options: EvalFile"
+zig build test -Doptimize=safe -Dnet=<file> -Dtest-filter="multi "
+zig build test -Doptimize=safe -Dnet=<file> -Dtest-filter="eval: "
+zig build test -Doptimize=safe -Dnet=<file> -Dtest-filter="options: EvalFile"
 ```
 
 which repeat the network tests of this document with the trained net embedded and the intrinsic
@@ -731,4 +739,4 @@ are passed explicitly, so its tests run in a build of either head; the single-la
 evaluated through the embedded network, so its tests need a single-layer build:
 `zig build test -Dnet=nets/dianguang-1.nnue`. `-Dtest-filter=<text>` runs the tests
 whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
-use `-Doptimize=ReleaseSafe` for those.
+use `-Doptimize=safe` for those.

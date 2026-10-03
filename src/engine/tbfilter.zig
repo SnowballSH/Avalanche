@@ -48,8 +48,8 @@ const Stats = struct {
     // Confusion matrix over decisively-probed positions:
     // matrix[recorded_result][tablebase_result], indices 0=loss,1=draw,2=win.
     matrix: [3][3]u64 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } },
-    probed_by_men: [MAX_MEN + 1]u64 = .{0} ** (MAX_MEN + 1),
-    dropped_by_men: [MAX_MEN + 1]u64 = .{0} ** (MAX_MEN + 1),
+    probed_by_men: [MAX_MEN + 1]u64 = @splat(0),
+    dropped_by_men: [MAX_MEN + 1]u64 = @splat(0),
 
     fn kept(self: Stats) u64 {
         return self.read - self.disagree;
@@ -372,7 +372,7 @@ fn printUsage() void {
 
 /// Loads the Syzygy tables at `tb_path` and returns the largest piece count they cover, or null after reporting why.
 pub fn load_tablebases(tb_path: []const u8) ?u32 {
-    const path_z = std.heap.page_allocator.dupeZ(u8, tb_path) catch {
+    const path_z = std.heap.page_allocator.dupeSentinel(u8, tb_path, 0) catch {
         std.debug.print("tbfilter: out of memory\n", .{});
         return null;
     };
@@ -545,7 +545,7 @@ pub fn run(args: []const []const u8) u8 {
     for (0..threads) |t| {
         const extra: u64 = if (t < remainder) 1 else 0;
         const count = base_records + extra;
-        const path = std.fmt.allocPrint(std.heap.page_allocator, "{s}.part{}.tmp", .{ cfg.output, t }) catch {
+        const path = std.heap.page_allocator.print("{s}.part{}.tmp", .{ cfg.output, t }) catch {
             std.debug.print("tbfilter: out of memory (part path)\n", .{});
             return 1;
         };

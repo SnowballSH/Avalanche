@@ -31,7 +31,7 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
         const ending = types.PieceType.King.index();
         while (pt <= ending) : (pt += 1) {
             last_piece_pts = SeeWeight[pt];
-            piece_bb = (if (pt == 0) (if (opp == types.Color.White) tables.get_pawn_attacks(types.Color.Black, to_sq) else tables.get_pawn_attacks(types.Color.White, to_sq)) else (tables.get_attacks(@as(types.PieceType, @enumFromInt(pt)), to_sq, blockers))) & defenders & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]);
+            piece_bb = (if (pt == 0) (if (opp == types.Color.White) tables.get_pawn_attacks(types.Color.Black, to_sq) else tables.get_pawn_attacks(types.Color.White, to_sq)) else (tables.get_attacks(@as(types.PieceType, @fromBackingInt(@intCast(pt))), to_sq, blockers))) & defenders & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]);
             if (piece_bb != 0) {
                 blockers &= ~(types.SquareIndexBB[@as(usize, @intCast(types.lsb(piece_bb)))]);
                 opp = opp.invert();
@@ -59,7 +59,7 @@ fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types
     const king_bb = pos.piece_bitboards[king_piece.index()] & occ;
     if (king_bb == 0) return 0;
 
-    const king_sq = @as(types.Square, @enumFromInt(types.lsb(king_bb)));
+    const king_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(king_bb))));
     const us = pos.all_pieces(color) & occ;
     const them = pos.all_pieces(opp) & occ;
     var candidates = tables.get_rook_attacks(king_sq, them) & pos.orthogonal_sliders(opp) & occ;
@@ -82,7 +82,7 @@ fn legalAttackers(pos: *position.Position, comptime color: types.Color, target: 
     if (pinned == 0) return legal;
 
     const king_piece = types.Piece.new_comptime(color, types.PieceType.King);
-    const king_sq = @as(types.Square, @enumFromInt(types.lsb(pos.piece_bitboards[king_piece.index()] & occ)));
+    const king_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(pos.piece_bitboards[king_piece.index()] & occ))));
     const target_bb = types.SquareIndexBB[target.index()];
     while (pinned != 0) {
         const sq = types.pop_lsb(&pinned);
@@ -127,7 +127,7 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         occ ^= types.SquareIndexBB[cap_idx];
     }
     occ |= types.SquareIndexBB[to];
-    var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @enumFromInt(to)), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @enumFromInt(to)), occ)) & occ;
+    var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @fromBackingInt(@intCast(to))), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @fromBackingInt(@intCast(to))), occ)) & occ;
 
     const bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
     const rooks = pos.orthogonal_sliders(types.Color.White) | pos.orthogonal_sliders(types.Color.Black);
@@ -138,9 +138,9 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         attackers &= occ;
         const pseudo_attackers = attackers & (if (stm == types.Color.White) white_pieces else black_pieces);
         const my_attackers = if (stm == types.Color.White)
-            legalAttackers(pos, types.Color.White, @as(types.Square, @enumFromInt(to)), occ, pseudo_attackers)
+            legalAttackers(pos, types.Color.White, @as(types.Square, @fromBackingInt(@intCast(to))), occ, pseudo_attackers)
         else
-            legalAttackers(pos, types.Color.Black, @as(types.Square, @enumFromInt(to)), occ, pseudo_attackers);
+            legalAttackers(pos, types.Color.Black, @as(types.Square, @fromBackingInt(@intCast(to))), occ, pseudo_attackers);
         if (my_attackers == 0) {
             break;
         }
@@ -170,10 +170,10 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         // Independent ifs (not else-if): a captured queen (pt == 4) must reveal
         // BOTH diagonal and orthogonal x-ray attackers, matching the Weiss source.
         if (pt == 0 or pt == 2 or pt == 4) {
-            attackers |= tables.get_bishop_attacks(@as(types.Square, @enumFromInt(to)), occ) & bishops;
+            attackers |= tables.get_bishop_attacks(@as(types.Square, @fromBackingInt(@intCast(to))), occ) & bishops;
         }
         if (pt == 3 or pt == 4) {
-            attackers |= tables.get_rook_attacks(@as(types.Square, @enumFromInt(to)), occ) & rooks;
+            attackers |= tables.get_rook_attacks(@as(types.Square, @fromBackingInt(@intCast(to))), occ) & rooks;
         }
     }
 

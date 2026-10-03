@@ -40,12 +40,12 @@ pub fn init() void {
     while (color < 2) : (color += 1) {
         const piece_types = [_]types.PieceType{ types.PieceType.Knight, types.PieceType.Bishop, types.PieceType.Rook, types.PieceType.Queen, types.PieceType.King };
         for (piece_types) |pt| {
-            const piece = types.Piece.new(@as(types.Color, @enumFromInt(color)), pt);
+            const piece = types.Piece.new(@as(types.Color, @fromBackingInt(@intCast(color))), pt);
             const piece_idx = piece.index();
 
             var sq_a: usize = 0;
             while (sq_a < 64) : (sq_a += 1) {
-                const attacks = tables.get_attacks(pt, @as(types.Square, @enumFromInt(sq_a)), 0);
+                const attacks = tables.get_attacks(pt, @as(types.Square, @fromBackingInt(@intCast(sq_a))), 0);
 
                 var atk_bb = attacks;
                 while (atk_bb != 0) {

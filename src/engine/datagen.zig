@@ -142,7 +142,7 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
     const enemy_occ = if (stm == types.Color.White) black_occ else white_occ;
     const occ = friendly_occ | enemy_occ;
 
-    var pcs: [16]u8 = .{0} ** 16;
+    var pcs: [16]u8 = @splat(0);
     var idx: usize = 0;
     var occ_iter = occ;
     while (occ_iter != 0) {
@@ -262,7 +262,7 @@ pub const DatagenSingle = struct {
     };
 
     fn activeSearcher(self: *DatagenSingle, turn: types.Color) *search.Searcher {
-        return &self.searchers[@as(usize, @intFromEnum(turn))];
+        return &self.searchers[@as(usize, @backingInt(turn))];
     }
 
     fn resetSearchStateForGame(self: *DatagenSingle, pos: *position.Position) void {
@@ -450,7 +450,7 @@ pub const DatagenSingle = struct {
 
         // Set game result in the initial board
         var board = initial_board.?;
-        board.wdl = @intFromEnum(outcome);
+        board.wdl = @backingInt(outcome);
 
         // Write game under file lock: PackedBoard + viriformat.MoveScorePairs + Terminator
         self.output.lock.lockUncancelable(platform.io);
@@ -556,7 +556,7 @@ pub const DatagenSingle = struct {
         if (records.items.len == 0) return;
 
         for (records.items) |*rec| {
-            rec.board.result = if (rec.white_was_stm) @intFromEnum(outcome) else 2 - @intFromEnum(outcome);
+            rec.board.result = if (rec.white_was_stm) @backingInt(outcome) else 2 - @backingInt(outcome);
         }
 
         self.output.lock.lockUncancelable(platform.io);

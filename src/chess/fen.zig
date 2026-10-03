@@ -41,7 +41,7 @@ const QUEEN = 4;
 const KING = 5;
 
 const Board = struct {
-    pieces: [2][6]u64 = .{.{0} ** 6} ** 2,
+    pieces: [2][6]u64 = @splat(@splat(0)),
 
     fn occupied(self: Board) u64 {
         var all: u64 = 0;
@@ -52,7 +52,7 @@ const Board = struct {
     }
 
     fn king_attacked(self: Board, king_colour: usize, attacker: usize) bool {
-        const square: types.Square = @enumFromInt(@ctz(self.pieces[king_colour][KING]));
+        const square: types.Square = @fromBackingInt(@intCast(@ctz(self.pieces[king_colour][KING])));
         const theirs = self.pieces[attacker];
         const occupancy = self.occupied();
         const pawn_sources = if (king_colour == WHITE) tables.WhitePawnAttacks[square.index()] else tables.BlackPawnAttacks[square.index()];

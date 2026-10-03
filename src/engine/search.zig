@@ -356,11 +356,11 @@ pub const Searcher = struct {
     }
 
     inline fn pawn_correction_entry(self: *Searcher, pos: *const position.Position, comptime color: types.Color) *i16 {
-        return &self.pawn_correction[@intFromEnum(color)][@as(usize, @intCast(pos.pawn_hash % CORRHIST_SIZE))];
+        return &self.pawn_correction[@backingInt(color)][@as(usize, @intCast(pos.pawn_hash % CORRHIST_SIZE))];
     }
 
     inline fn nonpawn_correction_entry(self: *Searcher, pos: *const position.Position, comptime color: types.Color, comptime key_color: types.Color) *i16 {
-        return &self.nonpawn_correction[@intFromEnum(color)][@intFromEnum(key_color)][@as(usize, @intCast(pos.nonpawn_hash[@intFromEnum(key_color)] % CORRHIST_SIZE))];
+        return &self.nonpawn_correction[@backingInt(color)][@backingInt(key_color)][@as(usize, @intCast(pos.nonpawn_hash[@backingInt(key_color)] % CORRHIST_SIZE))];
     }
 
     inline fn corrected_eval(self: *Searcher, pos: *const position.Position, comptime color: types.Color, raw_eval: i32) i32 {
@@ -1615,7 +1615,7 @@ pub const Searcher = struct {
 
                     // Step 5.4c: History Pruning
                     if (depth <= parameters.HistPruningDepth and
-                        self.history[@intFromEnum(color)][move.from][move.to] < -parameters.HistPruningMargin * @as(i32, @intCast(depth)))
+                        self.history[@backingInt(color)][move.from][move.to] < -parameters.HistPruningMargin * @as(i32, @intCast(depth)))
                     {
                         skip_quiet = true;
                     }
@@ -1729,7 +1729,7 @@ pub const Searcher = struct {
                         reduction -= parameters.LMRCheck;
                     }
 
-                    var lmr_history = self.history[@intFromEnum(color)][move.from][move.to];
+                    var lmr_history = self.history[@backingInt(color)][move.from][move.to];
                     if (!is_capture and !is_null) {
                         lmr_history += self.continuation_history(self.ply - 1, move, 0) + self.continuation_history(self.ply - 1, move, 1);
                     }
@@ -1814,18 +1814,18 @@ pub const Searcher = struct {
 
             if (!is_null and self.ply >= 1) {
                 const last = self.move_history[self.ply - 1];
-                self.counter_moves[@intFromEnum(color)][last.from][last.to] = best_move;
+                self.counter_moves[@backingInt(color)][last.from][last.to] = best_move;
             }
 
             const b = best_move.to_u16();
             const max_history: i32 = parameters.HistoryGravityMax;
             for (quiet_moves.items) |m| {
                 const is_best = m.to_u16() == b;
-                const hist = self.history[@intFromEnum(color)][m.from][m.to] * adj;
+                const hist = self.history[@backingInt(color)][m.from][m.to] * adj;
                 if (is_best) {
-                    self.history[@intFromEnum(color)][m.from][m.to] += adj - @divTrunc(hist, max_history);
+                    self.history[@backingInt(color)][m.from][m.to] += adj - @divTrunc(hist, max_history);
                 } else {
-                    self.history[@intFromEnum(color)][m.from][m.to] += -adj - @divTrunc(hist, max_history);
+                    self.history[@backingInt(color)][m.from][m.to] += -adj - @divTrunc(hist, max_history);
                 }
 
                 // Continuation History

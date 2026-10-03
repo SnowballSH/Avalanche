@@ -74,7 +74,7 @@ const OPTIONS = [_]Option{
     .{ .name = "Hash", .kind = .{ .spin = .{ .default = 16, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
     .{ .name = "Threads", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_SEARCH_THREADS } }, .apply = set_threads },
     .{ .name = "Move Overhead", .aliases = &.{"MoveOverhead"}, .kind = .{ .spin = .{ .default = search.DEFAULT_MOVE_OVERHEAD, .min = 0, .max = search.MAX_MOVE_OVERHEAD } }, .apply = set_move_overhead },
-    .{ .name = "NumaPolicy", .kind = .{ .combo = .{ .default = @tagName(numa.Policy.auto), .values = std.meta.fieldNames(numa.Policy) } }, .apply = set_numa_policy, .available = platform.has_threads },
+    .{ .name = "NumaPolicy", .kind = .{ .combo = .{ .default = @tagName(numa.Policy.auto), .values = @typeInfo(numa.Policy).@"enum".field_names } }, .apply = set_numa_policy, .available = platform.has_threads },
     .{ .name = "MultiPV", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_MULTI_PV } }, .apply = set_multi_pv },
     .{ .name = "Ponder", .kind = .{ .check = false }, .apply = set_ponder },
     .{ .name = "Clear Hash", .kind = .button, .apply = clear_hash },
@@ -232,7 +232,7 @@ fn set_syzygy_path(ctx: Context, value: Value) !void {
         syzygy.deinit();
         return;
     }
-    const cpath = try platform.allocator.dupeZ(u8, path);
+    const cpath = try platform.allocator.dupeSentinel(u8, path, 0);
     defer platform.allocator.free(cpath);
     if (syzygy.init(cpath.ptr)) {
         try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.line_ending, .{ syzygy.max_pieces(), path });

@@ -7,7 +7,7 @@ pub const Side = enum(u1) {
     Queen,
 
     pub inline fn index(self: Side) usize {
-        return @intFromEnum(self);
+        return @backingInt(self);
     }
 };
 
@@ -15,7 +15,7 @@ pub const Rights = u4;
 pub const NO_RIGHTS: Rights = 0;
 
 pub inline fn right(color: types.Color, side: Side) Rights {
-    const shift: u2 = @intCast(2 * @as(u8, @intFromEnum(color)) + @intFromEnum(side));
+    const shift: u2 = @intCast(2 * @as(u8, @backingInt(color)) + @backingInt(side));
     return @as(Rights, 1) << shift;
 }
 
@@ -71,13 +71,13 @@ pub const Rule = struct {
 /// rights each square revokes when a piece leaves or lands on it.
 pub const Setup = struct {
     rules: [types.N_COLORS][2]Rule = .{ .{ .{}, .{} }, .{ .{}, .{} } },
-    revoked_by: [types.N_SQUARES]Rights = [_]Rights{0} ** types.N_SQUARES,
+    revoked_by: [types.N_SQUARES]Rights = @splat(0),
     is_chess960: bool = false,
 
     pub fn add(self: *Setup, color: types.Color, side: Side, king_from: types.Square, rook_from: types.Square) Rights {
         const added = Rule.init(color, side, king_from, rook_from);
         const bit = right(color, side);
-        self.rules[@intFromEnum(color)][side.index()] = added;
+        self.rules[@backingInt(color)][side.index()] = added;
         self.revoked_by[king_from.index()] |= bit;
         self.revoked_by[rook_from.index()] |= bit;
         self.is_chess960 = self.is_chess960 or !added.is_standard();
@@ -85,7 +85,7 @@ pub const Setup = struct {
     }
 
     pub inline fn rule(self: *const Setup, color: types.Color, side: Side) *const Rule {
-        return &self.rules[@intFromEnum(color)][side.index()];
+        return &self.rules[@backingInt(color)][side.index()];
     }
 
     pub inline fn revoked(self: *const Setup, from: u6, to: u6) Rights {

@@ -13,7 +13,7 @@ const KNIGHT_PLACEMENTS = [10][2]u3{
 
 pub fn back_rank(index: u16) [8]types.PieceType {
     std.debug.assert(index < N_POSITIONS);
-    var rank: [8]?types.PieceType = .{null} ** 8;
+    var rank: [8]?types.PieceType = @splat(null);
     var n = index;
 
     rank[2 * (n % 4) + 1] = .Bishop;

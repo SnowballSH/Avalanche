@@ -80,7 +80,7 @@ test "adjudicator: draws are not adjudicated before the minimum ply" {
 test "adjudicator: winner maps to a white-relative outcome" {
     try testing.expectEqual(Outcome.white_win, Outcome.for_winner(types.Color.White));
     try testing.expectEqual(Outcome.black_win, Outcome.for_winner(types.Color.Black));
-    try testing.expectEqual(@as(u8, 2), @intFromEnum(Outcome.white_win));
+    try testing.expectEqual(@as(u8, 2), @backingInt(Outcome.white_win));
 }
 
 test "terminal: checkmate beats the fifty-move rule and repetition" {

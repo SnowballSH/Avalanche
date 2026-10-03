@@ -102,7 +102,7 @@ test "strength: strong levels keep the best move, weak levels spread choices" {
 
     const level_ties = [_]i32{ 10, 10, 10, 10 };
     const weak = Strength.from_skill_level(0);
-    var hits = [_]usize{0} ** level_ties.len;
+    var hits: [level_ties.len]usize = @splat(0);
     for (0..400) |_| hits[weak.pick(&level_ties, random)] += 1;
     for (hits) |count| try std.testing.expect(count > 50);
 }

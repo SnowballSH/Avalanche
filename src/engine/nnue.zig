@@ -39,7 +39,7 @@ inline fn king_square(pos: *const position.Position, color: types.Color) types.S
     const king = types.Piece.new(color, types.PieceType.King);
     const king_bb = pos.piece_bitboards[king.index()];
     const index = if (king_bb == 0) 0 else types.lsb(king_bb);
-    return @as(types.Square, @enumFromInt(index));
+    return @as(types.Square, @fromBackingInt(@intCast(index)));
 }
 
 inline fn perspective_king_sq(pos: *const position.Position, comptime perspective: types.Color) usize {
@@ -79,7 +79,7 @@ const KingBucketState = struct {
 };
 
 inline fn nnue_index_flat(piece: types.Piece, sq: types.Square) FeaturePair {
-    const code: usize = @intFromEnum(piece);
+    const code: usize = @backingInt(piece);
     const piece_offset = (code & 7) * 64;
     const color_offset = (code >> 3) * 384;
     const white = color_offset + piece_offset + sq.index();
@@ -96,7 +96,7 @@ inline fn nnue_index_buckets(
     white_state: KingBucketState,
     black_state: KingBucketState,
 ) FeaturePair {
-    const code: usize = @intFromEnum(piece);
+    const code: usize = @backingInt(piece);
     const piece_offset = (code & 7) * 64;
     const color_offset = (code >> 3) * 384;
     const white = (color_offset + piece_offset + sq.index()) ^ white_state.flip;
@@ -113,9 +113,9 @@ fn feature_index_pov(
     comptime perspective: types.Color,
     state: KingBucketState,
 ) usize {
-    const code: usize = @intFromEnum(piece);
+    const code: usize = @backingInt(piece);
     const piece_offset = (code & 7) * 64;
-    const color_offset = ((code >> 3) ^ @intFromEnum(perspective)) * 384;
+    const color_offset = ((code >> 3) ^ @backingInt(perspective)) * 384;
     const oriented_sq = sq.index() ^ (if (perspective == types.Color.White) 0 else 56);
     const feature = (color_offset + piece_offset + oriented_sq) ^ state.flip;
     return state.weight_offset + feature * weights.HIDDEN_SIZE;
@@ -157,11 +157,11 @@ pub const Accumulator = struct {
 
 const FinnyEntry = struct {
     acc: [weights.HIDDEN_SIZE]i16 align(64) = undefined,
-    pieces: [2][6]u64 = .{.{0} ** 6} ** 2,
+    pieces: [2][6]u64 = @splat(@splat(0)),
 
     fn clear(self: *FinnyEntry) void {
         self.acc = weights.MODEL.layer_1_bias;
-        self.pieces = .{.{0} ** 6} ** 2;
+        self.pieces = @splat(@splat(0));
     }
 };
 
@@ -258,7 +258,7 @@ pub const NNUE = struct {
     fn update(self: *NNUE, comptime added: usize, comptime removed: usize, adds: [added]FeaturePair, subs: [removed]FeaturePair) void {
         const t = self.update_target();
         inline for (.{ types.Color.White, types.Color.Black }) |color| {
-            if (!self.refresh_pending[@intFromEnum(color)]) {
+            if (!self.refresh_pending[@backingInt(color)]) {
                 var add_rows: [added]usize = undefined;
                 var sub_rows: [removed]usize = undefined;
                 inline for (&add_rows, adds) |*row, feature| row.* = feature.row(color);
@@ -271,7 +271,7 @@ pub const NNUE = struct {
     inline fn note_king_move(self: *NNUE, pc: types.Piece, to: types.Square) void {
         if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
         if (pc.piece_type() != types.PieceType.King) return;
-        const color = @intFromEnum(pc.color());
+        const color = @backingInt(pc.color());
         const king_pov = if (pc.color() == types.Color.White) to.index() else to.index() ^ 56;
         if (!self.king_state[color].same_slot(KingBucketState.from_king(king_pov))) self.refresh_pending[color] = true;
     }
@@ -299,7 +299,7 @@ pub const NNUE = struct {
             acc.clear();
             for (pos.mailbox, 0..) |pc, i| {
                 if (pc == types.Piece.NO_PIECE) continue;
-                const feature = nnue_index_flat(pc, @as(types.Square, @enumFromInt(i)));
+                const feature = nnue_index_flat(pc, @as(types.Square, @fromBackingInt(@intCast(i))));
                 inline for (.{ types.Color.White, types.Color.Black }) |color| {
                     apply_rows(1, 0, acc.perspective(color), acc.perspective(color), .{feature.row(color)}, .{});
                 }
@@ -327,7 +327,7 @@ pub const NNUE = struct {
     fn sync_king_state(self: *NNUE, pos: *const position.Position) void {
         inline for ([_]types.Color{ types.Color.White, types.Color.Black }) |color| {
             const kp = perspective_king_sq(pos, color);
-            self.king_state[@intFromEnum(color)] = KingBucketState.from_king(kp);
+            self.king_state[@backingInt(color)] = KingBucketState.from_king(kp);
         }
         self.king_state_ready = true;
     }
@@ -337,12 +337,12 @@ pub const NNUE = struct {
         self.ensure_finny();
         const kp = perspective_king_sq(pos, color);
         const now = KingBucketState.from_king(kp);
-        const prev = self.king_state[@intFromEnum(color)];
+        const prev = self.king_state[@backingInt(color)];
         if (!prev.same_slot(now)) {
             self.refresh_perspective(pos, color);
-            self.king_state[@intFromEnum(color)] = now;
+            self.king_state[@backingInt(color)] = now;
         }
-        self.refresh_pending[@intFromEnum(color)] = false;
+        self.refresh_pending[@backingInt(color)] = false;
     }
 
     fn refresh_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
@@ -350,7 +350,7 @@ pub const NNUE = struct {
 
         const king_pov = perspective_king_sq(pos, perspective);
         const state = KingBucketState.from_king(king_pov);
-        const entry = &self.finny[@intFromEnum(perspective)][state.mirror_index()][state.bucket];
+        const entry = &self.finny[@backingInt(perspective)][state.mirror_index()][state.bucket];
 
         var adds: [64]usize = undefined;
         var subs: [64]usize = undefined;
@@ -359,15 +359,15 @@ pub const NNUE = struct {
 
         inline for ([_]types.Color{ types.Color.White, types.Color.Black }) |pc_color| {
             inline for (0..6) |pt| {
-                const piece = types.Piece.new(pc_color, @as(types.PieceType, @enumFromInt(pt)));
+                const piece = types.Piece.new(pc_color, @as(types.PieceType, @fromBackingInt(@intCast(pt))));
                 const cur = pos.piece_bitboards[piece.index()];
-                const cached = entry.pieces[@intFromEnum(pc_color)][pt];
+                const cached = entry.pieces[@backingInt(pc_color)][pt];
 
                 var added = cur & ~cached;
                 while (added != 0) {
                     const sq_i: usize = @intCast(types.lsb(added));
                     added &= added - 1;
-                    adds[add_n] = feature_index_pov(piece, @as(types.Square, @enumFromInt(sq_i)), perspective, state);
+                    adds[add_n] = feature_index_pov(piece, @as(types.Square, @fromBackingInt(@intCast(sq_i))), perspective, state);
                     add_n += 1;
                 }
 
@@ -375,11 +375,11 @@ pub const NNUE = struct {
                 while (removed != 0) {
                     const sq_i: usize = @intCast(types.lsb(removed));
                     removed &= removed - 1;
-                    subs[sub_n] = feature_index_pov(piece, @as(types.Square, @enumFromInt(sq_i)), perspective, state);
+                    subs[sub_n] = feature_index_pov(piece, @as(types.Square, @fromBackingInt(@intCast(sq_i))), perspective, state);
                     sub_n += 1;
                 }
 
-                entry.pieces[@intFromEnum(pc_color)][pt] = cur;
+                entry.pieces[@backingInt(pc_color)][pt] = cur;
             }
         }
 
@@ -390,8 +390,11 @@ pub const NNUE = struct {
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
             var lanes: V = entry.acc[i..][0..UPDATE_LANES].*;
+            // The removed rows are summed and subtracted once, see "Refresh loop" in docs/NNUE.md.
+            var removed: V = @splat(0);
             for (adds[0..add_n]) |row| lanes +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
-            for (subs[0..sub_n]) |row| lanes -%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
+            for (subs[0..sub_n]) |row| removed +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
+            lanes -%= removed;
             entry.acc[i..][0..UPDATE_LANES].* = lanes;
             dst[i..][0..UPDATE_LANES].* = lanes;
         }
@@ -422,7 +425,7 @@ pub const NNUE = struct {
 
     pub inline fn evaluate_comptime(self: *const NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
         const acc = self.current();
-        if (comptime builtin.mode == .Debug) {
+        if (comptime builtin.mode == .debug) {
             std.debug.assert(self.piece_count == types.popcount_usize(pos.all_all_pieces()));
         }
         const bucket = @min((self.piece_count -| 2) / 4, weights.OUTPUT_SIZE - 1);

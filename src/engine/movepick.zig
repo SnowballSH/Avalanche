@@ -65,11 +65,11 @@ pub fn scoreMoves(searcher: *search.Searcher, pos: *position.Position, list: *st
                 score += SortKiller1;
             } else if (searcher.killer[searcher.ply][1].to_u16() == move.to_u16()) {
                 score += SortKiller2;
-            } else if (searcher.ply >= 1 and searcher.counter_moves[@intFromEnum(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
+            } else if (searcher.ply >= 1 and searcher.counter_moves[@backingInt(pos.turn)][last.from][last.to].to_u16() == move.to_u16()) {
                 score += SortCounterMove;
             } else {
                 score += SortQuiet;
-                score += searcher.history[@intFromEnum(pos.turn)][move.from][move.to];
+                score += searcher.history[@backingInt(pos.turn)][move.from][move.to];
                 if (!is_null and searcher.ply >= 1) {
                     const plies: [3]usize = .{ 0, 1, 3 };
                     const weights: [3]i32 = .{ parameters.ContHistWeight1, parameters.ContHistWeight2, parameters.ContHistWeight4 };

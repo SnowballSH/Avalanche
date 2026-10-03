@@ -4,7 +4,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const is_wasm = builtin.cpu.arch.isWasm();
+pub const is_wasm = builtin.target.cpu.arch.isWasm();
 pub const has_threads = !builtin.single_threaded;
 
 pub var io: std.Io = undefined;
@@ -99,24 +99,24 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
 // wasm32 caps atomic operands at 32 bits; single-threaded builds need no
 // atomicity, so these lower to plain memory operations there.
 
-pub inline fn atomicLoad(comptime T: type, ptr: *const T, comptime order: std.builtin.AtomicOrder) T {
+pub inline fn atomicLoad(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicLoad(T, ptr, order);
     return ptr.*;
 }
 
-pub inline fn atomicStore(comptime T: type, ptr: *T, value: T, comptime order: std.builtin.AtomicOrder) void {
+pub inline fn atomicStore(comptime T: type, ptr: *T, value: T, comptime order: std.lang.AtomicOrder) void {
     if (comptime has_threads) return @atomicStore(T, ptr, value, order);
     ptr.* = value;
 }
 
-pub inline fn atomicRmw(comptime T: type, ptr: *T, comptime op: std.builtin.AtomicRmwOp, operand: T, comptime order: std.builtin.AtomicOrder) T {
+pub inline fn atomicRmw(comptime T: type, ptr: *T, comptime op: std.lang.AtomicRmwOp, operand: T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicRmw(T, ptr, op, operand, order);
     const old = ptr.*;
     ptr.* = applyRmw(T, op, old, operand);
     return old;
 }
 
-fn applyRmw(comptime T: type, comptime op: std.builtin.AtomicRmwOp, old: T, operand: T) T {
+fn applyRmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operand: T) T {
     return switch (op) {
         .Xchg => operand,
         .Add => old +% operand,
@@ -132,8 +132,7 @@ fn applyRmw(comptime T: type, comptime op: std.builtin.AtomicRmwOp, old: T, oper
 
 test "applyRmw matches @atomicRmw for every operation" {
     const cases = [_][2]i64{ .{ 0, 0 }, .{ 5, -3 }, .{ std.math.maxInt(i64), 1 }, .{ std.math.minInt(i64), -1 }, .{ -7, 7 } };
-    inline for (@typeInfo(std.builtin.AtomicRmwOp).@"enum".fields) |field| {
-        const op: std.builtin.AtomicRmwOp = @enumFromInt(field.value);
+    inline for (comptime std.enums.values(std.lang.AtomicRmwOp)) |op| {
         for (cases) |case| {
             var cell = case[0];
             const previous = @atomicRmw(i64, &cell, op, case[1], .monotonic);
@@ -154,15 +153,15 @@ pub fn AtomicValue(comptime T: type) type {
             return .{ .raw = value };
         }
 
-        pub inline fn load(self: *const Self, comptime order: std.builtin.AtomicOrder) T {
+        pub inline fn load(self: *const Self, comptime order: std.lang.AtomicOrder) T {
             return atomicLoad(T, &self.raw, order);
         }
 
-        pub inline fn store(self: *Self, value: T, comptime order: std.builtin.AtomicOrder) void {
+        pub inline fn store(self: *Self, value: T, comptime order: std.lang.AtomicOrder) void {
             atomicStore(T, &self.raw, value, order);
         }
 
-        pub inline fn fetchAdd(self: *Self, operand: T, comptime order: std.builtin.AtomicOrder) T {
+        pub inline fn fetchAdd(self: *Self, operand: T, comptime order: std.lang.AtomicOrder) T {
             return atomicRmw(T, &self.raw, .Add, operand, order);
         }
     };

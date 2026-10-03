@@ -329,8 +329,8 @@ pub const DynamicEvaluator = struct {
 };
 
 pub inline fn distance_eval(pos: *position.Position, comptime white_winning: bool) i32 {
-    var k1 = @as(types.Square, @enumFromInt(types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()])));
-    var k2 = @as(types.Square, @enumFromInt(types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()])));
+    var k1 = @as(types.Square, @fromBackingInt(@intCast(types.lsb(pos.piece_bitboards[types.Piece.WHITE_KING.index()]))));
+    var k2 = @as(types.Square, @fromBackingInt(@intCast(types.lsb(pos.piece_bitboards[types.Piece.BLACK_KING.index()]))));
 
     const r1 = @as(i32, @intCast(k1.rank().index()));
     const r2 = @as(i32, @intCast(k2.rank().index()));
