@@ -31,7 +31,8 @@
 
 - The history term that shortens or lengthens a reduction is, for quiet moves,
   the main history plus the one-ply and two-ply continuation histories of the
-  move, divided by `LMRHistoryDivisor`. Captures use the main history alone.
+  move, divided by `LMRHistoryDivisor`. Captures, which are only reduced when
+  they lose material, use their capture history entry instead.
 - The three tables share one bonus and gravity rule, so their sum spans about
   three times the range of one; the divisor was widened from 5164 to 8192 with
   the change and has not been tuned since.

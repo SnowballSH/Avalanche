@@ -1682,6 +1682,7 @@ pub const Searcher = struct {
             const new_depth = @as(usize, @intCast(@as(i32, @intCast(depth)) + extension - 1));
 
             const nodes_before = self.nodes;
+            const capture_history: i32 = if (is_capture) self.capture_history_entry(pos, move).* else 0;
 
             self.ttable.prefetch(pos.prefetch_key_after(move));
 
@@ -1729,7 +1730,7 @@ pub const Searcher = struct {
                         reduction -= parameters.LMRCheck;
                     }
 
-                    var lmr_history = self.history[@intFromEnum(color)][move.from][move.to];
+                    var lmr_history = if (is_capture) capture_history else self.history[@intFromEnum(color)][move.from][move.to];
                     if (!is_capture and !is_null) {
                         lmr_history += self.continuation_history(self.ply - 1, move, 0) + self.continuation_history(self.ply - 1, move, 1);
                     }
