@@ -244,7 +244,8 @@ random weights and accumulators, stage by stage and end to end.
 | | | wasm simd128 | `i16x8.q15mulr_sat_s`, `i8x16.narrow_i16x8_u` |
 | | `umull` | AArch64 | `sqxtun`, `umull` |
 | | `portable` | anything else, Debug | `@Vector` u16 multiply |
-| non-zero blocks | | x86, wasm, Debug | compare to a bit mask, table lookup |
+| non-zero blocks | | AVX-512 VBMI2 (512 bits; + VL at 256 bits) | `vptestmd`, `vpcompressb` |
+| | | other x86, wasm, Debug | compare to a bit mask, table lookup |
 | | | AArch64 | `umaxp`, a multiplication for the mask, table lookup |
 | L1 | `dpbusd` | AVX-512 VNNI (512 bits); AVX-512 VNNI + VL or AVX-VNNI (256 bits) | `vpdpbusd` |
 | | `maddubs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmaddubsw`, `pmaddwd` |
@@ -276,11 +277,18 @@ the result does not depend on the target:
   byte because there are 256 blocks. AArch64 has no instruction that turns a comparison into a
   mask: `umaxp` twice reduces 32 activations to the 8 block maxima in a u64, and a multiplication
   gathers one bit of each byte.
+- **Non-zero blocks, `vpcompressb`.** One step covers as many blocks as a vector has bytes: the
+  comparisons of their activations give one mask bit per block, and `vpcompressb` packs the bytes
+  of a vector of block indices that the mask selects at the front. The whole vector is stored at
+  the end of the list. Four steps at 512 bits, against 32 table lookups. The register form with
+  zeroing is used; the form that writes to memory is slow on Zen 4.
 - **L1.** The weights of a block are 64 adjacent bytes, the 16 outputs' weights for its four
   inputs, so a non-zero block is one broadcast of its four activations and 64 byte products.
   `vpdpbusd` and `sdot` add the products into the i32 sums; they take several cycles, so the blocks
   go round-robin into independent partial sums (8 vectors with `vpdpbusd`, 16 with `sdot`), added
-  at the end. `pmaddubsw` + `pmaddwd` cannot saturate with activations up to 127 (see "Integer
+  at the end. The indices of a round of blocks are read from the list with one load and taken
+  apart with shifts: the loop is limited by loads (the index, the activations and the weights of
+  every block), on the M4 and on Zen 4 alike. `pmaddubsw` + `pmaddwd` cannot saturate with activations up to 127 (see "Integer
   formula") and feed a plain addition, so one sum is enough there.
 - **L1, `extadd`.** Wasm has no byte dot product. A product of an activation and a weight fits an
   i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes, and
@@ -348,6 +356,12 @@ which the search 20 and 25 ns. Zen 4 runs a 512-bit operation as two of 256, whi
 pairwise step gains nothing from the wider vectors there. Wasm under Node 26 on the M4: `bench`
 1.00M -> 1.47M nps (+47%).
 
+Then the non-zero search with `vpcompressb` and the single load of a round's indices. EPYC 9R14,
+native: search 19.8 -> 7.0 ns, L1 68.6 -> 55.5 ns, `nnue-speed` 128.1 -> 116.9 ns, `bench`
+1.584M -> 1.634M nps (+3.2%, of which the indices +0.5%). The 256-bit AVX2 build has neither
+(no `vpcompressb`, one chain). Apple M4, from the indices alone: L1 63.2 -> 58.0 ns, `bench`
+2.193M -> 2.215M nps (+1.0%).
+
 On the M4 the head is at what the core can do in 128-bit vectors: the pairwise step and the L1
 products are limited by loads per cycle, L2 by the multiplier.
 
@@ -376,7 +390,10 @@ the measurement that decided it:
   were added with zeroed inputs instead of a branch per chain: +0.1% in `bench` on the EPYC 9R14
   (range 0.0 to 0.2%, seven runs), nothing on the M4.
 
-Not tried: `vpcompressb` instead of the table for the index list.
+- **Partial sums in the `pairs` L2**, four of them: 18.4 to 18.7 ns on the EPYC 9R14 at 512 bits
+  (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
+- **16-bit L2 weights on AArch64** (`smlal`, half the weight loads): 28.3 ns against 29.2, and no
+  more nodes per second. L2 there is limited by the multiplier, not by loads.
 
 ### What has been executed
 
@@ -406,8 +423,10 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 | x86 at 256 bits with AVX-VNNI (`alderlake`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | **no** |
 | wasm simd128 | `mulhrs` | `extadd` | `pairs` | yes, by the `web/` tests (`bench` equal to native) |
 
-The EPYC 9R14 runs were repeated when the `pairs` L2 was added, with random weights and the default net
-embedded.
+The EPYC 9R14 runs were repeated when the `pairs` L2 and when the `vpcompressb` search were added,
+with random weights and the default net embedded. The search with `vpcompressb` is what `znver4`
+and `znver4-avx512vnni` (512 bits) and `icelake_server` (256 bits) compile; `x86_64_v4` and the
+builds without AVX-512 compile the table.
 
 **The VEX-encoded `vpdpbusd` of AVX-VNNI has not been executed.** It is what a 256-bit build
 without AVX-512 uses (Alder Lake and later Intel desktop CPUs with `-Dcpu=native`). Zen 4 has no
