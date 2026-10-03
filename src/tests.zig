@@ -1192,9 +1192,10 @@ test "search: forced node-limited search continues after reporting mate" {
     defer s.deinit();
     s.force_thinking = true;
     // Black mates in 3 and the search sees it within a few thousand nodes, where the old mate
-    // cutoff stopped. Search policy is deliberately independent of output.
+    // cutoff stopped. The node limit bounds the test and sits far below what the search needs to
+    // run out of depth. Search policy is deliberately independent of output.
     s.silent_output = true;
-    s.max_nodes = 100_000;
+    s.max_nodes = 30_000;
     s.stop = false;
     s.reset_heuristics(true);
 
