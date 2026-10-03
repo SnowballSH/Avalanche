@@ -67,6 +67,11 @@ jobs:
       - name: Unit tests
         run: zig build test
 
+      # The default network is multi-layer; this covers the single-layer head.
+      - name: Unit tests (single-layer head)
+        if: runner.os == 'Linux'
+        run: zig build test -Dnet=nets/dianguang-1.nnue
+
       # The release build above leaves the binary at zig-out/bin/Avalanche[.exe].
       # The expected node count is NOT hardcoded here -- it is read from the
       # committed `bench.nodes` file. Whenever a change legitimately alters the

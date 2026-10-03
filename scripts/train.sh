@@ -2,7 +2,8 @@
 # train.sh — Train an Avalanche NNUE network using bullet
 #
 # Usage: ./scripts/train.sh [data_file ...]
-#   data_file: Path(s) to training data in bulletformat (default: data/training.bin)
+#   data_file: Path(s) to training data in bulletformat (default: data/training.bin);
+#   not needed with TRAIN_DATA_DIR, which takes precedence
 #
 # Tunables (env vars, all optional — defaults are the current best recipe):
 #   TRAIN_NET_ID (net), TRAIN_INPUT (buckets16), TRAIN_HIDDEN (1024),
@@ -21,7 +22,8 @@
 #     over that many superbatches),
 #   TRAIN_BATCH_SIZE (16384), TRAIN_BATCHES_PER_SB (12208),
 #   TRAIN_SAVE_RATE (10), TRAIN_THREADS (all cores),
-#   TRAIN_DATA_DIR (a directory of .viribin chunks, read with games interleaved across files),
+#   TRAIN_DATA_DIR (a directory of .viribin chunks, read with games interleaved across files; an
+#     absolute path, like TRAIN_VALIDATION_DIR: the trainer runs from training/),
 #   TRAIN_SHUFFLE_MB (128; shuffle buffer of the .viribin loader, 16384 positions per MB),
 #   TRAIN_START_SB (1; with TRAIN_RESUME_FROM, the superbatch to resume at, keeping the LR schedule),
 #   TRAIN_INIT_NET (unset or empty = random initialisation. A quantised single-layer .nnue, absolute path:
@@ -44,7 +46,7 @@
 # The quantised.bin file from a checkpoint can be directly used as an .nnue file.
 #
 # Prerequisites:
-#   - Training data in bulletformat (.bin)
+#   - Training data: bulletformat (.bin) files, or a TRAIN_DATA_DIR of .viribin chunks
 #   - Rust toolchain installed
 #   - For GPU training: set CUDA_PATH and pass --features cuda
 
@@ -61,9 +63,12 @@ if [ -z "${CUDA_PATH:-}" ]; then
     fi
 fi
 
-# Collect data file arguments (default to data/training.bin)
+# Collect data file arguments (default to data/training.bin, or none when
+# TRAIN_DATA_DIR names the data: the trainer then reads that directory)
 # Canonicalize to absolute paths so they survive the cd into training/
-if [ $# -eq 0 ]; then
+if [ $# -eq 0 ] && [ -n "${TRAIN_DATA_DIR:-}" ]; then
+    DATA_FILES=()
+elif [ $# -eq 0 ]; then
     DATA_FILES=("$ROOT_DIR/data/training.bin")
 else
     DATA_FILES=()
@@ -77,7 +82,7 @@ else
 fi
 
 # Verify data files exist
-for f in "${DATA_FILES[@]}"; do
+for f in ${DATA_FILES[@]+"${DATA_FILES[@]}"}; do
     if [ ! -f "$f" ]; then
         echo "Error: Training data not found at $f"
         echo "Run scripts/datagen.sh and scripts/prepare_data.sh first."
@@ -93,7 +98,7 @@ if [ ! -f "$TRAINER" ] || [ -n "$(find "$TRAINING_DIR/src" "$TRAINING_DIR/Cargo.
 fi
 
 echo "=== Avalanche NNUE Training ==="
-echo "Data: ${DATA_FILES[*]}"
+echo "Data: ${TRAIN_DATA_DIR:-${DATA_FILES[*]}}"
 echo "Output: $TRAINING_DIR/checkpoints/"
 if [ -n "${CUDA_PATH:-}" ]; then
     echo "GPU: CUDA (${CUDA_PATH})"
@@ -104,7 +109,7 @@ echo "==============================="
 echo ""
 
 cd "$TRAINING_DIR"
-"$TRAINER" "${DATA_FILES[@]}"
+"$TRAINER" ${DATA_FILES[@]+"${DATA_FILES[@]}"}
 
 echo ""
 echo "=== Training Complete ==="
