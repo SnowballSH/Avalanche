@@ -549,7 +549,11 @@ inline fn add_indexed_block(sums: *L1Sums, activations: *align(64) const Activat
 fn add_listed_blocks(chains: *L1Chains, activations: *align(64) const Activations, l1_weights: *const [L1_BLOCKS]BlockWeights, indices: []const u8) void {
     var i: usize = 0;
     while (i + L1_CHAINS <= indices.len) : (i += L1_CHAINS) {
-        inline for (chains, 0..) |*chain, k| add_indexed_block(chain, activations, l1_weights, indices[i + k]);
+        // One load for the indices of a round: loads are what limits it.
+        const round = std.mem.readInt(std.meta.Int(.unsigned, 8 * L1_CHAINS), indices[i..][0..L1_CHAINS], .little);
+        inline for (chains, 0..) |*chain, k| {
+            add_indexed_block(chain, activations, l1_weights, @as(u8, @truncate(round >> (8 * k))));
+        }
     }
     // Fewer blocks than chains are left: still one chain each.
     inline for (chains[0 .. L1_CHAINS - 1], 0..) |*chain, k| {
