@@ -1345,7 +1345,7 @@ pub const Searcher = struct {
             }
         }
 
-        const raw_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (is_null) -self.raw_eval_history[self.ply - 1] else if (self.exclude_move[self.ply].to_u16() != 0) self.raw_eval_history[self.ply] else hce.evaluate_mode(pos, color, mode);
+        const raw_eval: i32 = if (in_check) -hce.MateScore + @as(i32, @intCast(self.ply)) else if (tthit and entry.?.static_eval != tt.EVAL_NONE) entry.?.static_eval else if (self.exclude_move[self.ply].to_u16() != 0) self.raw_eval_history[self.ply] else if (is_null) -self.raw_eval_history[self.ply - 1] else hce.evaluate_mode(pos, color, mode);
         const static_eval: i32 = if (in_check) raw_eval else self.corrected_eval(pos, color, raw_eval);
 
         var best_score: i32 = static_eval;

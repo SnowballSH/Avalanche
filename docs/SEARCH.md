@@ -50,9 +50,10 @@
 ## Capture history
 
 - A table indexed by moving piece, target square and captured piece type is
-  added to the ordering score of captures: `MVV-LVA * 32 + history`. The scale
-  keeps the victim term dominant, so the history only orders captures of
-  similar material value. An en passant capture counts as a pawn.
+  added to the ordering score of captures: `MVV-LVA * 32 + history`. One step
+  of victim value is 3200 and the history spans ±`HistoryGravityMax` (15649),
+  so the victim term leads but a saturated history can lift a capture past
+  one of a more valuable piece. An en passant capture counts as a pawn.
 - On a beta cutoff every capture searched at the node is updated with the same
   bonus and gravity rule as the quiet history: the cutoff move up, the other
   captures down. Captures are updated whether a capture or a quiet move cut.

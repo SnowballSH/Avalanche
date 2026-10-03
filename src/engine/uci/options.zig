@@ -261,6 +261,8 @@ fn set_eval_file(ctx: Context, value: Value) !void {
     };
     ctx.position.refresh_evaluation();
     search.discard_helper_evaluation_caches();
+    // Stored static evals were computed by the previous network.
+    tt.GlobalTT.clear();
     try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{weights.active_network()});
 }
 

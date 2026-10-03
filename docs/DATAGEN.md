@@ -138,7 +138,8 @@ Avalanche netscale net=<candidate.nnue> ref=<reference.nnue> positions=<file.epd
 then give the candidate `EvalScale=<eval_scale>` in the SPRT (the reference keeps the default 1000).
 
 Both networks are evaluated by the build that runs the tool, so both must have its architecture (`-Dhead`, see
-[NNUE.md](NNUE.md)): to compare two multi-layer networks, build with one of them as `-Dnet`. A file of the other
+[NNUE.md](NNUE.md)): the default build compares multi-layer networks, and to compare two single-layer networks,
+build with one of them as `-Dnet`. A file of the other
 architecture is refused with the message `EvalFile` gives for it.
 
 For both networks the tool takes the mean absolute raw network output (centipawns for the side to move, before
@@ -155,7 +156,7 @@ candidate_mean_abs`) and `eval_scale` (`factor` in permille, rounded). When `eva
 
 `EvalScale` multiplies the network output as it enters the static evaluation (`raw * EvalScale / 1000`, truncated),
 so the post-scaling, correction history and the hash table all see the scaled value; the default is an exact
-identity. The network file is never rewritten: output weights are small integers (at most 127 in magnitude), so
-re-rounding them adds eval noise of about 10 cp RMS per position that a mean cannot show, and networks whose weights
-already sit at the 127 clip, the production network included, could not be scaled up at all. Datagen and `netscale`
+identity. The network file is never rewritten: the output weights of a single-layer network are small integers (at
+most 127 in magnitude), so re-rounding them adds eval noise of about 10 cp RMS per position that a mean cannot show,
+and a network whose weights already sit at the 127 clip, as Nezha's do, could not be scaled up at all. Datagen and `netscale`
 run at the default scale and record the unscaled output.
