@@ -369,19 +369,22 @@ native: search 19.8 -> 7.0 ns, L1 68.6 -> 55.5 ns, `nnue-speed` 128.1 -> 116.9 n
 2.193M -> 2.215M nps (+1.0%).
 
 Together with the accumulator changes ("Accumulator updates" above), from the commit that made
-Dianguang-3 the default net (3fa9ddf) to the one after these changes, same node counts:
+Dianguang-3 the default net (3fa9ddf) to commit 19b56d7, same node counts. Each row is one
+session of alternating runs, so it differs a little from the per-change figures above, which were
+taken in other sessions and on other machines of the same model:
 
 | Machine, build | `nnue-speed` | `bench` |
 |---|---|---|
 | EPYC 9R14 (Zen 4), native, 512 bits | 144.3 -> 115.6 ns | 1.510M -> 1.627M nps (+7.8%) |
 | EPYC 9R14, `-Dcpu=haswell`, 256 bits | 166.4 -> 145.2 ns | 1.410M -> 1.525M nps (+8.2%) |
 | Apple M4 | 147 -> 145 ns | 2.121M -> 2.192M nps (+3.3%) |
-| wasm, Node 26 on the M4 | | 1.00M -> 1.47M nps (+47%) |
+| wasm, Node 26 on the M4 | not measured | 1.00M -> 1.47M nps (+47%) |
 
 An EPYC 9R45 (Zen 5) runs the native build's `bench` at 2.38M nps.
 
-Where the time of a `bench` run goes after that, by sampling the search thread: on the M4,
-accumulator updates 20%, Finny rebuilds 5%, the head 21%; on the EPYC 9R14, 20%, 6% and 18%.
+At that commit, by sampling the search thread, a `bench` run spends 20% of its time in
+accumulator updates, 5% in Finny rebuilds and 21% in the head on the M4; 20%, 6% and 18% on the
+EPYC 9R14.
 
 What limits each part now:
 
@@ -404,9 +407,9 @@ the measurement that decided it:
 - **Lazy accumulator updates.** Of the 15.8M accumulator frames of a `bench` run, 14.9M are
   evaluated or have an evaluated descendant, so at most 5% of the updates could be skipped.
 - **Prefetching the weight rows of an accumulator update.** At the start of the update, all rows:
-  1.5% slower in `bench` on the M4; the rows of a move are read sequentially already. When the
-  move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: +0.4%, 0% and
-  -3.5% on an EPYC 9R45, -0.2% to -11% on the M4.
+  `bench` changed by -1.5% on the M4; the rows of a move are read sequentially already. When the
+  move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
+  -3.5% on an EPYC 9R45, and by -0.2% to -11% on the M4.
 - **Reordering the feature-transformer outputs so that active ones share blocks.** It changes no
   evaluation. Sorting by how often each is non-zero (measured on the evaluations of a `bench` run,
   checked on the other half) lowers the non-zero blocks from 85.3 to 77.5, a greedy grouping by
