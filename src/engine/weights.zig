@@ -116,6 +116,16 @@ var embedded_model: [@sizeOf(NNUEWeights)]u8 align(@alignOf(NNUEWeights)) = NNUE
 
 pub const MODEL: *const NNUEWeights = if (platform.is_wasm) @ptrCast(&embedded_model) else &model_storage;
 
+/// What the head derives from `MODEL`; `prepare` keeps it in step.
+pub var prepared: switch (HEAD) {
+    .single => void,
+    .multi => head_multi.Prepared,
+} = undefined;
+
+fn prepare() void {
+    if (HEAD == .multi) prepared = .init(&MODEL.head, l1_shift(&MODEL.header));
+}
+
 fn adviseHugePages() void {
     if (builtin.os.tag != .linux) return;
     const MADV_HUGEPAGE = 14;
@@ -172,7 +182,7 @@ pub fn validate_as(comptime kind: Head, bytes: []const u8) NetworkError!void {
 pub inline fn evaluate(own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     return switch (HEAD) {
         .single => head_single.evaluate(&MODEL.head, own, opp, bucket),
-        .multi => head_multi.evaluate(&MODEL.head, l1_shift(&MODEL.header), own, opp, bucket),
+        .multi => head_multi.evaluate(&MODEL.head, &prepared, own, opp, bucket),
     };
 }
 
@@ -218,6 +228,7 @@ pub fn do_nnue() void {
     // Validate the network in use rather than NNUE_SOURCE: on wasm, referencing
     // the embedded bytes at runtime would emit a second 25 MB copy of them.
     validate(std.mem.asBytes(MODEL)) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
+    prepare();
 }
 
 /// Large enough to read a network of either architecture, so that a file of
@@ -239,6 +250,7 @@ pub fn read_file(path: []const u8) ![]u8 {
 pub fn install(bytes: []const u8) NetworkError!void {
     try validate(bytes);
     @memcpy(std.mem.asBytes(&model_storage), bytes);
+    prepare();
 }
 
 /// Replaces the active network with the file at `path`, or with the embedded

@@ -72,7 +72,7 @@ pub fn evaluate(net: *const Net, pos: *const position.Position) Evaluation {
     const bucket = @min((pieces -| 2) / 4, arch.OUTPUT_SIZE - 1);
     const shift = weights.l1_shift(&net.header);
     return .{
-        .engine = head_multi.evaluate(&net.head, shift, own, opp, bucket),
+        .engine = head_multi.evaluate(&net.head, &.init(&net.head, shift), own, opp, bucket),
         .trainer = head_multi.evaluate_float(&net.head, shift, own, opp, bucket, .trainer),
         .quantised = head_multi.evaluate_float(&net.head, shift, own, opp, bucket, .quantised_pairwise),
     };
@@ -314,7 +314,7 @@ const MultiStage = enum {
                 sample.sums = head_multi.l1_sums(head, &sample.activations, sample.bucket);
                 std.mem.doNotOptimizeAway(&sample.sums);
             },
-            .l2_l3 => std.mem.doNotOptimizeAway(head_multi.finish(head, weights.l1_shift(&weights.MODEL.header), sample.bucket, sample.sums)),
+            .l2_l3 => std.mem.doNotOptimizeAway(head_multi.finish(head, &weights.prepared, sample.bucket, sample.sums)),
         }
     }
 

@@ -58,8 +58,8 @@ test "multi head: the SIMD path equals the scalar path on random weights" {
             const acc = random_accumulators(random, round);
             const bucket = round % arch.OUTPUT_SIZE;
             const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, bucket);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, shift, &acc.own, &acc.opp, bucket));
-            try expectEqual(scalar, head_multi.evaluate(head, shift, &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
             try distinct.put(scalar, {});
         }
     }
@@ -194,7 +194,7 @@ test "multi head: accumulators of all zeros and of all ones" {
         try expect_pairwise(&acc);
         for (0..arch.OUTPUT_SIZE) |bucket| {
             const scalar = head_multi.evaluate_scalar(head, 0, &acc.own, &acc.opp, bucket);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, 0, &acc.own, &acc.opp, bucket));
+            try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, 0), &acc.own, &acc.opp, bucket));
         }
     }
 }
@@ -220,7 +220,7 @@ test "multi head: saturated weights cannot overflow" {
         try head_multi.validate(std.mem.asBytes(head));
         for ([_]head_multi.L1Shift{ 0, 1, head_multi.L1_SHIFT_MAX }) |shift| {
             const scalar = head_multi.evaluate_scalar(head, shift, &acc.own, &acc.opp, 0);
-            try expectEqual(scalar, head_multi.evaluate_simd(head, shift, &acc.own, &acc.opp, 0));
+            try expectEqual(scalar, head_multi.evaluate_simd(head, &.init(head, shift), &acc.own, &acc.opp, 0));
         }
     }
 
@@ -251,7 +251,7 @@ test "multi head: the integer formula follows the float forward pass" {
             // Dense rounds only: `random.int(i16)` rounds are all 0 or 255.
             const acc = random_accumulators(random, round % 3);
             const bucket = round % arch.OUTPUT_SIZE;
-            const engine: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, bucket));
+            const engine: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, bucket));
             trainer.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .trainer));
             quantised.add(engine, head_multi.evaluate_float(head, shift, &acc.own, &acc.opp, bucket, .quantised_pairwise));
             magnitude.add(engine, 0);
@@ -328,9 +328,9 @@ test "multi head: small L1 weights are stored with a shift and stay close to the
             quantise_l1(head, shift, l1_weights, &bias);
             // docs/NNUE.md: the chosen shift puts the largest weight at 64..127 levels.
             try expect(@abs(@as(i32, head.l1_weights[0][0][0][0])) >= 64);
-            const with_shift: f64 = @floatFromInt(head_multi.evaluate(head, shift, &acc.own, &acc.opp, 0));
+            const with_shift: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, shift), &acc.own, &acc.opp, 0));
             quantise_l1(head, 0, l1_weights, &bias);
-            const without: f64 = @floatFromInt(head_multi.evaluate(head, 0, &acc.own, &acc.opp, 0));
+            const without: f64 = @floatFromInt(head_multi.evaluate(head, &.init(head, 0), &acc.own, &acc.opp, 0));
             shifted.add(with_shift, float);
             unshifted.add(without, float);
             magnitude.add(float, 0);
