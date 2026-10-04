@@ -200,7 +200,7 @@ comptime {
     std.debug.assert(L1_SIZE * 4 == DOT_CHUNKS * VECTOR_BYTES);
 }
 
-/// LLVM leaves target intrinsics unresolved at -ODebug.
+/// LLVM leaves target intrinsics unresolved at -Doptimize=debug.
 const intrinsics = builtin.mode != .debug;
 
 fn x86_has(comptime feature: std.Target.x86.Feature) bool {

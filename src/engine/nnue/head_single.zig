@@ -45,7 +45,7 @@ comptime {
 
 /// Pairwise signed i16 dot product. Optimized x86 builds use pmaddwd directly;
 /// Debug and other architectures retain the portable expression. LLVM leaves
-/// x86 intrinsics unresolved at -ODebug, hence the explicit mode guard.
+/// x86 intrinsics unresolved at -Doptimize=debug, hence the explicit mode guard.
 inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
     if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isX86()) {
         if (comptime OUTPUT_LANES == 32 and builtin.target.cpu.has(.x86, .avx512f) and builtin.target.cpu.has(.x86, .avx512bw)) {

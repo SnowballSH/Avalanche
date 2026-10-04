@@ -453,7 +453,7 @@ the measurement that decided it:
 
 ### What has been executed
 
-The intrinsics are compiled only outside Debug (LLVM leaves them unresolved at `-ODebug`). So a
+The intrinsics are compiled only outside Debug (LLVM leaves them unresolved at ``-Doptimize=debug``). So a
 plain `zig build test` compares the scalar path with the *portable* paths only, and reports the test
 `multi head: the SIMD comparisons cover the intrinsic paths` as skipped. To test the paths a release
 binary runs:

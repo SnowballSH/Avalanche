@@ -25,6 +25,6 @@ pub const intrinsic_call: std.lang.CallingConvention = if (builtin.target.cpu.ar
 /// of another element width is compiled bit by bit (docs/NNUE.md, "Reinterpreting arrays"), so
 /// casts that involve an array go through memory instead.
 pub inline fn reinterpret(comptime To: type, value: anytype) To {
-    comptime std.debug.assert(@sizeOf(To) == @sizeOf(@TypeOf(value)));
+    comptime std.debug.assert(@bitSizeOf(To) == @bitSizeOf(@TypeOf(value)) and @bitSizeOf(To) == 8 * @sizeOf(To));
     return @as(*align(1) const To, @ptrCast(&value)).*;
 }
