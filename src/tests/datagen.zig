@@ -223,8 +223,8 @@ test "viriformat: FRC castling encodes king-to-rook-square with the castle type"
     }
     const encoded = viriformat.encode_move(castle.?);
     try testing.expectEqual(@as(u16, 2), encoded >> 14);
-    try testing.expectEqual(@as(u16, @intFromEnum(types.Square.b1)), (encoded >> 6) & 63);
-    try testing.expectEqual(@as(u16, @intFromEnum(types.Square.f1)), encoded & 63);
+    try testing.expectEqual(@as(u16, @backingInt(types.Square.b1)), (encoded >> 6) & 63);
+    try testing.expectEqual(@as(u16, @backingInt(types.Square.f1)), encoded & 63);
 }
 
 test "viriformat: FRC unmoved castling rooks are marked as type 6" {

@@ -30,7 +30,7 @@ const Density = enum {
     isolated,
 
     fn of_round(round: usize) Density {
-        return @enumFromInt(round % @typeInfo(Density).@"enum".fields.len);
+        return @fromBackingInt(@intCast(round % @typeInfo(Density).@"enum".field_names.len));
     }
 };
 
@@ -87,7 +87,7 @@ test "multi head: the SIMD comparisons cover the intrinsic paths" {
     // Skipped, so that the summary shows it, when this build has a portable
     // pairwise product or L1: Debug builds and x86 without SSSE3. The
     // comparisons then say nothing about the instructions a release binary
-    // runs; run them again with -Doptimize=ReleaseSafe.
+    // runs; run them again with -Doptimize=safe.
     if (head_multi.L1_PATH == .portable or head_multi.PAIRWISE_PATH == .portable) return error.SkipZigTest;
 }
 

@@ -10,7 +10,7 @@ const platform = @import("../platform.zig");
 pub const MAX_NODES = 64;
 pub const MAX_CPUS = 1024;
 
-pub const CpuSet = std.bit_set.StaticBitSet(MAX_CPUS);
+pub const CpuSet = std.bit_set.Static(MAX_CPUS);
 
 pub const Policy = enum {
     /// Bind search threads to nodes when the machine has more than one.
@@ -21,16 +21,18 @@ pub const Policy = enum {
 
 pub var policy: Policy = .auto;
 
-const supported = builtin.os.tag == .linux and !platform.is_wasm;
+const supported = builtin.target.os.tag == .linux and !platform.is_wasm;
 
 pub const ParseError = error{ InvalidCpuList, TooManyCpus, TooManyNodes };
 
 pub const Topology = struct {
-    node_cpus: [MAX_NODES]CpuSet = [_]CpuSet{CpuSet.initEmpty()} ** MAX_NODES,
+    node_cpus: [MAX_NODES]CpuSet = @splat(.empty),
     node_count: usize = 0,
 
     pub fn single_node() Topology {
-        return .{ .node_count = 1, .node_cpus = [_]CpuSet{CpuSet.initFull()} ++ [_]CpuSet{CpuSet.initEmpty()} ** (MAX_NODES - 1) };
+        var single: Topology = .{ .node_count = 1 };
+        single.node_cpus[0] = .full;
+        return single;
     }
 
     pub fn add_node(self: *Topology, cpulist: []const u8) ParseError!void {
@@ -65,7 +67,7 @@ pub const Topology = struct {
 
 /// Parses the kernel cpulist format, e.g. "0-3,8-11\n".
 pub fn parse_cpulist(text: []const u8) ParseError!CpuSet {
-    var set = CpuSet.initEmpty();
+    var set = CpuSet.empty;
     var ranges = std.mem.tokenizeAny(u8, text, ", \t\r\n");
     while (ranges.next()) |range| {
         var bounds = std.mem.splitScalar(u8, range, '-');
@@ -100,12 +102,12 @@ pub fn topology() *const Topology {
 
 /// CPUs the calling thread may run on, e.g. as restricted by taskset or a cpuset.
 fn allowed_cpus() CpuSet {
-    if (!supported) return CpuSet.initFull();
+    if (!supported) return CpuSet.full;
     var mask: std.os.linux.cpu_set_t = undefined;
     if (std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &mask)) != .SUCCESS) {
-        return CpuSet.initFull();
+        return CpuSet.full;
     }
-    var set = CpuSet.initEmpty();
+    var set = CpuSet.empty;
     for (mask, 0..) |word, i| {
         var bits = word;
         while (bits != 0) : (bits &= bits - 1) set.set(i * @bitSizeOf(usize) + @ctz(bits));
@@ -190,7 +192,7 @@ test "numa: binding really restricts the thread's CPUs on Linux" {
     try std.testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &original)));
     defer std.os.linux.sched_setaffinity(0, &original) catch {};
 
-    var single = CpuSet.initEmpty();
+    var single = CpuSet.empty;
     single.set(topo.node_cpus[0].findFirstSet().?);
     bind_current_thread(&single);
 
@@ -214,7 +216,7 @@ test "numa: detection reads the sysfs node layout" {
 
     var root_buf: [std.fs.max_path_bytes]u8 = undefined;
     const root = root_buf[0..try tmp.dir.realPath(io, &root_buf)];
-    const topo = try detect(root, CpuSet.initFull());
+    const topo = try detect(root, CpuSet.full);
     try std.testing.expectEqual(@as(usize, 2), topo.node_count);
     try std.testing.expect(topo.node_cpus[0].isSet(9) and !topo.node_cpus[0].isSet(4));
     try std.testing.expect(topo.node_cpus[1].isSet(12));
@@ -242,7 +244,7 @@ test "numa: placement binds each thread to its node's CPUs on Linux" {
 
     // Two single-CPU "nodes" on the first two CPUs this process may use.
     var topo = Topology{};
-    var cpus = std.bit_set.IntegerBitSet(@bitSizeOf(usize)).initEmpty();
+    var cpus = std.bit_set.Integer(@bitSizeOf(usize)).empty;
     cpus.mask = original[0];
     var it = cpus.iterator(.{});
     for (0..2) |_| {

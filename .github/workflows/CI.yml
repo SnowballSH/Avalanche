@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  ZIG_VERSION: "0.16.0"
+  ZIG_VERSION: "0.17.0"
 
 jobs:
   build:
@@ -40,7 +40,7 @@ jobs:
 
       - name: Setup Zig ${{ env.ZIG_VERSION }}
         # mlugg/setup-zig@v2 is the maintained successor to goto-bus-stop/setup-zig:
-        # it knows the 0.16.0 release channel and current ziglang.org download
+        # it knows the current release channel and ziglang.org download
         # layout, verifies the release minisign signature, and caches the global
         # zig cache (~/.cache/zig) keyed on build.zig[.zon] across runs.
         uses: mlugg/setup-zig@v2
@@ -66,6 +66,11 @@ jobs:
 
       - name: Unit tests
         run: zig build test
+
+      # Optimised code differs from Debug code and has been miscompiled before (docs/NNUE.md,
+      # "Refresh loop").
+      - name: Unit tests (fast)
+        run: zig build test -Doptimize=fast
 
       # The default network is multi-layer; this covers the single-layer head.
       - name: Unit tests (single-layer head)

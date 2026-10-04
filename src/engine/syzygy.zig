@@ -18,9 +18,7 @@ const position = @import("../chess/position.zig");
 
 pub const supported = !platform.is_wasm;
 
-const c = if (supported) @cImport({
-    @cInclude("tbprobe.h");
-}) else struct {};
+const c = if (supported) @import("pyrrhic") else struct {};
 
 pub const MAX_TB_MOVES: usize = 256; // == Pyrrhic TB_MAX_MOVES
 
@@ -314,14 +312,14 @@ pub fn kingAttacks(sq: u8) callconv(.c) u64 {
 }
 
 pub fn bishopAttacks(sq: u8, occ: u64) callconv(.c) u64 {
-    return tables.get_attacks(types.PieceType.Bishop, @enumFromInt(sq), occ);
+    return tables.get_attacks(types.PieceType.Bishop, @fromBackingInt(@intCast(sq)), occ);
 }
 
 pub fn rookAttacks(sq: u8, occ: u64) callconv(.c) u64 {
-    return tables.get_attacks(types.PieceType.Rook, @enumFromInt(sq), occ);
+    return tables.get_attacks(types.PieceType.Rook, @fromBackingInt(@intCast(sq)), occ);
 }
 
 pub fn queenAttacks(sq: u8, occ: u64) callconv(.c) u64 {
-    return tables.get_attacks(types.PieceType.Bishop, @enumFromInt(sq), occ) |
-        tables.get_attacks(types.PieceType.Rook, @enumFromInt(sq), occ);
+    return tables.get_attacks(types.PieceType.Bishop, @fromBackingInt(@intCast(sq)), occ) |
+        tables.get_attacks(types.PieceType.Rook, @fromBackingInt(@intCast(sq)), occ);
 }

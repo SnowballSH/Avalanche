@@ -170,16 +170,16 @@ pub const Position = struct {
 
     pub fn set_fen(self: *Position, fen: []const u8) void {
         self.reset();
-        var sq: i32 = @as(i32, @intCast(@intFromEnum(types.Square.a8)));
+        var sq: i32 = @as(i32, @intCast(@backingInt(types.Square.a8)));
         var tokens = std.mem.tokenizeScalar(u8, fen, ' ');
         const bd = tokens.next() orelse return;
         for (bd) |ch| {
             if (std.ascii.isDigit(ch)) {
-                sq += @as(i32, @intCast(ch - '0')) * @intFromEnum(types.Direction.East);
+                sq += @as(i32, @intCast(ch - '0')) * @backingInt(types.Direction.East);
             } else if (ch == '/') {
-                sq += @intFromEnum(types.Direction.South) * 2;
+                sq += @backingInt(types.Direction.South) * 2;
             } else {
-                self.add_piece(@as(types.Piece, @enumFromInt(utils.first_index(u8, types.PieceString[0..], ch).?)), @as(types.Square, @enumFromInt(sq)));
+                self.add_piece(@as(types.Piece, @fromBackingInt(@intCast(utils.first_index(u8, types.PieceString[0..], ch).?))), @as(types.Square, @fromBackingInt(@intCast(sq))));
                 sq += 1;
             }
         }
@@ -203,7 +203,7 @@ pub const Position = struct {
                     // passant, so an idle EP square in the FEN does not give this
                     // position a hash that differs from the same position with the
                     // EP right expired (see play_move's DOUBLE_PUSH branch).
-                    const ep_target = @as(types.Square, @enumFromInt(i));
+                    const ep_target = @as(types.Square, @fromBackingInt(@intCast(i)));
                     const can_capture = if (self.turn == types.Color.White)
                         (tables.get_pawn_attacks(types.Color.Black, ep_target) & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]) != 0
                     else
@@ -261,7 +261,7 @@ pub const Position = struct {
         if (pc.piece_type() == types.PieceType.Pawn) {
             self.pawn_hash ^= key;
         } else {
-            self.nonpawn_hash[@intFromEnum(pc.color())] ^= key;
+            self.nonpawn_hash[@backingInt(pc.color())] ^= key;
         }
     }
 
@@ -273,7 +273,7 @@ pub const Position = struct {
             const color: types.Color = if (std.ascii.isUpper(ch)) .White else .Black;
             const king_bb = self.piece_bitboards[types.Piece.new(color, .King).index()];
             if (king_bb == 0) continue;
-            const king_sq: types.Square = @enumFromInt(types.lsb(king_bb));
+            const king_sq: types.Square = @fromBackingInt(@intCast(types.lsb(king_bb)));
             const back_rank: types.Rank = if (color == .White) .RANK1 else .RANK8;
             if (king_sq.rank() != back_rank) continue;
 
@@ -283,15 +283,15 @@ pub const Position = struct {
                 'k' => blk: {
                     const outer = rooks & squares_beyond(king_sq, .King);
                     if (outer == 0) continue;
-                    break :blk @enumFromInt(63 - @clz(outer));
+                    break :blk @fromBackingInt(@intCast(63 - @clz(outer)));
                 },
                 'q' => blk: {
                     const outer = rooks & squares_beyond(king_sq, .Queen);
                     if (outer == 0) continue;
-                    break :blk @enumFromInt(types.lsb(outer));
+                    break :blk @fromBackingInt(@intCast(types.lsb(outer)));
                 },
                 'a'...'h' => blk: {
-                    const sq = types.Square.new(@enumFromInt(std.ascii.toLower(ch) - 'a'), back_rank);
+                    const sq = types.Square.new(@fromBackingInt(@intCast(std.ascii.toLower(ch) - 'a')), back_rank);
                     if (rooks & types.SquareIndexBB[sq.index()] == 0 or sq.file().index() == king_file) continue;
                     break :blk sq;
                 },
@@ -574,7 +574,7 @@ pub const Position = struct {
     pub inline fn in_check(self: *const Position, comptime color: types.Color) bool {
         comptime var king: types.Piece = types.Piece.new_comptime(color, types.PieceType.King);
         const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
-        return self.attackers_from(opp, @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[king.index()]))), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
+        return self.attackers_from(opp, @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[king.index()])))), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
     }
 
     pub inline fn has_non_pawns(self: *const Position) bool {
@@ -643,7 +643,7 @@ pub const Position = struct {
                 self.remove_piece(move.get_to().add(types.Direction.South.relative_dir(color)));
             },
             else => {
-                const index = @intFromEnum(flags);
+                const index = @backingInt(flags);
                 switch (index) {
                     types.PR_KNIGHT => {
                         self.remove_piece(move.get_from());
@@ -702,7 +702,7 @@ pub const Position = struct {
             }
         }
 
-        if (comptime builtin.mode == .Debug) {
+        if (comptime builtin.mode == .debug) {
             std.debug.assert(self.pawn_hash == self.compute_pawn_hash());
             std.debug.assert(self.nonpawn_hash[0] == self.compute_nonpawn_hash(.White));
             std.debug.assert(self.nonpawn_hash[1] == self.compute_nonpawn_hash(.Black));
@@ -739,7 +739,7 @@ pub const Position = struct {
                 self.add_piece(types.Piece.new_comptime(opp, types.PieceType.Pawn), move.get_to().add(types.Direction.South.relative_dir(color)));
             },
             else => {
-                const index = @intFromEnum(flags);
+                const index = @backingInt(flags);
                 switch (index) {
                     types.PR_KNIGHT, types.PR_BISHOP, types.PR_ROOK, types.PR_QUEEN => {
                         self.remove_piece(move.get_to());
@@ -845,8 +845,8 @@ pub const Position = struct {
         const them_bb = self.all_pieces(opp);
         const all_bb = us_bb | them_bb;
 
-        const our_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()])));
-        const their_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()])));
+        const our_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()]))));
+        const their_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()]))));
 
         const our_diag_sliders = self.diagonal_sliders(color);
         const their_diag_sliders = self.diagonal_sliders(opp);
@@ -926,7 +926,7 @@ pub const Position = struct {
             1 => {
                 // Single check: Move, capture, or block
 
-                var checker_sq = @as(types.Square, @enumFromInt(types.lsb(self.checkers)));
+                var checker_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.checkers))));
 
                 switch (self.mailbox[checker_sq.index()]) {
                     types.Piece.new_comptime(opp, types.PieceType.Pawn) => {
@@ -953,10 +953,10 @@ pub const Position = struct {
                         while (b1 != 0) {
                             var psq = types.pop_lsb(&b1);
                             if (self.mailbox[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
                             } else {
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.CAPTURE)) catch {};
                             }
@@ -996,7 +996,7 @@ pub const Position = struct {
                     // Diagonal pin? OK
                     b1 = b2 & self.pinned & tables.LineOf[ep.index()][our_king.index()];
                     if (b1 != 0) {
-                        list.append(types.Move.new_from_to_flag(@as(types.Square, @enumFromInt(types.lsb(b1))), ep, types.MoveFlags.EN_PASSANT)) catch {};
+                        list.append(types.Move.new_from_to_flag(@as(types.Square, @fromBackingInt(@intCast(types.lsb(b1)))), ep, types.MoveFlags.EN_PASSANT)) catch {};
                     }
                 }
 
@@ -1023,10 +1023,10 @@ pub const Position = struct {
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
                         }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
@@ -1113,10 +1113,10 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_QUEEN)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_ROOK)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_KNIGHT)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_BISHOP)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_ROOK))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_KNIGHT))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_BISHOP))))) catch {};
             }
 
             // Promotion Captures
@@ -1126,19 +1126,19 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
             }
         }
 
@@ -1154,8 +1154,8 @@ pub const Position = struct {
         const them_bb = self.all_pieces(opp);
         const all_bb = us_bb | them_bb;
 
-        const our_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()])));
-        const their_king = @as(types.Square, @enumFromInt(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()])));
+        const our_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()]))));
+        const their_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()]))));
 
         const our_diag_sliders = self.diagonal_sliders(color);
         const their_diag_sliders = self.diagonal_sliders(opp);
@@ -1234,7 +1234,7 @@ pub const Position = struct {
             1 => {
                 // Single check: Move, capture, or block
 
-                var checker_sq = @as(types.Square, @enumFromInt(types.lsb(self.checkers)));
+                var checker_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.checkers))));
 
                 switch (self.mailbox[checker_sq.index()]) {
                     types.Piece.new_comptime(opp, types.PieceType.Pawn) => {
@@ -1296,7 +1296,7 @@ pub const Position = struct {
                     // Diagonal pin? OK
                     b1 = b2 & self.pinned & tables.LineOf[ep.index()][our_king.index()];
                     if (b1 != 0) {
-                        list.append(types.Move.new_from_to_flag(@as(types.Square, @enumFromInt(types.lsb(b1))), ep, types.MoveFlags.EN_PASSANT)) catch {};
+                        list.append(types.Move.new_from_to_flag(@as(types.Square, @fromBackingInt(@intCast(types.lsb(b1)))), ep, types.MoveFlags.EN_PASSANT)) catch {};
                     }
                 }
 
@@ -1321,10 +1321,10 @@ pub const Position = struct {
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
                         }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
@@ -1384,28 +1384,28 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_ROOK)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_KNIGHT)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @enumFromInt(types.PC_BISHOP)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP))))) catch {};
             }
 
             b2 = types.shift_bitboard(b1, rel_north) & quiet_mask;
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_QUEEN)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_ROOK)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_KNIGHT)))) catch {};
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @enumFromInt(types.PR_BISHOP)))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_ROOK))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_KNIGHT))))) catch {};
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_BISHOP))))) catch {};
             }
         }
 

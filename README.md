@@ -10,7 +10,7 @@
 
 Avalanche is a strong UCI chess engine written in [Zig](https://ziglang.org/).
 
-June 2026 update: **Avalanche now builds with Zig 0.16.0.**
+October 2026 update: **Avalanche now builds with Zig 0.17.0.**
 
 ## Strength
 
@@ -38,7 +38,8 @@ GPL-3.0. See [`LICENSE`](LICENSE).
 
 `zig build --release=fast`
 
-Avalanche now builds with **Zig 0.16.0**.
+Avalanche builds with **Zig 0.17.0**. The first build downloads the official
+[translate-c](https://codeberg.org/ziglang/translate-c) package, which generates the bindings for the Syzygy probing code.
 
 ```sh
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche

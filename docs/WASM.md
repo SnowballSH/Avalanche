@@ -10,11 +10,11 @@ cd web && npm ci && npm run check && npm run lint && npm test   # test builds wa
 
 ## Target choice
 
-Zig 0.16 offers three WebAssembly routes:
+Zig offers three WebAssembly routes:
 
 | Target                | Runtime needs                        | Verdict                                                                                                            |
 | --------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `wasm32-emscripten`   | Emscripten JS runtime                | Broken in 0.16.0 ([`std.os.emscripten` fails to compile](https://github.com/gdzig/gdzig/pull/244)); heavy runtime. |
+| `wasm32-emscripten`   | Emscripten JS runtime                | Broken when the port was written, on Zig 0.16.0 ([`std.os.emscripten` fails to compile](https://github.com/gdzig/gdzig/pull/244)); heavy runtime. |
 | `wasm32-wasi`         | WASI preview 1 shim in the browser   | Tier 2 with full `std`, but browsers need a polyfill, and stdin-driven UCI blocks the loop.                        |
 | `wasm32-freestanding` | Nothing: the module declares its ABI | **Chosen.** Smallest glue, no shim, every host call is one we designed.                                            |
 
@@ -135,6 +135,6 @@ All of these are comptime-resolved, so native builds compile to the same code as
 - **Syzygy tablebases.** Pyrrhic needs libc file I/O, so `syzygy.supported` is false, all probe paths are compiled
   out, and the Syzygy options are not advertised.
 - **Threads > 1.** Lazy SMP would need shared memory, a `wasi-threads`-style spawn import backed by Web
-  Workers, and 64-bit atomics for the TT. Zig 0.16 rejects 64-bit atomics on wasm32, so the TT lock words
+  Workers, and 64-bit atomics for the TT. Zig rejects 64-bit atomics on wasm32, so the TT lock words
   would first have to be split into 32-bit halves.
 - `datagen`, `genfens`, `tbfilter`: offline tooling with filesystem needs; not referenced by the wasm root.

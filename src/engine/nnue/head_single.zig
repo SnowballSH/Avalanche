@@ -45,21 +45,21 @@ comptime {
 
 /// Pairwise signed i16 dot product. Optimized x86 builds use pmaddwd directly;
 /// Debug and other architectures retain the portable expression. LLVM leaves
-/// x86 intrinsics unresolved at -ODebug, hence the explicit mode guard.
+/// x86 intrinsics unresolved at -Doptimize=debug, hence the explicit mode guard.
 inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
-    if (comptime builtin.mode != .Debug and builtin.cpu.arch.isX86()) {
-        if (comptime OUTPUT_LANES == 32 and builtin.cpu.has(.x86, .avx512f) and builtin.cpu.has(.x86, .avx512bw)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.avx512.pmaddw.d.512" }).*(a, b);
+    if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isX86()) {
+        if (comptime OUTPUT_LANES == 32 and builtin.target.cpu.has(.x86, .avx512f) and builtin.target.cpu.has(.x86, .avx512bw)) {
+            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.avx512.pmaddw.d.512" }).*(a, b);
         }
-        if (comptime OUTPUT_LANES == 16 and builtin.cpu.has(.x86, .avx2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.avx2.pmadd.wd" }).*(a, b);
+        if (comptime OUTPUT_LANES == 16 and builtin.target.cpu.has(.x86, .avx2)) {
+            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.avx2.pmadd.wd" }).*(a, b);
         }
-        if (comptime OUTPUT_LANES == 8 and builtin.cpu.has(.x86, .sse2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.x86.sse2.pmadd.wd" }).*(a, b);
+        if (comptime OUTPUT_LANES == 8 and builtin.target.cpu.has(.x86, .sse2)) {
+            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.sse2.pmadd.wd" }).*(a, b);
         }
     }
-    if (comptime builtin.mode != .Debug and builtin.cpu.arch.isWasm() and OUTPUT_LANES == 8) {
-        return @extern(*const fn (OutputI16, OutputI16) callconv(.c) OutputI32, .{ .name = "llvm.wasm.dot" }).*(a, b);
+    if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isWasm() and OUTPUT_LANES == 8) {
+        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.wasm.dot" }).*(a, b);
     }
 
     const a_parts = std.simd.deinterlace(2, a);

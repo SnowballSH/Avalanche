@@ -80,12 +80,12 @@ test "viriformat: a move that is not legal in the position is an error" {
     const pos = try support.new_position();
     defer support.destroy_position(pos);
     pos.set_fen(types.DEFAULT_FEN);
-    const e2e5: u16 = @intFromEnum(types.Square.e2) | (@as(u16, @intFromEnum(types.Square.e5)) << 6);
+    const e2e5: u16 = @backingInt(types.Square.e2) | (@as(u16, @backingInt(types.Square.e5)) << 6);
     try testing.expectError(error.IllegalMove, viriformat.decode_move(pos, e2e5));
 }
 
 test "viriformat: a truncated game is an error" {
-    var bytes = [_]u8{0} ** 34;
+    var bytes: [34]u8 = @splat(0);
     var reader = viriformat.Reader.init(&bytes);
     try testing.expectError(error.Truncated, reader.next());
 }

@@ -58,7 +58,7 @@ pub fn pack_board(pos: *position.Position, white_relative_score: i32) PackedBoar
     const castling_rooks = pos.castling_rook_squares();
 
     // Pack pieces in occupancy order (LSB first)
-    var pcs: [16]u8 = .{0} ** 16;
+    var pcs: [16]u8 = @splat(0);
     var idx: usize = 0;
     var occ_iter = all_occ;
     while (occ_iter != 0) {
@@ -120,9 +120,9 @@ const PIECE_CHARS = "pnbrqk";
 /// Rebuilds a FEN from a packed header; unmoved rooks become Shredder-FEN castling files, which `set_fen` reads for
 /// standard chess and Chess960 alike.
 pub fn header_to_fen(board: PackedBoard, buf: *[FEN_CAPACITY]u8) []const u8 {
-    var squares: [64]u8 = .{0} ** 64;
-    var white_rights: [8]bool = .{false} ** 8;
-    var black_rights: [8]bool = .{false} ** 8;
+    var squares: [64]u8 = @splat(0);
+    var white_rights: [8]bool = @splat(false);
+    var black_rights: [8]bool = @splat(false);
     var occupancy = board.occ;
     var index: usize = 0;
     while (occupancy != 0) : (index += 1) {

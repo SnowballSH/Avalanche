@@ -50,7 +50,7 @@ pub fn parse(args: []const []const u8, diag: *Diagnostic) ParseError!Options {
     if (threads == 0) return invalid(diag, "threads", args[0]);
 
     var options: Options = .{ .threads = threads };
-    var seen: std.EnumSet(Key) = .initEmpty();
+    var seen: std.EnumSet(Key) = .empty;
     for (args[1..]) |arg| {
         // A bare argument is the book path.
         const eq = std.mem.indexOfScalar(u8, arg, '=');

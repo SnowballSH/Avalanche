@@ -38,7 +38,7 @@ pub const MULTI_HEADER: [HEADER_SIZE]u8 = multi_header(0);
 pub fn multi_header(shift: head_multi.L1Shift) [HEADER_SIZE]u8 {
     const fields = [_]u32{
         FORMAT_VERSION,
-        @intFromEnum(Head.multi),
+        @backingInt(Head.multi),
         NUM_INPUT_BUCKETS,
         HIDDEN_SIZE,
         OUTPUT_SIZE,
@@ -107,7 +107,7 @@ pub const head = switch (HEAD) {
 
 pub const NNUEWeights = Network(HEAD);
 
-const MODEL_ALIGN = if (builtin.os.tag == .linux) 2 * 1024 * 1024 else std.atomic.cache_line;
+const MODEL_ALIGN = if (builtin.target.os.tag == .linux) 2 * 1024 * 1024 else std.atomic.cache_line;
 var model_storage: NNUEWeights align(MODEL_ALIGN) = undefined;
 
 // Read in place on wasm to avoid a second 25 MB copy in linear memory. It must
@@ -127,7 +127,7 @@ fn prepare() void {
 }
 
 fn adviseHugePages() void {
-    if (builtin.os.tag != .linux) return;
+    if (builtin.target.os.tag != .linux) return;
     const MADV_HUGEPAGE = 14;
     const bytes = std.mem.asBytes(&model_storage);
     const ptr: [*]align(2 * 1024 * 1024) u8 = @alignCast(bytes.ptr);

@@ -98,7 +98,7 @@ pub inline fn sliding_attack(square_: types.Square, occ: types.Bitboard, mask: t
 // ROOK MAGIC BITBOARDS
 
 inline fn get_rook_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
-    return sliding_attack(square, occ, types.MaskFile[@intFromEnum(square.file())]) | sliding_attack(square, occ, types.MaskRank[@intFromEnum(square.rank())]);
+    return sliding_attack(square, occ, types.MaskFile[@backingInt(square.file())]) | sliding_attack(square, occ, types.MaskRank[@backingInt(square.rank())]);
 }
 
 var RookAttackMasks: [64]types.Bitboard = std.mem.zeroes([64]types.Bitboard);
@@ -125,9 +125,9 @@ const RookMagics = [64]types.Bitboard{
 };
 
 pub fn init_rook_attacks() void {
-    var sq: usize = @intFromEnum(types.Square.a1);
+    var sq: usize = @backingInt(types.Square.a1);
 
-    while (sq <= @intFromEnum(types.Square.h8)) : (sq += 1) {
+    while (sq <= @backingInt(types.Square.h8)) : (sq += 1) {
         const edges = ((types.MaskRank[types.File.AFILE.index()] | types.MaskRank[types.File.HFILE.index()]) & ~types.MaskRank[types.rank_plain(sq)]) |
             ((types.MaskFile[types.File.AFILE.index()] | types.MaskFile[types.File.HFILE.index()]) & ~types.MaskFile[types.file_plain(sq)]);
 
@@ -139,14 +139,14 @@ pub fn init_rook_attacks() void {
 
         index = index *% RookMagics[sq];
         index = index >> @as(u6, @intCast(RookAttackShifts[sq]));
-        RookAttacks[sq][@intCast(index)] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+        RookAttacks[sq][@intCast(index)] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), subset);
         subset = (subset -% RookAttackMasks[sq]) & RookAttackMasks[sq];
 
         while (subset != 0) {
             index = subset;
             index = index *% RookMagics[sq];
             index = index >> @as(u6, @intCast(RookAttackShifts[sq]));
-            RookAttacks[sq][@intCast(index)] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+            RookAttacks[sq][@intCast(index)] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), subset);
             subset = (subset -% RookAttackMasks[sq]) & RookAttackMasks[sq];
         }
     }
@@ -193,9 +193,9 @@ const BishopMagics = [64]types.Bitboard{
 };
 
 pub fn init_bishop_attacks() void {
-    var sq: usize = @intFromEnum(types.Square.a1);
+    var sq: usize = @backingInt(types.Square.a1);
 
-    while (sq <= @intFromEnum(types.Square.h8)) : (sq += 1) {
+    while (sq <= @backingInt(types.Square.h8)) : (sq += 1) {
         const edges = ((types.MaskRank[types.File.AFILE.index()] | types.MaskRank[types.File.HFILE.index()]) & ~types.MaskRank[types.rank_plain(sq)]) |
             ((types.MaskFile[types.File.AFILE.index()] | types.MaskFile[types.File.HFILE.index()]) & ~types.MaskFile[types.file_plain(sq)]);
 
@@ -207,14 +207,14 @@ pub fn init_bishop_attacks() void {
 
         index = index *% BishopMagics[sq];
         index = index >> @as(u6, @intCast(BishopAttackShifts[sq]));
-        BishopAttacks[sq][@intCast(index)] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+        BishopAttacks[sq][@intCast(index)] = get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), subset);
         subset = (subset -% BishopAttackMasks[sq]) & BishopAttackMasks[sq];
 
         while (subset != 0) {
             index = subset;
             index = index *% BishopMagics[sq];
             index = index >> @as(u6, @intCast(BishopAttackShifts[sq]));
-            BishopAttacks[sq][@intCast(index)] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), subset);
+            BishopAttacks[sq][@intCast(index)] = get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), subset);
             subset = (subset -% BishopAttackMasks[sq]) & BishopAttackMasks[sq];
         }
     }
@@ -237,17 +237,17 @@ pub inline fn get_xray_bishop_attacks(square: types.Square, occ: types.Bitboard,
 pub var SquaresBetween: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);
 
 pub fn init_squares_between() void {
-    var sq1: usize = @intFromEnum(types.Square.a1);
+    var sq1: usize = @backingInt(types.Square.a1);
 
-    while (sq1 <= @intFromEnum(types.Square.h8)) : (sq1 += 1) {
-        var sq2: usize = @intFromEnum(types.Square.a1);
+    while (sq1 <= @backingInt(types.Square.h8)) : (sq1 += 1) {
+        var sq2: usize = @backingInt(types.Square.a1);
 
-        while (sq2 <= @intFromEnum(types.Square.h8)) : (sq2 += 1) {
+        while (sq2 <= @backingInt(types.Square.h8)) : (sq2 += 1) {
             const sqs = types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
             if (types.file_plain(sq1) == types.file_plain(sq2) or types.rank_plain(sq1) == types.rank_plain(sq2)) {
-                SquaresBetween[sq1][sq2] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq1)), sqs) & get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq2)), sqs);
+                SquaresBetween[sq1][sq2] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq1))), sqs) & get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq2))), sqs);
             } else if (types.diagonal_plain(sq1) == types.diagonal_plain(sq2) or types.anti_diagonal_plain(sq1) == types.anti_diagonal_plain(sq2)) {
-                SquaresBetween[sq1][sq2] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq1)), sqs) & get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq2)), sqs);
+                SquaresBetween[sq1][sq2] = get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq1))), sqs) & get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq2))), sqs);
             } else {
                 SquaresBetween[sq1][sq2] = 0;
             }
@@ -261,16 +261,16 @@ pub fn init_squares_between() void {
 pub var LineOf: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);
 
 pub fn init_line_between() void {
-    var sq1: usize = @intFromEnum(types.Square.a1);
+    var sq1: usize = @backingInt(types.Square.a1);
 
-    while (sq1 <= @intFromEnum(types.Square.h8)) : (sq1 += 1) {
-        var sq2: usize = @intFromEnum(types.Square.a1);
+    while (sq1 <= @backingInt(types.Square.h8)) : (sq1 += 1) {
+        var sq2: usize = @backingInt(types.Square.a1);
 
-        while (sq2 <= @intFromEnum(types.Square.h8)) : (sq2 += 1) {
+        while (sq2 <= @backingInt(types.Square.h8)) : (sq2 += 1) {
             if (types.file_plain(sq1) == types.file_plain(sq2) or types.rank_plain(sq1) == types.rank_plain(sq2)) {
-                LineOf[sq1][sq2] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq1)), 0) & get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq2)), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
+                LineOf[sq1][sq2] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq1))), 0) & get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq2))), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
             } else if (types.diagonal_plain(sq1) == types.diagonal_plain(sq2) or types.anti_diagonal_plain(sq1) == types.anti_diagonal_plain(sq2)) {
-                LineOf[sq1][sq2] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq1)), 0) & get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq2)), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
+                LineOf[sq1][sq2] = get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq1))), 0) & get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq2))), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
             } else {
                 LineOf[sq1][sq2] = 0;
             }
@@ -286,14 +286,14 @@ pub var PawnAttacks: [types.N_COLORS][64]types.Bitboard = std.mem.zeroes([types.
 pub fn init_pseudo_legal() void {
     std.mem.copyForwards(types.Bitboard, PawnAttacks[0][0..64], WhitePawnAttacks[0..64]);
     std.mem.copyForwards(types.Bitboard, PawnAttacks[1][0..64], BlackPawnAttacks[0..64]);
-    std.mem.copyForwards(types.Bitboard, PseudoLegalAttacks[@intFromEnum(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
-    std.mem.copyForwards(types.Bitboard, PseudoLegalAttacks[@intFromEnum(types.PieceType.King)][0..64], KingAttacks[0..64]);
-    var sq: usize = @intFromEnum(types.Square.a1);
+    std.mem.copyForwards(types.Bitboard, PseudoLegalAttacks[@backingInt(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
+    std.mem.copyForwards(types.Bitboard, PseudoLegalAttacks[@backingInt(types.PieceType.King)][0..64], KingAttacks[0..64]);
+    var sq: usize = @backingInt(types.Square.a1);
 
-    while (sq <= @intFromEnum(types.Square.h8)) : (sq += 1) {
-        PseudoLegalAttacks[@intFromEnum(types.PieceType.Bishop)][sq] = get_bishop_attacks_for_init(@as(types.Square, @enumFromInt(sq)), 0);
-        PseudoLegalAttacks[@intFromEnum(types.PieceType.Rook)][sq] = get_rook_attacks_for_init(@as(types.Square, @enumFromInt(sq)), 0);
-        PseudoLegalAttacks[@intFromEnum(types.PieceType.Queen)][sq] = PseudoLegalAttacks[@intFromEnum(types.PieceType.Bishop)][sq] | PseudoLegalAttacks[@intFromEnum(types.PieceType.Rook)][sq];
+    while (sq <= @backingInt(types.Square.h8)) : (sq += 1) {
+        PseudoLegalAttacks[@backingInt(types.PieceType.Bishop)][sq] = get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), 0);
+        PseudoLegalAttacks[@backingInt(types.PieceType.Rook)][sq] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), 0);
+        PseudoLegalAttacks[@backingInt(types.PieceType.Queen)][sq] = PseudoLegalAttacks[@backingInt(types.PieceType.Bishop)][sq] | PseudoLegalAttacks[@backingInt(types.PieceType.Rook)][sq];
     }
 }
 
@@ -310,13 +310,13 @@ pub inline fn get_attacks(pt: types.PieceType, sq: types.Square, occ: types.Bitb
         types.PieceType.Rook => get_rook_attacks(sq, occ),
         types.PieceType.Bishop => get_bishop_attacks(sq, occ),
         types.PieceType.Queen => get_rook_attacks(sq, occ) | get_bishop_attacks(sq, occ),
-        else => PseudoLegalAttacks[@intFromEnum(pt)][sq.index()],
+        else => PseudoLegalAttacks[@backingInt(pt)][sq.index()],
     };
 }
 
 // Get Pawn attacks of a given color and square
 pub inline fn get_pawn_attacks(comptime color: types.Color, sq: types.Square) types.Bitboard {
-    return PawnAttacks[@intFromEnum(color)][sq.index()];
+    return PawnAttacks[@backingInt(color)][sq.index()];
 }
 
 // Get Pawn attacks of every pawn on bitboard

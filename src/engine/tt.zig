@@ -82,13 +82,13 @@ fn memsetThreadCount() usize {
     return std.Thread.getCpuCount() catch 1;
 }
 
-pub const TT_ALIGN: usize = if (builtin.os.tag == .linux) 2 * MB else std.atomic.cache_line;
+pub const TT_ALIGN: usize = if (builtin.target.os.tag == .linux) 2 * MB else std.atomic.cache_line;
 
 // `&.{}` would carry @alignOf(i128), contradicting the declared alignment.
 var empty_table: [0]i128 align(TT_ALIGN) = .{};
 
 fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
-    if (builtin.os.tag != .linux) return false;
+    if (builtin.target.os.tag != .linux) return false;
     const MADV_HUGEPAGE = 14;
     const ptr: [*]align(TT_ALIGN) u8 = @ptrCast(data.ptr);
     std.posix.madvise(ptr, data.len * @sizeOf(i128), MADV_HUGEPAGE) catch return false;
@@ -96,7 +96,7 @@ fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
 }
 
 fn hugePageBytes(addr: usize) u64 {
-    if (builtin.os.tag != .linux) return 0;
+    if (builtin.target.os.tag != .linux) return 0;
     const file = std.Io.Dir.cwd().openFile(platform.io, "/proc/self/smaps", .{}) catch return 0;
     defer file.close(platform.io);
 

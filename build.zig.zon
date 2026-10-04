@@ -1,0 +1,20 @@
+.{
+    .name = .avalanche,
+    .version = "4.0.0",
+    .dependencies = .{
+        .translate_c = .{
+            .url = "git+https://codeberg.org/ziglang/translate-c#875969d3493e245e01bf5d7860f792d8f3eb9ef5",
+            .hash = "translate_c-0.0.0-Q_BUWoFOBwAhz77Zd15HCVuhTKzdUKc94kezmCeJ7IC_",
+        },
+    },
+    .minimum_zig_version = "0.17.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "nets",
+        "LICENSE",
+        "README.md",
+    },
+    .fingerprint = 0x301f4ee2de001703,
+}

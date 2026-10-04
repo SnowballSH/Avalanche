@@ -91,7 +91,7 @@ test "Bitboard general" {
     try expect(types.popcount(0b0110111010010) == 7);
     try expect(types.lsb(0b01101000) == 3);
     var b: types.Bitboard = 0b01101000;
-    try expect(@intFromEnum(types.pop_lsb(&b)) == 3);
+    try expect(@backingInt(types.pop_lsb(&b)) == 3);
     try expect(b == 0b01100000);
 
     const bb_i: types.Bitboard = 0x3c18183c0000;
@@ -437,7 +437,7 @@ test "types-move: packed layout and to_u16 bit ordering" {
     }
     {
         // h7(55) -> h8(63), quiet queen promotion (PR_QUEEN = 0b0111 = 7)
-        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, @as(types.MoveFlags, @enumFromInt(types.PR_QUEEN)));
+        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN))));
         try expect(m.is_promotion());
         try expect(!m.is_capture());
         try expect(m.flags == 7);
@@ -445,7 +445,7 @@ test "types-move: packed layout and to_u16 bit ordering" {
     }
     {
         // h7 -> h8, queen promotion-capture (PC_QUEEN = 0b1111 = 15): both capture and promotion.
-        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, @as(types.MoveFlags, @enumFromInt(types.PC_QUEEN)));
+        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN))));
         try expect(m.is_promotion());
         try expect(m.is_capture());
         try expect(m.flags == 15);
