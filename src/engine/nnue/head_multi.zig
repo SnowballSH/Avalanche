@@ -396,7 +396,7 @@ else switch (VECTOR_BYTES) {
 /// Bit i is set when block i, four activations from the lowest, is not zero.
 inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
     if (comptime !(intrinsics and builtin.target.cpu.arch == .aarch64 and builtin.target.cpu.has(.aarch64, .neon))) {
-        const blocks: @Vector(NNZ_BLOCKS, u32) = @bitCast(activations.*);
+        const blocks = arch.reinterpret(@Vector(NNZ_BLOCKS, u32), activations.*);
         return @bitCast(blocks != @as(@Vector(NNZ_BLOCKS, u32), @splat(0)));
     }
     // AArch64 has no instruction for the mask of a comparison. `umaxp` twice
@@ -425,7 +425,7 @@ pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *Block
         var block_indices: PairU8 = std.simd.iota(u8, VECTOR_BYTES);
         var first: usize = 0;
         while (first < L1_BLOCKS) : (first += VECTOR_BYTES) {
-            const blocks: Blocks = @bitCast(activations[first * 4 ..][0 .. VECTOR_BYTES * 4].*);
+            const blocks = arch.reinterpret(Blocks, activations[first * 4 ..][0 .. VECTOR_BYTES * 4].*);
             const nonzero = blocks != @as(Blocks, @splat(0));
             indices[count..][0..VECTOR_BYTES].* = compress.*(block_indices, @splat(0), nonzero);
             count += std.simd.countTrues(nonzero);
@@ -608,7 +608,7 @@ pub fn l1_sums(head: *const Weights, activations: *align(64) const Activations, 
         inline for (chains[1..]) |*chain| total = add_sums(total, chain[chunk]);
         output.* = output_sums(total);
     }
-    return @as(L1Vector, @bitCast(outputs)) + @as(L1Vector, head.l1_bias[bucket]);
+    return arch.reinterpret(L1Vector, outputs) + @as(L1Vector, head.l1_bias[bucket]);
 }
 
 /// The 32 L2 sums as vectors of the dot product's width.
@@ -656,17 +656,17 @@ pub fn finish(head: *const Weights, prepared: *const Prepared, bucket: usize, su
     const z2: L2 = switch (L2_PATH) {
         .pairs => blk: {
             // Each output's value and square as two adjacent i16.
-            const pairs: [L1_SIZE]u32 = @bitCast(clipped | squared << @splat(16));
-            var sums_2: L2Sums = @bitCast(head.l2_bias[bucket]);
+            const pairs = arch.reinterpret([L1_SIZE]u32, clipped | squared << @splat(16));
+            var sums_2 = arch.reinterpret(L2Sums, head.l2_bias[bucket]);
             inline for (pairs, &prepared.l2_pairs[bucket]) |pair, *weights| {
                 const inputs: DotI16 = @bitCast(@as(DotU32, @splat(pair)));
                 const pair_weights: *const [L2_CHUNKS]DotI16 = @ptrCast(weights);
                 inline for (&sums_2, pair_weights) |*sum, chunk| sum.* += pair_products(inputs, chunk);
             }
-            break :blk @bitCast(sums_2);
+            break :blk arch.reinterpret(L2, sums_2);
         },
         .wide => blk: {
-            const hidden: [L2_INPUTS]i32 = @bitCast([2]L1{ clipped, squared });
+            const hidden = arch.reinterpret([L2_INPUTS]i32, [2]L1{ clipped, squared });
             var sums_2: L2 = head.l2_bias[bucket];
             inline for (hidden, &head.l2_weights[bucket]) |input, *column| {
                 sums_2 += @as(L2, @splat(input)) * @as(L2, column.*);

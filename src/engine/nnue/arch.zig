@@ -20,3 +20,11 @@ pub const AccumulatorPtr = *align(64) const Accumulator;
 /// Calling convention for declaring LLVM target intrinsics. Every vector, a mask included, has
 /// to be passed as a vector, which the x86-64 C conventions do not do.
 pub const intrinsic_call: std.lang.CallingConvention = if (builtin.target.cpu.arch == .x86_64) .{ .x86_64_vectorcall = .{} } else .c;
+
+/// The bytes of `value` read as a `To`. Since Zig 0.17, `@bitCast` between an array and a type
+/// of another element width is compiled bit by bit (docs/NNUE.md, "Reinterpreting arrays"), so
+/// casts that involve an array go through memory instead.
+pub inline fn reinterpret(comptime To: type, value: anytype) To {
+    comptime std.debug.assert(@sizeOf(To) == @sizeOf(@TypeOf(value)));
+    return @as(*align(1) const To, @ptrCast(&value)).*;
+}

@@ -55,6 +55,14 @@ combined with the wrong sign, so the row-by-row form gives wrong accumulators in
 compiled correctly. `zig build test -Doptimize=fast` covers it: the tests named "refresh" and
 "smp root" fail on an Apple CPU if the subtraction loop comes back.
 
+**Reinterpreting arrays.** Zig 0.17.0 defines `@bitCast` on the logical bits of a value. Between
+two vectors or two integers that is still a free reinterpretation, but a cast between an array
+(or an array of vectors) and a type of another element width is compiled as a bit-by-bit
+conversion through one wide integer: it made the multi-layer head about 80 times slower on
+AVX-512. The heads therefore use `@bitCast` only between vectors and integers, and
+`arch.reinterpret`, a load through a pointer cast, wherever an array is involved. All supported
+targets are little-endian, where the two agree.
+
 All integers in a file are little-endian. bullet pads a file with the bytes `bullet...` to a
 multiple of 64 bytes; the engine ignores the padding.
 
