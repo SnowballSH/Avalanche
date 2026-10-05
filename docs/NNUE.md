@@ -579,8 +579,6 @@ Tried and left out:
   against 465 for 4 in the same run.
 - **A step of 64 or 128 lanes in the rebuild alone**: 434 to 518 and 469 to 488 cycles with the
   per-count loops, inside the spread of the runs at 32 lanes.
-- **Applying a multi-piece move in one pass**: it concerns the 0.73% of frames above, at most
-  half of their update time.
 
 ### What has been executed
 
