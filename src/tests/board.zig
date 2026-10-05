@@ -295,3 +295,53 @@ test "draw: the repetition scan matches the reference on random key histories" {
         }
     }
 }
+
+const Snapshot = struct {
+    piece_bitboards: [types.N_PIECES]types.Bitboard,
+    mailbox: [types.N_SQUARES]types.Piece,
+    turn: types.Color,
+    game_ply: u32,
+    keys: position.Keys,
+    undo: position.UndoInfo,
+
+    fn of(pos: *const position.Position) Snapshot {
+        return .{
+            .piece_bitboards = pos.piece_bitboards,
+            .mailbox = pos.mailbox,
+            .turn = pos.turn,
+            .game_ply = pos.game_ply,
+            .keys = pos.keys(),
+            .undo = pos.history[pos.game_ply],
+        };
+    }
+};
+
+fn undo(pos: *position.Position, move: types.Move) void {
+    switch (pos.turn) {
+        .White => pos.undo_move(.Black, move),
+        .Black => pos.undo_move(.White, move),
+    }
+}
+
+fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, moves: []const types.Move) !void {
+    const fen = pos.basic_fen(std.testing.allocator);
+    defer std.testing.allocator.free(fen);
+    fresh.set_fen(fen);
+    try expectEqual(fresh.keys(), pos.keys());
+
+    const before = Snapshot.of(pos);
+    for (moves) |move| {
+        play(pos, move);
+        undo(pos, move);
+        try expectEqual(before, Snapshot.of(pos));
+    }
+    pos.play_null_move();
+    pos.undo_null_move();
+    try expectEqual(before, Snapshot.of(pos));
+}
+
+test "make/unmake: keys match a position set from the FEN, and undoing any move restores the position" {
+    const fresh = try support.new_position();
+    defer support.destroy_position(fresh);
+    try walk_random_games(0x0D0_0BAD_F00D_A11_0E5, 6, 120, fresh, expect_moves_round_trip);
+}
