@@ -1149,7 +1149,6 @@ pub const Position = struct {
         const all_bb = us_bb | them_bb;
 
         const our_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()]))));
-        const their_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()]))));
 
         const our_diag_sliders = self.diagonal_sliders(color);
         const their_diag_sliders = self.diagonal_sliders(opp);
@@ -1166,32 +1165,15 @@ pub const Position = struct {
         const rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
         const rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
 
-        // Squares King cannot go to
-        var danger: types.Bitboard = 0;
-
-        const their_pawns = self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()];
-
-        danger |= tables.get_pawn_attacks_bb(opp, their_pawns) | tables.get_attacks(types.PieceType.King, their_king, all_bb);
-
-        b1 = self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Knight).index()];
+        // King captures
+        const occupied_without_king = all_bb ^ types.SquareIndexBB[our_king.index()];
+        b1 = tables.get_attacks(types.PieceType.King, our_king, all_bb) & them_bb;
         while (b1 != 0) {
-            danger |= tables.get_attacks(types.PieceType.Knight, types.pop_lsb(&b1), all_bb);
+            const target = types.pop_lsb(&b1);
+            if (self.attackers_from(opp, target, occupied_without_king) == 0) {
+                list.append(types.Move.new_from_to_flag(our_king, target, types.MoveFlags.CAPTURE)) catch {};
+            }
         }
-
-        b1 = their_diag_sliders;
-        while (b1 != 0) {
-            danger |= tables.get_attacks(types.PieceType.Bishop, types.pop_lsb(&b1), all_bb ^ types.SquareIndexBB[our_king.index()]);
-        }
-
-        b1 = their_ortho_sliders;
-        while (b1 != 0) {
-            danger |= tables.get_attacks(types.PieceType.Rook, types.pop_lsb(&b1), all_bb ^ types.SquareIndexBB[our_king.index()]);
-        }
-
-        // King moves
-        b1 = tables.get_attacks(types.PieceType.King, our_king, all_bb) & ~(us_bb | danger);
-
-        types.Move.make_all(types.MoveFlags.CAPTURE, our_king, b1 & them_bb, list);
 
         var capture_mask: types.Bitboard = 0;
         var quiet_mask: types.Bitboard = 0;

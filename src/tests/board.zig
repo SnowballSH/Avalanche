@@ -8,6 +8,7 @@ const search = @import("../engine/search.zig");
 const see = @import("../engine/see.zig");
 const support = @import("support.zig");
 const expectEqual = std.testing.expectEqual;
+const expectEqualSlices = std.testing.expectEqualSlices;
 
 const MoveList = std.array_list.Managed(types.Move);
 
@@ -182,6 +183,42 @@ fn expect_see_matches_reference(prng: *utils.PRNG, pos: *position.Position, move
 test "see: threshold matches the reference exchange on every move of random games" {
     var prng = utils.PRNG.new(0x5EE_7E57_0B0A_2D00_C0FF_EE11);
     try walk_random_games(0xB0A2D_5EE_D1FF_E2E7_1A1, 12, 80, &prng, expect_see_matches_reference);
+}
+
+fn king_captures(pos: *const position.Position, moves: []const types.Move, out: *MoveList) !void {
+    out.clearRetainingCapacity();
+    for (moves) |move| {
+        if (move.is_capture() and pos.mailbox[move.from].piece_type() == .King) try out.append(move);
+    }
+}
+
+const KingCaptureLists = struct {
+    captures: MoveList,
+    from_legal: MoveList,
+    from_captures: MoveList,
+};
+
+fn expect_same_king_captures(lists: *KingCaptureLists, pos: *position.Position, legal: []const types.Move) !void {
+    lists.captures.clearRetainingCapacity();
+    switch (pos.turn) {
+        .White => pos.generate_q_moves(.White, &lists.captures),
+        .Black => pos.generate_q_moves(.Black, &lists.captures),
+    }
+    try king_captures(pos, legal, &lists.from_legal);
+    try king_captures(pos, lists.captures.items, &lists.from_captures);
+    try expectEqualSlices(types.Move, lists.from_legal.items, lists.from_captures.items);
+}
+
+test "movegen: the capture generator finds the legal generator's king captures in the same order" {
+    var lists = KingCaptureLists{
+        .captures = try MoveList.initCapacity(std.testing.allocator, 256),
+        .from_legal = try MoveList.initCapacity(std.testing.allocator, 8),
+        .from_captures = try MoveList.initCapacity(std.testing.allocator, 8),
+    };
+    defer lists.captures.deinit();
+    defer lists.from_legal.deinit();
+    defer lists.from_captures.deinit();
+    try walk_random_games(0xC0DE_CAFE_F00D_0BAD_5EED, 40, 160, &lists, expect_same_king_captures);
 }
 
 fn reference_material_draw(pos: *const position.Position) bool {
