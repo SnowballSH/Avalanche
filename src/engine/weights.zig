@@ -109,7 +109,7 @@ pub const NNUEWeights = Network(HEAD);
 
 /// The embedded network, aligned for inference: the only copy of it in the
 /// executable. Wasm runs on it in place to avoid a second 25 MB in linear memory.
-const embedded_model: [@sizeOf(NNUEWeights)]u8 align(@alignOf(NNUEWeights)) = NNUE_SOURCE[0..@sizeOf(NNUEWeights)].*;
+const embedded_model align(@alignOf(NNUEWeights)) = NNUE_SOURCE.*;
 
 /// The network in use: the embedded image until `adopt` has copied a network
 /// into large memory (docs/MEMORY.md).
@@ -227,8 +227,8 @@ comptime {
 }
 
 pub fn do_nnue() void {
-    validate(&embedded_model) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
-    if (platform.is_wasm) prepare() else adopt(&embedded_model);
+    validate(embedded_model[0..@sizeOf(NNUEWeights)]) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
+    if (platform.is_wasm) prepare() else adopt(embedded_model[0..@sizeOf(NNUEWeights)]);
 }
 
 /// Large enough to read a network of either architecture, so that a file of
@@ -258,7 +258,7 @@ pub fn install(bytes: []const u8) NetworkError!void {
 pub fn load(path: []const u8) !void {
     if (comptime !supports_eval_file) return error.Unsupported;
     if (std.mem.eql(u8, path, EMBEDDED_NAME)) {
-        try install(&embedded_model);
+        try install(embedded_model[0..@sizeOf(NNUEWeights)]);
         active_name = build_options.net_name;
         return;
     }
