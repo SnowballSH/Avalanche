@@ -561,8 +561,7 @@ cores times its instructions, not wall-clock time.
   (one row added, one removed), 227 for a capture, 275 with two rows of each kind. That is 2.6
   loads per cycle and no more, whatever the loop looks like: steps of 16, 32, 64 and 128 lanes
   took 174.0, 175.3, 177.8 and 175.8 cycles for the quiet move, and the other shapes show no
-  order either (within 3% for a capture and for two rows of each kind, 7% for two added and one
-  removed). The generated loop is already one `ldp` per 32 bytes of every source and one `stp`
+  order either (within 3% for a capture and for two rows of each kind). The generated loop is already one `ldp` per 32 bytes of every source and one `stp`
   per 32 bytes of the destination, with pointer increments, so `UPDATE_LANES` stays at 32.
 - **Rebuilds** run over the two row lists inside every 64-byte step. LLVM unrolls each list four
   times into partial sums that it clears and combines in every step, with a remainder loop for

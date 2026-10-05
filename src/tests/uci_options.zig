@@ -132,6 +132,8 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
             std.mem.writeInt(i32, bytes, std.mem.readInt(i32, bytes, .little) + (1 << 20), .little);
         },
     }
+    const first_feature_bias = altered[@offsetOf(weights.NNUEWeights, "layer_1_bias")..][0..2];
+    std.mem.writeInt(i16, first_feature_bias, std.mem.readInt(i16, first_feature_bias, .little) +% 7, .little);
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "altered.nnue", .data = altered });
     const altered_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "altered.nnue", &path_buf)];
     const kept = try support.new_position();
@@ -148,7 +150,11 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     // new network when its evaluation is rebuilt.
     kept.rebuild_evaluation();
     try expect(hce.evaluate_nnue(kept) != kept_embedded_eval);
-    try expectEqual(support.network_output(kept), hce.evaluate_nnue(kept));
+    const fresh = try support.new_position();
+    defer support.destroy_position(fresh);
+    fresh.set_fen(types.KIWIPETE_FEN);
+    try expectEqual(support.network_output(fresh), support.network_output(kept));
+    try expectEqual(support.network_output(fresh), hce.evaluate_nnue(kept));
 
     try f.set("name EvalFile value " ++ weights.EMBEDDED_NAME);
     try expectEqual(embedded_eval, support.network_output(f.pos));

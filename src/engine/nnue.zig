@@ -220,7 +220,10 @@ pub const NNUE = struct {
     pub fn adopt_storage(self: *NNUE, storage: ?*Storage) void {
         self.storage = storage;
         self.depth = 0;
-        if (storage) |s| s.states[0] = .stale;
+        if (storage) |s| {
+            s.states[0] = .stale;
+            self.follow_network();
+        }
     }
 
     /// Drops what was computed with another network.
