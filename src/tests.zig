@@ -35,6 +35,7 @@ test {
     _ = @import("engine/datagen/adjudicator.zig");
     _ = @import("tests/datagen.zig");
     _ = @import("chess/cuckoo.zig");
+    _ = @import("chess/key_history.zig");
     _ = @import("chess/fen.zig");
     _ = @import("tests/viriformat.zig");
     _ = @import("tests/tbfilter_viri.zig");

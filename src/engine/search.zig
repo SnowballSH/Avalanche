@@ -5,6 +5,7 @@ const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const cuckoo = @import("../chess/cuckoo.zig");
+const KeyHistory = @import("../chess/key_history.zig").KeyHistory;
 const hce = @import("hce.zig");
 const tt = @import("tt.zig");
 const movepick = @import("movepick.zig");
@@ -82,7 +83,7 @@ inline fn reserve_next_iteration(
 }
 
 pub const MAX_PLY = 200;
-pub const MAX_GAMEPLY = 1024;
+const KEY_HISTORY_CAPACITY = @typeInfo(@FieldType(position.Position, "history")).array.len + 1;
 pub const MAX_MOVES = 256;
 pub const MAX_MULTI_PV = MAX_MOVES;
 
@@ -264,7 +265,7 @@ pub const Searcher = struct {
     exclude_move: [MAX_PLY]types.Move = undefined,
     nmp_min_ply: u32 = 0,
 
-    hash_history: std.array_list.Managed(u64) = undefined,
+    hash_history: KeyHistory = undefined,
     eval_history: [MAX_PLY]i32 = undefined,
     raw_eval_history: [MAX_PLY]i32 = undefined,
     move_history: [MAX_PLY]types.Move = undefined,
@@ -328,7 +329,7 @@ pub const Searcher = struct {
             .continuation = platform.allocator.create([12][64][64][64]i16) catch unreachable,
             .root_board = board,
         };
-        self.hash_history = std.array_list.Managed(u64).initCapacity(platform.allocator, MAX_GAMEPLY) catch unreachable;
+        self.hash_history = KeyHistory.init(platform.allocator, KEY_HISTORY_CAPACITY) catch unreachable;
         self.reset_heuristics(true);
     }
 
@@ -339,7 +340,7 @@ pub const Searcher = struct {
     }
 
     pub fn deinit(self: *Searcher) void {
-        self.hash_history.deinit();
+        self.hash_history.deinit(platform.allocator);
         platform.allocator.destroy(self.continuation);
         self.root_board.deinit();
         platform.allocator.destroy(self.root_board);
