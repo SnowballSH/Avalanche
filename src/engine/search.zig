@@ -238,6 +238,9 @@ pub fn shutdown_helpers() void {
     helper_pool.deinit();
 }
 
+/// Indexed by the earlier move's piece and target square, then by the move's squares.
+pub const ContinuationHistory = [12][64][64][64]i16;
+
 pub const Searcher = struct {
     min_depth: usize = 1,
     max_millis: u64 = 0,
@@ -278,7 +281,7 @@ pub const Searcher = struct {
     history: [2][64][64]i32 = undefined,
 
     counter_moves: [2][64][64]types.Move = undefined,
-    continuation: *[12][64][64][64]i16,
+    continuation: *align(platform.large_memory.ALIGNMENT) ContinuationHistory,
     capture_history: [12][64][6]i16 = undefined,
     pawn_correction: [2][CORRHIST_SIZE]i16 = undefined,
     nonpawn_correction: [2][2][CORRHIST_SIZE]i16 = undefined,
@@ -325,7 +328,7 @@ pub const Searcher = struct {
         const board = platform.allocator.create(position.Position) catch unreachable;
         board.init();
         self.* = .{
-            .continuation = platform.large_memory.create([12][64][64][64]i16, "search") catch @panic("out of memory for the continuation history"),
+            .continuation = platform.large_memory.create(ContinuationHistory, "search") catch @panic("out of memory for the continuation history"),
             .root_board = board,
         };
         self.hash_history = KeyHistory.init(platform.allocator, position.HISTORY_CAPACITY) catch unreachable;
@@ -340,7 +343,7 @@ pub const Searcher = struct {
 
     pub fn deinit(self: *Searcher) void {
         self.hash_history.deinit(platform.allocator);
-        platform.large_memory.destroy(self.continuation);
+        platform.large_memory.destroy(ContinuationHistory, self.continuation);
         self.root_board.deinit();
         platform.allocator.destroy(self.root_board);
     }
