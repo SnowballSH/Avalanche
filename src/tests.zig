@@ -191,7 +191,7 @@ test "Position" {
     zobrist.init_zobrist();
     weights.do_nnue();
 
-    // Position is ~174 KiB; keep it off the test stack.
+    // Position holds the whole undo stack; keep it off the test stack.
     const pos = try std.testing.allocator.create(position.Position);
     defer std.testing.allocator.destroy(pos);
     pos.init();
@@ -896,10 +896,8 @@ fn expect_nnue_matches_fresh(pos: *position.Position) !void {
         std.testing.allocator.destroy(reference);
     }
     reference.init();
-    reference.piece_bitboards = pos.piece_bitboards;
-    reference.mailbox = pos.mailbox;
-    reference.turn = pos.turn;
-    reference.evaluator.full_refresh(reference);
+    reference.copy_game_state(pos);
+    reference.rebuild_evaluation();
 
     const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
     const expected = reference.evaluator.nnue_evaluator.accumulator(reference);
