@@ -122,7 +122,12 @@ pub var prepared: switch (HEAD) {
     .multi => head_multi.Prepared,
 } = undefined;
 
+/// Changes whenever another network becomes the active one; what was computed
+/// with the previous network is recognised by an older value.
+pub var generation: u32 = 0;
+
 fn prepare() void {
+    generation +%= 1;
     if (HEAD == .multi) prepared = .init(&MODEL.head, l1_shift(&MODEL.header));
 }
 
@@ -244,9 +249,9 @@ pub fn read_file(path: []const u8) ![]u8 {
 /// Replaces the active network's weights with `bytes`, a whole network file,
 /// keeping its name. Every network enters through here, so `bytes` gets the
 /// checks of `validate`: this build's architecture, header and weight ranges.
-/// The active network is untouched on error. Callers must refresh every
-/// position's accumulators afterwards. Not for wasm, which reads the embedded
-/// network in place.
+/// The active network is untouched on error. Callers must refresh the
+/// evaluation of every position they keep (`Position.refresh_evaluation`, or
+/// setting it up again). Not for wasm, which reads the embedded network in place.
 pub fn install(bytes: []const u8) NetworkError!void {
     try validate(bytes);
     @memcpy(std.mem.asBytes(&model_storage), bytes);
@@ -255,7 +260,7 @@ pub fn install(bytes: []const u8) NetworkError!void {
 
 /// Replaces the active network with the file at `path`, or with the embedded
 /// network for `EMBEDDED_NAME`. The active network is untouched on error.
-/// Callers must refresh every position's accumulators afterwards.
+/// Callers must refresh the evaluation of every position they keep.
 pub fn load(path: []const u8) !void {
     if (comptime !supports_eval_file) return error.Unsupported;
     if (std.mem.eql(u8, path, EMBEDDED_NAME)) {

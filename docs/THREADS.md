@@ -26,8 +26,9 @@ thread from its own Finny table before its first job. Every job unwinds back
 to the root, so an aspiration re-search costs each helper a few scalars and
 the root move list. Copying the whole `Position` instead cost 157 KB per
 helper per re-search (80 MB at 512 threads) and replaced each helper's warm
-Finny table with the main thread's. Loading a network (`EvalFile`) discards
-the helpers' Finny tables.
+Finny table with the main thread's. After a network is loaded (`EvalFile`), a
+helper drops its Finny table and its evaluation cache when it next rebuilds its
+root: both carry the generation of the network they were filled with.
 
 The search contract is unchanged: helpers run a fixed-depth root search per
 job, observe the main thread's stop flag and share the node budget for

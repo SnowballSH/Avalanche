@@ -468,12 +468,121 @@ test "multi net: the feature transformer of parity matches the engine's accumula
     defer support.destroy_position(pos);
     for (bench.FENS) |fen| {
         pos.set_fen(fen);
-        const engine = pos.evaluator.nnue_evaluator.current();
+        const engine = pos.evaluator.nnue_evaluator.accumulator(pos);
         var acc: arch.Accumulator = undefined;
         parity.accumulate(weights.MODEL, pos, types.Color.White, &acc);
         try expect(std.mem.eql(i16, &acc, &engine.white));
         parity.accumulate(weights.MODEL, pos, types.Color.Black, &acc);
         try expect(std.mem.eql(i16, &acc, &engine.black));
+    }
+}
+
+fn expect_accumulators_rebuilt(pos: *position.Position) !void {
+    const engine = pos.evaluator.nnue_evaluator.accumulator(pos);
+    var rebuilt: Accumulators = undefined;
+    parity.accumulate(weights.MODEL, pos, types.Color.White, &rebuilt.own);
+    parity.accumulate(weights.MODEL, pos, types.Color.Black, &rebuilt.opp);
+    try std.testing.expectEqualSlices(i16, &rebuilt.own, &engine.white);
+    try std.testing.expectEqualSlices(i16, &rebuilt.opp, &engine.black);
+
+    const bucket = @min((types.popcount_usize(pos.all_all_pieces()) -| 2) / 4, arch.OUTPUT_SIZE - 1);
+    const expected = if (pos.turn == types.Color.White)
+        weights.evaluate(&rebuilt.own, &rebuilt.opp, bucket)
+    else
+        weights.evaluate(&rebuilt.opp, &rebuilt.own, bucket);
+    try expectEqual(expected, hce.evaluate_nnue(pos));
+}
+
+test "multi net: a rebuild from the cache of an unrelated position equals a scalar one" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    const source = try support.new_position();
+    defer support.destroy_position(source);
+
+    // The kings never leave e1 and e8, so every rebuild starts from the cache
+    // entries of the position before: up to 30 rows to remove and to add.
+    const fens = [_][]const u8{
+        types.DEFAULT_FEN,
+        "4k3/8/8/3p4/4P3/8/8/4K3 w - - 0 1",
+        types.DEFAULT_FEN,
+        types.KIWIPETE_FEN,
+        "4k3/pppppppp/8/8/8/8/8/4K3 b - - 0 1",
+        "4k3/pppppppp/8/8/8/8/8/4K3 b - - 0 1",
+    };
+    for (fens) |fen| {
+        source.set_fen(fen);
+        pos.copy_game_state(source);
+        pos.rebuild_evaluation();
+        try expect_accumulators_rebuilt(pos);
+    }
+}
+
+/// Moves that change more than one piece: a uniformly random game plays too few of them.
+fn is_rare_update(move: types.Move) bool {
+    return move.is_castle() or move.is_promotion() or move.get_flags() == types.MoveFlags.EN_PASSANT;
+}
+
+test "multi net: incremental accumulators equal a rebuild after every move of random games" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    var prng = std.Random.DefaultPrng.init(0x5eed_0005);
+    const random = prng.random();
+
+    const starts = [_][]const u8{
+        types.DEFAULT_FEN,
+        types.KIWIPETE_FEN,
+        // Promotions with and without capture, for both sides.
+        "1n2k1n1/P1P2P1P/8/8/8/8/p1p2p1p/1N2K1N1 w - - 0 1",
+        // En passant available at once, and more double pushes to come.
+        "4k3/pp1p1ppp/8/2pP4/4pP2/8/PPP1P1PP/4K3 w - c6 0 1",
+        // Chess960: the king and the rook land on each other's squares.
+        "1r2k1r1/pppppppp/8/8/8/8/PPPPPPPP/1R2K1R1 w GBgb - 0 1",
+        // Kings alone with pawns: nearly every move changes a king bucket.
+        "8/2k2p2/3p4/8/8/3P4/2K2P2/8 w - - 0 1",
+    };
+    const plies = 160;
+    for (starts) |fen| {
+        for (0..3) |_| {
+            pos.set_fen(fen);
+            try expect_accumulators_rebuilt(pos);
+            var played: [plies]types.Move = undefined;
+            var count: usize = 0;
+            while (count < plies) {
+                var storage: [256]types.Move = undefined;
+                var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
+                var moves = try std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len);
+                support.legal_moves(pos, &moves);
+                if (moves.items.len == 0) break;
+
+                var rare: [256]types.Move = undefined;
+                var rare_count: usize = 0;
+                for (moves.items) |move| {
+                    if (is_rare_update(move)) {
+                        rare[rare_count] = move;
+                        rare_count += 1;
+                    }
+                }
+                const move = if (rare_count != 0 and random.boolean())
+                    rare[random.uintLessThan(usize, rare_count)]
+                else
+                    moves.items[random.uintLessThan(usize, moves.items.len)];
+                support.play(pos, move);
+                played[count] = move;
+                count += 1;
+                try expect_accumulators_rebuilt(pos);
+
+                // A search takes moves back and plays others from the same frames.
+                if (random.uintLessThan(u8, 8) == 0) {
+                    for (0..random.uintAtMost(usize, @min(count, 6))) |_| {
+                        count -= 1;
+                        support.undo(pos, played[count]);
+                        try expect_accumulators_rebuilt(pos);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -536,7 +645,7 @@ test "multi net: the loaders reject the other architecture and damaged files" {
     const pos = try support.new_position();
     defer support.destroy_position(pos);
     pos.set_fen(types.KIWIPETE_FEN);
-    const before = hce.evaluate_nnue(pos);
+    const before = support.network_output(pos);
     var settings: options.Settings = .{};
     var out_buf: [1024]u8 = undefined;
     var out = std.Io.Writer.fixed(&out_buf);
@@ -544,6 +653,6 @@ test "multi net: the loaders reject the other architecture and damaged files" {
     try options.set_option(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{path}), .{ .settings = &settings, .position = pos, .out = &out });
     try expect(std.mem.indexOf(u8, out.buffered(), "WrongArchitecture") != null);
     try expect(std.mem.indexOf(u8, out.buffered(), "-Dhead=") != null);
-    try expectEqual(before, hce.evaluate_nnue(pos));
+    try expectEqual(before, support.network_output(pos));
     try std.testing.expectEqualStrings(@import("build_options").net_name, weights.active_network());
 }

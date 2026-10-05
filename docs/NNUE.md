@@ -21,8 +21,9 @@ without that header, `UnsupportedHeader` to one whose header differs (or is cut 
 `WrongArchitecture` to a file with the multi-layer header and `WrongSize` to any other length. A
 file larger than both layouts is not read at all (`StreamTooLong`).
 
-Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
-`src/engine/nnue/head_multi.zig`, `src/engine/weights.zig` (file layouts, loading),
+Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
+`src/engine/nnue/head_single.zig`, `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig`
+(file layouts, loading),
 `training/src/main.rs` and `training/src/multilayer.rs` (trainer).
 
 ## Shared by both heads
@@ -37,15 +38,96 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
-**Accumulator updates** (`src/engine/nnue.zig`). A move writes its position's accumulators into
-the next frame of a stack, each perspective in one pass: the parent's values plus the rows of the
-features that appeared, minus those that disappeared (two rows for a quiet move, three for a
-capture). When a king moves to another bucket or crosses the mirror line, every feature of that
-king's perspective changes. That perspective is then not updated at all: it is rebuilt from the
-"Finny table", a cache with one accumulator per perspective, mirror side and bucket and the piece
-sets it was computed for. The rebuild adds and removes only the rows by which the position
-differs from the cached one, and writes the result to the cache and to the frame in the same pass.
-Wrapping arithmetic makes the order of the additions irrelevant.
+**Accumulator updates** (`src/engine/nnue.zig`). A move opens the next frame of a stack and
+records in it the features that appeared and disappeared (one of each for a quiet move, a second
+removal for a capture, two of each for castling) and whether its king left its bucket or crossed
+the mirror line. The frame's accumulators are computed at once, or later when an evaluation
+needs them ("Lazy updates" below), each perspective in one pass: the values of the frame below
+plus the rows of the features that appeared, minus those that disappeared. When a king moves to
+another bucket or crosses the mirror line, every feature of that king's perspective changes. That
+perspective is then not updated at all: it is rebuilt from the "Finny table", a cache with one
+accumulator per perspective, mirror side and bucket and the piece sets it was computed for. The
+rebuild adds and removes only the rows by which the position differs from the cached one, and
+writes the result to the cache and to the frame in the same pass. Wrapping arithmetic makes the
+order of the additions irrelevant.
+
+**Evaluation cache** (`src/engine/nnue/eval_cache.zig`). The network's output is a function of
+the pieces and of the side it is computed for, and the search asks for it again and again for the
+same position: a quiescence node that fails low without a best move is not stored in the
+transposition table, quiescence evaluates before it probes the table, razoring hands a node that
+was just evaluated to quiescence, and every re-search and every new iteration walks over the
+leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) are of
+a position evaluated earlier in the run. So every `Position` (one per search thread) keeps a
+direct-mapped table of 2^17 outputs, 1 MiB. An entry is 8 bytes: the output in 20 bits (the
+largest any head can produce is ±131586) and 44 further bits of the Zobrist hash. The slot is the
+low 17 bits of the hash (the transposition table uses the high ones), so 61 bits of the hash
+decide a hit, against the 32 key bits and the index of the transposition table. The evaluations
+are therefore those of the head except when two positions agree in those 61 bits, about once in
+2^44 probes that land on another position's entry. The side-to-move key is folded into the hash
+when the output is asked for the side not to move. The scaling the search applies to the output
+(`EvalScale`, material, the fifty-move counter) comes after the cache, because the counter is not
+part of the hash. A cache belongs to the network it was filled with: `weights.generation` changes
+with every network that becomes active, and a position whose evaluation is rebuilt under another
+generation clears its cache and its Finny table first.
+
+Hit rate by table size, measured with whole 64-bit keys:
+
+| Entries | 2^10 | 2^12 | 2^14 | 2^16 | 2^18 | 2^20 | unbounded |
+|---|---|---|---|---|---|---|---|
+| `bench` (depth 14, 15.5M nodes) | 14.1% | 17.8% | 23.1% | 29.8% | 34.6% | 36.5% | 37.4% |
+| the same positions to depth 18 (91.0M nodes) | | | | 22.5% | 27.9% | | |
+
+**Lazy updates.** `push` (first thing in `play_move`) opens a frame, `toggle`, `move` and `capture`
+record the piece changes in it, and `commit` closes it; for a king move it compares the bucket and
+mirror side of the king's old and new square and marks that perspective for a rebuild if they
+differ. `commit` then looks the new position up in the evaluation cache. If its evaluation is
+there, the frame is left as a record: nothing is computed, and nothing will be unless a
+descendant needs it. Otherwise the frame's accumulators are computed at once.
+
+Bringing a perspective of the current frame up to date walks down the stack to the nearest frame
+that holds this perspective and applies the recorded changes frame by frame on the way back up,
+so the frames in between are computed as well and the next evaluation in that subtree starts from
+them. If the walk meets a frame marked for a rebuild first, the perspective is rebuilt for the
+current position from the Finny table instead: the frames in between have nothing to continue
+from, and the pieces of an earlier frame are no longer known. The bottom frame always holds its
+accumulators or is marked for a rebuild, which ends the walk. A piece changed outside a move
+(`add_piece` on a position being set up) marks the current frame for a rebuild of both
+perspectives. When the stack is full,
+the current frame is computed and moved to the bottom. An evaluation that misses the cache does
+the same walk, which is where the frames skipped at `commit` are computed when a position below
+them needs them.
+
+Why `commit` computes eagerly on a miss, and does not wait for the evaluation: the rows of an
+update come from all over a 25 MiB table, and in `play_move` that memory traffic overlaps the
+transposition-table probe of the new node, which is fetched at the same time. Deferred to the
+evaluation, the same work runs after the probe and on the critical path of the head. And without
+the cache there is little to skip: 94% of the frames of a `bench` run are evaluated or lie below
+an evaluated one. EPYC 9R14 (Zen 4, 512-bit build), single thread, alternating runs, against the
+eager updates this replaced; `bench`, and four positions searched for 3 s with a 256 MiB hash:
+
+| Variant | `bench` | 3 s searches |
+|---|---|---|
+| deferred to the evaluation, no cache | -4.9% | -5.6% |
+| eager as before, with the cache (2^16 entries of 16 bytes) | +0.6% | -1.2% |
+| deferred to the evaluation, with that cache (EPYC 9R45) | +2.8% | -2.6% |
+| eager on a cache miss, with that cache | +4.7% | +0.3% |
+| eager on a cache miss, 2^16 entries of 8 bytes | +5.1% | +1.7% |
+| eager on a cache miss, 2^17 entries of 8 bytes (what the engine does) | +5.3% | +1.1% |
+
+A frame holds two perspectives. Per frame, 2.0 were computed before; now 1.40 are in `bench`, and
+1.53 at depth 18 with 2^16 entries (1.42 with 2^18). The cache alone gains little on this machine,
+where the head takes 117 ns and a probe of a table that does not stay in the second-level cache
+is not free; what pays is that a hit also makes the accumulators unnecessary. The gain is smaller
+in the long searches because the hit rate is lower and because a node there waits for its
+transposition-table entry to come from memory whatever else it does. A move with several piece
+changes (castling, en passant, promotion) is one pass per perspective where it used to be one per
+change; such moves are 0.7% of the frames.
+
+Tried and left out: prefetching the cache slot when the search prefetches the transposition-table
+entry, before the move is played (EPYC 9R45: `bench` +0.5%, the 3 s searches -0.3%, within the
+noise of that measurement), and 16-byte entries with the whole key (the fourth row of the table
+against the fifth: the smaller table stays in the caches better). The measurements were taken
+with 24 output bits and 40 hash bits in an entry.
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
 instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of
@@ -53,7 +135,9 @@ unknown length that subtracts into a vector is unrolled into four partial sums t
 combined with the wrong sign, so the row-by-row form gives wrong accumulators in `fast` builds
 (`safe`, `small`, generic AArch64 and x86-64 builds are not affected). A loop of additions is
 compiled correctly. `zig build test -Doptimize=fast` covers it: the tests named "refresh" and
-"smp root" fail on an Apple CPU if the subtraction loop comes back.
+"smp root" fail on an Apple CPU if the subtraction loop comes back, and the one named "random
+games" compares both accumulators with a scalar rebuild after every move of a few thousand random
+ones, castling, en passant, promotions and take-backs included.
 
 **Reinterpreting arrays.** Zig 0.17.0 defines `@bitCast` on the logical bits of a value. Between
 two vectors or two integers that is still a free reinterpretation, but a cast between an array
@@ -422,8 +506,9 @@ the measurement that decided it:
 
 - **Skipping zero L1 outputs in L2.** 12.4 of 16 are non-zero on the bench positions; the loop
   over the non-zero ones was slower than the full one (44 ns against 34 for L2 and L3).
-- **Lazy accumulator updates.** Of the 15.8M accumulator frames of a `bench` run, 14.9M are
-  evaluated or have an evaluated descendant, so at most 5% of the updates could be skipped.
+- **Lazy accumulator updates without the evaluation cache.** Of the 15.8M accumulator frames of a
+  `bench` run, 14.9M were evaluated or had an evaluated descendant, so at most 5% of the updates
+  could be skipped. The cache changed that, see "Lazy updates".
 - **Prefetching the weight rows of an accumulator update.** At the start of the update, all rows:
   `bench` changed by -1.5% on the M4; the rows of a move are read sequentially already. When the
   move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
@@ -450,6 +535,55 @@ the measurement that decided it:
   (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
 - **16-bit L2 weights on AArch64** (`smlal`, half the weight loads): 28.3 ns against 29.2, and no
   more nodes per second. L2 there is limited by the multiplier, not by loads.
+
+### Accumulator kernels
+
+What a `bench` run asks of the accumulators, counted at commit 870eeab: 13.84M frames and 12.57M
+evaluations; 2.38M king moves, of which 2.22M leave the king's bucket or mirror side, so one frame
+in six rebuilds a perspective from the Finny table; 0.73% of the frames take a second or third
+update pass (castling, en passant, promotions). A rebuild adds 2.80 rows and removes 2.78 on
+average:
+
+| Rows of one kind | 0 | 1 | 2 | 3 | 4 | 5 or 6 | 7 to 32 |
+|---|---|---|---|---|---|---|---|
+| added, % of the rebuilds | 4.9 | 18.1 | 28.6 | 20.4 | 13.2 | 10.8 | 4.0 |
+| removed | 5.3 | 20.2 | 29.2 | 17.0 | 12.1 | 11.3 | 4.9 |
+
+Nothing differs in 4.1% of the rebuilds, and in 2.3% the position has fewer pieces than rows
+differ, so starting from the biases would rarely be shorter.
+
+The timings below are cycles of an M4 performance core for one perspective, with the rows in the
+first-level cache, from a stand-alone copy of the kernels that replays these row counts. The
+machine was shared and busy, so they are the process's cycles per instruction on performance
+cores times its instructions, not wall-clock time.
+
+- **Updates** cost 0.39 cycles per 16-byte load and 0.2 per store: 175 cycles for a quiet move
+  (one row added, one removed), 227 for a capture, 275 with two rows of each kind. That is 2.6
+  loads per cycle and no more, whatever the loop looks like: steps of 16, 32, 64 and 128 lanes
+  took 174.0, 175.3, 177.8 and 175.8 cycles for the quiet move, and the other shapes show no
+  order either (within 3% for a capture and for two rows of each kind). The generated loop is already one `ldp` per 32 bytes of every source and one `stp`
+  per 32 bytes of the destination, with pointer increments, so `UPDATE_LANES` stays at 32.
+- **Rebuilds** run over the two row lists inside every 64-byte step. LLVM unrolls each list four
+  times into partial sums that it clears and combines in every step, with a remainder loop for
+  the usual case of fewer than four rows: 539 to 592 cycles a rebuild (five runs).
+
+Tried and left out:
+
+- **A rebuild loop compiled for every pair of row counts**: the update loop with two
+  destinations, the cache and the frame, for up to 4 added and 4 removed rows (25 loops picked by
+  a switch), rows beyond four of a kind applied to the cache first, in place. With the rows in
+  the first-level cache a rebuild took 465 to 513 cycles (three runs) instead of 539 to 592, and
+  `bench` retired 2.8 to 3.0% fewer instructions (113.4G to 110.1G for the same nodes). That did
+  not become time. Over eleven alternating pairs of `bench` the cycles, counted the same way,
+  were 0.7% higher by the fastest run of each binary (32.30G against 32.52G) and 1.9% higher by
+  the median (33.07G against 33.70G), with single pairs from 10% slower to 10% faster on a
+  machine that was busy throughout: no gain that the measurement can show, and more code. Passes
+  of up to 8 rows (81 loops; more than four rows of a kind occur in 15% of the rebuilds, more
+  than eight in 1%) were 2.2% slower than the old loop by the fastest of four runs. With the rows
+  in the first-level cache, passes of up to 2, 3, 6 or 8 rows took 519, 469, 469 and 461 cycles
+  against 465 for 4 in the same run.
+- **A step of 64 or 128 lanes in the rebuild alone**: 434 to 518 and 469 to 488 cycles with the
+  per-count loops, inside the spread of the runs at 32 lanes.
 
 ### What has been executed
 

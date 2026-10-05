@@ -121,12 +121,12 @@ pub fn run(args_in: []const []const u8) !void {
 
     var prng = utils.PRNG.new(@as(u128, seed) | (@as(u128, seed) << 64) ^ 0xdeadbeefcafe1234);
 
+    var pos: position.Position = undefined;
+    pos.init();
+    defer pos.deinit();
+
     var generated: u64 = 0;
     while (generated < n_fens) {
-        var pos: position.Position = undefined;
-        pos.init();
-        defer pos.deinit();
-
         if (book_lines.len > 0) {
             const line = book_lines[prng.rand64() % book_lines.len];
             pos.set_fen(line);
