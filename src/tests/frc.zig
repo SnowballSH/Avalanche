@@ -80,10 +80,8 @@ fn expect_perft_suite(suite: []const PerftCase) !void {
 fn expect_nnue_matches_fresh(pos: *position.Position) !void {
     const reference = try new_position();
     defer destroy_position(reference);
-    reference.piece_bitboards = pos.piece_bitboards;
-    reference.mailbox = pos.mailbox;
-    reference.turn = pos.turn;
-    reference.evaluator.full_refresh(reference);
+    reference.copy_game_state(pos);
+    reference.rebuild_evaluation();
 
     const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
     const expected = reference.evaluator.nnue_evaluator.accumulator(reference);

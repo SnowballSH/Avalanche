@@ -120,11 +120,7 @@ pub fn has_upcoming_repetition(pos: anytype, hash_history: []const u64, ply: u32
         }
 
         const move_sqs = types.SquareIndexBB[from_sq] | types.SquareIndexBB[to_sq];
-        const stm_occ = if (pos.turn == types.Color.White)
-            (pos.piece_bitboards[types.Piece.WHITE_PAWN.index()] | pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | pos.piece_bitboards[types.Piece.WHITE_ROOK.index()] | pos.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | pos.piece_bitboards[types.Piece.WHITE_KING.index()])
-        else
-            (pos.piece_bitboards[types.Piece.BLACK_PAWN.index()] | pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | pos.piece_bitboards[types.Piece.BLACK_ROOK.index()] | pos.piece_bitboards[types.Piece.BLACK_QUEEN.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()]);
-        if (stm_occ & move_sqs != 0) {
+        if (pos.occupancy[@backingInt(pos.turn)] & move_sqs != 0) {
             return true;
         }
     }

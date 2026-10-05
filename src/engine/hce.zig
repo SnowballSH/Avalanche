@@ -438,43 +438,15 @@ pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: ty
     return pos.evaluator.nnue_evaluator.evaluate_comptime(color, pos);
 }
 
-pub inline fn is_material_draw(pos: *position.Position) bool {
-    const all = pos.all_pieces(types.Color.White) | pos.all_pieces(types.Color.Black);
-    const kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
-
-    if (kings == all) {
-        return true;
-    }
-
-    const wb = pos.piece_bitboards[types.Piece.WHITE_BISHOP.index()];
-    const bb = pos.piece_bitboards[types.Piece.BLACK_BISHOP.index()];
-    const wn = pos.piece_bitboards[types.Piece.WHITE_KNIGHT.index()];
-    const bn = pos.piece_bitboards[types.Piece.BLACK_KNIGHT.index()];
-
-    const wbc = types.popcount(wb);
-    const bbc = types.popcount(bb);
-    const wnc = types.popcount(wn);
-    const bnc = types.popcount(bn);
-
-    // KB vs K
-    if (wbc == 1 and wb | kings == all) {
-        return true;
-    }
-
-    if (bbc == 1 and bb | kings == all) {
-        return true;
-    }
-
-    // KN vs K
-    if (wnc == 1 and wn | kings == all) {
-        return true;
-    }
-
-    if (bnc == 1 and bn | kings == all) {
-        return true;
-    }
-
-    return false;
+/// Bare kings, or a single knight or bishop besides them.
+pub inline fn is_material_draw(pos: *const position.Position) bool {
+    const bb = &pos.piece_bitboards;
+    const pawns_and_majors = bb[types.Piece.WHITE_PAWN.index()] | bb[types.Piece.BLACK_PAWN.index()] |
+        bb[types.Piece.WHITE_ROOK.index()] | bb[types.Piece.BLACK_ROOK.index()] |
+        bb[types.Piece.WHITE_QUEEN.index()] | bb[types.Piece.BLACK_QUEEN.index()];
+    const minors = bb[types.Piece.WHITE_KNIGHT.index()] | bb[types.Piece.BLACK_KNIGHT.index()] |
+        bb[types.Piece.WHITE_BISHOP.index()] | bb[types.Piece.BLACK_BISHOP.index()];
+    return pawns_and_majors == 0 and minors & (minors -% 1) == 0;
 }
 
 pub inline fn is_material_drawish(pos: *position.Position) bool {

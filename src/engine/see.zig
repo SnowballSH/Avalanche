@@ -61,15 +61,16 @@ fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types
 
     const king_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(king_bb))));
     const us = pos.all_pieces(color) & occ;
-    const them = pos.all_pieces(opp) & occ;
-    var candidates = tables.get_rook_attacks(king_sq, them) & pos.orthogonal_sliders(opp) & occ;
-    candidates |= tables.get_bishop_attacks(king_sq, them) & pos.diagonal_sliders(opp) & occ;
+    const pieces = us | (pos.all_pieces(opp) & occ);
+    var snipers = tables.PseudoLegalAttacks[types.PieceType.Rook.index()][king_sq.index()] & pos.orthogonal_sliders(opp);
+    snipers |= tables.PseudoLegalAttacks[types.PieceType.Bishop.index()][king_sq.index()] & pos.diagonal_sliders(opp);
+    snipers &= occ;
 
     var pinned: types.Bitboard = 0;
-    while (candidates != 0) {
-        const pinner = types.pop_lsb(&candidates);
-        const between = tables.SquaresBetween[king_sq.index()][pinner.index()] & us;
-        if (between != 0 and (between & (between - 1)) == 0) {
+    while (snipers != 0) {
+        const sniper = types.pop_lsb(&snipers);
+        const between = tables.SquaresBetween[king_sq.index()][sniper.index()] & pieces;
+        if (between & us != 0 and (between & (between - 1)) == 0) {
             pinned |= between;
         }
     }
@@ -77,6 +78,8 @@ fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types
 }
 
 fn legalAttackers(pos: *position.Position, comptime color: types.Color, target: types.Square, occ: types.Bitboard, attackers: types.Bitboard) types.Bitboard {
+    if (attackers == 0) return 0;
+
     var legal = attackers;
     var pinned = pinnedPieces(pos, color, occ) & attackers;
     if (pinned == 0) return legal;
@@ -129,10 +132,13 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     occ |= types.SquareIndexBB[to];
     var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @fromBackingInt(@intCast(to))), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @fromBackingInt(@intCast(to))), occ)) & occ;
 
+    var stm = pos.mailbox[from].color().invert();
+    if (attackers & (if (stm == types.Color.White) white_pieces else black_pieces) == 0) {
+        return true;
+    }
+
     const bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
     const rooks = pos.orthogonal_sliders(types.Color.White) | pos.orthogonal_sliders(types.Color.Black);
-
-    var stm = pos.mailbox[from].color().invert();
 
     while (true) {
         attackers &= occ;

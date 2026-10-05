@@ -115,7 +115,7 @@ test "smp root: helper sees a repetition from before the root" {
     var helper = search.Searcher.new();
     defer helper.deinit();
     // Leftover history from an earlier, longer game must not survive.
-    try helper.hash_history.appendNTimes(pos.hash, 40);
+    for (0..40) |_| try helper.hash_history.append(pos.hash);
 
     try main.hash_history.append(pos.hash);
     for ([_][]const u8{ "g1f3", "g8f6", "f3g1" }) |move| {

@@ -11,8 +11,29 @@ const see = @import("../engine/see.zig");
 
 pub const MAX_HISTORY_PLY: u32 = 1920;
 
+/// Entries of the undo stack, one per position from `set_fen` on: the longest
+/// game the UCI position parser replays (MAX_HISTORY_PLY moves) and the deepest
+/// search on top of it. search.zig checks its MAX_PLY against this.
+pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + 256;
+
+/// Zobrist keys of a position.
+pub const Keys = struct {
+    hash: u64 = 0,
+    pawn_hash: u64 = 0,
+    nonpawn_hash: [2]u64 = .{ 0, 0 },
+};
+
 // Stores information for undoing a move.
-pub const UndoInfo = packed struct {
+pub const UndoInfo = struct {
+    // Keys of the position the move was played from
+    previous_keys: Keys,
+
+    // Enemy pieces attacking the king of the side to move
+    king_attackers: types.Bitboard,
+
+    // Fifty-move rule counter
+    fifty: u16,
+
     castling: castling.Rights,
 
     // piece that was captured
@@ -21,24 +42,25 @@ pub const UndoInfo = packed struct {
     // EP square
     ep_sq: types.Square,
 
-    // Fifty-move rule counter
-    fifty: u16,
-
     pub fn new() UndoInfo {
         return UndoInfo{
+            .previous_keys = .{},
+            .king_attackers = 0,
+            .fifty = 0,
             .castling = castling.NO_RIGHTS,
             .captured = types.Piece.NO_PIECE,
             .ep_sq = types.Square.NO_SQUARE,
-            .fifty = 0,
         };
     }
 
-    pub fn from(old: UndoInfo) UndoInfo {
+    pub fn after(previous: UndoInfo, previous_keys: Keys) UndoInfo {
         return UndoInfo{
-            .castling = old.castling,
+            .previous_keys = previous_keys,
+            .king_attackers = 0,
+            .fifty = previous.fifty +| 1,
+            .castling = previous.castling,
             .captured = types.Piece.NO_PIECE,
             .ep_sq = types.Square.NO_SQUARE,
-            .fifty = old.fifty +| 1,
         };
     }
 };
@@ -47,6 +69,8 @@ pub const UndoInfo = packed struct {
 pub const Position = struct {
     // Bitboards of each piece
     piece_bitboards: [types.N_PIECES]types.Bitboard = undefined,
+    // Squares occupied by each color
+    occupancy: [types.N_COLORS]types.Bitboard = .{ 0, 0 },
     // Mailbox representation of the board
     mailbox: [types.N_SQUARES]types.Piece = undefined,
     // Current player
@@ -63,14 +87,11 @@ pub const Position = struct {
     nonpawn_hash: [2]u64 = .{ 0, 0 },
 
     // History of Undo information.
-    // Sized to accommodate the longest game the UCI position parser will replay
-    // (MAX_HISTORY_PLY moves) plus the deepest search (MAX_PLY plies of play_move).
-    history: [MAX_HISTORY_PLY + 256]UndoInfo = undefined,
+    history: [HISTORY_CAPACITY]UndoInfo = undefined,
 
-    // Stores the enemy pieces that are attacking the king
+    // Working values of the move generators: the pieces attacking the king of
+    // the side they last ran for, and that side's pieces pinned to it.
     checkers: types.Bitboard = 0,
-
-    // Stores the pieces that are pinned to the king
     pinned: types.Bitboard = 0,
 
     castling: castling.Setup = .{},
@@ -104,6 +125,7 @@ pub const Position = struct {
     /// played from here never read the entries below it.
     pub fn copy_game_state(self: *Position, src: *const Position) void {
         self.piece_bitboards = src.piece_bitboards;
+        self.occupancy = src.occupancy;
         self.mailbox = src.mailbox;
         self.turn = src.turn;
         self.game_ply = src.game_ply;
@@ -228,6 +250,10 @@ pub const Position = struct {
         }
 
         self.hash ^= zobrist.CastlingHash[self.castling_rights()];
+        self.history[self.game_ply].king_attackers = switch (self.turn) {
+            .White => self.king_attackers(.White),
+            .Black => self.king_attackers(.Black),
+        };
 
         self.evaluator.full_refresh(self);
     }
@@ -255,12 +281,20 @@ pub const Position = struct {
         return key;
     }
 
-    inline fn toggle_structure_hash(self: *Position, pc: types.Piece, key: u64) void {
-        if (pc.piece_type() == types.PieceType.Pawn) {
-            self.pawn_hash ^= key;
-        } else {
-            self.nonpawn_hash[@backingInt(pc.color())] ^= key;
-        }
+    pub inline fn keys(self: *const Position) Keys {
+        return .{ .hash = self.hash, .pawn_hash = self.pawn_hash, .nonpawn_hash = self.nonpawn_hash };
+    }
+
+    inline fn restore_keys(self: *Position, saved: Keys) void {
+        self.hash = saved.hash;
+        self.pawn_hash = saved.pawn_hash;
+        self.nonpawn_hash = saved.nonpawn_hash;
+    }
+
+    inline fn toggle_keys(self: *Position, pc: types.Piece, key: u64) void {
+        self.hash ^= key;
+        const structure_hash = if (pc.piece_type() == types.PieceType.Pawn) &self.pawn_hash else &self.nonpawn_hash[@backingInt(pc.color())];
+        structure_hash.* ^= key;
     }
 
     // Accepts standard, X-FEN (K/Q = outermost rook on that wing) and
@@ -471,41 +505,26 @@ pub const Position = struct {
     }
 
     pub inline fn add_piece(self: *Position, pc: types.Piece, sq: types.Square) void {
-        self.evaluator.add_piece(pc, sq, self);
-        self.mailbox[sq.index()] = pc;
-        self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
-        const key = zobrist.ZobristTable[pc.index()][sq.index()];
-        self.hash ^= key;
-        self.toggle_structure_hash(pc, key);
+        self.place(pc, sq, true);
     }
 
     pub inline fn remove_piece(self: *Position, sq: types.Square) void {
-        self.evaluator.remove_piece(sq, self);
-        const pc = self.mailbox[sq.index()];
-        const key = zobrist.ZobristTable[pc.index()][sq.index()];
-        self.hash ^= key;
-        self.toggle_structure_hash(pc, key);
-        self.piece_bitboards[pc.index()] &= ~types.SquareIndexBB[sq.index()];
-        self.mailbox[sq.index()] = types.Piece.NO_PIECE;
+        self.lift(sq, true);
     }
 
-    pub inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
+    inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
         const captured = self.mailbox[to.index()];
         if (captured != types.Piece.NO_PIECE) {
             const moving = self.mailbox[from.index()];
             self.evaluator.capture_piece(captured, moving, from, to);
 
-            // Remove captured piece
-            const captured_key = zobrist.ZobristTable[captured.index()][to.index()];
-            self.hash ^= captured_key;
-            self.toggle_structure_hash(captured, captured_key);
+            self.toggle_keys(captured, zobrist.ZobristTable[captured.index()][to.index()]);
             self.piece_bitboards[captured.index()] &= ~types.SquareIndexBB[to.index()];
+            self.occupancy[@backingInt(captured.color())] &= ~types.SquareIndexBB[to.index()];
 
-            // Move piece from -> to
-            const moving_key = zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
-            self.hash ^= moving_key;
-            self.toggle_structure_hash(moving, moving_key);
+            self.toggle_keys(moving, zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()]);
             self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+            self.occupancy[@backingInt(moving.color())] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
             self.mailbox[to.index()] = moving;
             self.mailbox[from.index()] = types.Piece.NO_PIECE;
         } else {
@@ -514,14 +533,35 @@ pub const Position = struct {
     }
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
-    pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
-        const moving = self.mailbox[from.index()];
-        self.evaluator.move_piece_quiet(from, to, self);
-        const key = zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()];
-        self.hash ^= key;
-        self.toggle_structure_hash(moving, key);
+    inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
+        self.relocate(from, to, true);
+    }
 
+    inline fn place(self: *Position, pc: types.Piece, sq: types.Square, comptime keyed: bool) void {
+        std.debug.assert(pc != types.Piece.NO_PIECE);
+        self.evaluator.add_piece(pc, sq, self);
+        self.mailbox[sq.index()] = pc;
+        self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
+        self.occupancy[@backingInt(pc.color())] |= types.SquareIndexBB[sq.index()];
+        if (keyed) self.toggle_keys(pc, zobrist.ZobristTable[pc.index()][sq.index()]);
+    }
+
+    inline fn lift(self: *Position, sq: types.Square, comptime keyed: bool) void {
+        self.evaluator.remove_piece(sq, self);
+        const pc = self.mailbox[sq.index()];
+        if (keyed) self.toggle_keys(pc, zobrist.ZobristTable[pc.index()][sq.index()]);
+        self.piece_bitboards[pc.index()] &= ~types.SquareIndexBB[sq.index()];
+        self.occupancy[@backingInt(pc.color())] &= ~types.SquareIndexBB[sq.index()];
+        self.mailbox[sq.index()] = types.Piece.NO_PIECE;
+    }
+
+    inline fn relocate(self: *Position, from: types.Square, to: types.Square, comptime keyed: bool) void {
+        const moving = self.mailbox[from.index()];
+        std.debug.assert(moving != types.Piece.NO_PIECE);
+        self.evaluator.move_piece_quiet(from, to, self);
+        if (keyed) self.toggle_keys(moving, zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()]);
         self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+        self.occupancy[@backingInt(moving.color())] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
         self.mailbox[to.index()] = moving;
         self.mailbox[from.index()] = types.Piece.NO_PIECE;
     }
@@ -541,10 +581,7 @@ pub const Position = struct {
     }
 
     pub inline fn all_pieces(self: *const Position, comptime color: types.Color) types.Bitboard {
-        return if (color == types.Color.White)
-            self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()]
-        else
-            self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()];
+        return self.occupancy[@backingInt(color)];
     }
 
     pub inline fn all_all_pieces(self: *const Position) types.Bitboard {
@@ -569,10 +606,23 @@ pub const Position = struct {
         }
     }
 
+    /// Enemy pieces attacking the king of `color`.
+    pub inline fn king_attackers(self: *const Position, comptime color: types.Color) types.Bitboard {
+        const king_bb = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()];
+        if (king_bb == 0) return 0;
+        const king_sq: types.Square = @fromBackingInt(@intCast(types.lsb(king_bb)));
+        return self.attackers_from(comptime color.invert(), king_sq, self.all_all_pieces());
+    }
+
     pub inline fn in_check(self: *const Position, comptime color: types.Color) bool {
-        comptime var king: types.Piece = types.Piece.new_comptime(color, types.PieceType.King);
-        const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
-        return self.attackers_from(opp, @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[king.index()])))), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
+        if (self.turn == color) {
+            const attacked = self.history[self.game_ply].king_attackers != 0;
+            if (comptime builtin.mode == .debug) {
+                std.debug.assert(attacked == (self.king_attackers(color) != 0));
+            }
+            return attacked;
+        }
+        return self.king_attackers(color) != 0;
     }
 
     pub inline fn has_non_pawns(self: *const Position) bool {
@@ -593,106 +643,68 @@ pub const Position = struct {
 
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
         self.evaluator.nnue_evaluator.push(self);
+        const previous = self.history[self.game_ply];
+        var undo = UndoInfo.after(previous, self.keys());
         self.turn = self.turn.invert();
-        self.hash ^= zobrist.TurnHash;
         self.game_ply += 1;
-        self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
 
-        // Clear the previous position's en-passant key from the hash (mirrors
-        // play_null_move). A DOUBLE_PUSH below re-adds the new EP key; otherwise
+        // The previous position's en-passant key leaves the hash (mirrors
+        // play_null_move). A DOUBLE_PUSH below adds the new EP key; otherwise
         // the new position simply has no EP square.
-        if (self.history[self.game_ply - 1].ep_sq != types.Square.NO_SQUARE) {
-            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply - 1].ep_sq.file().index()];
+        var state_key = zobrist.TurnHash;
+        if (previous.ep_sq != types.Square.NO_SQUARE) {
+            state_key ^= zobrist.EnPassantHash[previous.ep_sq.file().index()];
         }
-
-        const flags = move.get_flags();
-        const old_castle = self.history[self.game_ply].castling;
-        if (old_castle != castling.NO_RIGHTS) {
-            const new_castle = old_castle & ~self.castling.revoked(move.from, move.to);
-            self.history[self.game_ply].castling = new_castle;
-            self.hash ^= zobrist.CastlingHash[old_castle] ^ zobrist.CastlingHash[new_castle];
+        if (previous.castling != castling.NO_RIGHTS) {
+            undo.castling = previous.castling & ~self.castling.revoked(move.from, move.to);
+            state_key ^= zobrist.CastlingHash[previous.castling] ^ zobrist.CastlingHash[undo.castling];
         }
 
         const pt = self.mailbox[move.from].piece_type();
         if (pt == types.PieceType.Pawn or move.is_capture()) {
-            self.history[self.game_ply].fifty = 0;
+            undo.fifty = 0;
         }
 
-        switch (flags) {
-            types.MoveFlags.QUIET => {
-                self.move_piece_quiet(move.get_from(), move.get_to());
-            },
+        const from = move.get_from();
+        const to = move.get_to();
+        const flags = move.get_flags();
+        if (flags == types.MoveFlags.QUIET) {
+            self.move_piece_quiet(from, to);
+        } else if (flags == types.MoveFlags.CAPTURE) {
+            undo.captured = self.mailbox[to.index()];
+            self.move_piece(from, to);
+        } else switch (flags) {
             types.MoveFlags.DOUBLE_PUSH => {
-                self.move_piece_quiet(move.get_from(), move.get_to());
+                self.move_piece_quiet(from, to);
 
                 // Only record/hash EP when an enemy pawn can actually capture.
                 const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
-                const ep_target = move.get_from().add(types.Direction.North.relative_dir(color));
+                const ep_target = from.add(types.Direction.North.relative_dir(color));
                 if (tables.get_pawn_attacks(color, ep_target) & self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()] != 0) {
-                    self.history[self.game_ply].ep_sq = ep_target;
-                    self.hash ^= zobrist.EnPassantHash[ep_target.file().index()];
+                    undo.ep_sq = ep_target;
+                    state_key ^= zobrist.EnPassantHash[ep_target.file().index()];
                 }
             },
             types.MoveFlags.OO, types.MoveFlags.OOO => {
                 self.castle(color, castling.side_of(flags), false);
             },
             types.MoveFlags.EN_PASSANT => {
-                self.move_piece_quiet(move.get_from(), move.get_to());
-                self.remove_piece(move.get_to().add(types.Direction.South.relative_dir(color)));
+                self.move_piece_quiet(from, to);
+                self.remove_piece(to.add(types.Direction.South.relative_dir(color)));
             },
             else => {
-                const index = @backingInt(flags);
-                switch (index) {
-                    types.PR_KNIGHT => {
-                        self.remove_piece(move.get_from());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Knight), move.get_to());
-                    },
-                    types.PR_BISHOP => {
-                        self.remove_piece(move.get_from());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Bishop), move.get_to());
-                    },
-                    types.PR_ROOK => {
-                        self.remove_piece(move.get_from());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Rook), move.get_to());
-                    },
-                    types.PR_QUEEN => {
-                        self.remove_piece(move.get_from());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Queen), move.get_to());
-                    },
-                    types.PC_KNIGHT => {
-                        self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
-                        self.remove_piece(move.get_to());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Knight), move.get_to());
-                    },
-                    types.PC_BISHOP => {
-                        self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
-                        self.remove_piece(move.get_to());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Bishop), move.get_to());
-                    },
-                    types.PC_ROOK => {
-                        self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
-                        self.remove_piece(move.get_to());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Rook), move.get_to());
-                    },
-                    types.PC_QUEEN => {
-                        self.remove_piece(move.get_from());
-                        self.history[self.game_ply].captured = self.mailbox[move.to];
-                        self.remove_piece(move.get_to());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Queen), move.get_to());
-                    },
-                    else => {
-                        if (flags == types.MoveFlags.CAPTURE) {
-                            const c = self.mailbox[move.to];
-                            self.history[self.game_ply].captured = c;
-                            self.move_piece(move.get_from(), move.get_to());
-                        }
-                    },
+                self.remove_piece(from);
+                if (move.is_capture()) {
+                    undo.captured = self.mailbox[to.index()];
+                    self.remove_piece(to);
                 }
+                self.add_piece(types.Piece.new(color, flags.promote_type()), to);
             },
         }
+
+        undo.king_attackers = self.king_attackers(comptime color.invert());
+        self.history[self.game_ply] = undo;
+        self.hash ^= state_key;
 
         self.evaluator.nnue_evaluator.commit(self, color, pt == types.PieceType.King);
 
@@ -709,65 +721,40 @@ pub const Position = struct {
             self.evaluator.nnue_evaluator.in_undo = false;
             self.evaluator.nnue_evaluator.pop();
         }
+        const undo = &self.history[self.game_ply];
+        const from = move.get_from();
+        const to = move.get_to();
         const flags = move.get_flags();
         const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
-        switch (flags) {
-            types.MoveFlags.QUIET => {
-                self.move_piece_quiet(move.get_to(), move.get_from());
-            },
+        if (flags == types.MoveFlags.QUIET) {
+            self.relocate(to, from, false);
+        } else if (flags == types.MoveFlags.CAPTURE) {
+            self.relocate(to, from, false);
+            self.place(undo.captured, to, false);
+        } else switch (flags) {
             types.MoveFlags.DOUBLE_PUSH => {
-                self.move_piece_quiet(move.get_to(), move.get_from());
-                // Mirror play_move: the EP key was only XOR'd in if the square was
-                // actually recorded (an enemy pawn could capture), so only remove it
-                // when ep_sq was set. Otherwise make/unmake desyncs the hash.
-                if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
-                    self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
-                }
+                self.relocate(to, from, false);
             },
             types.MoveFlags.OO, types.MoveFlags.OOO => {
                 self.castle(color, castling.side_of(flags), true);
             },
             types.MoveFlags.EN_PASSANT => {
-                self.move_piece_quiet(move.get_to(), move.get_from());
-                self.add_piece(types.Piece.new_comptime(opp, types.PieceType.Pawn), move.get_to().add(types.Direction.South.relative_dir(color)));
+                self.relocate(to, from, false);
+                self.place(types.Piece.new_comptime(opp, types.PieceType.Pawn), to.add(types.Direction.South.relative_dir(color)), false);
             },
             else => {
-                const index = @backingInt(flags);
-                switch (index) {
-                    types.PR_KNIGHT, types.PR_BISHOP, types.PR_ROOK, types.PR_QUEEN => {
-                        self.remove_piece(move.get_to());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Pawn), move.get_from());
-                    },
-                    types.PC_KNIGHT, types.PC_BISHOP, types.PC_ROOK, types.PC_QUEEN => {
-                        self.remove_piece(move.get_to());
-                        self.add_piece(types.Piece.new_comptime(color, types.PieceType.Pawn), move.get_from());
-                        self.add_piece(self.history[self.game_ply].captured, move.get_to());
-                    },
-                    else => {
-                        if (flags == types.MoveFlags.CAPTURE) {
-                            self.move_piece(move.get_to(), move.get_from());
-                            self.add_piece(self.history[self.game_ply].captured, move.get_to());
-                        }
-                    },
+                self.lift(to, false);
+                self.place(types.Piece.new_comptime(color, types.PieceType.Pawn), from, false);
+                if (move.is_capture()) {
+                    self.place(undo.captured, to, false);
                 }
             },
         }
 
-        const undone_castle = self.history[self.game_ply].castling;
-
+        self.restore_keys(undo.previous_keys);
         self.turn = self.turn.invert();
-        self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;
-
-        const restored_castle = self.history[self.game_ply].castling;
-        self.hash ^= zobrist.CastlingHash[undone_castle] ^ zobrist.CastlingHash[restored_castle];
-
-        // Re-add the restored position's en-passant key (mirrors undo_null_move).
-        // The DOUBLE_PUSH branch above already removed this move's own EP key.
-        if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
-            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
-        }
     }
 
     fn castle(self: *Position, comptime color: types.Color, side: castling.Side, comptime undo: bool) void {
@@ -779,13 +766,13 @@ pub const Position = struct {
 
         // In Chess960 the king and rook may land on each other's origin squares.
         if (king_to == rook_from or rook_to == king_from) {
-            self.remove_piece(rook_from);
-            if (king_from != king_to) self.move_piece_quiet(king_from, king_to);
-            self.add_piece(types.Piece.new_comptime(color, .Rook), rook_to);
+            self.lift(rook_from, !undo);
+            if (king_from != king_to) self.relocate(king_from, king_to, !undo);
+            self.place(types.Piece.new_comptime(color, .Rook), rook_to, !undo);
             return;
         }
-        if (king_from != king_to) self.move_piece_quiet(king_from, king_to);
-        if (rook_from != rook_to) self.move_piece_quiet(rook_from, rook_to);
+        if (king_from != king_to) self.relocate(king_from, king_to, !undo);
+        if (rook_from != rook_to) self.relocate(rook_from, rook_to, !undo);
     }
 
     inline fn generate_castling(self: *const Position, comptime color: types.Color, occupied: types.Bitboard, danger: types.Bitboard, list: *std.array_list.Managed(types.Move)) void {
@@ -811,24 +798,26 @@ pub const Position = struct {
     }
 
     pub fn play_null_move(self: *Position) void {
+        const previous = self.history[self.game_ply];
+        var undo = UndoInfo.after(previous, self.keys());
         self.turn = self.turn.invert();
-        self.hash ^= zobrist.TurnHash;
         self.game_ply += 1;
-        self.history[self.game_ply] = UndoInfo.from(self.history[self.game_ply - 1]);
+        undo.king_attackers = switch (self.turn) {
+            .White => self.king_attackers(.White),
+            .Black => self.king_attackers(.Black),
+        };
+        self.history[self.game_ply] = undo;
 
-        if (self.history[self.game_ply - 1].ep_sq != types.Square.NO_SQUARE) {
-            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply - 1].ep_sq.file().index()];
+        self.hash ^= zobrist.TurnHash;
+        if (previous.ep_sq != types.Square.NO_SQUARE) {
+            self.hash ^= zobrist.EnPassantHash[previous.ep_sq.file().index()];
         }
     }
 
     pub fn undo_null_move(self: *Position) void {
+        self.hash = self.history[self.game_ply].previous_keys.hash;
         self.turn = self.turn.invert();
-        self.hash ^= zobrist.TurnHash;
         self.game_ply -= 1;
-
-        if (self.history[self.game_ply].ep_sq != types.Square.NO_SQUARE) {
-            self.hash ^= zobrist.EnPassantHash[self.history[self.game_ply].ep_sq.file().index()];
-        }
     }
 
     // Generate all LEGAL moves
@@ -1149,7 +1138,6 @@ pub const Position = struct {
         const all_bb = us_bb | them_bb;
 
         const our_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()]))));
-        const their_king = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.King).index()]))));
 
         const our_diag_sliders = self.diagonal_sliders(color);
         const their_diag_sliders = self.diagonal_sliders(opp);
@@ -1166,32 +1154,15 @@ pub const Position = struct {
         const rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
         const rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
 
-        // Squares King cannot go to
-        var danger: types.Bitboard = 0;
-
-        const their_pawns = self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()];
-
-        danger |= tables.get_pawn_attacks_bb(opp, their_pawns) | tables.get_attacks(types.PieceType.King, their_king, all_bb);
-
-        b1 = self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Knight).index()];
+        // King captures
+        const occupied_without_king = all_bb ^ types.SquareIndexBB[our_king.index()];
+        b1 = tables.get_attacks(types.PieceType.King, our_king, all_bb) & them_bb;
         while (b1 != 0) {
-            danger |= tables.get_attacks(types.PieceType.Knight, types.pop_lsb(&b1), all_bb);
+            const target = types.pop_lsb(&b1);
+            if (self.attackers_from(opp, target, occupied_without_king) == 0) {
+                list.append(types.Move.new_from_to_flag(our_king, target, types.MoveFlags.CAPTURE)) catch {};
+            }
         }
-
-        b1 = their_diag_sliders;
-        while (b1 != 0) {
-            danger |= tables.get_attacks(types.PieceType.Bishop, types.pop_lsb(&b1), all_bb ^ types.SquareIndexBB[our_king.index()]);
-        }
-
-        b1 = their_ortho_sliders;
-        while (b1 != 0) {
-            danger |= tables.get_attacks(types.PieceType.Rook, types.pop_lsb(&b1), all_bb ^ types.SquareIndexBB[our_king.index()]);
-        }
-
-        // King moves
-        b1 = tables.get_attacks(types.PieceType.King, our_king, all_bb) & ~(us_bb | danger);
-
-        types.Move.make_all(types.MoveFlags.CAPTURE, our_king, b1 & them_bb, list);
 
         var capture_mask: types.Bitboard = 0;
         var quiet_mask: types.Bitboard = 0;
