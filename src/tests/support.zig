@@ -51,3 +51,10 @@ pub fn undo(pos: *position.Position, move: types.Move) void {
         .Black => pos.undo_move(.White, move),
     }
 }
+
+/// The network's output for the side to move, computed by the head and not taken from the evaluation cache.
+pub fn network_output(pos: *position.Position) i32 {
+    return switch (pos.turn) {
+        inline else => |turn| pos.evaluator.nnue_evaluator.evaluate_uncached(turn, pos),
+    };
+}

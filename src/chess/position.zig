@@ -84,14 +84,13 @@ pub const Position = struct {
     pub fn init(self: *Position) void {
         self.evaluator.nnue_evaluator.storage = null;
         self.uci_chess960 = false;
-        self.evaluator.nnue_evaluator.ensure_storage();
+        self.evaluator.nnue_evaluator.allocate_storage();
         self.reset();
     }
 
-    /// Recomputes evaluation state from scratch, discarding cached
-    /// accumulators; required after the network weights change.
+    /// Recomputes evaluation state from scratch; required after the network
+    /// weights change for a position that is kept.
     pub fn refresh_evaluation(self: *Position) void {
-        self.evaluator.nnue_evaluator.discard_caches();
         self.evaluator.full_refresh(self);
     }
 

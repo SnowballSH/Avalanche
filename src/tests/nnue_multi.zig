@@ -645,7 +645,7 @@ test "multi net: the loaders reject the other architecture and damaged files" {
     const pos = try support.new_position();
     defer support.destroy_position(pos);
     pos.set_fen(types.KIWIPETE_FEN);
-    const before = hce.evaluate_nnue(pos);
+    const before = support.network_output(pos);
     var settings: options.Settings = .{};
     var out_buf: [1024]u8 = undefined;
     var out = std.Io.Writer.fixed(&out_buf);
@@ -653,6 +653,6 @@ test "multi net: the loaders reject the other architecture and damaged files" {
     try options.set_option(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{path}), .{ .settings = &settings, .position = pos, .out = &out });
     try expect(std.mem.indexOf(u8, out.buffered(), "WrongArchitecture") != null);
     try expect(std.mem.indexOf(u8, out.buffered(), "-Dhead=") != null);
-    try expectEqual(before, hce.evaluate_nnue(pos));
+    try expectEqual(before, support.network_output(pos));
     try std.testing.expectEqualStrings(@import("build_options").net_name, weights.active_network());
 }

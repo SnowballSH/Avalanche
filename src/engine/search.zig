@@ -234,12 +234,6 @@ pub fn reset_helper_heuristics() void {
     helper_pool.reset_heuristics();
 }
 
-/// Required after the network weights change: helpers keep their own Finny tables.
-pub fn discard_helper_evaluation_caches() void {
-    std.debug.assert(!helpers_are_live());
-    for (0..helper_pool.count()) |i| helper(i).root_board.evaluator.nnue_evaluator.discard_caches();
-}
-
 pub fn shutdown_helpers() void {
     helper_pool.deinit();
 }

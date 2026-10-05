@@ -21,8 +21,9 @@ without that header, `UnsupportedHeader` to one whose header differs (or is cut 
 `WrongArchitecture` to a file with the multi-layer header and `WrongSize` to any other length. A
 file larger than both layouts is not read at all (`StreamTooLong`).
 
-Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
-`src/engine/nnue/head_multi.zig`, `src/engine/weights.zig` (file layouts, loading),
+Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
+`src/engine/nnue/head_single.zig`, `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig`
+(file layouts, loading),
 `training/src/main.rs` and `training/src/multilayer.rs` (trainer).
 
 ## Shared by both heads
@@ -37,10 +38,10 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
-**Accumulator updates** (`src/engine/nnue.zig`). A move computes no accumulator. It opens the next
-frame of a stack and records in it the features that appeared and disappeared (one of each for a
-quiet move, a second removal for a capture, two of each for castling) and whether its king left
-its bucket or crossed the mirror line. A frame's accumulators are computed when an evaluation
+**Accumulator updates** (`src/engine/nnue.zig`). A move opens the next frame of a stack and
+records in it the features that appeared and disappeared (one of each for a quiet move, a second
+removal for a capture, two of each for castling) and whether its king left its bucket or crossed
+the mirror line. The frame's accumulators are computed at once, or later when an evaluation
 needs them ("Lazy updates" below), each perspective in one pass: the values of the frame below
 plus the rows of the features that appeared, minus those that disappeared. When a king moves to
 another bucket or crosses the mirror line, every feature of that king's perspective changes. That
@@ -57,13 +58,17 @@ transposition table, quiescence evaluates before it probes the table, razoring h
 was just evaluated to quiescence, and every re-search and every new iteration walks over the
 leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) are of
 a position evaluated earlier in the run. So every `Position` (one per search thread) keeps a
-direct-mapped table of 2^17 outputs, 1 MiB. An entry is 8 bytes: the output in 24 bits (no head
-can produce more than 18) and 40 further bits of the Zobrist hash. The slot is the low 17 bits of
-the hash (the transposition table uses the high ones), so 57 bits of the hash are compared, more
-than the transposition table compares. The side-to-move key is folded into the hash when the
-output is asked for the side not to move. The scaling the search applies to the output
+direct-mapped table of 2^17 outputs, 1 MiB. An entry is 8 bytes: the output in 20 bits (the
+largest any head can produce is ±131586) and 44 further bits of the Zobrist hash. The slot is the
+low 17 bits of the hash (the transposition table uses the high ones), so 61 bits of the hash
+decide a hit, against the 32 key bits and the index of the transposition table. The evaluations
+are therefore those of the head except when two positions agree in those 61 bits, about once in
+2^44 probes that land on another position's entry. The side-to-move key is folded into the hash
+when the output is asked for the side not to move. The scaling the search applies to the output
 (`EvalScale`, material, the fifty-move counter) comes after the cache, because the counter is not
-part of the hash. The table is cleared when the network changes (`discard_caches`).
+part of the hash. A cache belongs to the network it was filled with: `weights.generation` changes
+with every network that becomes active, and a position whose evaluation is rebuilt under another
+generation clears its cache and its Finny table first.
 
 Hit rate by table size, measured with whole 64-bit keys:
 
@@ -87,7 +92,7 @@ current position from the Finny table instead: the frames in between have nothin
 from, and the pieces of an earlier frame are no longer known. The bottom frame always holds its
 accumulators or is marked for a rebuild, which ends the walk. A piece changed outside a move
 (`add_piece` on a position being set up) marks the current frame for a rebuild of both
-perspectives, and so does a move with more changes than a frame records. When the stack is full,
+perspectives. When the stack is full,
 the current frame is computed and moved to the bottom. An evaluation that misses the cache does
 the same walk, which is where the frames skipped at `commit` are computed when a position below
 them needs them.
@@ -120,8 +125,9 @@ change; such moves are 0.7% of the frames.
 
 Tried and left out: prefetching the cache slot when the search prefetches the transposition-table
 entry, before the move is played (EPYC 9R45: `bench` +0.5%, the 3 s searches -0.3%, within the
-noise of that measurement), and 16-byte entries with the whole key (the first three rows of the
-table against the last three: the smaller table stays in the caches better).
+noise of that measurement), and 16-byte entries with the whole key (the fourth row of the table
+against the fifth: the smaller table stays in the caches better). The measurements were taken
+with 24 output bits and 40 hash bits in an entry.
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
 instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of

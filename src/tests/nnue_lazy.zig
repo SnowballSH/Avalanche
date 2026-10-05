@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const zobrist = @import("../chess/zobrist.zig");
+const hce = @import("../engine/hce.zig");
 const nnue = @import("../engine/nnue.zig");
 const support = @import("support.zig");
 
@@ -73,18 +74,97 @@ test "lazy accumulators: a random walk of moves and take-backs matches a rebuild
     }
 }
 
-test "lazy accumulators: frames that were never evaluated survive the stack running out" {
+const Line = struct {
+    fen: []const u8,
+    moves: []const []const u8,
+};
+
+const LINES = [_]Line{
+    .{ .fen = types.DEFAULT_FEN, .moves = &.{ "e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "e1g1", "f6e4" } },
+    // Both kings leave their buckets in the middle of the line.
+    .{ .fen = "4k3/8/8/8/8/8/3p3P/4K3 w - - 0 1", .moves = &.{ "e1d2", "e8d7", "h2h4", "d7c6", "d2c3", "c6b5", "h4h5" } },
+    .{ .fen = "4k3/1P4P1/8/3pP3/8/8/1p4p1/4K3 w - d6 0 1", .moves = &.{ "e5d6", "b2b1q", "e1e2", "g2g1n", "e2d2", "e8d7", "g7g8q" } },
+};
+
+/// Plays `moves` with every position evaluated, so that the cache knows them, and takes them back.
+fn rehearse(pos: *position.Position, moves: []const []const u8) void {
+    var played: [16]types.Move = undefined;
+    for (moves, 0..) |text, ply| {
+        played[ply] = types.Move.new_from_string(pos, text);
+        support.play(pos, played[ply]);
+        _ = hce.evaluate_nnue(pos);
+    }
+    var ply = moves.len;
+    while (ply > 0) : (ply -= 1) support.undo(pos, played[ply - 1]);
+}
+
+test "lazy accumulators: a replayed line stays a record until it is needed, then matches a rebuild at every depth" {
     support.init_tables();
     const pos = try support.new_position();
     defer support.destroy_position(pos);
     const reference = try support.new_position();
     defer support.destroy_position(reference);
 
-    pos.set_fen(types.DEFAULT_FEN);
+    for (LINES) |line| {
+        for (1..line.moves.len + 1) |walk_length| {
+            pos.set_fen(line.fen);
+            rehearse(pos, line.moves);
+
+            var played: [16]types.Move = undefined;
+            for (line.moves[0..walk_length], 0..) |text, ply| {
+                played[ply] = types.Move.new_from_string(pos, text);
+                support.play(pos, played[ply]);
+                try std.testing.expect(!pos.evaluator.nnue_evaluator.frame_is_computed());
+            }
+            try expect_matches_rebuild(pos, reference);
+            try std.testing.expect(pos.evaluator.nnue_evaluator.frame_is_computed());
+
+            var ply = walk_length;
+            while (ply > 0) : (ply -= 1) {
+                support.undo(pos, played[ply - 1]);
+                try expect_matches_rebuild(pos, reference);
+            }
+        }
+    }
+}
+
+test "lazy accumulators: a null move on a frame that is still a record is evaluated from that frame" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    const reference = try support.new_position();
+    defer support.destroy_position(reference);
+
+    const line = LINES[0];
+    pos.set_fen(line.fen);
+    rehearse(pos, line.moves);
+    for (line.moves[0..5]) |text| support.play(pos, types.Move.new_from_string(pos, text));
+    try std.testing.expect(!pos.evaluator.nnue_evaluator.frame_is_computed());
+
+    pos.play_null_move();
+    try expect_matches_rebuild(pos, reference);
+    pos.undo_null_move();
+    try expect_matches_rebuild(pos, reference);
+}
+
+test "lazy accumulators: frames that are still records survive the stack running out" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    const reference = try support.new_position();
+    defer support.destroy_position(reference);
+
     const shuffle = [_][]const u8{ "g1f3", "g8f6", "f3g1", "f6g8" };
+    pos.set_fen(types.DEFAULT_FEN);
+    rehearse(pos, &shuffle);
+    _ = hce.evaluate_nnue(pos);
+
+    var records: usize = 0;
     for (0..2 * nnue.STACK_CAP + 3) |ply| {
         support.play(pos, types.Move.new_from_string(pos, shuffle[ply % shuffle.len]));
+        records += @intFromBool(!pos.evaluator.nnue_evaluator.frame_is_computed());
     }
+    try std.testing.expect(records > 2 * nnue.STACK_CAP);
     try expect_matches_rebuild(pos, reference);
 }
 

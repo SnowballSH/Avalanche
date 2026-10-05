@@ -161,10 +161,7 @@ const FrameState = struct {
     const fresh: FrameState = .{ .computed = .{ true, true } };
 
     fn record(self: *FrameState, comptime added: usize, comptime removed: usize, adds: [added]Feature, subs: [removed]Feature) void {
-        if (self.add_count + added > MAX_CHANGES or self.sub_count + removed > MAX_CHANGES) {
-            self.rebuild = .{ true, true };
-            return;
-        }
+        std.debug.assert(self.add_count + added <= MAX_CHANGES and self.sub_count + removed <= MAX_CHANGES);
         inline for (adds) |feature| {
             self.adds[self.add_count] = feature;
             self.add_count += 1;
@@ -181,6 +178,16 @@ pub const Storage = struct {
     frames: [STACK_CAP]Accumulator,
     states: [STACK_CAP]FrameState,
     cache: EvalCache,
+    /// `weights.generation` of the network the cache and the Finny table were filled with.
+    network_generation: u32,
+};
+
+/// The piece changes a legal move can make: quiet moves and promotions, captures
+/// (en passant and capturing promotions too), castling.
+const MOVE_SHAPES = [_]struct { added: usize, removed: usize }{
+    .{ .added = 1, .removed = 1 },
+    .{ .added = 1, .removed = 2 },
+    .{ .added = 2, .removed = 2 },
 };
 
 pub const NNUE = struct {
@@ -197,10 +204,10 @@ pub const NNUE = struct {
         return .{};
     }
 
-    pub fn ensure_storage(self: *NNUE) void {
-        if (self.storage != null) return;
+    pub fn allocate_storage(self: *NNUE) void {
         const storage = platform.allocator.create(Storage) catch unreachable;
         storage.cache.clear();
+        storage.network_generation = weights.generation;
         self.adopt_storage(storage);
     }
 
@@ -216,10 +223,13 @@ pub const NNUE = struct {
         if (storage) |s| s.states[0] = .stale;
     }
 
-    /// Required after the network weights change.
-    pub fn discard_caches(self: *NNUE) void {
+    /// Drops what was computed with another network.
+    fn follow_network(self: *NNUE) void {
+        const storage = self.storage.?;
+        if (storage.network_generation == weights.generation) return;
+        storage.network_generation = weights.generation;
+        storage.cache.clear();
         self.finny_ready = false;
-        if (self.storage) |storage| storage.cache.clear();
     }
 
     inline fn current(self: *const NNUE) *Accumulator {
@@ -228,6 +238,12 @@ pub const NNUE = struct {
 
     inline fn frame_state(self: *const NNUE) *FrameState {
         return &self.storage.?.states[self.depth];
+    }
+
+    /// Whether the current frame holds both accumulators, not only the record of its move.
+    pub fn frame_is_computed(self: *const NNUE) bool {
+        const computed = self.frame_state().computed;
+        return computed[0] and computed[1];
     }
 
     /// The accumulators of the current position, brought up to date.
@@ -332,20 +348,18 @@ pub const NNUE = struct {
         const changes = &storage.states[frame];
         const dst = storage.frames[frame].perspective(perspective);
         const src = storage.frames[frame - 1].perspective(perspective);
-        const SHAPES = MAX_CHANGES + 1;
-        switch (@as(usize, changes.add_count) * SHAPES + changes.sub_count) {
-            inline 0...SHAPES * SHAPES - 1 => |shape| {
-                const added = shape / SHAPES;
-                const removed = shape % SHAPES;
-                var add_rows: [added]usize = undefined;
-                var sub_rows: [removed]usize = undefined;
-                inline for (&add_rows, changes.adds[0..added]) |*row, feature| row.* = feature_index_pov(feature.piece, feature.square, perspective, king);
-                inline for (&sub_rows, changes.subs[0..removed]) |*row, feature| row.* = feature_index_pov(feature.piece, feature.square, perspective, king);
-                apply_rows(added, removed, dst, src, add_rows, sub_rows);
-            },
-            else => unreachable,
+        inline for (MOVE_SHAPES) |shape| {
+            if (changes.add_count == shape.added and changes.sub_count == shape.removed) {
+                var add_rows: [shape.added]usize = undefined;
+                var sub_rows: [shape.removed]usize = undefined;
+                inline for (&add_rows, changes.adds[0..shape.added]) |*row, feature| row.* = feature_index_pov(feature.piece, feature.square, perspective, king);
+                inline for (&sub_rows, changes.subs[0..shape.removed]) |*row, feature| row.* = feature_index_pov(feature.piece, feature.square, perspective, king);
+                apply_rows(shape.added, shape.removed, dst, src, add_rows, sub_rows);
+                changes.computed[@backingInt(perspective)] = true;
+                return;
+            }
         }
-        changes.computed[@backingInt(perspective)] = true;
+        unreachable;
     }
 
     fn rebuild_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
@@ -361,6 +375,7 @@ pub const NNUE = struct {
 
     /// Rebuilds both accumulators of the current frame from the pieces on the board.
     pub fn refresh_accumulator(self: *NNUE, pos: *const position.Position) void {
+        self.follow_network();
         self.recording = false;
         self.piece_count = @intCast(types.popcount_usize(pos.all_all_pieces()));
         inline for (.{ types.Color.White, types.Color.Black }) |perspective| self.rebuild_perspective(pos, perspective);

@@ -829,7 +829,7 @@ test "eval: determinism same position twice" {
     try expect(a == b);
 
     const c = hce.evaluate_nnue_comptime(pos, types.Color.White);
-    const d = hce.evaluate_nnue_comptime(pos, types.Color.White);
+    const d = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
     try expect(c == d);
 }
 

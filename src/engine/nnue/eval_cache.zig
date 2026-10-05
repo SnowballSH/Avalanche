@@ -2,10 +2,10 @@
 
 const std = @import("std");
 
-pub const ENTRY_BITS = 17;
-pub const ENTRY_COUNT = 1 << ENTRY_BITS;
+const ENTRY_BITS = 17;
+const ENTRY_COUNT = 1 << ENTRY_BITS;
 
-const Output = i24;
+const Output = i20;
 const VACANT = std.math.minInt(Output);
 
 const Entry = packed struct(u64) {
