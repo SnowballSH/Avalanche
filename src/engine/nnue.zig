@@ -1,5 +1,6 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
+const large_memory = platform.large_memory;
 const builtin = @import("builtin");
 pub const weights = @import("weights.zig");
 const types = @import("../chess/types.zig");
@@ -138,7 +139,7 @@ const FinnyTable = if (weights.NUM_INPUT_BUCKETS > 1)
 else
     void;
 
-pub const STACK_CAP = 256;
+pub const STACK_CAP = 254;
 
 const Feature = struct {
     piece: types.Piece,
@@ -190,8 +191,14 @@ const MOVE_SHAPES = [_]struct { added: usize, removed: usize }{
     .{ .added = 2, .removed = 2 },
 };
 
+comptime {
+    if (@sizeOf(Storage) > large_memory.HUGE_PAGE_SIZE) {
+        @compileError("nnue.Storage must fit one huge page: lower STACK_CAP or the evaluation cache");
+    }
+}
+
 pub const NNUE = struct {
-    storage: ?*Storage = null,
+    storage: ?*align(large_memory.ALIGNMENT) Storage = null,
     depth: u16 = 0,
     /// Between `push` and `commit`: piece changes belong to the move being played.
     recording: bool = false,
@@ -205,19 +212,19 @@ pub const NNUE = struct {
     }
 
     pub fn allocate_storage(self: *NNUE) void {
-        const storage = platform.allocator.create(Storage) catch unreachable;
+        const storage = large_memory.create(Storage, "evaluator") catch @panic("out of memory for an evaluator");
         storage.cache.clear();
         storage.network_generation = weights.generation;
         self.adopt_storage(storage);
     }
 
     pub fn release_storage(self: *NNUE) void {
-        if (self.storage) |storage| platform.allocator.destroy(storage);
+        if (self.storage) |storage| large_memory.destroy(Storage, storage);
         self.storage = null;
     }
 
     /// Takes over the storage of an evaluator that was reset; the board is empty.
-    pub fn adopt_storage(self: *NNUE, storage: ?*Storage) void {
+    pub fn adopt_storage(self: *NNUE, storage: ?*align(large_memory.ALIGNMENT) Storage) void {
         self.storage = storage;
         self.depth = 0;
         if (storage) |s| {

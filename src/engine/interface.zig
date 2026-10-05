@@ -133,6 +133,7 @@ pub const UciInterface = struct {
             try self.print_evaluation(out);
         } else if (eql(command, "perft") or eql(command, "perftdiv")) {
             const depth = @max(std.fmt.parseUnsigned(u32, tokens.next() orelse "1", 10) catch 1, 1);
+            self.position.evaluator.nnue_evaluator.reset_depth(&self.position);
             if (eql(command, "perft")) {
                 perft.perft_test(&self.position, depth);
             } else switch (self.position.turn) {

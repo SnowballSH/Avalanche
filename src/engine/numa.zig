@@ -140,9 +140,17 @@ pub fn place_current_thread(thread_index: usize) void {
     place_on(topology(), thread_index);
 }
 
+/// Whether `place_current_thread` binds threads on this machine under the current policy.
+pub fn binds_threads() bool {
+    return binds_on(topology());
+}
+
+fn binds_on(topo: *const Topology) bool {
+    return supported and policy != .none and topo.is_numa();
+}
+
 fn place_on(topo: *const Topology, thread_index: usize) void {
-    if (!supported or policy == .none or !topo.is_numa()) return;
-    bind_current_thread(&topo.node_cpus[topo.node_for_thread(thread_index)]);
+    if (binds_on(topo)) bind_current_thread(&topo.node_cpus[topo.node_for_thread(thread_index)]);
 }
 
 fn bind_current_thread(cpus: *const CpuSet) void {

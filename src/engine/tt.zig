@@ -1,13 +1,12 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
-const builtin = @import("builtin");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
 const hce = @import("hce.zig");
+const numa = @import("numa.zig");
 
 pub const MB: usize = 1 << 20;
-pub const KB: usize = 1 << 10;
 pub const MAX_HASH_MB: usize = 1048576;
 
 pub const Bound = enum(u2) {
@@ -38,112 +37,60 @@ comptime {
     }
 }
 
-const tt_allocator = platform.allocator;
+const large_memory = platform.large_memory;
 
-fn parallelMemset(data: []i128, num_threads: usize) void {
-    const len = data.len;
-    if (len == 0) return;
-    if (comptime !platform.has_threads) return @memset(data, 0);
+/// Who searches with a table, which decides who backs and clears its memory.
+pub const Sharing = enum {
+    /// One thread; whoever creates the table backs it.
+    private,
+    /// The search threads: the parts of a new table are backed on threads
+    /// placed like search threads spread evenly over all of them. See docs/MEMORY.md.
+    search_threads,
+};
 
-    const MIN_ENTRIES_PER_THREAD = 1024 * 1024 / @sizeOf(i128);
-    const max_useful_threads = @max(1, len / MIN_ENTRIES_PER_THREAD);
-    const threads_to_use = @max(1, @min(num_threads, @min(max_useful_threads, search.MAX_THREADS)));
-    if (threads_to_use <= 1) {
-        @memset(data, 0);
-        return;
-    }
-
-    const chunk_size = len / threads_to_use;
-    var thread_handles: [search.MAX_THREADS]?std.Thread = undefined;
-
-    for (0..threads_to_use) |i| {
-        const start = i * chunk_size;
-        const end = if (i == threads_to_use - 1) len else (i + 1) * chunk_size;
-        thread_handles[i] = std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, memsetWorker, .{data[start..end]}) catch null;
-        if (thread_handles[i] == null) {
-            @memset(data[start..end], 0);
-        }
-    }
-
-    for (0..threads_to_use) |i| {
-        if (thread_handles[i]) |t| {
-            t.join();
-        }
-    }
-}
-
-fn memsetWorker(slice: []i128) void {
-    @memset(slice, 0);
-}
-
-fn memsetThreadCount() usize {
+fn search_thread_count() usize {
     if (comptime !platform.has_threads) return 1;
-    if (search.THREADS_CONFIGURED) return search.NUM_THREADS + 1;
-    return std.Thread.getCpuCount() catch 1;
+    return if (search.THREADS_CONFIGURED) search.NUM_THREADS + 1 else std.Thread.getCpuCount() catch 1;
 }
 
-pub const TT_ALIGN: usize = if (builtin.target.os.tag == .linux) 2 * MB else std.atomic.cache_line;
-
-// `&.{}` would carry @alignOf(i128), contradicting the declared alignment.
-var empty_table: [0]i128 align(TT_ALIGN) = .{};
-
-fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
-    if (builtin.target.os.tag != .linux) return false;
-    const MADV_HUGEPAGE = 14;
-    const ptr: [*]align(TT_ALIGN) u8 = @ptrCast(data.ptr);
-    std.posix.madvise(ptr, data.len * @sizeOf(i128), MADV_HUGEPAGE) catch return false;
-    return true;
+/// Part `part` of `parts` goes where the search thread at the same fraction of all search threads runs.
+fn place_like_search_thread(part: usize, parts: usize) void {
+    numa.place_current_thread(search_thread_of_part(part, parts, search_thread_count()));
 }
 
-fn hugePageBytes(addr: usize) u64 {
-    if (builtin.target.os.tag != .linux) return 0;
-    const file = std.Io.Dir.cwd().openFile(platform.io, "/proc/self/smaps", .{}) catch return 0;
-    defer file.close(platform.io);
-
-    var buf: [1 << 15]u8 = undefined;
-    var stream = file.readerStreaming(platform.io, &buf);
-    const reader = &stream.interface;
-    var in_range = false;
-    while (reader.takeDelimiterInclusive('\n') catch null) |line| {
-        if (std.mem.indexOfScalar(u8, line, '-')) |dash| {
-            if (std.mem.indexOfScalar(u8, line, ' ')) |space| {
-                if (dash < space) {
-                    const start = std.fmt.parseInt(usize, line[0..dash], 16) catch continue;
-                    const end = std.fmt.parseInt(usize, line[dash + 1 .. space], 16) catch continue;
-                    in_range = addr >= start and addr < end;
-                    continue;
-                }
-            }
-        }
-        if (in_range and std.mem.startsWith(u8, line, "AnonHugePages:")) {
-            var it = std.mem.tokenizeAny(u8, line["AnonHugePages:".len..], " \tkB\r\n");
-            const kb = it.next() orelse return 0;
-            return (std.fmt.parseInt(u64, kb, 10) catch 0) * KB;
-        }
-    }
-    return 0;
+fn search_thread_of_part(part: usize, parts: usize, threads: usize) usize {
+    return part * threads / parts;
 }
 
 pub const TranspositionTable = struct {
-    data: []align(TT_ALIGN) i128,
-    size: usize,
-    age: u5,
-    huge_page_bytes: u64 = 0,
+    data: []align(large_memory.ALIGNMENT) i128 = large_memory.empty(i128),
+    size: usize = 0,
+    age: u5 = 0,
+    sharing: Sharing = .private,
 
     pub fn new() TranspositionTable {
-        return TranspositionTable{
-            .data = &empty_table,
-            .size = 0,
-            .age = 0,
-        };
+        return .{};
     }
 
     pub fn deinit(self: *TranspositionTable) void {
-        if (self.data.len != 0) {
-            tt_allocator.free(self.data);
-        }
-        self.data = &empty_table;
+        large_memory.free(i128, self.data);
+        self.data = large_memory.empty(i128);
         self.size = 0;
+    }
+
+    fn parallelism(self: *const TranspositionTable) usize {
+        if (comptime !platform.has_threads) return 1;
+        return switch (self.sharing) {
+            .private => 1,
+            .search_threads => search_thread_count(),
+        };
+    }
+
+    fn placement(self: *const TranspositionTable) ?large_memory.Placement {
+        if (comptime !platform.has_threads) return null;
+        if (self.sharing == .private) return null;
+        numa.init();
+        return if (numa.binds_threads()) &place_like_search_thread else null;
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
@@ -153,22 +100,20 @@ pub const TranspositionTable = struct {
         }
         const requested_size: usize = @intCast(@max(1, @min(bytes / @sizeOf(Item), std.math.maxInt(usize))));
 
-        const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
-        _ = adviseHugePages(new_data);
-
-        const num_threads = memsetThreadCount();
-        parallelMemset(new_data, num_threads);
+        const new_data = large_memory.alloc_populated(i128, requested_size, "hash", self.parallelism(), self.placement()) catch return;
 
         self.deinit();
         self.data = new_data;
         self.size = new_data.len;
-        self.huge_page_bytes = hugePageBytes(@intFromPtr(new_data.ptr));
     }
 
-    pub inline fn clear(self: *TranspositionTable) void {
-        if (self.size == 0) return;
-        const num_threads = memsetThreadCount();
-        parallelMemset(self.data, num_threads);
+    pub fn clear(self: *TranspositionTable) void {
+        large_memory.zero(std.mem.sliceAsBytes(self.data), self.parallelism());
+    }
+
+    /// How much of the table the OS backs with huge pages right now.
+    pub fn huge_page_bytes(self: *const TranspositionTable) u64 {
+        return large_memory.huge_page_bytes(std.mem.sliceAsBytes(self.data));
     }
 
     pub inline fn do_age(self: *TranspositionTable) void {
@@ -281,4 +226,110 @@ pub const TranspositionTable = struct {
     }
 };
 
-pub var GlobalTT = TranspositionTable.new();
+pub var GlobalTT: TranspositionTable = .{ .sharing = .search_threads };
+
+const testing = std.testing;
+
+fn test_item(hash: u64, age: u5) Item {
+    return .{
+        .key = @truncate(hash),
+        .eval = 17,
+        .static_eval = 3,
+        .bestmove = types.Move.empty(),
+        .flag = .Exact,
+        .depth = 5,
+        .was_pv = 0,
+        .age = age,
+    };
+}
+
+const TEST_HASHES = [_]u64{ 0x0123_4567_89ab_cdef, 0x7000_0000_0000_0001, 0xf00d_f00d_f00d_f00d, 0xffff_ffff_ffff_fff0 };
+
+fn expect_only_table_live(table: *const TranspositionTable, live_before: usize) !void {
+    const mapped = std.mem.alignForward(usize, table.size * @sizeOf(Item), large_memory.ALIGNMENT);
+    try testing.expectEqual(live_before + mapped, large_memory.live_bytes());
+}
+
+test "tt: a table shrinks and grows to the size asked for and frees the one it replaces" {
+    const live_before = large_memory.live_bytes();
+    var table = TranspositionTable.new();
+
+    table.reset(4);
+    try testing.expectEqual(4 * MB / @sizeOf(Item), table.size);
+    try expect_only_table_live(&table, live_before);
+    table.set(TEST_HASHES[0], test_item(TEST_HASHES[0], table.age));
+    try testing.expect(table.get(TEST_HASHES[0]) != null);
+
+    table.reset(1);
+    try testing.expectEqual(MB / @sizeOf(Item), table.size);
+    try expect_only_table_live(&table, live_before);
+    try testing.expect(table.get(TEST_HASHES[0]) == null);
+
+    table.reset(8);
+    try testing.expectEqual(8 * MB / @sizeOf(Item), table.size);
+    try expect_only_table_live(&table, live_before);
+    table.set(TEST_HASHES[3], test_item(TEST_HASHES[3], table.age));
+    try testing.expectEqual(@as(i32, 17), table.get(TEST_HASHES[3]).?.eval);
+
+    table.deinit();
+    try testing.expectEqual(@as(usize, 0), table.size);
+    try testing.expectEqual(live_before, large_memory.live_bytes());
+}
+
+test "tt: a resize that cannot be allocated keeps the old table" {
+    if (@bitSizeOf(usize) < 64) return error.SkipZigTest;
+    const live_before = large_memory.live_bytes();
+    var table = TranspositionTable.new();
+    defer table.deinit();
+    table.reset(2);
+    table.set(TEST_HASHES[1], test_item(TEST_HASHES[1], table.age));
+
+    table.reset(1 << 43);
+    try testing.expectEqual(2 * MB / @sizeOf(Item), table.size);
+    try testing.expect(table.get(TEST_HASHES[1]) != null);
+    try expect_only_table_live(&table, live_before);
+}
+
+test "tt: clear empties the table" {
+    var table = TranspositionTable.new();
+    defer table.deinit();
+    table.reset(2);
+    for (TEST_HASHES) |hash| table.set(hash, test_item(hash, table.age));
+    for (TEST_HASHES) |hash| try testing.expect(table.get(hash) != null);
+
+    table.clear();
+    for (TEST_HASHES) |hash| try testing.expect(table.get(hash) == null);
+    try testing.expect(std.mem.allEqual(i128, table.data, 0));
+}
+
+test "tt: the search threads' table is backed and cleared in one part per thread" {
+    if (comptime !platform.has_threads) return error.SkipZigTest;
+    platform.io = testing.io;
+    const configured = search.THREADS_CONFIGURED;
+    const helpers = search.NUM_THREADS;
+    defer {
+        search.THREADS_CONFIGURED = configured;
+        search.NUM_THREADS = helpers;
+    }
+    search.THREADS_CONFIGURED = true;
+    search.NUM_THREADS = 1;
+
+    var table: TranspositionTable = .{ .sharing = .search_threads };
+    defer table.deinit();
+    try testing.expectEqual(@as(usize, 2), table.parallelism());
+    table.reset(64);
+    try testing.expectEqual(64 * MB / @sizeOf(Item), table.size);
+    try testing.expect(std.mem.allEqual(i128, table.data, 0));
+
+    for (TEST_HASHES) |hash| table.set(hash, test_item(hash, table.age));
+    for (TEST_HASHES) |hash| try testing.expect(table.get(hash) != null);
+    table.clear();
+    try testing.expect(std.mem.allEqual(i128, table.data, 0));
+}
+
+test "tt: the parts of a table smaller than one part per thread are spread over all search threads" {
+    try std.testing.expectEqual(@as(usize, 0), search_thread_of_part(0, 32, 128));
+    try std.testing.expectEqual(@as(usize, 64), search_thread_of_part(16, 32, 128));
+    try std.testing.expectEqual(@as(usize, 124), search_thread_of_part(31, 32, 128));
+    for (0..8) |part| try std.testing.expectEqual(part, search_thread_of_part(part, 8, 8));
+}
