@@ -3,6 +3,8 @@ const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
 const utils = @import("../chess/utils.zig");
+const hce = @import("../engine/hce.zig");
+const search = @import("../engine/search.zig");
 const see = @import("../engine/see.zig");
 const support = @import("support.zig");
 const expectEqual = std.testing.expectEqual;
@@ -180,4 +182,79 @@ fn expect_see_matches_reference(prng: *utils.PRNG, pos: *position.Position, move
 test "see: threshold matches the reference exchange on every move of random games" {
     var prng = utils.PRNG.new(0x5EE_7E57_0B0A_2D00_C0FF_EE11);
     try walk_random_games(0xB0A2D_5EE_D1FF_E2E7_1A1, 12, 80, &prng, expect_see_matches_reference);
+}
+
+fn reference_material_draw(pos: *const position.Position) bool {
+    const all = pos.all_pieces(.White) | pos.all_pieces(.Black);
+    const kings = pos.piece_bitboards[types.Piece.WHITE_KING.index()] | pos.piece_bitboards[types.Piece.BLACK_KING.index()];
+    if (kings == all) return true;
+
+    inline for ([_]types.Piece{ .WHITE_BISHOP, .BLACK_BISHOP, .WHITE_KNIGHT, .BLACK_KNIGHT }) |minor| {
+        const bb = pos.piece_bitboards[minor.index()];
+        if (@popCount(bb) == 1 and bb | kings == all) return true;
+    }
+    return false;
+}
+
+test "draw: material draws match the reference on random sparse positions" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const extras = "NBnbNBnbPRQprq";
+    var prng = utils.PRNG.new(0x0DD_BA11_5EED_FACE);
+    for (0..4000) |_| {
+        var board: [64]u8 = @splat('.');
+        board[@intCast(prng.rand64() % 64)] = 'K';
+        var placed: usize = 0;
+        const wanted = 1 + prng.rand64() % 4;
+        while (placed < wanted) {
+            const sq: usize = @intCast(prng.rand64() % 64);
+            if (board[sq] != '.') continue;
+            board[sq] = if (placed == 0) 'k' else extras[@intCast(prng.rand64() % extras.len)];
+            placed += 1;
+        }
+
+        var fen_buf: [96]u8 = undefined;
+        var fen = std.Io.Writer.fixed(&fen_buf);
+        for (0..8) |rank| {
+            if (rank != 0) try fen.writeByte('/');
+            for (board[rank * 8 ..][0..8]) |piece| try fen.writeByte(if (piece == '.') '1' else piece);
+        }
+        try fen.writeAll(" w - - 0 1");
+        pos.set_fen(fen.buffered());
+        try expectEqual(reference_material_draw(pos), hce.is_material_draw(pos));
+    }
+}
+
+fn reference_has_earlier_occurrences(keys: []const u64, key: u64, fifty: u16, needed: u8) bool {
+    if (keys.len > 1) {
+        var index: i16 = @as(i16, @intCast(keys.len)) - 3;
+        const limit: i16 = index - @as(i16, @intCast(fifty)) - 1;
+        var count: u8 = 0;
+        while (index >= limit and index >= 0) : (index -= 2) {
+            if (keys[@intCast(index)] == key) {
+                count += 1;
+                if (count >= needed) return true;
+            }
+        }
+    }
+    return false;
+}
+
+test "draw: the repetition scan matches the reference on random key histories" {
+    var prng = utils.PRNG.new(0x2E9E_A7ED_C0DE_5EED);
+    var keys: [48]u64 = undefined;
+    for (0..200_000) |_| {
+        const len: usize = @intCast(prng.rand64() % (keys.len + 1));
+        for (keys[0..len]) |*key| key.* = prng.rand64() % 3;
+        const fifty: u16 = @intCast(prng.rand64() % 100);
+        const key = prng.rand64() % 3;
+        inline for (.{ 1, 2 }) |needed| {
+            try expectEqual(
+                reference_has_earlier_occurrences(keys[0..len], key, fifty, needed),
+                search.Searcher.has_earlier_occurrences(keys[0..len], key, fifty, needed),
+            );
+        }
+    }
 }

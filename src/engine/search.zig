@@ -541,9 +541,13 @@ pub const Searcher = struct {
             (score == self.contempt_score() or (flag == tt.Bound.Exact and score == 0));
     }
 
-    fn draw_score(self: *Searcher, pos: *position.Position, comptime color: types.Color, in_check: bool, threefold: bool) ?i32 {
+    inline fn draw_score(self: *Searcher, pos: *position.Position, comptime color: types.Color, in_check: bool, threefold: bool) ?i32 {
         if (!self.is_draw(pos, threefold)) return null;
+        return self.drawn_position_score(pos, color, in_check);
+    }
 
+    fn drawn_position_score(self: *Searcher, pos: *position.Position, comptime color: types.Color, in_check: bool) i32 {
+        @branchHint(.cold);
         if (in_check) {
             var move_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
             var fba = std.heap.FixedBufferAllocator.init(&move_bytes);
@@ -1043,31 +1047,35 @@ pub const Searcher = struct {
     }
 
     pub fn is_draw(self: *Searcher, pos: *position.Position, threefold: bool) bool {
-        if (pos.history[pos.game_ply].fifty >= 100) {
+        const fifty = pos.history[pos.game_ply].fifty;
+        if (fifty >= 100 or hce.is_material_draw(pos)) {
             return true;
         }
+        return has_earlier_occurrences(self.hash_history.items, pos.hash, fifty, if (threefold) 2 else 1);
+    }
 
-        if (hce.is_material_draw(pos)) {
-            return true;
+    /// Whether `key` occurs at least `needed` times among the keys two, four, ...
+    /// plies before the last of `keys`, no further back than `fifty + 3` plies.
+    pub fn has_earlier_occurrences(keys: []const u64, key: u64, fifty: u16, needed: u8) bool {
+        std.debug.assert(needed > 0);
+        if (keys.len < 3) {
+            return false;
         }
 
-        if (self.hash_history.items.len > 1) {
-            var index: i16 = @as(i16, @intCast(self.hash_history.items.len)) - 3;
-            const limit: i16 = index - @as(i16, @intCast(pos.history[pos.game_ply].fifty)) - 1;
-            var count: u8 = 0;
-            const threshold: u8 = if (threefold) 2 else 1;
-            while (index >= limit and index >= 0) {
-                if (self.hash_history.items[@as(usize, @intCast(index))] == pos.hash) {
-                    count += 1;
-                    if (count >= threshold) {
-                        return true;
-                    }
+        const oldest = (keys.len - 3) -| (@as(usize, fifty) + 1);
+        var missing = needed;
+        var index = keys.len - 3;
+        while (true) : (index -= 2) {
+            if (keys[index] == key) {
+                missing -= 1;
+                if (missing == 0) {
+                    return true;
                 }
-                index -= 2;
+            }
+            if (index < oldest + 2) {
+                return false;
             }
         }
-
-        return false;
     }
 
     // Counts occurrences of the current position's hash in the game history (the
