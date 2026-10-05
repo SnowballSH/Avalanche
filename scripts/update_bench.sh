@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 #
-# Refresh the expected bench node count that CI asserts against.
+# Refresh the expected bench node count that CI asserts against, and the
+# `nnue-speed` checksum of the default network (`nnue-speed.checksum`), which
+# changes with the network and which every release binary must reproduce.
 #
 # CI (.github/workflows/CI.yml) reads the expected node count from the committed
 # `bench.nodes` file instead of hardcoding it. The fixed-position benchmark is
 # deterministic and its node count is platform-independent, so it only changes
 # when something that affects the search/eval changes (a new NNUE net, a search
 # parameter, a movegen tweak, ...). When that happens on purpose, run this script
-# before pushing and commit the updated `bench.nodes`.
+# before pushing and commit the updated `bench.nodes` and `nnue-speed.checksum`.
 #
 # Usage:
 #   scripts/update_bench.sh
@@ -18,6 +20,7 @@ set -euo pipefail
 cd "$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 
 NODES_FILE="bench.nodes"
+CHECKSUM_FILE="nnue-speed.checksum"
 
 echo "==> Building release engine (zig build --release=fast)"
 zig build --release=fast
@@ -59,3 +62,11 @@ else
   echo ""
   echo "      git commit -m \"<description>\" -m \"Bench: $NODES\""
 fi
+
+CHECKSUM="$("$BIN" nnue-speed | sed -n 's/.*(checksum \([0-9]*\)).*/\1/p')"
+if [ -z "${CHECKSUM:-}" ]; then
+  echo "ERROR: could not parse a checksum from the nnue-speed output" >&2
+  exit 1
+fi
+printf '%s\n' "$CHECKSUM" > "$CHECKSUM_FILE"
+echo "==> $CHECKSUM_FILE: $CHECKSUM"

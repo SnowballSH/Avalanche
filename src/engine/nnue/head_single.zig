@@ -35,7 +35,7 @@ pub fn validate(bytes: []const u8) ValidateError!void {
     }
 }
 
-const OUTPUT_LANES = @min(std.simd.suggestVectorLength(i16) orelse 8, 32);
+const OUTPUT_LANES = @min(std.simd.suggestVectorLength(i16) orelse 8, arch.WIDEST_VECTOR_BITS / 16);
 const OutputI16 = @Vector(OUTPUT_LANES, i16);
 const OutputI32 = @Vector(OUTPUT_LANES / 2, i32);
 

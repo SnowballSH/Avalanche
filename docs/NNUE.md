@@ -339,7 +339,8 @@ random weights and accumulators, stage by stage and end to end.
 `evaluate_simd` is three functions: `activate` (step 1), `l1_sums` (step 2 before the shift) and
 `finish` (the rest). Vectors are as wide as `std.simd.suggestVectorLength(u8)` says for the target:
 512 bits with AVX-512 unless the CPU model prefers 256 (`x86_64_v4` and Intel's server models do),
-256 with AVX2, 128 otherwise. The paths are chosen at compile time from the target's features:
+256 with AVX2, 128 otherwise, and 128 on AArch64 also where SVE makes it suggest more: the AArch64
+paths are NEON. The paths are chosen at compile time from the target's features:
 
 | Stage | Path | Target | Instructions |
 |---|---|---|---|
@@ -354,6 +355,7 @@ random weights and accumulators, stage by stage and end to end.
 | | `maddubs` | x86 with SSSE3, AVX2 or AVX-512BW | `pmaddubsw`, `pmaddwd` |
 | | `sdot` | AArch64 with dotprod | `sdot` |
 | | `extadd` | wasm simd128 | `i16x8.mul`, `i32x4.extadd_pairwise_i16x8_s` |
+| | | AArch64 without dotprod | `smull`, `sadalp` |
 | | `portable` | anything else, Debug | widening `@Vector` multiply |
 | L2 | `pairs` | x86 (SSE2, AVX2 or AVX-512BW) | `pmaddwd` |
 | | | wasm simd128 | `i32x4.dot_i16x8_s` |
@@ -396,12 +398,17 @@ the result does not depend on the target:
   every block), on the M4 and on Zen 4 alike. `pmaddubsw` + `pmaddwd` cannot saturate with
   activations up to 127 (see "Integer formula") and feed a plain addition, so one sum is enough
   there.
-- **L1, `extadd`.** Wasm has no byte dot product. A product of an activation and a weight fits an
-  i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes, and
-  `extadd_pairwise` adds neighbours into i32. That leaves each output as two i32, which are
-  accumulated apart and added once, after the last block, because adding them needs a shuffle.
-  The blocks are taken two at a time: the products of two blocks still fit an i16 when added
-  (`2 * 127 * 128`), so one widening addition serves both (+1.9% in `bench` under Node).
+- **L1, `extadd`.** Wasm has no byte dot product, and neither has AArch64 before the dotprod
+  extension (ARMv8.0: Cortex-A53, A57, A72, A73). A product of an activation and a weight fits an
+  i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes (`smull`), and
+  `extadd_pairwise` (`sadalp`, which also accumulates) adds neighbours into i32. That leaves each
+  output as two i32, which are accumulated apart and added once, after the last block, because
+  adding them needs a shuffle. The blocks are taken two at a time: the products of two blocks
+  still fit an i16 when added (`2 * 127 * 128`), so one widening addition serves both (+1.9% in
+  `bench` under Node). On AArch64 it replaced the portable L1, which widened 16 products and
+  deinterleaved them by fours: an Apple M4 running the `-Dcpu=generic` build spends 4.69 G cycles
+  in `nnue-speed` instead of 8.48 G, and 128.7 G instead of 158.8 G instructions in `bench`; the
+  `sdot` build takes 3.5 G and 113.2 G (docs/BUILD.md, "Measurements").
 - **L2, `pairs`.** `pmaddwd` multiplies i16 lanes and adds neighbours into i32, so it does two of
   the 32 x 32 products per i32 lane where an i32 multiply does one (and `pmulld` is two
   micro-operations on Intel). An activation is at most 8192 and a weight at most 2047, so both fit
@@ -602,7 +609,8 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 | Build | Pairwise | L1 | L2 | Executed |
 |---|---|---|---|---|
 | Apple Silicon | `umull` | `sdot` | `wide` | yes, natively |
-| AArch64 without dotprod (`-Dcpu=apple_m4-dotprod`) | `umull` | `portable` | `wide` | yes, natively |
+| AArch64 without dotprod (`-Dcpu=generic`, `-Dcpu=apple_m4-dotprod`) | `umull` | `extadd` | `wide` | yes, natively |
+| AArch64 with SVE (`-Dcpu=neoverse_v1`) | `umull` | `sdot` | `wide` | **no**: the same NEON code as on Apple Silicon, but the rest of such a build may use SVE, which the M4 lacks |
 | x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on an EPYC 9R14 (Zen 4) |
 | x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
 | x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
@@ -610,7 +618,7 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 | x86 AVX-512BW without VNNI (`-Dcpu=znver4-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | `pairs`, 512 bits | yes, on an EPYC 9R14 |
 | x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | `pairs`, 512 bits | yes, natively on an EPYC 9R14 |
 | x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`, `x86_64_v4`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | `pairs`, 256 bits | yes, on an EPYC 9R14 |
-| x86 at 256 bits with AVX-VNNI (`alderlake`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | **no** |
+| x86 at 256 bits with AVX-VNNI (`x86_64_v3+avxvnni`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | yes, on an EPYC 9R45 (Zen 5) |
 | wasm simd128 | `mulhrs` | `extadd` | `pairs` | yes, by the `web/` tests (`bench` equal to native) |
 
 The EPYC 9R14 runs were repeated when the `pairs` L2 and when the `vpcompressb` search were added,
@@ -618,14 +626,15 @@ with random weights and the default net embedded. The search with `vpcompressb` 
 and `znver4-avx512vnni` (512 bits) and `icelake_server` (256 bits) compile; `x86_64_v4` and the
 builds without AVX-512 compile the table.
 
-**The VEX-encoded `vpdpbusd` of AVX-VNNI has not been executed.** It is what a 256-bit build
-without AVX-512 uses (Alder Lake and later Intel desktop CPUs with `-Dcpu=native`). Zen 4 has no
-AVX-VNNI, so the `alderlake` build stops there on an illegal instruction, and Rosetta has none
-either. It differs from the tested EVEX path only in the encoding of that one instruction, and the
-generated code was read. To close it, on an Alder Lake or Zen 5 machine:
+**The VEX-encoded `vpdpbusd` of AVX-VNNI** is what a 256-bit build without AVX-512 uses: Alder
+Lake and later Intel desktop CPUs with `-Dcpu=native`, and the `avxvnni` release binaries
+(`-Dcpu=x86_64_v3+avxvnni`, docs/BUILD.md). Zen 4 has no AVX-VNNI and Rosetta has none either;
+Zen 5 has it, and an EPYC 9R45 ran that build: `bench` and the `nnue-speed` checksum equal to
+every other path's. It differs from the EVEX path only in the encoding of that one instruction.
+The comparisons with the scalar path, on such a machine:
 
 ```
-zig build test -Doptimize=safe -Dtest-filter="multi " -Dcpu=alderlake
+zig build test -Doptimize=safe -Dtest-filter="multi " -Dcpu=x86_64_v3+avxvnni
 ```
 
 The `nnue-speed` checksum of a given network must be the same on every machine and path.

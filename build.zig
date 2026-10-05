@@ -3,9 +3,7 @@ const std = @import("std");
 const Translator = @import("translate_c").Translator;
 
 fn buildTimestamp(b: *std.Build) []const u8 {
-    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer io_threaded.deinit();
-    const now: std.time.epoch.EpochSeconds = .{ .secs = @intCast(std.Io.Clock.real.now(io_threaded.io()).toSeconds()) };
+    const now: std.time.epoch.EpochSeconds = .{ .secs = @intCast(std.Io.Clock.real.now(b.graph.io).toSeconds()) };
     const year_day = now.getEpochDay().calculateYearDay();
     const month_day = year_day.calculateMonthDay();
     const day_seconds = now.getDaySeconds();
@@ -24,7 +22,7 @@ const Pyrrhic = struct {
     source: std.Build.LazyPath,
 
     fn init(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) Pyrrhic {
-        const translator: Translator = .init(b.dependency("translate_c", .{}), .{
+        const translator: Translator = .init(b.dependency("translate_c", .{ .optimize = std.lang.Optimize.debug }), .{
             .c_source_file = b.path("src/pyrrhic/tbprobe.h"),
             .target = target,
             .optimize = optimize,
@@ -40,6 +38,30 @@ const Pyrrhic = struct {
         module.addImport("pyrrhic", pyrrhic.bindings);
         module.addIncludePath(pyrrhic.include_path);
         module.addCSourceFile(.{ .file = pyrrhic.source, .flags = &.{ "-O3", "-std=gnu11" } });
+    }
+};
+
+/// What the native executable and its unit tests are compiled from and with.
+const Engine = struct {
+    target: std.Build.ResolvedTarget,
+    optimize: std.lang.Optimize,
+    strip: ?bool,
+    options: *std.Build.Step.Options,
+    net: std.Build.LazyPath,
+    pyrrhic: Pyrrhic,
+
+    fn createModule(engine: Engine, b: *std.Build, root_source_file: []const u8) *std.Build.Module {
+        const module = b.createModule(.{
+            .root_source_file = b.path(root_source_file),
+            .target = engine.target,
+            .optimize = engine.optimize,
+            .link_libc = true,
+            .strip = engine.strip,
+        });
+        module.addOptions("build_options", engine.options);
+        module.addAnonymousImport("nnue", .{ .root_source_file = engine.net });
+        engine.pyrrhic.addTo(module);
+        return module;
     }
 };
 
@@ -76,22 +98,19 @@ pub fn build(b: *std.Build) void {
     build_options.addOption(HeadOption, "head", head);
     build_options.addOption([]const u8, "net_name", std.fs.path.stem(netPath));
 
+    const engine: Engine = .{
+        .target = target,
+        .optimize = optimize,
+        .strip = b.option(bool, "strip", "Omit debug information (release binaries; default: the compiler's choice)"),
+        .options = build_options,
+        .net = net,
+        .pyrrhic = .init(b, target, optimize),
+    };
+
     const exe = b.addExecutable(.{
         .name = targetName,
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
+        .root_module = engine.createModule(b, "src/main.zig"),
     });
-    exe.root_module.addOptions("build_options", build_options);
-    exe.root_module.addAnonymousImport("nnue", .{
-        .root_source_file = net,
-    });
-
-    const pyrrhic: Pyrrhic = .init(b, target, optimize);
-    pyrrhic.addTo(exe.root_module);
 
     b.installArtifact(exe);
 
@@ -105,20 +124,8 @@ pub fn build(b: *std.Build) void {
     const test_filter = b.option([]const u8, "test-filter", "Run only the unit tests whose name contains this text");
     const exe_tests = b.addTest(.{
         .filters = if (test_filter) |filter| b.dupeStrings(&.{filter}) else &.{},
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/tests.zig"),
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        }),
+        .root_module = engine.createModule(b, "src/tests.zig"),
     });
-
-    exe_tests.root_module.addOptions("build_options", build_options);
-    exe_tests.root_module.addAnonymousImport("nnue", .{
-        .root_source_file = net,
-    });
-
-    pyrrhic.addTo(exe_tests.root_module);
 
     const wasm = b.addExecutable(.{
         .name = "avalanche",
