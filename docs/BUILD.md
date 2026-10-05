@@ -43,10 +43,12 @@ What the compiler resolves, read off the binaries, and what changing it does:
 
 Instruction counts are from `/usr/bin/time -l` on an Apple M4 that was running other work, where
 wall time and cycles were useless (the same binary varied by more than 20% in cycles) and the retired
-instructions of one binary varied by 0.3 to 0.5% between runs. Nothing here is a measured gain
-in time, so `build.zig` sets none of it. Frame pointers are the one worth timing on a quiet x86-64
-machine: there the prologue is three instructions and `rbp` becomes a general register, and a
-profiler that walks frames is the price.
+instructions of one binary varied by 0.3 to 0.5% between runs. The binaries were built from commit
+870eeab with only the build changes this document describes: the function counts and sizes in the
+table are not those of a build that also has the other changes of pull requests #104 to #111.
+Nothing here is a measured gain in time, so `build.zig` sets none of it. Frame pointers are the one
+worth timing on a quiet x86-64 machine: there the prologue is three instructions and `rbp` becomes
+a general register, and a profiler that walks frames is the price.
 
 One thing the build does choose: the `translate_c` tool is always compiled in Debug mode
 (`.optimize` in its `b.dependency` call). It runs once, on one header.
@@ -188,7 +190,9 @@ the next tag otherwise.
 **ARM levels on one core.** Apple M4, native macOS builds that differ only in `-Dcpu`, so the
 core is the same and the instructions it may use are not. `bench` instructions are the median of
 two runs, the `nnue-speed` figures the median of three (whole program: two million evaluations
-and the stage loops); all print 15472869 nodes and checksum 360840000.
+and the stage loops); all print 15472869 nodes and checksum 360840000. The builds are commit
+870eeab with only the build changes this document describes: the absolute counts are not those of
+a build that also has the other changes of pull requests #104 to #111.
 
 | `-Dcpu` | L1 | Atomics | `bench` instructions | `nnue-speed` cycles | `nnue-speed` user time |
 |---|---|---|---|---|---|

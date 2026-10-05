@@ -8,15 +8,6 @@ const support = @import("support.zig");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 
-fn play(pos: *position.Position, text: []const u8) !void {
-    const move = types.Move.new_from_string(pos, text);
-    try expect(move.to_u16() != 0);
-    switch (pos.turn) {
-        .White => pos.play_move(.White, move),
-        .Black => pos.play_move(.Black, move),
-    }
-}
-
 fn expect_same_evaluation(a: *position.Position, b: *position.Position) !void {
     const acc_a = a.evaluator.nnue_evaluator.accumulator(a);
     const acc_b = b.evaluator.nnue_evaluator.accumulator(b);
@@ -43,16 +34,6 @@ const RootCase = struct { fen: []const u8, moves: []const []const u8 };
 // One helper adopts every root in turn, so each rebuild runs against a Finny
 // table warmed by unrelated positions. The king walks cross input buckets and
 // the mirroring boundary.
-fn enter_root(s: *search.Searcher, pos: *position.Position, case: RootCase) !void {
-    pos.set_fen(case.fen);
-    s.hash_history.clearRetainingCapacity();
-    try s.hash_history.append(pos.hash);
-    for (case.moves) |move| {
-        try play(pos, move);
-        try s.hash_history.append(pos.hash);
-    }
-}
-
 const root_cases = [_]RootCase{
     .{ .fen = types.DEFAULT_FEN, .moves = &.{} },
     .{ .fen = types.DEFAULT_FEN, .moves = &.{ "e2e4", "e7e5", "e1e2", "e8e7", "e2d3", "e7d6" } },
@@ -61,6 +42,16 @@ const root_cases = [_]RootCase{
     .{ .fen = "4k3/8/8/8/8/8/4P3/R3K2R w KQ - 0 1", .moves = &.{ "e1g1", "e8d7", "g1h1", "d7c6", "h1g1", "c6b5" } },
     .{ .fen = types.DEFAULT_FEN, .moves = &.{"g1f3"} },
 };
+
+fn enter_root(s: *search.Searcher, pos: *position.Position, case: RootCase) !void {
+    pos.set_fen(case.fen);
+    s.hash_history.clear();
+    try s.hash_history.append(pos.hash);
+    for (case.moves) |move| {
+        _ = try support.play_uci(pos, move);
+        try s.hash_history.append(pos.hash);
+    }
+}
 
 test "smp root: adopted root evaluates like a fresh set_fen" {
     support.init_tables();
@@ -72,7 +63,7 @@ test "smp root: adopted root evaluates like a fresh set_fen" {
 
     for (root_cases) |case| {
         main.set_fen(case.fen);
-        for (case.moves) |move| try play(main, move);
+        for (case.moves) |move| _ = try support.play_uci(main, move);
 
         helper.copy_game_state(main);
         helper.rebuild_evaluation();
@@ -88,15 +79,9 @@ test "smp root: adopted root evaluates like a fresh set_fen" {
         // Moves from the adopted root update incrementally and unwind back to it.
         const helper_moves = helper.legal_moves();
         for (helper_moves.items()) |move| {
-            switch (helper.turn) {
-                .White => helper.play_move(.White, move),
-                .Black => helper.play_move(.Black, move),
-            }
+            support.play(helper, move);
             try expect_matches_fresh(helper);
-            switch (helper.turn) {
-                .White => helper.undo_move(.Black, move),
-                .Black => helper.undo_move(.White, move),
-            }
+            support.undo(helper, move);
         }
         try expectEqual(main.hash, helper.hash);
         try expect_same_evaluation(main, helper);
@@ -119,7 +104,7 @@ test "smp root: helper sees a repetition from before the root" {
 
     try main.hash_history.append(pos.hash);
     for ([_][]const u8{ "g1f3", "g8f6", "f3g1" }) |move| {
-        try play(pos, move);
+        _ = try support.play_uci(pos, move);
         try main.hash_history.append(pos.hash);
     }
 
@@ -127,7 +112,7 @@ test "smp root: helper sees a repetition from before the root" {
     helper.root_board.rebuild_evaluation();
     try expect(!helper.is_draw(helper.root_board, false));
 
-    try play(pos, "f6g8");
+    _ = try support.play_uci(pos, "f6g8");
     try main.hash_history.append(pos.hash);
 
     helper.adopt_root(&main, pos);

@@ -7,7 +7,6 @@ const nnue = @import("../engine/nnue.zig");
 const support = @import("support.zig");
 
 const expectEqual = std.testing.expectEqual;
-const expectEqualSlices = std.testing.expectEqualSlices;
 
 const FENS = [_][]const u8{
     types.DEFAULT_FEN,
@@ -19,13 +18,7 @@ const FENS = [_][]const u8{
 };
 
 fn expect_matches_rebuild(pos: *position.Position, reference: *position.Position) !void {
-    reference.copy_game_state(pos);
-    reference.rebuild_evaluation();
-
-    const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
-    const expected = reference.evaluator.nnue_evaluator.accumulator(reference);
-    try expectEqualSlices(i16, &expected.white, &actual.white);
-    try expectEqualSlices(i16, &expected.black, &actual.black);
+    try support.expect_nnue_matches_rebuild(pos, reference);
 
     inline for (.{ types.Color.White, types.Color.Black }) |turn| {
         const uncached = reference.evaluator.nnue_evaluator.evaluate_uncached(turn, reference);
@@ -80,18 +73,11 @@ const LINES = [_]Line{
     .{ .fen = "4k3/1P4P1/8/3pP3/8/8/1p4p1/4K3 w - d6 0 1", .moves = &.{ "e5d6", "b2b1q", "e1e2", "g2g1n", "e2d2", "e8d7", "g7g8q" } },
 };
 
-fn play(pos: *position.Position, text: []const u8) !types.Move {
-    const move = types.Move.new_from_string(pos, text);
-    try std.testing.expect(move.to_u16() != 0);
-    support.play(pos, move);
-    return move;
-}
-
 /// Plays `moves` with every position evaluated, so that the cache knows them, and takes them back.
 fn rehearse(pos: *position.Position, moves: []const []const u8) !void {
     var played: [16]types.Move = undefined;
     for (moves, 0..) |text, ply| {
-        played[ply] = try play(pos, text);
+        played[ply] = try support.play_uci(pos, text);
         _ = hce.evaluate_nnue(pos);
     }
     var ply = moves.len;
@@ -112,7 +98,7 @@ test "lazy accumulators: a replayed line stays a record until it is needed, then
 
             var played: [16]types.Move = undefined;
             for (line.moves[0..walk_length], 0..) |text, ply| {
-                played[ply] = try play(pos, text);
+                played[ply] = try support.play_uci(pos, text);
                 try std.testing.expect(!pos.evaluator.nnue_evaluator.frame_is_computed());
             }
             try expect_matches_rebuild(pos, reference);
@@ -137,7 +123,7 @@ test "lazy accumulators: a null move on a frame that is still a record is evalua
     const line = LINES[0];
     pos.set_fen(line.fen);
     try rehearse(pos, line.moves);
-    for (line.moves[0..5]) |text| _ = try play(pos, text);
+    for (line.moves[0..5]) |text| _ = try support.play_uci(pos, text);
     try std.testing.expect(!pos.evaluator.nnue_evaluator.frame_is_computed());
 
     pos.play_null_move();
@@ -159,7 +145,7 @@ test "lazy accumulators: frames that are still records survive the stack running
 
     var records: usize = 0;
     for (0..2 * nnue.STACK_CAP + 3) |ply| {
-        _ = try play(pos, shuffle[ply % shuffle.len]);
+        _ = try support.play_uci(pos, shuffle[ply % shuffle.len]);
         records += @intFromBool(!pos.evaluator.nnue_evaluator.frame_is_computed());
     }
     try std.testing.expect(records > 2 * nnue.STACK_CAP);

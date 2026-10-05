@@ -140,7 +140,11 @@ counts do not move.
 - Scan by blocks. While exchanges are pending the scan compares a block of
   scores against the carried score and visits only the slots that exceed it,
   in order, recomputing the mask after each exchange. The block is
-  `std.simd.suggestVectorLength(i32)` scores, at most 16. The score array is
+  `std.simd.suggestVectorLength(i32)` scores, at most 16: four with NEON and
+  SSE, eight with AVX2 and on AArch64 CPUs with SVE (256 bits are suggested
+  there, docs/BUILD.md, and compile to two NEON halves), sixteen with AVX-512
+  at 512 bits. The scan is correct at every length, and the tests run 4, 8
+  and 16 on any host; the SVE case has not been timed. The score array is
   padded with the minimum integer so that a full block past the end is
   readable and never exceeds the carried score.
 - Leaving the loop early. In `negamax`, once late move, history or futility
@@ -184,12 +188,15 @@ moves each):
 | first picks served with no scan | 0 | 1,470,992 (876,362 never scanned) |
 
 The early exits fire 1,745,395 times and remove 14,855,225 picks. A scan
-finds 4.8 slots above the carried score per pick. With blocks of four (NEON,
-SSE) that is about one per block, so skipping whole blocks saves little
-there; the time went into mispredicted exchanges, which the branch-free scan
-removes.
+finds 4.8 slots above the carried score per pick. With blocks of four (NEON
+without SVE, SSE) that is about one per block, so skipping whole blocks saves
+little there; the time went into mispredicted exchanges, which the
+branch-free scan removes.
 
-Retired instructions for `bench` on an Apple M4:
+Retired instructions for `bench` on an Apple M4. The builds are commit
+870eeab with these changes alone, row by row: the absolute counts are not
+those of a build that also has the other changes of pull requests #104 to
+#111.
 
 | | instructions |
 |---|---:|

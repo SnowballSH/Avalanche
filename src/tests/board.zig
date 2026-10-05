@@ -25,13 +25,6 @@ const WALK_FENS = [_][]const u8{
     "qnbnr1kr/ppp1b1pp/4p3/3p1p2/8/2NPP3/PPP1BPPP/QNB1R1KR w HEhe - 1 9",
 };
 
-fn play(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        .White => pos.play_move(.White, move),
-        .Black => pos.play_move(.Black, move),
-    }
-}
-
 /// Calls `visit(context, pos, moves)` on every position of seeded random games from `WALK_FENS`.
 fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: anytype, comptime visit: anytype) !void {
     support.init_tables();
@@ -47,7 +40,7 @@ fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: 
                 const moves = pos.legal_moves();
                 try visit(context, pos, moves.items());
                 if (moves.len == 0) break;
-                play(pos, moves.items()[@intCast(prng.rand64() % moves.len)]);
+                support.play(pos, moves.items()[@intCast(prng.rand64() % moves.len)]);
             }
         }
     }
@@ -294,13 +287,6 @@ const Snapshot = struct {
     }
 };
 
-fn undo(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        .White => pos.undo_move(.Black, move),
-        .Black => pos.undo_move(.White, move),
-    }
-}
-
 fn occupancy_of_pieces(pos: *const position.Position) [types.N_COLORS]types.Bitboard {
     var occupancy: [types.N_COLORS]types.Bitboard = .{ 0, 0 };
     for (pos.mailbox, 0..) |piece, sq| {
@@ -326,8 +312,8 @@ fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, m
 
     const before = Snapshot.of(pos);
     for (moves) |move| {
-        play(pos, move);
-        undo(pos, move);
+        support.play(pos, move);
+        support.undo(pos, move);
         try expectEqual(before, Snapshot.of(pos));
     }
     if (before.undo.king_attackers == 0) {
@@ -438,7 +424,7 @@ test "make/unmake: castling in which king and rook swap squares" {
             if (move.is_castle()) break move;
         } else return error.TestExpectedCastlingMove;
         const mover = pos.turn;
-        play(pos, castle);
+        support.play(pos, castle);
         try expectEqual(types.Piece.new(mover, .King), pos.mailbox[case.king_to.index()]);
         try expectEqual(types.Piece.new(mover, .Rook), pos.mailbox[case.rook_to.index()]);
         try expectEqual(@as(usize, 3), @popCount(pos.occupancy[0] | pos.occupancy[1]));

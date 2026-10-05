@@ -11,9 +11,9 @@ Where the engine's large data lives, which of it is on huge pages, and why.
 | Continuation history         | 6.0 MiB              | each search thread            | a few 8 KiB sub-tables per node, chosen by the last moves |
 | `Searcher` (other histories) | 473 KiB              | each search thread            | random: corrections 192 KiB, butterfly 32 KiB, PV 79 KiB  |
 | Evaluator storage            | 2.0 MiB              | each `Position`               | two adjacent 4 KiB accumulator frames per node, by ply, and one random 8-byte entry of the 1 MiB evaluation cache |
-| `Position` with Finny table  | 154 KiB              | each `Position`               | board state every node, one 2 KiB Finny entry per refresh |
+| `Position` with Finny table  | 239 KiB              | each `Position`               | board state every node, one 2 KiB Finny entry per refresh; 102 KiB of it is the undo stack (docs/BOARD.md), one 48-byte entry per ply |
 
-A search thread therefore owns 8.6 MiB, not counting its 64 MiB of mostly untouched stack.
+A search thread therefore owns 8.7 MiB, not counting its 64 MiB of mostly untouched stack.
 
 With 4 KiB pages the first three rows alone are thousands of pages, far beyond the 64 to 96
 entries of a first-level data TLB and, with the hash table, beyond the second level as well. On
@@ -25,7 +25,7 @@ One interface for memory that is large, long-lived and worth its own pages:
 
 ```zig
 pub const ALIGNMENT: usize; // 2 MiB on Linux, the page size on macOS and Windows, a cache line on wasm
-pub const Placement = *const fn (index: usize) void;
+pub const Placement = *const fn (index: usize, parts: usize) void;
 pub fn empty(comptime T: type) []align(ALIGNMENT) T;
 pub fn alloc(comptime T: type, n: usize, comptime label: [:0]const u8) Error![]align(ALIGNMENT) T;
 pub fn alloc_populated(comptime T: type, n: usize, comptime label: [:0]const u8, threads: usize, placement: ?Placement) Error![]align(ALIGNMENT) T;
@@ -70,7 +70,7 @@ is not bound, so the main thread's tables are on whatever node the UCI thread ra
 `threads` parts of at least 32 MiB and backs each part by storing one byte to every page: the OS
 hands out zeroed pages, so nothing has to be cleared a second time, but it has to be a store,
 because reading a fresh page only maps the kernel's shared zero page. Given a `placement`, every
-part gets a thread of its own, which calls `placement(index)` before it touches anything; the
+part gets a thread of its own, which calls `placement(index, parts)` before touching anything; the
 calling thread only waits, since it must not be moved. The transposition table's placement binds
 the thread of part `i` of `n` like search thread `i * threads / n`: with a part per thread that is
 search thread `i`, and a table too small for that (under 32 MiB per thread) still has its parts
@@ -194,15 +194,19 @@ macOS on the same Apple M4 (16 KiB pages, no huge pages to ask for) is unchanged
 `bench` retired 113.47, 113.62 and 113.02 billion instructions before and 113.26, 113.05 and
 112.80 billion after, in alternating runs, and the three start-up sessions above took the same
 time within noise (medians of 15 runs: 20.9 against 21.2 ms, 43.6 against 42.9 ms, 26.8 against
-26.1 ms).
+26.1 ms). Both builds are on commit 870eeab, one without this change and one with it alone: the
+absolute counts are not those of a build that also has the other changes of pull requests #104 to
+#111.
 
 ## The per-thread data, reviewed for cache and TLB behaviour
 
-`Searcher` is about 473 KiB. Zig orders the fields of a struct by alignment, not by use, so the
-scalars the search touches at every node (`nodes`, `ply`, `seldepth`, `stop`, the `ttable` and
-`continuation` pointers) end up on several different 4 KiB pages, with cold arrays between them:
-108 KiB of MultiPV `lines` and the root-only `node_spent_table` of 32 KiB. That costs TLB entries,
-not cache: each scalar's line stays in L1.
+`Searcher` is about 473 KiB. What other threads read or write while it searches, `nodes` and
+`stop` included, is one nested struct, `Searcher.shared`, on the searcher's first cache line
+(docs/THREADS.md, "Searcher layout"). Zig orders the other fields by alignment, not by use, so the
+remaining scalars the search touches at every node (`ply`, `seldepth`, `time_stop`, the `ttable`
+and `continuation` pointers) end up on several different 4 KiB pages, with cold arrays between
+them: 106 KiB of MultiPV `lines` and the root-only `node_spent_table` of 32 KiB. That costs TLB
+entries, not cache: each scalar's line stays in L1.
 
 The tables a thread reads at random, besides the continuation history, are the correction
 histories (`pawn_correction` 64 KiB, `nonpawn_correction` 128 KiB, six lookups per evaluation),
@@ -216,7 +220,7 @@ page on Linux. The Finny table is touched one 2 KiB entry per king-bucket refres
 
 ## Not done
 
-- **One block per search thread.** `Searcher` (473 KiB) and a `Position` (154 KiB) would fit a
+- **One block per search thread.** `Searcher` (473 KiB) and a `Position` (239 KiB) would fit a
   huge page of their own next to the continuation history and the evaluator storage. Today they
   come from the C allocator on 4 KiB pages. A block each would cost 2 MiB apiece, since a huge
   page is resident in full once one byte of it is written; packing both into one needs one owner

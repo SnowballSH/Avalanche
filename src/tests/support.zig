@@ -45,6 +45,32 @@ pub fn undo(pos: *position.Position, move: types.Move) void {
     }
 }
 
+/// Plays the legal move written as `text` in UCI notation.
+pub fn play_uci(pos: *position.Position, text: []const u8) !types.Move {
+    const move = types.Move.new_from_string(pos, text);
+    try std.testing.expect(move.to_u16() != 0);
+    play(pos, move);
+    return move;
+}
+
+/// Checks the accumulators of `pos` against those `reference` builds for the same pieces.
+pub fn expect_nnue_matches_rebuild(pos: *position.Position, reference: *position.Position) !void {
+    reference.copy_game_state(pos);
+    reference.rebuild_evaluation();
+
+    const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
+    const expected = reference.evaluator.nnue_evaluator.accumulator(reference);
+    try std.testing.expectEqualSlices(i16, &expected.white, &actual.white);
+    try std.testing.expectEqualSlices(i16, &expected.black, &actual.black);
+}
+
+/// The reference is a new position: rebuilding `pos` itself would go through the Finny table under test.
+pub fn expect_nnue_matches_fresh(pos: *position.Position) !void {
+    const reference = try new_position();
+    defer destroy_position(reference);
+    try expect_nnue_matches_rebuild(pos, reference);
+}
+
 /// The network's output for the side to move, computed by the head and not taken from the evaluation cache.
 pub fn network_output(pos: *position.Position) i32 {
     return switch (pos.turn) {

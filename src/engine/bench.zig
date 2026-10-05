@@ -102,8 +102,8 @@ pub fn bench() !void {
         pos.set_fen(fen);
         @atomicStore(bool, &searcher.shared.stop, false, .monotonic);
         searcher.reset_heuristics(true);
-        searcher.hash_history.clearRetainingCapacity();
-        searcher.hash_history.append(pos.hash) catch {};
+        searcher.hash_history.clear();
+        searcher.hash_history.append(pos.hash) catch unreachable;
         const job = BenchJob{ .searcher = searcher, .pos = pos, .depth = depth };
         if (comptime platform.has_threads) {
             const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 * 1024 }, runBenchSearch, .{job}) catch unreachable;

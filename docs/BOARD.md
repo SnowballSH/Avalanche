@@ -117,7 +117,9 @@ before. The round-to-round ratios of this run spread about two points either way
 
 Apple M4, `--release=fast`. The machine was running other builds and benchmarks at load average
 15 to 20, so nps says nothing; the table gives what `/usr/bin/time -l` reports as the instructions
-retired by `bench`, one run per build, back to back.
+retired by `bench`, one run per build, back to back. The builds are commit 870eeab with these
+changes alone, row by row: the absolute counts are not those of a build that also has the other
+changes of pull requests #104 to #111.
 
 | Change | Instructions | Against the row above |
 |---|---|---|
@@ -159,9 +161,10 @@ different load and their other shares are not comparable.
 
 - **PEXT slider lookups.** BMI2 alone does not say that `pext` is fast (Zen 1 and Zen 2 run it in
   microcode), and the x86-64-v3 release build has to serve those CPUs. Every CPU with AVX-512 has
-  a fast one, so the v4 build could select it soundly at compile time. It was not written: the
-  magic lookups are 1.4% of `bench` on the M4, `pext` stands in for an and, a multiply and a shift
-  and saves two small loads per lookup, and nothing here can time x86.
+  a fast one, so the `avx512` release build (docs/BUILD.md) could select it soundly at compile
+  time. It was not written: the magic lookups are 1.4% of `bench` on the M4, `pext` stands in for
+  an and, a multiply and a shift and saves two small loads per lookup, and nothing here can time
+  x86.
 - **Narrowing the repetition scan**, see above.
 - **Seeding the move generators with the stored king attackers.** Not built. They would skip a
   knight and a pawn table load and one branch of the loop that finds the pins, an estimated five

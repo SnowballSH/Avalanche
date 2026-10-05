@@ -78,26 +78,15 @@ jobs:
         run: zig build test -Dnet=nets/dianguang-1.nnue
 
       # The release build above leaves the binary at zig-out/bin/Avalanche[.exe].
-      # The expected node count is NOT hardcoded here -- it is read from the
-      # committed `bench.nodes` file. Whenever a change legitimately alters the
-      # node count, run `scripts/update_bench.sh` and commit the updated file.
-      - name: Bench (assert node count)
+      # The expected node count and checksum are NOT hardcoded here -- they are
+      # read from the committed `bench.nodes` and `nnue-speed.checksum` files.
+      # Whenever a change legitimately alters either, run
+      # `scripts/update_bench.sh` and commit the updated files.
+      - name: Bench node count and nnue-speed checksum
         shell: bash
         run: |
-          set -euo pipefail
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
-          EXPECTED="$(tr -d '[:space:]' < bench.nodes)"
-          echo "Expected node count (from bench.nodes): $EXPECTED"
-          OUT="$("$BIN" bench)"
-          echo "$OUT"
-          # bench prints "<nodes> nodes <nps> nps"; the node count is speed-independent.
-          if echo "$OUT" | grep -qE "^${EXPECTED} nodes"; then
-            echo "OK: bench node count matches ($EXPECTED nodes)"
-          else
-            echo "FAIL: expected '$EXPECTED nodes' (from bench.nodes), but bench printed the line above."
-            echo "      If this change intentionally alters the node count, run scripts/update_bench.sh and commit bench.nodes."
-            exit 1
-          fi
+          bash scripts/verify_binary.sh "$BIN"
 
       - name: UCI frontend smoke test
         shell: bash

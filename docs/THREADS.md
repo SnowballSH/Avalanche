@@ -13,7 +13,7 @@ waits for them to go idle again, instead of spawning and joining one OS thread
 per move and became the dominant cost at high thread counts.
 
 A worker owns its `Searcher`: the worker thread allocates and initialises it
-after NUMA placement, so its 8.6 MiB of tables are first touched, and
+after NUMA placement, so its 8.7 MiB of tables are first touched, and
 therefore physically allocated, on the node the thread runs on. The largest
 of them, the 6 MiB continuation history, is on huge pages where the OS has
 them; docs/MEMORY.md lists what lives where. The main thread's `Searcher` is
@@ -22,9 +22,11 @@ created by the UCI thread, which is not bound, so its tables are not placed.
 Lowering `Threads` shuts down surplus workers and frees their tables.
 
 A helper takes over the root once per search, not per job: the main thread
-copies the game state (`Position.copy_game_state`, about 400 bytes), the
-game's hash history and the root move list, and the helper rebuilds its
-accumulator on its own thread from its own Finny table before its first job.
+copies the game state (`Position.copy_game_state`: the piece bitboards, the
+occupancy, the mailbox, the keys, the side to move, the ply counters, the
+castling setup and the current undo entry, 458 bytes in all), the game's hash
+history and the root move list, and the helper rebuilds its accumulator on its
+own thread from its own Finny table before its first job.
 Every job unwinds back to the root, so an aspiration re-search costs each
 helper the excluded MultiPV moves, its stop flag and the job itself. Copying
 the whole `Position` instead cost 157 KB per helper per re-search (80 MB at
@@ -170,9 +172,11 @@ code before this work with the scalars over-aligned, 0.999 to 1.004 with them
 nested, and 0.998 to 1.000 with the layout described here. The counts that
 `/usr/bin/time -l` reports on a busy machine move with the cycles a run takes
 (113.19 G in a run of 43.9 G cycles, 112.67 G in one of 28.7 G, same binary),
-which is more than the layouts differ by. `ply` alone is used on 74 lines of
-`negamax` and `quiescence_search`, so nesting it has a cost in the source and
-no measured gain.
+which is more than the layouts differ by. All of these builds are commit
+870eeab with only this work on top: the absolute counts are not those of a
+build that also has the other changes of pull requests #104 to #111. `ply`
+alone is used on 74 lines of `negamax` and `quiescence_search`, so nesting it
+has a cost in the source and no measured gain.
 
 ### Transposition table
 
@@ -195,10 +199,13 @@ adopted:
 
 - Single-threaded it could not be told apart from the lock: `bench` retired
   113.99 G instructions against 113.75 G in one run each, on a machine where
-  repeated runs of one binary differ by more than that. The atomic OR works
-  on a line the core already holds; `lock or` is usually quoted at about 20
-  cycles, around 1% of a node on a current x86 core, which bounds what
-  removing it can give there. That has not been measured on x86.
+  repeated runs of one binary differ by more than that. Both builds are
+  commit 870eeab with only this work on top: the absolute counts are not
+  those of a build that also has the other changes of pull requests #104 to
+  #111. The atomic OR works on a line the core already holds; `lock or` is
+  usually quoted at about 20 cycles, around 1% of a node on a current x86
+  core, which bounds what removing it can give there. That has not been
+  measured on x86.
 - It does not scale differently. The lock is per entry and the line has to
   come to the storing core in exclusive state for a plain store just the
   same; two threads meet on one entry only when they store the same position

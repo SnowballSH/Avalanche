@@ -57,18 +57,21 @@ same position: a quiescence node that fails low without a best move is not store
 transposition table, quiescence evaluates before it probes the table, razoring hands a node that
 was just evaluated to quiescence, and every re-search and every new iteration walks over the
 leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) are of
-a position evaluated earlier in the run. So every `Position` (one per search thread) keeps a
-direct-mapped table of 2^17 outputs, 1 MiB. An entry is 8 bytes: the output in 20 bits (the
-largest any head can produce is ±131586) and 44 further bits of the Zobrist hash. The slot is the
-low 17 bits of the hash (the transposition table uses the high ones), so 61 bits of the hash
-decide a hit, against the 32 key bits and the index of the transposition table. The evaluations
-are therefore those of the head except when two positions agree in those 61 bits, about once in
-2^44 probes that land on another position's entry. The side-to-move key is folded into the hash
-when the output is asked for the side not to move. The scaling the search applies to the output
-(`EvalScale`, material, the fifty-move counter) comes after the cache, because the counter is not
-part of the hash. A cache belongs to the network it was filled with: `weights.generation` changes
-with every network that becomes active, and a position whose evaluation is rebuilt under another
-generation clears its cache and its Finny table first.
+a position evaluated earlier in the run. So every `Position` keeps a direct-mapped table of 2^17
+outputs, 1 MiB. A helper thread has one such position, the root position of its `Searcher`. The
+main thread searches the position it is given (the UCI layer's, or that of `bench` or datagen),
+and its `Searcher` owns a root position as well, with a cache it does not use. An entry is 8
+bytes: the output in 20 bits (the largest any head can produce is ±131586) and 44 further bits of
+the Zobrist hash. The slot is the low 17 bits of the hash (the transposition table uses the high
+ones), so 61 bits of the hash decide a hit, against the 32 key bits and the index of the
+transposition table. The evaluations are therefore those of the head except when two positions
+agree in those 61 bits, about once in 2^44 probes that land on another position's entry. The
+side-to-move key is folded into the hash when the output is asked for the side not to move. The
+scaling the search applies to the output (`EvalScale`, material, the fifty-move counter) comes
+after the cache, because the counter is not part of the hash. A cache belongs to the network it
+was filled with: `weights.generation` changes with every network that becomes active, and a
+position whose evaluation is rebuilt under another generation clears its cache and its Finny
+table first.
 
 Hit rate by table size, measured with whole 64-bit keys:
 
@@ -92,18 +95,18 @@ current position from the Finny table instead: the frames in between have nothin
 from, and the pieces of an earlier frame are no longer known. The bottom frame always holds its
 accumulators or is marked for a rebuild, which ends the walk. A piece changed outside a move
 (`add_piece` on a position being set up) marks the current frame for a rebuild of both
-perspectives. When the stack is full,
-the current frame is computed and moved to the bottom. An evaluation that misses the cache does
-the same walk, which is where the frames skipped at `commit` are computed when a position below
-them needs them.
+perspectives. When the stack is full, the current frame is computed and moved to the bottom. An
+evaluation that misses the cache does the same walk, which is where the frames skipped at `commit`
+are computed when a position below them needs them.
 
 Why `commit` computes eagerly on a miss, and does not wait for the evaluation: the rows of an
 update come from all over a 25 MiB table, and in `play_move` that memory traffic overlaps the
 transposition-table probe of the new node, which is fetched at the same time. Deferred to the
 evaluation, the same work runs after the probe and on the critical path of the head. And without
-the cache there is little to skip: 94% of the frames of a `bench` run are evaluated or lie below
-an evaluated one. EPYC 9R14 (Zen 4, 512-bit build), single thread, alternating runs, against the
-eager updates this replaced; `bench`, and four positions searched for 3 s with a 256 MiB hash:
+the cache there is little to skip: 13.10M of the 13.84M frames of a `bench` run (95%) are
+evaluated or lie below an evaluated one. EPYC 9R14 (Zen 4, 512-bit build), single thread,
+alternating runs, against the eager updates this replaced; `bench`, and four positions searched
+for 3 s with a 256 MiB hash:
 
 | Variant | `bench` | 3 s searches |
 |---|---|---|
@@ -499,8 +502,9 @@ What limits each part now:
 
 - **Accumulator updates** are memory operations: per 64 bytes of one perspective, three or four
   loads and a store. With every row in the first-level cache, one perspective of a capture takes
-  50 ns on the M4 (three loads per cycle) and 38 ns on Zen 4, whose 512-bit loads and stores are
-  two operations each; rows spread over the whole table take 100 ns on both.
+  50 ns on the M4 (2.6 loads per cycle, see "Accumulator kernels") and 38 ns on Zen 4, whose
+  512-bit loads and stores are two operations each; rows spread over the whole table take 100 ns
+  on both.
 - **The head on the M4**: the pairwise step by its nine vector operations per 16 products, the L1
   products by loads per cycle, L2 by the multiplier (two per cycle).
 - **The head on Zen 4**: the pairwise step and the 256-bit L1 by the vector units (the same time
@@ -513,9 +517,11 @@ the measurement that decided it:
 
 - **Skipping zero L1 outputs in L2.** 12.4 of 16 are non-zero on the bench positions; the loop
   over the non-zero ones was slower than the full one (44 ns against 34 for L2 and L3).
-- **Lazy accumulator updates without the evaluation cache.** Of the 15.8M accumulator frames of a
-  `bench` run, 14.9M were evaluated or had an evaluated descendant, so at most 5% of the updates
-  could be skipped. The cache changed that, see "Lazy updates".
+- **Lazy accumulator updates without the evaluation cache.** Of the 13.84M accumulator frames of a
+  `bench` run, 13.10M are evaluated or have an evaluated descendant, so no more than about 5% of
+  the updates could be skipped. The count that decided it was taken with Dianguang-2 embedded,
+  whose `bench` has 17.58M nodes: 14.9M of 15.8M frames, the same share. The cache changed that,
+  see "Lazy updates".
 - **Prefetching the weight rows of an accumulator update.** At the start of the update, all rows:
   `bench` changed by -1.5% on the M4; the rows of a move are read sequentially already. When the
   move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
@@ -580,8 +586,10 @@ Tried and left out:
   destinations, the cache and the frame, for up to 4 added and 4 removed rows (25 loops picked by
   a switch), rows beyond four of a kind applied to the cache first, in place. With the rows in
   the first-level cache a rebuild took 465 to 513 cycles (three runs) instead of 539 to 592, and
-  `bench` retired 2.8 to 3.0% fewer instructions (113.4G to 110.1G for the same nodes). That did
-  not become time. Over eleven alternating pairs of `bench` the cycles, counted the same way,
+  `bench` retired 2.8 to 3.0% fewer instructions (113.4G to 110.1G for the same nodes; both builds
+  are commit 870eeab with only this loop changed, so the absolute counts are not those of a build
+  with the evaluation cache and the other changes of pull requests #104 to #111). That did not
+  become time. Over eleven alternating pairs of `bench` the cycles, counted the same way,
   were 0.7% higher by the fastest run of each binary (32.30G against 32.52G) and 1.9% higher by
   the median (33.07G against 33.70G), with single pairs from 10% slower to 10% faster on a
   machine that was busy throughout: no gain that the measurement can show, and more code. Passes
@@ -610,7 +618,7 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 |---|---|---|---|---|
 | Apple Silicon | `umull` | `sdot` | `wide` | yes, natively |
 | AArch64 without dotprod (`-Dcpu=generic`, `-Dcpu=apple_m4-dotprod`) | `umull` | `extadd` | `wide` | yes, natively |
-| AArch64 with SVE (`-Dcpu=neoverse_v1`) | `umull` | `sdot` | `wide` | **no**: the same NEON code as on Apple Silicon, but the rest of such a build may use SVE, which the M4 lacks |
+| AArch64 with SVE (`-Dcpu=neoverse_v1`) | `umull` | `sdot` | `wide` | in CI only, by the native build of the job `tiers` when its AArch64 runner has SVE: the same NEON code as on Apple Silicon. No development machine has SVE |
 | x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on an EPYC 9R14 (Zen 4) |
 | x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
 | x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |

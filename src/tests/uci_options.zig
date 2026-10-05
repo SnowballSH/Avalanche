@@ -209,7 +209,7 @@ test "options: EvalScale 1000 leaves every evaluation unchanged" {
         try f.set("name EvalScale value 700");
         try f.set("name EvalScale value 1000");
         try expectEqual(raw, hce.scale_network_output(raw));
-        try expectEqual(raw, hce.evaluate_nnue(f.pos));
+        try expectEqual(raw, support.network_output(f.pos));
         try expectEqual(before, static_eval(f.pos));
     }
 }
@@ -229,7 +229,7 @@ test "options: EvalScale 800 scales the network output to exactly raw * 800 / 10
 
         try f.set("name EvalScale value 800");
         try expectEqual(@divTrunc(raw * 800, 1000), hce.scale_network_output(raw));
-        try expectEqual(raw, hce.evaluate_nnue(f.pos));
+        try expectEqual(raw, support.network_output(f.pos));
         // The rest of the static evaluation is applied to the scaled output.
         const scaled = static_eval(f.pos);
         try expect(@abs(scaled) <= @abs(unscaled));
