@@ -17,7 +17,8 @@ A worker owns its `Searcher`: the worker thread allocates and initialises it
 after NUMA placement, so its 7.6 MiB of tables are first touched, and
 therefore physically allocated, on the node the thread runs on. The largest
 of them, the 6 MiB continuation history, is on huge pages where the OS has
-them; docs/MEMORY.md lists what lives where.
+them; docs/MEMORY.md lists what lives where. The main thread's `Searcher` is
+created by the UCI thread, which is not bound, so its tables are not placed.
 `ucinewgame` resets all helpers' heuristics in parallel on their own threads.
 Lowering `Threads` shuts down surplus workers and frees their tables.
 
@@ -55,5 +56,6 @@ Not done (possible future work): replicating the network weights per node
 accesses mostly hit caches, but a replica per node would remove the remaining
 cross-node traffic on large machines. The weights are one block of large
 memory behind the `weights.MODEL` pointer (docs/MEMORY.md), first touched by
-the UCI thread. The transposition table is shared by design; a new table is
-touched by as many threads as will search, which spreads it over their nodes.
+the UCI thread. The transposition table is shared by design: part `i` of a new
+table is backed on a thread bound like search thread `i`, with the limits
+docs/MEMORY.md lists.
