@@ -187,11 +187,6 @@ pub const DynamicEvaluator = struct {
     nnue_evaluator: nnue.NNUE = nnue.NNUE.new(),
     need_hce: bool = false,
 
-    /// A fresh evaluator on the network storage of `previous`, for an empty board.
-    pub fn reusing(previous: *const DynamicEvaluator) DynamicEvaluator {
-        return .{ .nnue_evaluator = nnue.NNUE.reusing(&previous.nnue_evaluator) };
-    }
-
     pub inline fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
         if (UseNNUE) {
             self.nnue_evaluator.toggle(true, pc, sq);

@@ -82,8 +82,7 @@ pub const Position = struct {
     evaluator: hce.DynamicEvaluator = undefined,
 
     pub fn init(self: *Position) void {
-        self.evaluator.nnue_evaluator.stack = null;
-        self.evaluator.nnue_evaluator.cache = null;
+        self.evaluator.nnue_evaluator.storage = null;
         self.uci_chess960 = false;
         self.evaluator.nnue_evaluator.ensure_storage();
         self.reset();
@@ -130,13 +129,14 @@ pub const Position = struct {
     }
 
     pub fn reset(self: *Position) void {
-        const evaluator = hce.DynamicEvaluator.reusing(&self.evaluator);
+        const storage = self.evaluator.nnue_evaluator.storage;
         const uci_chess960 = self.uci_chess960;
         self.* = .{ .uci_chess960 = uci_chess960 };
         @memset(self.piece_bitboards[0..types.N_PIECES], 0);
         @memset(self.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         self.history[0] = UndoInfo.new();
-        self.evaluator = evaluator;
+        self.evaluator = hce.DynamicEvaluator{};
+        self.evaluator.nnue_evaluator.adopt_storage(storage);
     }
 
     pub fn new() Position {

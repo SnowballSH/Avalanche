@@ -176,14 +176,15 @@ const FrameState = struct {
     }
 };
 
-pub const Stack = struct {
+/// The heap memory of an evaluator. It outlives `Position.reset`.
+pub const Storage = struct {
     frames: [STACK_CAP]Accumulator,
     states: [STACK_CAP]FrameState,
+    cache: EvalCache,
 };
 
 pub const NNUE = struct {
-    stack: ?*Stack = null,
-    cache: ?*EvalCache = null,
+    storage: ?*Storage = null,
     depth: u16 = 0,
     /// Between `push` and `commit`: piece changes belong to the move being played.
     recording: bool = false,
@@ -197,42 +198,36 @@ pub const NNUE = struct {
     }
 
     pub fn ensure_storage(self: *NNUE) void {
-        if (self.stack == null) {
-            self.stack = platform.allocator.create(Stack) catch unreachable;
-            self.stack.?.states[0] = .stale;
-        }
-        if (self.cache == null) {
-            self.cache = platform.allocator.create(EvalCache) catch unreachable;
-            self.cache.?.clear();
-        }
+        if (self.storage != null) return;
+        const storage = platform.allocator.create(Storage) catch unreachable;
+        storage.cache.clear();
+        self.adopt_storage(storage);
     }
 
     pub fn release_storage(self: *NNUE) void {
-        if (self.stack) |s| platform.allocator.destroy(s);
-        if (self.cache) |c| platform.allocator.destroy(c);
-        self.stack = null;
-        self.cache = null;
+        if (self.storage) |storage| platform.allocator.destroy(storage);
+        self.storage = null;
     }
 
-    /// A fresh evaluator on the storage of `previous`, for an empty board.
-    pub fn reusing(previous: *const NNUE) NNUE {
-        const self: NNUE = .{ .stack = previous.stack, .cache = previous.cache };
-        if (self.stack) |s| s.states[0] = .stale;
-        return self;
+    /// Takes over the storage of an evaluator that was reset; the board is empty.
+    pub fn adopt_storage(self: *NNUE, storage: ?*Storage) void {
+        self.storage = storage;
+        self.depth = 0;
+        if (storage) |s| s.states[0] = .stale;
     }
 
     /// Required after the network weights change.
     pub fn discard_caches(self: *NNUE) void {
         self.finny_ready = false;
-        if (self.cache) |c| c.clear();
+        if (self.storage) |storage| storage.cache.clear();
     }
 
     inline fn current(self: *const NNUE) *Accumulator {
-        return &self.stack.?.frames[self.depth];
+        return &self.storage.?.frames[self.depth];
     }
 
     inline fn frame_state(self: *const NNUE) *FrameState {
-        return &self.stack.?.states[self.depth];
+        return &self.storage.?.states[self.depth];
     }
 
     /// The accumulators of the current position, brought up to date.
@@ -262,9 +257,9 @@ pub const NNUE = struct {
 
     fn rebase(self: *NNUE, pos: *const position.Position) void {
         self.materialize(pos);
-        const stack = self.stack.?;
-        stack.frames[0] = stack.frames[self.depth];
-        stack.states[0] = .fresh;
+        const storage = self.storage.?;
+        storage.frames[0] = storage.frames[self.depth];
+        storage.states[0] = .fresh;
         self.depth = 0;
     }
 
@@ -315,7 +310,7 @@ pub const NNUE = struct {
     /// Frame 0 is always computed or marked for a rebuild, which ends the walk down.
     fn materialize_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
         const p = @backingInt(perspective);
-        const states = &self.stack.?.states;
+        const states = &self.storage.?.states;
         var base: usize = self.depth;
         while (!states[base].computed[p]) : (base -= 1) {
             if (states[base].rebuild[p]) {
@@ -330,10 +325,10 @@ pub const NNUE = struct {
     }
 
     fn apply_frame(self: *NNUE, frame: usize, comptime perspective: types.Color, king: KingBucketState) void {
-        const stack = self.stack.?;
-        const changes = &stack.states[frame];
-        const dst = stack.frames[frame].perspective(perspective);
-        const src = stack.frames[frame - 1].perspective(perspective);
+        const storage = self.storage.?;
+        const changes = &storage.states[frame];
+        const dst = storage.frames[frame].perspective(perspective);
+        const src = storage.frames[frame - 1].perspective(perspective);
         const SHAPES = MAX_CHANGES + 1;
         switch (@as(usize, changes.add_count) * SHAPES + changes.sub_count) {
             inline 0...SHAPES * SHAPES - 1 => |shape| {
@@ -443,7 +438,7 @@ pub const NNUE = struct {
     /// The network's output for `turn`, which need not be the side to move.
     pub inline fn evaluate_comptime(self: *NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
         const key = if (pos.turn == turn) pos.hash else pos.hash ^ zobrist.TurnHash;
-        const cache = self.cache.?;
+        const cache = &self.storage.?.cache;
         if (cache.get(key)) |output| return output;
         const output = self.evaluate_uncached(turn, pos);
         cache.put(key, output);

@@ -37,15 +37,56 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/head_single.zig`,
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
-**Accumulator updates** (`src/engine/nnue.zig`). A move writes its position's accumulators into
-the next frame of a stack, each perspective in one pass: the parent's values plus the rows of the
-features that appeared, minus those that disappeared (two rows for a quiet move, three for a
-capture). When a king moves to another bucket or crosses the mirror line, every feature of that
-king's perspective changes. That perspective is then not updated at all: it is rebuilt from the
-"Finny table", a cache with one accumulator per perspective, mirror side and bucket and the piece
-sets it was computed for. The rebuild adds and removes only the rows by which the position
-differs from the cached one, and writes the result to the cache and to the frame in the same pass.
-Wrapping arithmetic makes the order of the additions irrelevant.
+**Accumulator updates** (`src/engine/nnue.zig`). A move computes no accumulator. It opens the next
+frame of a stack and records in it the features that appeared and disappeared (one of each for a
+quiet move, a second removal for a capture, two of each for castling) and whether its king left
+its bucket or crossed the mirror line. A frame's accumulators are computed when an evaluation
+needs them ("Lazy updates" below), each perspective in one pass: the values of the frame below
+plus the rows of the features that appeared, minus those that disappeared. When a king moves to
+another bucket or crosses the mirror line, every feature of that king's perspective changes. That
+perspective is then not updated at all: it is rebuilt from the "Finny table", a cache with one
+accumulator per perspective, mirror side and bucket and the piece sets it was computed for. The
+rebuild adds and removes only the rows by which the position differs from the cached one, and
+writes the result to the cache and to the frame in the same pass. Wrapping arithmetic makes the
+order of the additions irrelevant.
+
+**Evaluation cache** (`src/engine/nnue/eval_cache.zig`). The network's output is a function of
+the pieces and of the side it is computed for, and the search asks for it again and again for the
+same position: a quiescence node that fails low without a best move is not stored in the
+transposition table, quiescence evaluates before it probes the table, razoring hands a node that
+was just evaluated to quiescence, and every re-search and every new iteration walks over the
+leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) are of
+a position evaluated earlier in the run. So every `Position` (one per search thread) keeps a
+direct-mapped table of 2^16 outputs, 16 bytes an entry: the 64-bit key and the output. The slot is
+the low bits of the Zobrist hash (the transposition table uses the high ones); the key is the
+whole hash, with the side-to-move key folded in when the output is asked for the side not to move.
+The scaling the search applies to the output (`EvalScale`, material, the fifty-move counter) comes
+after the cache, because the counter is not part of the hash. The table is cleared when the
+network changes (`discard_caches`). Hit rate on `bench` by table size:
+
+| Entries | 2^10 | 2^12 | 2^14 | 2^16 | 2^18 | 2^20 | unbounded |
+|---|---|---|---|---|---|---|---|
+| Hits | 14.1% | 17.8% | 23.1% | 29.8% | 34.6% | 36.5% | 37.4% |
+
+**Lazy updates.** `push` (first thing in `play_move`) opens a frame, `toggle`, `move` and `capture`
+record the piece changes in it, and `commit` closes it; for a king move it compares the bucket and
+mirror side of the king's old and new square and marks that perspective for a rebuild if they
+differ. Nothing else happens until an evaluation misses the cache. It then brings each perspective
+of the current frame up to date: it walks down the stack to the nearest frame that holds this
+perspective and applies the recorded changes frame by frame on the way back up, so the frames in
+between are computed as well, and the next evaluation in that subtree starts from them. If the
+walk meets a frame marked for a rebuild first, the perspective is rebuilt for the current position
+from the Finny table instead: the frames in between have nothing to continue from, and the pieces
+of an earlier frame are no longer known. The bottom frame always holds its accumulators or is
+marked for a rebuild, which ends the walk. A piece changed outside a move (`add_piece` on a
+position being set up) marks the current frame for a rebuild of both perspectives, and so does a
+move with more changes than a frame records. When the stack is full, the current frame is computed
+and moved to the bottom.
+
+Without the cache this saves little: 94% of the frames of a `bench` run are evaluated or lie
+below an evaluated one. With it, a frame is only needed below an evaluation that *misses*, and of
+the 13.84M frames a `bench` run opens, 10.39M (75.1%) are. A move with several piece changes
+(castling, en passant, promotion) is one pass per perspective where it used to be one per change.
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
 instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of
@@ -422,8 +463,9 @@ the measurement that decided it:
 
 - **Skipping zero L1 outputs in L2.** 12.4 of 16 are non-zero on the bench positions; the loop
   over the non-zero ones was slower than the full one (44 ns against 34 for L2 and L3).
-- **Lazy accumulator updates.** Of the 15.8M accumulator frames of a `bench` run, 14.9M are
-  evaluated or have an evaluated descendant, so at most 5% of the updates could be skipped.
+- **Lazy accumulator updates without the evaluation cache.** Of the 15.8M accumulator frames of a
+  `bench` run, 14.9M were evaluated or had an evaluated descendant, so at most 5% of the updates
+  could be skipped. The cache changed that, see "Lazy updates".
 - **Prefetching the weight rows of an accumulator update.** At the start of the update, all rows:
   `bench` changed by -1.5% on the M4; the rows of a move are read sequentially already. When the
   move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
