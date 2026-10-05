@@ -23,6 +23,9 @@ pub const UndoInfo = struct {
     // Keys of the position the move was played from
     previous_keys: Keys,
 
+    // Pieces giving check to the side to move
+    checkers: types.Bitboard,
+
     // Fifty-move rule counter
     fifty: u16,
 
@@ -37,6 +40,7 @@ pub const UndoInfo = struct {
     pub fn new() UndoInfo {
         return UndoInfo{
             .previous_keys = .{},
+            .checkers = 0,
             .fifty = 0,
             .castling = castling.NO_RIGHTS,
             .captured = types.Piece.NO_PIECE,
@@ -47,6 +51,7 @@ pub const UndoInfo = struct {
     pub fn after(previous: UndoInfo, previous_keys: Keys) UndoInfo {
         return UndoInfo{
             .previous_keys = previous_keys,
+            .checkers = 0,
             .fifty = previous.fifty +| 1,
             .castling = previous.castling,
             .captured = types.Piece.NO_PIECE,
@@ -243,6 +248,10 @@ pub const Position = struct {
         }
 
         self.hash ^= zobrist.CastlingHash[self.castling_rights()];
+        self.history[self.game_ply].checkers = switch (self.turn) {
+            .White => self.king_attackers(.White),
+            .Black => self.king_attackers(.Black),
+        };
 
         self.evaluator.full_refresh(self);
     }
@@ -595,10 +604,17 @@ pub const Position = struct {
         }
     }
 
+    /// Enemy pieces attacking the king of `color`.
+    pub inline fn king_attackers(self: *const Position, comptime color: types.Color) types.Bitboard {
+        const king_bb = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()];
+        if (king_bb == 0) return 0;
+        const king_sq: types.Square = @fromBackingInt(@intCast(types.lsb(king_bb)));
+        return self.attackers_from(comptime color.invert(), king_sq, self.all_all_pieces());
+    }
+
     pub inline fn in_check(self: *const Position, comptime color: types.Color) bool {
-        comptime var king: types.Piece = types.Piece.new_comptime(color, types.PieceType.King);
-        const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
-        return self.attackers_from(opp, @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.piece_bitboards[king.index()])))), self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black)) != 0;
+        if (self.turn == color) return self.history[self.game_ply].checkers != 0;
+        return self.king_attackers(color) != 0;
     }
 
     pub inline fn has_non_pawns(self: *const Position) bool {
@@ -678,6 +694,7 @@ pub const Position = struct {
             },
         }
 
+        undo.checkers = self.king_attackers(comptime color.invert());
         self.history[self.game_ply] = undo;
         self.hash ^= state_key;
 
@@ -774,9 +791,13 @@ pub const Position = struct {
 
     pub fn play_null_move(self: *Position) void {
         const previous = self.history[self.game_ply];
-        const undo = UndoInfo.after(previous, self.keys());
+        var undo = UndoInfo.after(previous, self.keys());
         self.turn = self.turn.invert();
         self.game_ply += 1;
+        undo.checkers = switch (self.turn) {
+            .White => self.king_attackers(.White),
+            .Black => self.king_attackers(.Black),
+        };
         self.history[self.game_ply] = undo;
 
         self.hash ^= zobrist.TurnHash;
