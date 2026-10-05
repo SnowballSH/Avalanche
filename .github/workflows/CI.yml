@@ -133,6 +133,62 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
           python3 scripts/uci_protocol_test.py "$BIN"
 
+  # Release binaries for CPU levels other than the runner's own (docs/BUILD.md, "Release matrix"):
+  # each is built, checked for the SIMD paths and instructions of its level and, where the
+  # runner's CPU has them, run. A pull request builds four of them and one native binary; the
+  # whole matrix is built by the `artifacts` job for tags.
+  tiers:
+    name: tiers / ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            os: ubuntu-latest
+            must_run: x86_64-linux-v2
+            may_run: x86_64-linux-avx512
+          - arch: aarch64
+            os: ubuntu-24.04-arm
+            must_run: aarch64-linux aarch64-linux-dotprod
+            may_run: ""
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      # A fixed version keeps build_options, and with it the compilation cache, the same between runs.
+      VERSION: ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Zig ${{ env.ZIG_VERSION }}
+        uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install llvm-objdump
+        run: sudo apt-get update && sudo apt-get install -y llvm
+
+      - name: CPU features of this runner
+        run: grep -m1 -E '^(flags|Features)' /proc/cpuinfo
+
+      - name: Binaries every runner of this architecture can run
+        run: REQUIRE_RUN=1 bash build_all_v3.sh ${{ matrix.must_run }}
+
+      - name: Binaries that run where the CPU allows
+        if: matrix.may_run != ''
+        run: bash build_all_v3.sh ${{ matrix.may_run }}
+
+      # No development machine has SVE, so an SVE-enabled build is executed here or nowhere.
+      - name: Native build on an SVE CPU
+        if: matrix.arch == 'aarch64'
+        run: |
+          if grep -q -w sve /proc/cpuinfo; then
+            zig build --release=fast -Dversion="$VERSION"
+            bash scripts/verify_binary.sh zig-out/bin/Avalanche "128-bit vectors, pairwise umull, L1 sdot, L2 wide"
+          else
+            echo "::notice::this runner has no SVE: the SVE-enabled native build was not executed"
+          fi
+
   datatool:
     name: datatool
     runs-on: ubuntu-latest
@@ -194,7 +250,7 @@ jobs:
   # per commit or on pull requests (so forks cannot trigger artifact builds).
   artifacts:
     name: release artifacts
-    needs: [build, wasm]
+    needs: [build, tiers, wasm]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -206,6 +262,9 @@ jobs:
         uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+
+      - name: Install llvm-objdump
+        run: sudo apt-get update && sudo apt-get install -y llvm
 
       - name: Cross-compile release binaries
         env:

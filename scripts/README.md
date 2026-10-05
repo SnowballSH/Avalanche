@@ -49,7 +49,8 @@ Run `scripts/sprt.py --help` for full option reference.
 | `openbench_build_check.sh` | Build as OpenBench does (`make EXE= EVALFILE=`) and parse bench |
 | `prepare_data.sh` | Preprocess raw self-play data for training |
 | `install_net.sh` | Install a trained `.nnue` file into `nets/` |
-| `update_bench.sh` | Rebuild and update `bench.nodes` after a search change |
+| `update_bench.sh` | Rebuild and update `bench.nodes` and `nnue-speed.checksum` after a search or network change |
+| `verify_binary.sh` | Run a built binary and check its `bench` node count and `nnue-speed` checksum (and, optionally, its SIMD paths) |
 
 Tune bulk datagen book composition by editing `scripts/datagen_a_lot.json`.
 Each job's `count` is the number of workers to launch for that book; missing

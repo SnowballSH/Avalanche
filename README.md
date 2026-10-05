@@ -51,9 +51,29 @@ python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalan
 zig build wasm --release=fast # WebAssembly build -> zig-out/web/avalanche.wasm (see docs/WASM.md)
 ```
 
+A build targets the CPU it is compiled on. For another machine, pass its CPU: `-Dcpu=x86_64_v3`, or with a target,
+`-Dtarget=aarch64-linux-musl -Dcpu=generic+v8_2a+dotprod`. `./zig-out/bin/Avalanche nnue-speed` prints the SIMD paths
+a binary was compiled with. [docs/BUILD.md](docs/BUILD.md) has the build options, what a release build is compiled
+with, and the measurements behind both.
+
 Development builds report their build time as the version (`Avalanche Compiled at ...`). Release binaries are built
 with `VERSION=4.1.0 bash build_all_v3.sh` (one binary per supported CPU level plus the wasm module, in `artifacts/`),
 which passes `-Dversion`; CI does the same for pushed `v*` tags.
+
+Pick the last binary in this list whose CPU features your CPU has. A binary for features the CPU lacks stops with an
+illegal instruction. On Linux, `/proc/cpuinfo` lists them under `flags` (x86) or `Features` (ARM), with the names
+given here.
+
+| Binary | Needs | Typical CPUs |
+|---|---|---|
+| `x86_64-*-v1` | nothing | any 64-bit x86 CPU |
+| `x86_64-*-v2` | `ssse3`, `sse4_2`, `popcnt` | Intel Nehalem (2008) and later, AMD Bulldozer and later, Atom-class CPUs since Silvermont |
+| `x86_64-*-v3` | `avx2`, `bmi2`, `fma` | Intel Core since Haswell (2013; Pentium and Celeron models only much later), AMD Zen 1 to Zen 3 |
+| `x86_64-*-avxvnni` | those of `v3` and `avx_vnni` | Intel Alder Lake (12th generation) and later without AVX-512 |
+| `x86_64-*-avx512` | `avx512_vnni`, `avx512_vbmi2` and the rest of the Ice Lake set (`avx512bw`, `avx512vl`, `avx512vbmi`, `avx512_bitalg`, `avx512_vpopcntdq`) | AMD Zen 4 and later; Intel Ice Lake, Tiger Lake, Rocket Lake, Sapphire Rapids and later. It uses 512-bit vectors, which has been timed on AMD only: on an Intel CPU compare its `bench` speed with `v3` |
+| `aarch64-linux`, `aarch64-windows` | nothing | any 64-bit ARM CPU: Raspberry Pi 3 and 4, Snapdragon 845 and 850, Jetson Xavier |
+| `aarch64-*-dotprod` | `asimddp`, `atomics` | Cortex-A76 and later (Raspberry Pi 5), Neoverse N1 and later, Snapdragon 855 / 8cx and later, Apple Silicon under Linux |
+| `aarch64-macos` | nothing | every Apple Silicon Mac |
 
 Older Zig 0.10.x is no longer required.
 

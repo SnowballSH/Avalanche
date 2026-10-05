@@ -182,7 +182,7 @@ pub fn evaluate_scalar(head: *const Weights, l1_shift: L1Shift, own: arch.Accumu
 
 /// Bytes per vector: the pairwise products made per step, and the L1 weights
 /// per dot product.
-const VECTOR_BYTES = @min(std.simd.suggestVectorLength(u8) orelse 16, 64);
+const VECTOR_BYTES = @min(std.simd.suggestVectorLength(u8) orelse 16, arch.WIDEST_VECTOR_BITS / 8);
 const PairI16 = @Vector(VECTOR_BYTES, i16);
 const PairU16 = @Vector(VECTOR_BYTES, u16);
 const PairU8 = @Vector(VECTOR_BYTES, u8);
@@ -208,6 +208,7 @@ fn x86_has(comptime feature: std.Target.x86.Feature) bool {
 }
 
 const wasm_simd = builtin.target.cpu.arch.isWasm() and builtin.target.cpu.has(.wasm, .simd128);
+const neon = builtin.target.cpu.arch == .aarch64 and builtin.target.cpu.has(.aarch64, .neon);
 
 /// Which pairwise product this build compiled.
 pub const PAIRWISE_PATH: enum { mulhrs, umull, portable } = if (!intrinsics)
@@ -219,7 +220,7 @@ else if (switch (VECTOR_BYTES) {
     else => false,
 })
     .mulhrs
-else if (builtin.target.cpu.arch == .aarch64 and VECTOR_BYTES == 16 and builtin.target.cpu.has(.aarch64, .neon))
+else if (neon and VECTOR_BYTES == 16)
     .umull
 else
     .portable;
@@ -243,7 +244,7 @@ else if (switch (VECTOR_BYTES) {
     .maddubs
 else if (builtin.target.cpu.arch == .aarch64 and VECTOR_BYTES == 16 and builtin.target.cpu.has(.aarch64, .dotprod))
     .sdot
-else if (wasm_simd and VECTOR_BYTES == 16)
+else if ((wasm_simd or neon) and VECTOR_BYTES == 16)
     .extadd
 else
     .portable;
@@ -395,7 +396,7 @@ else switch (VECTOR_BYTES) {
 
 /// Bit i is set when block i, four activations from the lowest, is not zero.
 inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
-    if (comptime !(intrinsics and builtin.target.cpu.arch == .aarch64 and builtin.target.cpu.has(.aarch64, .neon))) {
+    if (comptime !(intrinsics and neon)) {
         const blocks = arch.reinterpret(@Vector(NNZ_BLOCKS, u32), activations.*);
         return @bitCast(blocks != @as(@Vector(NNZ_BLOCKS, u32), @splat(0)));
     }
@@ -476,7 +477,8 @@ inline fn byte_products(inputs: DotI8, block_weights: DotI8, comptime half: usiz
 
 /// The sums of adjacent i16 lanes, as i32.
 inline fn widened_pairs(products: HalfI16) DotI32 {
-    return @extern(*const fn (HalfI16) callconv(arch.intrinsic_call) DotI32, .{ .name = "llvm.wasm.extadd.pairwise.signed.v4i32" }).*(products);
+    const name = if (wasm_simd) "llvm.wasm.extadd.pairwise.signed.v4i32" else "llvm.aarch64.neon.saddlp.v4i32.v8i16";
+    return @extern(*const fn (HalfI16) callconv(arch.intrinsic_call) DotI32, .{ .name = name }).*(products);
 }
 
 /// `sum[i] + dot(inputs[4i..4i+4], block_weights[4i..4i+4])`. `inputs` holds
@@ -509,9 +511,9 @@ inline fn dot_accumulate(sum: DotSum, inputs: DotI8, block_weights: DotI8) DotSu
         },
         .sdot => return @extern(*const fn (DotI32, DotI8, DotI8) callconv(arch.intrinsic_call) DotI32, .{ .name = "llvm.aarch64.neon.sdot.v4i32.v16i8" }).*(sum, inputs, block_weights),
         .extadd => {
-            // Wasm has no byte dot product. A product fits an i16, and the
-            // pairwise widening addition leaves two i32 per output; they
-            // are kept apart until `output_sums`, which needs a shuffle.
+            // For targets without a byte dot product. A product fits an i16,
+            // and the pairwise widening addition leaves two i32 per output;
+            // they are kept apart until `output_sums`, which needs a shuffle.
             var result = sum;
             inline for (&result, 0..) |*pair_sums, half| pair_sums.* += widened_pairs(byte_products(inputs, block_weights, half));
             return result;

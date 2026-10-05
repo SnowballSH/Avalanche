@@ -17,6 +17,10 @@ pub const Accumulator = [HIDDEN_SIZE]i16;
 /// that vector loads from it are aligned loads.
 pub const AccumulatorPtr = *align(64) const Accumulator;
 
+/// The widest vectors the heads have instructions for. On AArch64 that is NEON, also where SVE
+/// makes `std.simd.suggestVectorLength` say more.
+pub const WIDEST_VECTOR_BITS: comptime_int = if (builtin.target.cpu.arch == .aarch64) 128 else 512;
+
 /// Calling convention for declaring LLVM target intrinsics. Every vector, a mask included, has
 /// to be passed as a vector, which the x86-64 C conventions do not do.
 pub const intrinsic_call: std.lang.CallingConvention = if (builtin.target.cpu.arch == .x86_64) .{ .x86_64_vectorcall = .{} } else .c;
