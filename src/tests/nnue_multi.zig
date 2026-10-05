@@ -550,15 +550,12 @@ test "multi net: incremental accumulators equal a rebuild after every move of ra
             var played: [plies]types.Move = undefined;
             var count: usize = 0;
             while (count < plies) {
-                var storage: [256]types.Move = undefined;
-                var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-                var moves = try std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len);
-                support.legal_moves(pos, &moves);
-                if (moves.items.len == 0) break;
+                const moves = pos.legal_moves();
+                if (moves.len == 0) break;
 
                 var rare: [256]types.Move = undefined;
                 var rare_count: usize = 0;
-                for (moves.items) |move| {
+                for (moves.items()) |move| {
                     if (is_rare_update(move)) {
                         rare[rare_count] = move;
                         rare_count += 1;
@@ -567,7 +564,7 @@ test "multi net: incremental accumulators equal a rebuild after every move of ra
                 const move = if (rare_count != 0 and random.boolean())
                     rare[random.uintLessThan(usize, rare_count)]
                 else
-                    moves.items[random.uintLessThan(usize, moves.items.len)];
+                    moves.items()[random.uintLessThan(usize, moves.len)];
                 support.play(pos, move);
                 played[count] = move;
                 count += 1;

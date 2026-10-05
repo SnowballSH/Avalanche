@@ -310,14 +310,6 @@ pub const DatagenSingle = struct {
         };
     }
 
-    fn generateLegalMoves(pos: *position.Position, movelist: *std.array_list.Managed(types.Move)) void {
-        if (pos.turn == types.Color.White) {
-            pos.generate_legal_moves(types.Color.White, movelist);
-        } else {
-            pos.generate_legal_moves(types.Color.Black, movelist);
-        }
-    }
-
     fn playMove(pos: *position.Position, move: types.Move) void {
         if (pos.turn == types.Color.White) {
             pos.play_move(types.Color.White, move);
@@ -389,24 +381,20 @@ pub const DatagenSingle = struct {
         var initial_board: ?viriformat.PackedBoard = null;
 
         while (true) : (ply += 1) {
-            var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
-            generateLegalMoves(&pos, &movelist);
+            const movelist = pos.legal_moves();
             const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-            if (adjudicator.terminal(movelist.items.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+            if (adjudicator.terminal(movelist.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
                 outcome = ended;
-                movelist.deinit();
                 break;
             }
 
             // Random opening moves
             if (ply < random_plies) {
-                const move = self.pickRandomOpeningMove(&pos, movelist.items);
+                const move = self.pickRandomOpeningMove(&pos, movelist.items());
                 playMove(&pos, move);
                 self.noteGamePosition(&pos);
-                movelist.deinit();
                 continue;
             }
-            movelist.deinit();
 
             // The first search after the random plies both screens the opening and plays the first recorded move.
             var opening_search: ?SearchResult = null;
@@ -497,23 +485,19 @@ pub const DatagenSingle = struct {
         const random_plies = self.randomPlyCount(using_book);
 
         while (true) : (ply += 1) {
-            var movelist = try std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32);
-            generateLegalMoves(&pos, &movelist);
+            const movelist = pos.legal_moves();
             const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-            if (adjudicator.terminal(movelist.items.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+            if (adjudicator.terminal(movelist.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
                 outcome = ended;
-                movelist.deinit();
                 break;
             }
 
             if (ply < random_plies) {
-                const move = self.pickRandomOpeningMove(&pos, movelist.items);
+                const move = self.pickRandomOpeningMove(&pos, movelist.items());
                 playMove(&pos, move);
                 self.noteGamePosition(&pos);
-                movelist.deinit();
                 continue;
             }
-            movelist.deinit();
 
             const result = self.searchPosition(&pos);
             const res = result.score;

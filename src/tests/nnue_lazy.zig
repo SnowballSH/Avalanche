@@ -9,8 +9,6 @@ const support = @import("support.zig");
 const expectEqual = std.testing.expectEqual;
 const expectEqualSlices = std.testing.expectEqualSlices;
 
-const MoveList = std.array_list.Managed(types.Move);
-
 const FENS = [_][]const u8{
     types.DEFAULT_FEN,
     "r3k2r/pppq1ppp/2npbn2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 0 1",
@@ -44,9 +42,6 @@ test "lazy accumulators: a random walk of moves and take-backs matches a rebuild
     const reference = try support.new_position();
     defer support.destroy_position(reference);
 
-    var storage: [256]types.Move = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-    var moves = try MoveList.initCapacity(fba.allocator(), storage.len);
     var played: [96]types.Move = undefined;
 
     var prng = std.Random.DefaultPrng.init(0x1a2b_3c4d);
@@ -56,15 +51,14 @@ test "lazy accumulators: a random walk of moves and take-backs matches a rebuild
         pos.set_fen(fen);
         var depth: usize = 0;
         for (0..1500) |_| {
-            moves.clearRetainingCapacity();
-            support.legal_moves(pos, &moves);
-            const go_back = depth == played.len or moves.items.len == 0 or (depth > 0 and random.uintLessThan(u8, 5) < 2);
+            const moves = pos.legal_moves();
+            const go_back = depth == played.len or moves.len == 0 or (depth > 0 and random.uintLessThan(u8, 5) < 2);
             if (go_back) {
                 if (depth == 0) break;
                 depth -= 1;
                 support.undo(pos, played[depth]);
             } else {
-                played[depth] = moves.items[random.uintLessThan(usize, moves.items.len)];
+                played[depth] = moves.items()[random.uintLessThan(usize, moves.len)];
                 support.play(pos, played[depth]);
                 depth += 1;
             }

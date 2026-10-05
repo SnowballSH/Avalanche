@@ -21,20 +21,11 @@ const frc = @import("../chess/frc.zig");
 const Variant = enum { standard, frc, dfrc };
 
 fn playRandomMoves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-
     var ply: usize = 0;
     while (ply < n_plies) : (ply += 1) {
-        var movelist = std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32) catch return;
-        defer movelist.deinit();
-        if (pos.turn == types.Color.White) {
-            pos.generate_legal_moves(types.Color.White, &movelist);
-        } else {
-            pos.generate_legal_moves(types.Color.Black, &movelist);
-        }
-        if (movelist.items.len == 0) return;
-        const move = movelist.items[prng.rand64() % movelist.items.len];
+        const movelist = pos.legal_moves();
+        if (movelist.len == 0) return;
+        const move = movelist.items()[prng.rand64() % movelist.len];
         if (pos.turn == types.Color.White) {
             pos.play_move(types.Color.White, move);
         } else {
@@ -50,16 +41,7 @@ fn random_start(prng: *utils.PRNG) u16 {
 fn positionIsUsable(pos: *position.Position) bool {
     const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
     if (in_check) return false;
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    var movelist = std.array_list.Managed(types.Move).initCapacity(arena.allocator(), 32) catch return false;
-    defer movelist.deinit();
-    if (pos.turn == types.Color.White) {
-        pos.generate_legal_moves(types.Color.White, &movelist);
-    } else {
-        pos.generate_legal_moves(types.Color.Black, &movelist);
-    }
-    return movelist.items.len > 0;
+    return pos.legal_moves().len > 0;
 }
 
 pub fn run(args_in: []const []const u8) !void {

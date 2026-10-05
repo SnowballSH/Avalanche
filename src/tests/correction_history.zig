@@ -23,13 +23,6 @@ const WALK_FENS = [_][]const u8{
 const WALKS_PER_FEN = 24;
 const MAX_WALK_PLY = 96;
 
-fn legal_moves(pos: *position.Position, list: *std.array_list.Managed(types.Move)) void {
-    switch (pos.turn) {
-        .White => pos.generate_legal_moves(.White, list),
-        .Black => pos.generate_legal_moves(.Black, list),
-    }
-}
-
 fn play(pos: *position.Position, move: types.Move) void {
     switch (pos.turn) {
         .White => pos.play_move(.White, move),
@@ -75,13 +68,10 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
             var played: [MAX_WALK_PLY]types.Move = undefined;
             var ply: usize = 0;
             while (ply < MAX_WALK_PLY) : (ply += 1) {
-                var storage: [256]types.Move = undefined;
-                var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-                var moves = try std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len);
-                legal_moves(pos, &moves);
-                if (moves.items.len == 0) break;
+                const moves = pos.legal_moves();
+                if (moves.len == 0) break;
 
-                const move = moves.items[prng.rand64() % moves.items.len];
+                const move = moves.items()[prng.rand64() % moves.len];
                 switch (move.get_flags()) {
                     .EN_PASSANT => en_passants += 1,
                     .OO, .OOO => castles += 1,

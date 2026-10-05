@@ -38,16 +38,6 @@ fn expect_matches_fresh(pos: *position.Position) !void {
     try expect_same_evaluation(fresh, pos);
 }
 
-fn legal_moves(pos: *position.Position, storage: *[256]types.Move) []types.Move {
-    var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(storage));
-    var list = std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len) catch unreachable;
-    switch (pos.turn) {
-        .White => pos.generate_legal_moves(.White, &list),
-        .Black => pos.generate_legal_moves(.Black, &list),
-    }
-    return list.items;
-}
-
 const RootCase = struct { fen: []const u8, moves: []const []const u8 };
 
 // One helper adopts every root in turn, so each rebuild runs against a Finny
@@ -86,8 +76,8 @@ test "smp root: adopted root evaluates like a fresh set_fen" {
         try expect_matches_fresh(helper);
 
         // Moves from the adopted root update incrementally and unwind back to it.
-        var storage: [256]types.Move = undefined;
-        for (legal_moves(helper, &storage)) |move| {
+        const helper_moves = helper.legal_moves();
+        for (helper_moves.items()) |move| {
             switch (helper.turn) {
                 .White => helper.play_move(.White, move),
                 .Black => helper.play_move(.Black, move),
@@ -174,9 +164,9 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
         }
 
         try expectEqual(root_hash, pos.hash);
-        var storage: [256]types.Move = undefined;
         var legal = false;
-        for (legal_moves(pos, &storage)) |move| {
+        const root_moves = pos.legal_moves();
+        for (root_moves.items()) |move| {
             if (move.to_u16() == s.best_move.to_u16()) legal = true;
         }
         try expect(legal);

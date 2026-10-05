@@ -30,13 +30,6 @@ pub fn destroy_position(pos: *position.Position) void {
     std.testing.allocator.destroy(pos);
 }
 
-pub fn legal_moves(pos: *position.Position, list: *std.array_list.Managed(types.Move)) void {
-    switch (pos.turn) {
-        .White => pos.generate_legal_moves(.White, list),
-        .Black => pos.generate_legal_moves(.Black, list),
-    }
-}
-
 pub fn play(pos: *position.Position, move: types.Move) void {
     switch (pos.turn) {
         .White => pos.play_move(.White, move),
