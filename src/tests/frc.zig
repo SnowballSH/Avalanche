@@ -61,26 +61,9 @@ fn perft_from(pos: *position.Position, depth: u32) usize {
     };
 }
 
-fn legal_moves(pos: *position.Position, list: *std.array_list.Managed(types.Move)) void {
-    switch (pos.turn) {
-        .White => pos.generate_legal_moves(.White, list),
-        .Black => pos.generate_legal_moves(.Black, list),
-    }
-}
-
-fn play(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        .White => pos.play_move(.White, move),
-        .Black => pos.play_move(.Black, move),
-    }
-}
-
-fn undo(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        .White => pos.undo_move(.Black, move),
-        .Black => pos.undo_move(.White, move),
-    }
-}
+const legal_moves = support.legal_moves;
+const play = support.play;
+const undo = support.undo;
 
 fn expect_perft_suite(suite: []const PerftCase) !void {
     init_tables();
