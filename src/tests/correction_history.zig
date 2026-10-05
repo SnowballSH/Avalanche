@@ -23,20 +23,6 @@ const WALK_FENS = [_][]const u8{
 const WALKS_PER_FEN = 24;
 const MAX_WALK_PLY = 96;
 
-fn play(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        .White => pos.play_move(.White, move),
-        .Black => pos.play_move(.Black, move),
-    }
-}
-
-fn undo(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        .White => pos.undo_move(.Black, move),
-        .Black => pos.undo_move(.White, move),
-    }
-}
-
 fn expect_keys_match(pos: *const position.Position) !void {
     try expectEqual(pos.compute_pawn_hash(), pos.pawn_hash);
     try expectEqual(pos.compute_nonpawn_hash(.White), pos.nonpawn_hash[0]);
@@ -85,7 +71,7 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
                     piece_captures += 1;
                 }
 
-                play(pos, move);
+                support.play(pos, move);
                 played[ply] = move;
                 try expect_keys_match(pos);
 
@@ -98,7 +84,7 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
 
             while (ply > 0) {
                 ply -= 1;
-                undo(pos, played[ply]);
+                support.undo(pos, played[ply]);
                 try expect_keys_match(pos);
             }
             try expectEqual(root_pawn_hash, pos.pawn_hash);

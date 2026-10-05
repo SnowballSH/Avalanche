@@ -15,6 +15,8 @@ fail() {
 
 EXPECTED_NODES="$(tr -d '[:space:]' < "$ROOT/bench.nodes")"
 EXPECTED_CHECKSUM="$(tr -d '[:space:]' < "$ROOT/nnue-speed.checksum")"
+[ -n "$EXPECTED_NODES" ] || fail "bench.nodes is empty"
+[ -n "$EXPECTED_CHECKSUM" ] || fail "nnue-speed.checksum is empty"
 
 BENCH="$("$BIN" bench)"
 [[ "$BENCH" == "$EXPECTED_NODES nodes "* ]] || fail "$BIN bench printed '$BENCH', expected $EXPECTED_NODES nodes"

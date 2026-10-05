@@ -41,7 +41,7 @@ const Fixture = struct {
     fn run(self: *Fixture, max_depth: ?u8) void {
         tt.GlobalTT.clear();
         self.searcher.shared.stop = false;
-        self.searcher.hash_history.clearRetainingCapacity();
+        self.searcher.hash_history.clear();
         self.searcher.hash_history.append(self.pos.hash) catch unreachable;
         switch (self.pos.turn) {
             .White => _ = self.searcher.iterative_deepening(self.pos, .White, max_depth),

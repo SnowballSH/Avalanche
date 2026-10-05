@@ -76,18 +76,6 @@ fn expect_perft_suite(suite: []const PerftCase) !void {
     }
 }
 
-fn expect_nnue_matches_fresh(pos: *position.Position) !void {
-    const reference = try new_position();
-    defer destroy_position(reference);
-    reference.copy_game_state(pos);
-    reference.rebuild_evaluation();
-
-    const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
-    const expected = reference.evaluator.nnue_evaluator.accumulator(reference);
-    try std.testing.expectEqualSlices(i16, expected.white[0..], actual.white[0..]);
-    try std.testing.expectEqualSlices(i16, expected.black[0..], actual.black[0..]);
-}
-
 fn format_move(move: types.Move, chess960: bool, buf: *[8]u8) []const u8 {
     var writer = std.Io.Writer.fixed(buf);
     move.uci_print(&writer, chess960);
@@ -210,7 +198,7 @@ test "frc: incremental hash, fen and nnue agree with a fresh position after ever
             fresh.set_fen(fen);
             try expectEqual(fresh.hash, pos.hash);
             try expectEqual(fresh.castling_rights(), pos.castling_rights());
-            try expect_nnue_matches_fresh(pos);
+            try support.expect_nnue_matches_fresh(pos);
 
             undo(pos, move);
             try expectEqual(root_hash, pos.hash);

@@ -94,7 +94,11 @@ capture line, a pin that appears during the exchange, en passant and king recapt
   move. A full history refuses the append. The search pairs each append with a pop, and a
   refused append would make the pop take a key of the game, so there the refusal is
   `unreachable`, and a compile-time check in `search.zig` holds `HISTORY_CAPACITY` to the longest
-  game plus `MAX_PLY`.
+  game plus `MAX_PLY`. It is `unreachable` as well where a history starts over: the `position`
+  command (which stops reading moves at `MAX_HISTORY_PLY`), `bench`, a new datagen game and a
+  helper adopting the root all append to a history they have just cleared. Only datagen's record
+  of a game's moves ignores a refusal, because the length of its random opening is an option that
+  nothing bounds.
 - The repetition scan compares the keys two, four, ... plies back, as far as `fifty + 3`. It is
   not narrowed to `4 ..= fifty`, although no real game repeats outside that window: a null move
   adds to the fifty-move counter without adding a key, so a key two entries back can be a real
@@ -117,7 +121,9 @@ before. The round-to-round ratios of this run spread about two points either way
 
 Apple M4, `--release=fast`. The machine was running other builds and benchmarks at load average
 15 to 20, so nps says nothing; the table gives what `/usr/bin/time -l` reports as the instructions
-retired by `bench`, one run per build, back to back.
+retired by `bench`, one run per build, back to back. The builds are commit 870eeab with these
+changes alone, row by row: the absolute counts are not those of a build that also has the other
+changes of pull requests #104 to #111.
 
 | Change | Instructions | Against the row above |
 |---|---|---|
@@ -159,9 +165,10 @@ different load and their other shares are not comparable.
 
 - **PEXT slider lookups.** BMI2 alone does not say that `pext` is fast (Zen 1 and Zen 2 run it in
   microcode), and the x86-64-v3 release build has to serve those CPUs. Every CPU with AVX-512 has
-  a fast one, so the v4 build could select it soundly at compile time. It was not written: the
-  magic lookups are 1.4% of `bench` on the M4, `pext` stands in for an and, a multiply and a shift
-  and saves two small loads per lookup, and nothing here can time x86.
+  a fast one, so the `avx512` release build (docs/BUILD.md) could select it soundly at compile
+  time. It was not written: the magic lookups are 1.4% of `bench` on the M4, `pext` stands in for
+  an and, a multiply and a shift and saves two small loads per lookup, and nothing here can time
+  x86.
 - **Narrowing the repetition scan**, see above.
 - **Seeding the move generators with the stored king attackers.** Not built. They would skip a
   knight and a pawn table load and one branch of the loop that finds the pins, an estimated five

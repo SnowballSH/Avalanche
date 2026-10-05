@@ -281,6 +281,9 @@ comptime {
     if (@sizeOf(CrossThreadState) > std.atomic.cache_line) {
         @compileError("CrossThreadState must fit one cache line");
     }
+    if (@offsetOf(Searcher, "shared") != 0) {
+        @compileError("Searcher.shared must be the searcher's first cache line");
+    }
 }
 
 pub const Searcher = struct {
@@ -1170,8 +1173,8 @@ pub const Searcher = struct {
     pub fn adopt_root(self: *Searcher, main: *const Searcher, pos: *const position.Position) void {
         self.root_board.copy_game_state(pos);
         self.root_evaluation_pending = true;
-        self.hash_history.clearRetainingCapacity();
-        self.hash_history.appendSlice(main.hash_history.items) catch {};
+        self.hash_history.clear();
+        self.hash_history.append_slice(main.hash_history.items) catch unreachable;
         self.root_history_len = main.root_history_len;
         self.ttable = main.ttable;
         self.root_move_count = main.root_move_count;

@@ -16,7 +16,6 @@ pub const MAX_HISTORY_PLY: u32 = 1920;
 /// search on top of it. search.zig checks its MAX_PLY against this.
 pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + 256;
 
-/// Zobrist keys of a position.
 pub const Keys = struct {
     hash: u64 = 0,
     pawn_hash: u64 = 0,
@@ -25,7 +24,6 @@ pub const Keys = struct {
 
 // Stores information for undoing a move.
 pub const UndoInfo = struct {
-    // Keys of the position the move was played from
     previous_keys: Keys,
 
     // Enemy pieces attacking the king of the side to move
@@ -69,7 +67,6 @@ pub const UndoInfo = struct {
 pub const Position = struct {
     // Bitboards of each piece
     piece_bitboards: [types.N_PIECES]types.Bitboard = undefined,
-    // Squares occupied by each color
     occupancy: [types.N_COLORS]types.Bitboard = .{ 0, 0 },
     // Mailbox representation of the board
     mailbox: [types.N_SQUARES]types.Piece = undefined,
@@ -134,8 +131,6 @@ pub const Position = struct {
         self.pawn_hash = src.pawn_hash;
         self.nonpawn_hash = src.nonpawn_hash;
         self.history[self.game_ply] = src.history[src.game_ply];
-        self.checkers = src.checkers;
-        self.pinned = src.pinned;
         self.castling = src.castling;
         self.uci_chess960 = src.uci_chess960;
     }
@@ -1163,7 +1158,6 @@ pub const Position = struct {
         const rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
         const rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
 
-        // King captures
         const occupied_without_king = all_bb ^ types.SquareIndexBB[our_king.index()];
         b1 = tables.get_attacks(types.PieceType.King, our_king, all_bb) & them_bb;
         while (b1 != 0) {

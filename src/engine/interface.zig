@@ -193,8 +193,8 @@ pub const UciInterface = struct {
             return;
         }
 
-        self.searcher.hash_history.clearRetainingCapacity();
-        self.searcher.hash_history.append(self.position.hash) catch {};
+        self.searcher.hash_history.clear();
+        self.searcher.hash_history.append(self.position.hash) catch unreachable;
 
         if (!eql(tokens.next() orelse return, "moves")) return;
         while (tokens.next()) |tok| {
@@ -205,7 +205,7 @@ pub const UciInterface = struct {
                 .White => self.position.play_move(.White, move),
                 .Black => self.position.play_move(.Black, move),
             }
-            self.searcher.hash_history.append(self.position.hash) catch {};
+            self.searcher.hash_history.append(self.position.hash) catch unreachable;
         }
     }
 

@@ -271,8 +271,8 @@ pub const DatagenSingle = struct {
             @atomicStore(bool, &s.shared.stop, false, .monotonic);
             s.time_stop = false;
             s.force_thinking = false;
-            s.hash_history.clearRetainingCapacity();
-            s.hash_history.append(pos.hash) catch {};
+            s.hash_history.clear();
+            s.hash_history.append(pos.hash) catch unreachable;
             s.ttable.do_age();
         }
     }
