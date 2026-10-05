@@ -132,10 +132,13 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
     occ |= types.SquareIndexBB[to];
     var attackers = (pos.attackers_from(types.Color.White, @as(types.Square, @fromBackingInt(@intCast(to))), occ) | pos.attackers_from(types.Color.Black, @as(types.Square, @fromBackingInt(@intCast(to))), occ)) & occ;
 
+    var stm = pos.mailbox[from].color().invert();
+    if (attackers & (if (stm == types.Color.White) white_pieces else black_pieces) == 0) {
+        return true;
+    }
+
     const bishops = pos.diagonal_sliders(types.Color.White) | pos.diagonal_sliders(types.Color.Black);
     const rooks = pos.orthogonal_sliders(types.Color.White) | pos.orthogonal_sliders(types.Color.Black);
-
-    var stm = pos.mailbox[from].color().invert();
 
     while (true) {
         attackers &= occ;
