@@ -333,7 +333,7 @@ fn occupancy_of_pieces(pos: *const position.Position) [types.N_COLORS]types.Bitb
     return occupancy;
 }
 
-fn checkers_of_side_to_move(pos: *const position.Position) types.Bitboard {
+fn attackers_of_king_to_move(pos: *const position.Position) types.Bitboard {
     return switch (pos.turn) {
         .White => pos.king_attackers(.White),
         .Black => pos.king_attackers(.Black),
@@ -346,7 +346,7 @@ fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, m
     fresh.set_fen(fen);
     try expectEqual(fresh.keys(), pos.keys());
     try expectEqual(occupancy_of_pieces(pos), pos.occupancy);
-    try expectEqual(checkers_of_side_to_move(pos), pos.history[pos.game_ply].checkers);
+    try expectEqual(attackers_of_king_to_move(pos), pos.history[pos.game_ply].king_attackers);
 
     const before = Snapshot.of(pos);
     for (moves) |move| {
@@ -354,15 +354,15 @@ fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, m
         undo(pos, move);
         try expectEqual(before, Snapshot.of(pos));
     }
-    if (before.undo.checkers == 0) {
+    if (before.undo.king_attackers == 0) {
         pos.play_null_move();
-        try expectEqual(checkers_of_side_to_move(pos), pos.history[pos.game_ply].checkers);
+        try expectEqual(attackers_of_king_to_move(pos), pos.history[pos.game_ply].king_attackers);
         pos.undo_null_move();
         try expectEqual(before, Snapshot.of(pos));
     }
 }
 
-test "make/unmake: keys, occupancy and checkers match the board, and undoing any move restores the position" {
+test "make/unmake: keys, occupancy and king attackers match the board, and undoing any move restores the position" {
     const fresh = try support.new_position();
     defer support.destroy_position(fresh);
     try walk_random_games(0x0D0_0BAD_F00D_A11_0E5, 6, 120, fresh, expect_moves_round_trip);

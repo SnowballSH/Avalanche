@@ -11,6 +11,11 @@ const see = @import("../engine/see.zig");
 
 pub const MAX_HISTORY_PLY: u32 = 1920;
 
+/// Entries of the undo stack, one per position from `set_fen` on: the longest
+/// game the UCI position parser replays (MAX_HISTORY_PLY moves) and the deepest
+/// search on top of it. search.zig checks its MAX_PLY against this.
+pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + 256;
+
 /// Zobrist keys of a position.
 pub const Keys = struct {
     hash: u64 = 0,
@@ -23,8 +28,8 @@ pub const UndoInfo = struct {
     // Keys of the position the move was played from
     previous_keys: Keys,
 
-    // Pieces giving check to the side to move
-    checkers: types.Bitboard,
+    // Enemy pieces attacking the king of the side to move
+    king_attackers: types.Bitboard,
 
     // Fifty-move rule counter
     fifty: u16,
@@ -40,7 +45,7 @@ pub const UndoInfo = struct {
     pub fn new() UndoInfo {
         return UndoInfo{
             .previous_keys = .{},
-            .checkers = 0,
+            .king_attackers = 0,
             .fifty = 0,
             .castling = castling.NO_RIGHTS,
             .captured = types.Piece.NO_PIECE,
@@ -51,7 +56,7 @@ pub const UndoInfo = struct {
     pub fn after(previous: UndoInfo, previous_keys: Keys) UndoInfo {
         return UndoInfo{
             .previous_keys = previous_keys,
-            .checkers = 0,
+            .king_attackers = 0,
             .fifty = previous.fifty +| 1,
             .castling = previous.castling,
             .captured = types.Piece.NO_PIECE,
@@ -82,14 +87,11 @@ pub const Position = struct {
     nonpawn_hash: [2]u64 = .{ 0, 0 },
 
     // History of Undo information.
-    // Sized to accommodate the longest game the UCI position parser will replay
-    // (MAX_HISTORY_PLY moves) plus the deepest search (MAX_PLY plies of play_move).
-    history: [MAX_HISTORY_PLY + 256]UndoInfo = undefined,
+    history: [HISTORY_CAPACITY]UndoInfo = undefined,
 
-    // Stores the enemy pieces that are attacking the king
+    // Working values of the move generators: the pieces attacking the king of
+    // the side they last ran for, and that side's pieces pinned to it.
     checkers: types.Bitboard = 0,
-
-    // Stores the pieces that are pinned to the king
     pinned: types.Bitboard = 0,
 
     castling: castling.Setup = .{},
@@ -248,7 +250,7 @@ pub const Position = struct {
         }
 
         self.hash ^= zobrist.CastlingHash[self.castling_rights()];
-        self.history[self.game_ply].checkers = switch (self.turn) {
+        self.history[self.game_ply].king_attackers = switch (self.turn) {
             .White => self.king_attackers(.White),
             .Black => self.king_attackers(.Black),
         };
@@ -510,7 +512,7 @@ pub const Position = struct {
         self.lift(sq, true);
     }
 
-    pub inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
+    inline fn move_piece(self: *Position, from: types.Square, to: types.Square) void {
         const captured = self.mailbox[to.index()];
         if (captured != types.Piece.NO_PIECE) {
             const moving = self.mailbox[from.index()];
@@ -531,7 +533,7 @@ pub const Position = struct {
     }
 
     // DO NOT CALL IF DESTINATION IS NOT EMPTY
-    pub inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
+    inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
         self.relocate(from, to, true);
     }
 
@@ -613,7 +615,13 @@ pub const Position = struct {
     }
 
     pub inline fn in_check(self: *const Position, comptime color: types.Color) bool {
-        if (self.turn == color) return self.history[self.game_ply].checkers != 0;
+        if (self.turn == color) {
+            const attacked = self.history[self.game_ply].king_attackers != 0;
+            if (comptime builtin.mode == .debug) {
+                std.debug.assert(attacked == (self.king_attackers(color) != 0));
+            }
+            return attacked;
+        }
         return self.king_attackers(color) != 0;
     }
 
@@ -694,7 +702,7 @@ pub const Position = struct {
             },
         }
 
-        undo.checkers = self.king_attackers(comptime color.invert());
+        undo.king_attackers = self.king_attackers(comptime color.invert());
         self.history[self.game_ply] = undo;
         self.hash ^= state_key;
 
@@ -794,7 +802,7 @@ pub const Position = struct {
         var undo = UndoInfo.after(previous, self.keys());
         self.turn = self.turn.invert();
         self.game_ply += 1;
-        undo.checkers = switch (self.turn) {
+        undo.king_attackers = switch (self.turn) {
             .White => self.king_attackers(.White),
             .Black => self.king_attackers(.Black),
         };
