@@ -7,6 +7,7 @@ const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const see = @import("../engine/see.zig");
 const support = @import("support.zig");
+const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualSlices = std.testing.expectEqualSlices;
 
@@ -366,4 +367,114 @@ test "make/unmake: keys, occupancy and king attackers match the board, and undoi
     const fresh = try support.new_position();
     defer support.destroy_position(fresh);
     try walk_random_games(0x0D0_0BAD_F00D_A11_0E5, 6, 120, fresh, expect_moves_round_trip);
+}
+
+fn set_up(pos: *position.Position, moves: *MoveList, fen: []const u8) void {
+    pos.set_fen(fen);
+    moves.clearRetainingCapacity();
+    legal_moves(pos, moves);
+}
+
+const SeeCase = struct {
+    fen: []const u8,
+    move: []const u8,
+    /// What the exchange is worth: it passes this bound and fails the next.
+    value: i32,
+};
+
+const SEE_CASES = [_]SeeCase{
+    // The bishop is pinned by the queen and takes on the line of the pin; the rook behind it
+    // then makes the queen's recapture a loss.
+    .{ .fen = "3r3k/6b1/8/8/8/5N2/8/Q6K w - - 0 1", .move = "f3d4", .value = -308 },
+    // The pawn's recapture leaves the rook alone between its king and the bishop, so the
+    // rook is pinned for the rest of the exchange.
+    .{ .fen = "7k/6r1/5p2/6n1/8/5N2/8/BK4R1 w - - 0 1", .move = "f3g5", .value = 93 },
+    // En passant: the bishop behind the capturing pawn joins the exchange.
+    .{ .fen = "4k3/3p4/8/2pP4/8/8/6B1/4K3 w - c6 0 2", .move = "d5c6", .value = 93 },
+    // The king is the last attacker of an undefended rook, ...
+    .{ .fen = "4k3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = 93 - 521 },
+    // ... of a rook defended through the square it came from, ...
+    .{ .fen = "3rk3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = 93 },
+    // ... and of a rook that the other king defends.
+    .{ .fen = "8/8/8/8/8/2k5/3pK3/3R4 w - - 0 1", .move = "d1d2", .value = 93 },
+};
+
+test "see: pins on the capture line, pins that appear during the exchange, en passant and king recaptures" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    var moves = try MoveList.initCapacity(std.testing.allocator, 256);
+    defer moves.deinit();
+    var prng = utils.PRNG.new(0x5EE_CA5E_5EED);
+
+    for (SEE_CASES) |case| {
+        set_up(pos, &moves, case.fen);
+        try expect_see_matches_reference(&prng, pos, moves.items);
+
+        const move = types.Move.new_from_string(pos, case.move);
+        try expect(move.to_u16() != 0);
+        try expect(see.see_threshold(pos, move, case.value));
+        try expect(!see.see_threshold(pos, move, case.value + 1));
+    }
+}
+
+fn squares(comptime list: []const types.Square) types.Bitboard {
+    var bb: types.Bitboard = 0;
+    for (list) |sq| bb |= types.SquareIndexBB[sq.index()];
+    return bb;
+}
+
+test "fen: set_fen finds the pieces attacking the king of the side to move" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const cases = [_]struct { fen: []const u8, attackers: types.Bitboard }{
+        .{ .fen = types.DEFAULT_FEN, .attackers = 0 },
+        .{ .fen = "rnb1kbnr/pppp1ppp/8/4p3/4PP1q/8/PPPP2PP/RNBQKBNR w KQkq - 1 3", .attackers = squares(&.{.h4}) },
+        .{ .fen = "4k3/8/8/8/8/5n2/8/r3K3 w - - 0 1", .attackers = squares(&.{ .a1, .f3 }) },
+        .{ .fen = "4k3/4R3/8/8/8/8/8/4K3 b - - 0 1", .attackers = squares(&.{.e7}) },
+    };
+    for (cases) |case| {
+        pos.set_fen(case.fen);
+        try expectEqual(case.attackers, pos.history[pos.game_ply].king_attackers);
+        const attacked = switch (pos.turn) {
+            .White => pos.in_check(.White),
+            .Black => pos.in_check(.Black),
+        };
+        try expectEqual(case.attackers != 0, attacked);
+    }
+}
+
+test "make/unmake: castling in which king and rook swap squares" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    const fresh = try support.new_position();
+    defer support.destroy_position(fresh);
+    var moves = try MoveList.initCapacity(std.testing.allocator, 256);
+    defer moves.deinit();
+
+    const cases = [_]struct { fen: []const u8, king_to: types.Square, rook_to: types.Square }{
+        .{ .fen = "4k3/8/8/8/8/8/8/5KR1 w G - 0 1", .king_to = .g1, .rook_to = .f1 },
+        .{ .fen = "4k3/8/8/8/8/8/8/2RK4 w C - 0 1", .king_to = .c1, .rook_to = .d1 },
+        .{ .fen = "5kr1/8/8/8/8/8/8/4K3 b g - 0 1", .king_to = .g8, .rook_to = .f8 },
+    };
+    for (cases) |case| {
+        set_up(pos, &moves, case.fen);
+        try expect_moves_round_trip(fresh, pos, moves.items);
+
+        const castle = for (moves.items) |move| {
+            if (move.is_castle()) break move;
+        } else return error.TestExpectedCastlingMove;
+        const mover = pos.turn;
+        play(pos, castle);
+        try expectEqual(types.Piece.new(mover, .King), pos.mailbox[case.king_to.index()]);
+        try expectEqual(types.Piece.new(mover, .Rook), pos.mailbox[case.rook_to.index()]);
+        try expectEqual(@as(usize, 3), @popCount(pos.occupancy[0] | pos.occupancy[1]));
+
+        moves.clearRetainingCapacity();
+        legal_moves(pos, &moves);
+        try expect_moves_round_trip(fresh, pos, moves.items);
+    }
 }
