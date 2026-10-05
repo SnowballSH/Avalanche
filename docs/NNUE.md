@@ -129,7 +129,9 @@ unknown length that subtracts into a vector is unrolled into four partial sums t
 combined with the wrong sign, so the row-by-row form gives wrong accumulators in `fast` builds
 (`safe`, `small`, generic AArch64 and x86-64 builds are not affected). A loop of additions is
 compiled correctly. `zig build test -Doptimize=fast` covers it: the tests named "refresh" and
-"smp root" fail on an Apple CPU if the subtraction loop comes back.
+"smp root" fail on an Apple CPU if the subtraction loop comes back, and the one named "random
+games" compares both accumulators with a scalar rebuild after every move of a few thousand random
+ones, castling, en passant, promotions and take-backs included.
 
 **Reinterpreting arrays.** Zig 0.17.0 defines `@bitCast` on the logical bits of a value. Between
 two vectors or two integers that is still a free reinterpretation, but a cast between an array
@@ -527,6 +529,58 @@ the measurement that decided it:
   (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
 - **16-bit L2 weights on AArch64** (`smlal`, half the weight loads): 28.3 ns against 29.2, and no
   more nodes per second. L2 there is limited by the multiplier, not by loads.
+
+### Accumulator kernels
+
+What a `bench` run asks of the accumulators, counted at commit 870eeab: 13.84M frames and 12.57M
+evaluations; 2.38M king moves, of which 2.22M leave the king's bucket or mirror side, so one frame
+in six rebuilds a perspective from the Finny table; 0.73% of the frames take a second or third
+update pass (castling, en passant, promotions). A rebuild adds 2.80 rows and removes 2.78 on
+average:
+
+| Rows of one kind | 0 | 1 | 2 | 3 | 4 | 5 or 6 | 7 to 32 |
+|---|---|---|---|---|---|---|---|
+| added, % of the rebuilds | 4.9 | 18.1 | 28.6 | 20.4 | 13.2 | 10.8 | 4.0 |
+| removed | 5.3 | 20.2 | 29.2 | 17.0 | 12.1 | 11.3 | 4.9 |
+
+Nothing differs in 4.1% of the rebuilds, and in 2.3% the position has fewer pieces than rows
+differ, so starting from the biases would rarely be shorter.
+
+The timings below are cycles of an M4 performance core for one perspective, with the rows in the
+first-level cache, from a stand-alone copy of the kernels that replays these row counts. The
+machine was shared and busy, so they are the process's cycles per instruction on performance
+cores times its instructions, not wall-clock time.
+
+- **Updates** cost 0.39 cycles per 16-byte load and 0.2 per store: 175 cycles for a quiet move
+  (one row added, one removed), 227 for a capture, 275 with two rows of each kind. That is 2.6
+  loads per cycle and no more, whatever the loop looks like: steps of 16, 32, 64 and 128 lanes
+  took 174.0, 175.3, 177.8 and 175.8 cycles for the quiet move, and the other shapes show no
+  order either (within 3% for a capture and for two rows of each kind, 7% for two added and one
+  removed). The generated loop is already one `ldp` per 32 bytes of every source and one `stp`
+  per 32 bytes of the destination, with pointer increments, so `UPDATE_LANES` stays at 32.
+- **Rebuilds** run over the two row lists inside every 64-byte step. LLVM unrolls each list four
+  times into partial sums that it clears and combines in every step, with a remainder loop for
+  the usual case of fewer than four rows: 539 to 592 cycles a rebuild (five runs).
+
+Tried and left out:
+
+- **A rebuild loop compiled for every pair of row counts**: the update loop with two
+  destinations, the cache and the frame, for up to 4 added and 4 removed rows (25 loops picked by
+  a switch), rows beyond four of a kind applied to the cache first, in place. With the rows in
+  the first-level cache a rebuild took 465 to 513 cycles (three runs) instead of 539 to 592, and
+  `bench` retired 2.8 to 3.0% fewer instructions (113.4G to 110.1G for the same nodes). That did
+  not become time. Over eleven alternating pairs of `bench` the cycles, counted the same way,
+  were 0.7% higher by the fastest run of each binary (32.30G against 32.52G) and 1.9% higher by
+  the median (33.07G against 33.70G), with single pairs from 10% slower to 10% faster on a
+  machine that was busy throughout: no gain that the measurement can show, and more code. Passes
+  of up to 8 rows (81 loops; more than four rows of a kind occur in 15% of the rebuilds, more
+  than eight in 1%) were 2.2% slower than the old loop by the fastest of four runs. With the rows
+  in the first-level cache, passes of up to 2, 3, 6 or 8 rows took 519, 469, 469 and 461 cycles
+  against 465 for 4 in the same run.
+- **A step of 64 or 128 lanes in the rebuild alone**: 434 to 518 and 469 to 488 cycles with the
+  per-count loops, inside the spread of the runs at 32 lanes.
+- **Applying a multi-piece move in one pass**: it concerns the 0.73% of frames above, at most
+  half of their update time.
 
 ### What has been executed
 
