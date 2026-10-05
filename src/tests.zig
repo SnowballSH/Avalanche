@@ -22,6 +22,7 @@ comptime {
 
 test {
     _ = @import("tests/frc.zig");
+    _ = @import("tests/board.zig");
     _ = @import("tests/search_features.zig");
     _ = @import("tests/correction_history.zig");
     _ = @import("engine/strength.zig");
