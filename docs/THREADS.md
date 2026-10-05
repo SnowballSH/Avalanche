@@ -14,7 +14,7 @@ stack) per helper per re-search, which happened dozens of times per move and
 became the dominant cost at high thread counts.
 
 A worker owns its `Searcher`: the worker thread allocates and initialises it
-after NUMA placement, so its 7.6 MiB of tables are first touched, and
+after NUMA placement, so its 8.6 MiB of tables are first touched, and
 therefore physically allocated, on the node the thread runs on. The largest
 of them, the 6 MiB continuation history, is on huge pages where the OS has
 them; docs/MEMORY.md lists what lives where. The main thread's `Searcher` is

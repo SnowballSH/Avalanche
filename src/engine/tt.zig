@@ -41,12 +41,26 @@ const large_memory = platform.large_memory;
 
 /// Who searches with a table, which decides who backs and clears its memory.
 pub const Sharing = enum {
-    /// One thread, which does both itself.
+    /// One thread; whoever creates the table backs it.
     private,
-    /// The search threads: part `i` of a new table is backed on a thread
-    /// placed like search thread `i`. See docs/MEMORY.md.
+    /// The search threads: the parts of a new table are backed on threads
+    /// placed like search threads spread evenly over all of them. See docs/MEMORY.md.
     search_threads,
 };
+
+fn search_thread_count() usize {
+    if (comptime !platform.has_threads) return 1;
+    return if (search.THREADS_CONFIGURED) search.NUM_THREADS + 1 else std.Thread.getCpuCount() catch 1;
+}
+
+/// Part `part` of `parts` goes where the search thread at the same fraction of all search threads runs.
+fn place_like_search_thread(part: usize, parts: usize) void {
+    numa.place_current_thread(search_thread_of_part(part, parts, search_thread_count()));
+}
+
+fn search_thread_of_part(part: usize, parts: usize, threads: usize) usize {
+    return part * threads / parts;
+}
 
 pub const TranspositionTable = struct {
     data: []align(large_memory.ALIGNMENT) i128 = large_memory.empty(i128),
@@ -68,7 +82,7 @@ pub const TranspositionTable = struct {
         if (comptime !platform.has_threads) return 1;
         return switch (self.sharing) {
             .private => 1,
-            .search_threads => if (search.THREADS_CONFIGURED) search.NUM_THREADS + 1 else std.Thread.getCpuCount() catch 1,
+            .search_threads => search_thread_count(),
         };
     }
 
@@ -76,7 +90,7 @@ pub const TranspositionTable = struct {
         if (comptime !platform.has_threads) return null;
         if (self.sharing == .private) return null;
         numa.init();
-        return if (numa.binds_threads()) &numa.place_current_thread else null;
+        return if (numa.binds_threads()) &place_like_search_thread else null;
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
@@ -311,4 +325,11 @@ test "tt: the search threads' table is backed and cleared in one part per thread
     for (TEST_HASHES) |hash| try testing.expect(table.get(hash) != null);
     table.clear();
     try testing.expect(std.mem.allEqual(i128, table.data, 0));
+}
+
+test "tt: the parts of a table smaller than one part per thread are spread over all search threads" {
+    try std.testing.expectEqual(@as(usize, 0), search_thread_of_part(0, 32, 128));
+    try std.testing.expectEqual(@as(usize, 64), search_thread_of_part(16, 32, 128));
+    try std.testing.expectEqual(@as(usize, 124), search_thread_of_part(31, 32, 128));
+    for (0..8) |part| try std.testing.expectEqual(part, search_thread_of_part(part, 8, 8));
 }

@@ -13,7 +13,7 @@ Where the engine's large data lives, which of it is on huge pages, and why.
 | Evaluator storage            | 2.0 MiB              | each `Position`               | two adjacent 4 KiB accumulator frames per node, by ply, and one random 8-byte entry of the 1 MiB evaluation cache |
 | `Position` with Finny table  | 154 KiB              | each `Position`               | board state every node, one 2 KiB Finny entry per refresh |
 
-A search thread therefore owns 7.6 MiB, not counting its 64 MiB of mostly untouched stack.
+A search thread therefore owns 8.6 MiB, not counting its 64 MiB of mostly untouched stack.
 
 With 4 KiB pages the first three rows alone are thousands of pages, far beyond the 64 to 96
 entries of a first-level data TLB and, with the hash table, beyond the second level as well. On
@@ -71,11 +71,12 @@ is not bound, so the main thread's tables are on whatever node the UCI thread ra
 hands out zeroed pages, so nothing has to be cleared a second time, but it has to be a store,
 because reading a fresh page only maps the kernel's shared zero page. Given a `placement`, every
 part gets a thread of its own, which calls `placement(index)` before it touches anything; the
-calling thread only waits, since it must not be moved. The transposition table passes
-`numa.place_current_thread`, so part `i` of a new table is backed on a thread bound like search
-thread `i`. Threads fill the nodes in order (docs/THREADS.md), so a table for a few threads is on
-the first node with them, and a table for many is spread over the nodes in proportion to the
-threads on each.
+calling thread only waits, since it must not be moved. The transposition table's placement binds
+the thread of part `i` of `n` like search thread `i * threads / n`: with a part per thread that is
+search thread `i`, and a table too small for that (under 32 MiB per thread) still has its parts
+spread evenly over all the search threads. Threads fill the nodes in order (docs/THREADS.md), so a
+table for a few threads is on the first node with them, and a table for many is spread over the
+nodes in proportion to the threads on each.
 
 Limits of that, as the code stands:
 
@@ -89,7 +90,8 @@ Limits of that, as the code stands:
   at all, because engines under test are started thousands of times on busy machines. The 32 MiB
   per part is a judgement, not a measurement.
 - A private table (`tt.Sharing.private`: datagen gives every game thread its own two) is backed
-  and cleared by the thread that owns it.
+  by the thread that creates it, in one part and with no thread started. Datagen creates all of
+  them on its main thread before the game threads exist.
 - This placement has only run on single-node machines. The binding is covered by the tests of
   `numa.zig` and the mapping of parts to threads by tests with a recording placement, but no
   per-node page counts (`numa_maps`) have been looked at.
@@ -137,8 +139,8 @@ grep thp_fault /proc/vmstat        # thp_fault_alloc vs thp_fault_fallback
 cat /sys/kernel/mm/transparent_hugepage/enabled
 ```
 
-Blocks carry the names `[anon:avalanche-hash]`, `[anon:avalanche-network]` and
-`[anon:avalanche-search]` on kernels built with `CONFIG_ANON_VMA_NAME` (5.17 and later; many
+Blocks carry the names `[anon:avalanche-hash]`, `[anon:avalanche-network]`,
+`[anon:avalanche-search]` and `[anon:avalanche-evaluator]` on kernels built with `CONFIG_ANON_VMA_NAME` (5.17 and later; many
 distributions enable it). Elsewhere they are anonymous `rw-p` mappings whose size is a multiple of
 2048 kB and whose `VmFlags` include `hg`. Without names Linux merges neighbouring blocks into one
 mapping; `huge_page_bytes` then counts the whole mapping and is capped at the block's own size,
@@ -159,7 +161,9 @@ an Apple M4, kernel 7.1), `bench` with the default 16 MiB hash and one thread. F
 | Resident (`VmRSS`)   | 77,628 kB                                        | 79,336 kB                |
 | Page tables (`VmPTE`) | 216 kB                                          | 204 kB                   |
 
-The 1.6 MiB of extra resident memory is the rounding of the network to 13 whole huge pages.
+The 1.6 MiB of extra resident memory is the rounding of the network to 13 whole huge pages. The
+table was taken before the evaluator storage became a block: each `Position` now adds one more
+huge page (2,048 kB) where it had 1 MiB of C-allocator memory, and `bench` has two.
 
 Page faults and CPU time from `perf stat` (the fault counts are exact; the machine was heavily
 loaded, so the CPU times are inflated for both and only their ratio means something; start-up

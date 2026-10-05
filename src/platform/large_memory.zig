@@ -19,9 +19,9 @@ else
 
 pub const Error = std.mem.Allocator.Error;
 
-/// Runs on a thread before it backs part `index` of a block, to move the
-/// thread to where that part should live.
-pub const Placement = *const fn (index: usize) void;
+/// Runs on a thread before it backs part `index` of the `parts` of a block,
+/// to move the thread to where that part should live.
+pub const Placement = *const fn (index: usize, parts: usize) void;
 
 pub fn empty(comptime T: type) []align(ALIGNMENT) T {
     return @as([*]align(ALIGNMENT) T, @ptrFromInt(ALIGNMENT))[0..0];
@@ -137,8 +137,8 @@ fn in_parallel(bytes: []u8, threads: usize, placement: ?Placement, comptime work
 fn in_parts(bytes: []u8, parts: usize, placement: ?Placement, comptime work: fn ([]u8) void) void {
     std.debug.assert(parts >= 1 and parts <= MAX_PARTS);
     const placed_work = struct {
-        fn run(part: []u8, index: usize, place: Placement) void {
-            place(index);
+        fn run(part: []u8, index: usize, part_total: usize, place: Placement) void {
+            place(index, part_total);
             work(part);
         }
     }.run;
@@ -153,7 +153,7 @@ fn in_parts(bytes: []u8, parts: usize, placement: ?Placement, comptime work: fn 
         rest = rest[part.len..];
         const config: std.Thread.SpawnConfig = .{ .stack_size = WORKER_STACK_SIZE };
         const thread: ?std.Thread = if (placement) |place|
-            std.Thread.spawn(config, placed_work, .{ part, index, place }) catch null
+            std.Thread.spawn(config, placed_work, .{ part, index, parts, place }) catch null
         else if (rest.len != 0)
             std.Thread.spawn(config, work, .{part}) catch null
         else
@@ -227,7 +227,10 @@ const PlacementRecorder = struct {
         caller = std.Thread.getCurrentId();
     }
 
-    fn place(index: usize) void {
+    var parts_announced: std.atomic.Value(usize) = .init(0);
+
+    fn place(index: usize, parts: usize) void {
+        parts_announced.store(parts, .monotonic);
         _ = calls[index].fetchAdd(1, .monotonic);
         if (std.Thread.getCurrentId() != caller) _ = calls_off_caller.fetchAdd(1, .monotonic);
     }
@@ -237,6 +240,7 @@ const PlacementRecorder = struct {
             try testing.expectEqual(@as(u32, @intFromBool(index < parts)), count.load(.monotonic));
         }
         try testing.expectEqual(@as(u32, @intCast(parts)), calls_off_caller.load(.monotonic));
+        try testing.expectEqual(parts, parts_announced.load(.monotonic));
     }
 };
 
