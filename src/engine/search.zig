@@ -325,7 +325,7 @@ pub const Searcher = struct {
         const board = platform.allocator.create(position.Position) catch unreachable;
         board.init();
         self.* = .{
-            .continuation = platform.allocator.create([12][64][64][64]i16) catch unreachable,
+            .continuation = platform.large_memory.create([12][64][64][64]i16, "search") catch @panic("out of memory for the continuation history"),
             .root_board = board,
         };
         self.hash_history = KeyHistory.init(platform.allocator, position.HISTORY_CAPACITY) catch unreachable;
@@ -340,7 +340,7 @@ pub const Searcher = struct {
 
     pub fn deinit(self: *Searcher) void {
         self.hash_history.deinit(platform.allocator);
-        platform.allocator.destroy(self.continuation);
+        platform.large_memory.destroy(self.continuation);
         self.root_board.deinit();
         platform.allocator.destroy(self.root_board);
     }
