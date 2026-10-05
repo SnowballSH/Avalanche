@@ -214,11 +214,10 @@ test "viriformat: FRC castling encodes king-to-rook-square with the castle type"
     defer support.destroy_position(pos);
     pos.set_fen("4k3/8/8/8/8/8/8/1R3K2 w B - 0 1");
 
-    var moves = std.array_list.Managed(types.Move).init(testing.allocator);
-    defer moves.deinit();
+    var moves: types.MoveList = .{};
     pos.generate_legal_moves(types.Color.White, &moves);
     var castle: ?types.Move = null;
-    for (moves.items) |m| {
+    for (moves.items()) |m| {
         if (m.is_castle()) castle = m;
     }
     const encoded = viriformat.encode_move(castle.?);

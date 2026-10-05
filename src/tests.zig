@@ -46,6 +46,7 @@ test {
     _ = @import("tests/nnue_multi.zig");
     _ = @import("tests/nnue_lazy.zig");
     _ = @import("engine/nnue/eval_cache.zig");
+    _ = @import("tests/movepick.zig");
 }
 
 test "Basic Piece and Color" {
@@ -337,11 +338,10 @@ test "zobrist: make/unmake restores hash and board state" {
         const orig_bitboards = pos.piece_bitboards;
         const orig_mailbox = pos.mailbox;
 
-        var list = std.array_list.Managed(types.Move).initCapacity(std.heap.c_allocator, 48) catch unreachable;
-        defer list.deinit();
+        var list: types.MoveList = .{};
         pos.generate_legal_moves(types.Color.White, &list);
 
-        for (list.items) |move| {
+        for (list.items()) |move| {
             pos.play_move(types.Color.White, move);
             pos.undo_move(types.Color.White, move);
 
@@ -1364,11 +1364,10 @@ test "search: maximum-mobility position exceeds 128 quiet moves safely" {
     pos.init();
     pos.set_fen("R6R/3Q4/1Q4Q1/4Q3/2Q4Q/Q4Q2/pp1Q4/kBNN1KB1 w - - 0 1");
 
-    var moves = std.array_list.Managed(types.Move).initCapacity(std.testing.allocator, 256) catch unreachable;
-    defer moves.deinit();
+    var moves: types.MoveList = .{};
     pos.generate_legal_moves(types.Color.White, &moves);
     var quiets: usize = 0;
-    for (moves.items) |move| {
+    for (moves.items()) |move| {
         if (!move.is_capture()) quiets += 1;
     }
     try expect(quiets > 128);

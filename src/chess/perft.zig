@@ -13,15 +13,13 @@ pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) u
     var nodes: usize = 0;
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
-    var list = std.array_list.Managed(types.Move).initCapacity(platform.allocator, 48) catch unreachable;
-    defer list.deinit();
-
+    var list: types.MoveList = .{};
     pos.generate_legal_moves(color, &list);
     if (depth == 1) {
-        return @as(usize, @intCast(list.items.len));
+        return list.len;
     }
 
-    for (list.items) |move| {
+    for (list.items()) |move| {
         pos.play_move(color, move);
         nodes += perft(opp, pos, depth - 1);
         pos.undo_move(color, move);
@@ -35,12 +33,10 @@ pub fn perft_div(comptime color: types.Color, pos: *position.Position, depth: u3
     var branch: usize = 0;
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
-    var list = std.array_list.Managed(types.Move).initCapacity(platform.allocator, 48) catch unreachable;
-    defer list.deinit();
-
+    var list: types.MoveList = .{};
     pos.generate_legal_moves(color, &list);
 
-    for (list.items) |move| {
+    for (list.items()) |move| {
         pos.play_move(color, move);
         branch = perft(opp, pos, depth - 1);
         nodes += branch;

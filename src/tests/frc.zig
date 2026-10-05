@@ -61,7 +61,6 @@ fn perft_from(pos: *position.Position, depth: u32) usize {
     };
 }
 
-const legal_moves = support.legal_moves;
 const play = support.play;
 const undo = support.undo;
 
@@ -200,14 +199,11 @@ test "frc: incremental hash, fen and nnue agree with a fresh position after ever
 
     for (PERFT_SUITE ++ CASTLING_EDGE_SUITE) |case| {
         pos.set_fen(case.fen);
-        var storage: [256]types.Move = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-        var moves = try std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len);
-        legal_moves(pos, &moves);
+        const moves = pos.legal_moves();
 
         const root_hash = pos.hash;
         const root_board = pos.mailbox;
-        for (moves.items) |move| {
+        for (moves.items()) |move| {
             play(pos, move);
             const fen = pos.basic_fen(std.testing.allocator);
             defer std.testing.allocator.free(fen);
@@ -293,11 +289,8 @@ test "frc: search returns a legal move from a double fischer random position" {
     searcher.silent_output = true;
     _ = searcher.iterative_deepening(pos, .White, 6);
 
-    var storage: [256]types.Move = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-    var moves = try std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len);
-    legal_moves(pos, &moves);
-    for (moves.items) |move| {
+    const moves = pos.legal_moves();
+    for (moves.items()) |move| {
         if (move.to_u16() == searcher.best_move.to_u16()) return;
     }
     return error.TestUnexpectedResult;

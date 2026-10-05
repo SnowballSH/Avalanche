@@ -67,6 +67,24 @@ fn expect_consistent_lines(searcher: *const search.Searcher) !void {
     }
 }
 
+test "move list: a set-up position with more moves than a list holds is cut at the capacity and searched" {
+    var fixture: Fixture = undefined;
+    try fixture.init("QQQQQQQQ/Q6Q/Q6Q/Q6Q/Q6Q/Q1k4Q/Q6Q/KQQQQQQQ w - - 0 1");
+    defer fixture.deinit();
+    try expectEqual(@as(usize, types.MoveList.capacity), fixture.pos.legal_moves().len);
+
+    fixture.pos.set_fen("knQQQQQQ/pp5Q/Q6Q/Q6Q/Q6Q/Q6Q/Q6Q/KQQQQQQQ w - - 0 1");
+    const moves = fixture.pos.legal_moves();
+    try expectEqual(@as(usize, types.MoveList.capacity), moves.len);
+
+    fixture.run(3);
+    var best_is_listed = false;
+    for (moves.items()) |move| {
+        if (move.to_u16() == fixture.searcher.best_move.to_u16()) best_is_listed = true;
+    }
+    try expect(best_is_listed);
+}
+
 test "multipv: completed search reports distinct lines sorted by score" {
     var f: Fixture = undefined;
     try f.init("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3");

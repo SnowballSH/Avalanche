@@ -190,11 +190,8 @@ pub fn set_position(pos: *position.Position, board: PackedBoard) void {
 
 /// Finds the legal move whose viriformat encoding is `raw`, so decoding can never disagree with `encode_move`.
 pub fn decode_move(pos: *position.Position, raw: u16) error{IllegalMove}!types.Move {
-    var buffer: [256]types.Move = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&buffer));
-    var moves = std.array_list.Managed(types.Move).initCapacity(fba.allocator(), buffer.len) catch unreachable;
-    if (pos.turn == types.Color.White) pos.generate_legal_moves(types.Color.White, &moves) else pos.generate_legal_moves(types.Color.Black, &moves);
-    for (moves.items) |move| {
+    const moves = pos.legal_moves();
+    for (moves.items()) |move| {
         if (encode_move(move) == raw) return move;
     }
     return error.IllegalMove;

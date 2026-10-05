@@ -434,16 +434,8 @@ pub const Move = packed struct {
         const promo: ?u8 = if (move.len >= 5) move[4] else null;
         const chess960 = pos.chess960_notation();
 
-        var storage: [256]Move = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-        var list = std.array_list.Managed(Move).initCapacity(fba.allocator(), storage.len) catch unreachable;
-        defer list.deinit();
-        switch (pos.turn) {
-            .White => pos.generate_legal_moves(Color.White, &list),
-            .Black => pos.generate_legal_moves(Color.Black, &list),
-        }
-
-        for (list.items) |m| {
+        const list = pos.legal_moves();
+        for (list.items()) |m| {
             if (m.from != from.index()) continue;
             const destination = if (m.is_castle() and !chess960) m.castle_king_destination().index() else m.to;
             if (destination != to.index() and !(m.is_castle() and m.to == to.index())) continue;
@@ -464,10 +456,10 @@ pub const Move = packed struct {
         return Square.new(@fromBackingInt(@intCast(f - 'a')), @fromBackingInt(@intCast(r - '1')));
     }
 
-    pub fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *std.array_list.Managed(Move)) void {
+    pub inline fn make_all(comptime flag: MoveFlags, from: Square, to: Bitboard, list: *MoveList) void {
         var to_t = to;
         while (to_t != 0) {
-            list.append(Move.new_from_to_flag(from, pop_lsb(&to_t), flag)) catch {};
+            list.append(Move.new_from_to_flag(from, pop_lsb(&to_t), flag));
         }
     }
 
@@ -512,5 +504,31 @@ pub const Move = packed struct {
                 PromMoveTypeString[self.flags][0],
             }) catch {};
         }
+    }
+};
+
+pub const MoveList = struct {
+    pub const capacity = 256;
+
+    buffer: [capacity]Move = undefined,
+    len: usize = 0,
+
+    pub inline fn append(self: *MoveList, move: Move) void {
+        if (self.len == capacity) return;
+        self.buffer[self.len] = move;
+        self.len += 1;
+    }
+
+    pub inline fn items(self: *const MoveList) []const Move {
+        return self.buffer[0..self.len];
+    }
+
+    pub inline fn mutable_items(self: *MoveList) []Move {
+        return self.buffer[0..self.len];
+    }
+
+    pub inline fn truncate(self: *MoveList, len: usize) void {
+        std.debug.assert(len <= self.len);
+        self.len = len;
     }
 };

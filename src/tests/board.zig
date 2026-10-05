@@ -11,7 +11,7 @@ const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
 const expectEqualSlices = std.testing.expectEqualSlices;
 
-const MoveList = std.array_list.Managed(types.Move);
+const MoveList = types.MoveList;
 
 const WALK_FENS = [_][]const u8{
     types.DEFAULT_FEN,
@@ -24,13 +24,6 @@ const WALK_FENS = [_][]const u8{
     "3rr1k1/pp3pp1/1qn2np1/8/3p4/PP1R1P2/2P1NQPP/R1B3K1 b - - 0 1",
     "qnbnr1kr/ppp1b1pp/4p3/3p1p2/8/2NPP3/PPP1BPPP/QNB1R1KR w HEhe - 1 9",
 };
-
-fn legal_moves(pos: *position.Position, list: *MoveList) void {
-    switch (pos.turn) {
-        .White => pos.generate_legal_moves(.White, list),
-        .Black => pos.generate_legal_moves(.Black, list),
-    }
-}
 
 fn play(pos: *position.Position, move: types.Move) void {
     switch (pos.turn) {
@@ -46,18 +39,15 @@ fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: 
     defer support.destroy_position(pos);
 
     var prng = utils.PRNG.new(seed);
-    var moves = try MoveList.initCapacity(std.testing.allocator, 256);
-    defer moves.deinit();
 
     for (WALK_FENS) |fen| {
         for (0..walks_per_fen) |_| {
             pos.set_fen(fen);
             for (0..max_ply) |_| {
-                moves.clearRetainingCapacity();
-                legal_moves(pos, &moves);
-                try visit(context, pos, moves.items);
-                if (moves.items.len == 0) break;
-                play(pos, moves.items[@intCast(prng.rand64() % moves.items.len)]);
+                const moves = pos.legal_moves();
+                try visit(context, pos, moves.items());
+                if (moves.len == 0) break;
+                play(pos, moves.items()[@intCast(prng.rand64() % moves.len)]);
             }
         }
     }
@@ -186,40 +176,25 @@ test "see: threshold matches the reference exchange on every move of random game
     try walk_random_games(0xB0A2D_5EE_D1FF_E2E7_1A1, 12, 80, &prng, expect_see_matches_reference);
 }
 
-fn king_captures(pos: *const position.Position, moves: []const types.Move, out: *MoveList) !void {
-    out.clearRetainingCapacity();
+fn king_captures(pos: *const position.Position, moves: []const types.Move) MoveList {
+    var out: MoveList = .{};
     for (moves) |move| {
-        if (move.is_capture() and pos.mailbox[move.from].piece_type() == .King) try out.append(move);
+        if (move.is_capture() and pos.mailbox[move.from].piece_type() == .King) out.append(move);
     }
+    return out;
 }
 
-const KingCaptureLists = struct {
-    captures: MoveList,
-    from_legal: MoveList,
-    from_captures: MoveList,
-};
-
-fn expect_same_king_captures(lists: *KingCaptureLists, pos: *position.Position, legal: []const types.Move) !void {
-    lists.captures.clearRetainingCapacity();
+fn expect_same_king_captures(_: void, pos: *position.Position, legal: []const types.Move) !void {
+    var captures: MoveList = .{};
     switch (pos.turn) {
-        .White => pos.generate_q_moves(.White, &lists.captures),
-        .Black => pos.generate_q_moves(.Black, &lists.captures),
+        .White => pos.generate_q_moves(.White, &captures),
+        .Black => pos.generate_q_moves(.Black, &captures),
     }
-    try king_captures(pos, legal, &lists.from_legal);
-    try king_captures(pos, lists.captures.items, &lists.from_captures);
-    try expectEqualSlices(types.Move, lists.from_legal.items, lists.from_captures.items);
+    try expectEqualSlices(types.Move, king_captures(pos, legal).items(), king_captures(pos, captures.items()).items());
 }
 
 test "movegen: the capture generator finds the legal generator's king captures in the same order" {
-    var lists = KingCaptureLists{
-        .captures = try MoveList.initCapacity(std.testing.allocator, 256),
-        .from_legal = try MoveList.initCapacity(std.testing.allocator, 8),
-        .from_captures = try MoveList.initCapacity(std.testing.allocator, 8),
-    };
-    defer lists.captures.deinit();
-    defer lists.from_legal.deinit();
-    defer lists.from_captures.deinit();
-    try walk_random_games(0xC0DE_CAFE_F00D_0BAD_5EED, 40, 160, &lists, expect_same_king_captures);
+    try walk_random_games(0xC0DE_CAFE_F00D_0BAD_5EED, 40, 160, {}, expect_same_king_captures);
 }
 
 fn reference_material_draw(pos: *const position.Position) bool {
@@ -369,10 +344,9 @@ test "make/unmake: keys, occupancy and king attackers match the board, and undoi
     try walk_random_games(0x0D0_0BAD_F00D_A11_0E5, 6, 120, fresh, expect_moves_round_trip);
 }
 
-fn set_up(pos: *position.Position, moves: *MoveList, fen: []const u8) void {
+fn set_up(pos: *position.Position, fen: []const u8) MoveList {
     pos.set_fen(fen);
-    moves.clearRetainingCapacity();
-    legal_moves(pos, moves);
+    return pos.legal_moves();
 }
 
 const SeeCase = struct {
@@ -403,13 +377,11 @@ test "see: pins on the capture line, pins that appear during the exchange, en pa
     support.init_tables();
     const pos = try support.new_position();
     defer support.destroy_position(pos);
-    var moves = try MoveList.initCapacity(std.testing.allocator, 256);
-    defer moves.deinit();
     var prng = utils.PRNG.new(0x5EE_CA5E_5EED);
 
     for (SEE_CASES) |case| {
-        set_up(pos, &moves, case.fen);
-        try expect_see_matches_reference(&prng, pos, moves.items);
+        const moves = set_up(pos, case.fen);
+        try expect_see_matches_reference(&prng, pos, moves.items());
 
         const move = types.Move.new_from_string(pos, case.move);
         try expect(move.to_u16() != 0);
@@ -452,8 +424,6 @@ test "make/unmake: castling in which king and rook swap squares" {
     defer support.destroy_position(pos);
     const fresh = try support.new_position();
     defer support.destroy_position(fresh);
-    var moves = try MoveList.initCapacity(std.testing.allocator, 256);
-    defer moves.deinit();
 
     const cases = [_]struct { fen: []const u8, king_to: types.Square, rook_to: types.Square }{
         .{ .fen = "4k3/8/8/8/8/8/8/5KR1 w G - 0 1", .king_to = .g1, .rook_to = .f1 },
@@ -461,10 +431,10 @@ test "make/unmake: castling in which king and rook swap squares" {
         .{ .fen = "5kr1/8/8/8/8/8/8/4K3 b g - 0 1", .king_to = .g8, .rook_to = .f8 },
     };
     for (cases) |case| {
-        set_up(pos, &moves, case.fen);
-        try expect_moves_round_trip(fresh, pos, moves.items);
+        const moves = set_up(pos, case.fen);
+        try expect_moves_round_trip(fresh, pos, moves.items());
 
-        const castle = for (moves.items) |move| {
+        const castle = for (moves.items()) |move| {
             if (move.is_castle()) break move;
         } else return error.TestExpectedCastlingMove;
         const mover = pos.turn;
@@ -473,8 +443,6 @@ test "make/unmake: castling in which king and rook swap squares" {
         try expectEqual(types.Piece.new(mover, .Rook), pos.mailbox[case.rook_to.index()]);
         try expectEqual(@as(usize, 3), @popCount(pos.occupancy[0] | pos.occupancy[1]));
 
-        moves.clearRetainingCapacity();
-        legal_moves(pos, &moves);
-        try expect_moves_round_trip(fresh, pos, moves.items);
+        try expect_moves_round_trip(fresh, pos, pos.legal_moves().items());
     }
 }

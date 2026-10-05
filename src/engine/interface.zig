@@ -274,14 +274,7 @@ fn run_search(searcher: *search.Searcher, pos: *position.Position, max_depth: ?u
 }
 
 fn legal_move_count(pos: *position.Position) usize {
-    var storage: [search.MAX_MOVES]types.Move = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-    var moves = std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len) catch unreachable;
-    switch (pos.turn) {
-        .White => pos.generate_legal_moves(.White, &moves),
-        .Black => pos.generate_legal_moves(.Black, &moves),
-    }
-    return moves.items.len;
+    return pos.legal_moves().len;
 }
 
 inline fn eql(a: []const u8, b: []const u8) bool {

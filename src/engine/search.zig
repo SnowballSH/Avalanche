@@ -83,7 +83,7 @@ inline fn reserve_next_iteration(
 }
 
 pub const MAX_PLY = 200;
-pub const MAX_MOVES = 256;
+pub const MAX_MOVES = types.MoveList.capacity;
 pub const MAX_MULTI_PV = MAX_MOVES;
 
 /// One MultiPV line at the root, best first after each iteration.
@@ -176,6 +176,26 @@ pub fn update_correction(entry: *i16, best_score: i32, static_eval: i32, depth: 
     const bonus = std.math.clamp(diff * @as(i32, @intCast(depth)), -CORRHIST_MAX_BONUS, CORRHIST_MAX_BONUS);
     const value: i32 = entry.*;
     entry.* = @intCast(value + bonus - @divTrunc(value * @as(i32, @intCast(@abs(bonus))), CORRHIST_LIMIT));
+}
+
+// The move `negamax` skips unsearched once late-move, history or futility pruning has triggered.
+pub inline fn is_prunable_quiet(move: types.Move, killers: [2]types.Move) bool {
+    return !move.is_capture() and !move.is_promotion() and
+        move.to_u16() != killers[0].to_u16() and move.to_u16() != killers[1].to_u16();
+}
+
+pub fn only_prunable_quiets(moves: []const types.Move, killers: [2]types.Move) bool {
+    for (moves) |move| {
+        if (!is_prunable_quiet(move, killers)) return false;
+    }
+    return true;
+}
+
+pub fn only_captures(moves: []const types.Move) bool {
+    for (moves) |move| {
+        if (!move.is_capture()) return false;
+    }
+    return true;
 }
 
 comptime {
@@ -552,12 +572,9 @@ pub const Searcher = struct {
     fn drawn_position_score(self: *Searcher, pos: *position.Position, comptime color: types.Color, in_check: bool) i32 {
         @branchHint(.cold);
         if (in_check) {
-            var move_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-            var fba = std.heap.FixedBufferAllocator.init(&move_bytes);
-            var moves = std.array_list.Managed(types.Move).initCapacity(fba.allocator(), 218) catch unreachable;
-            defer moves.deinit();
+            var moves: types.MoveList = .{};
             pos.generate_legal_moves(color, &moves);
-            if (moves.items.len == 0) {
+            if (moves.len == 0) {
                 return -hce.MateScore + @as(i32, @intCast(self.ply));
             }
         }
@@ -951,11 +968,9 @@ pub const Searcher = struct {
         pos.play_move(color, bm);
         defer pos.undo_move(color, bm);
         const entry = self.ttable.get(pos.hash) orelse return types.Move.empty();
-        var storage: [MAX_MOVES]types.Move = undefined;
-        var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&storage));
-        var replies = std.array_list.Managed(types.Move).initCapacity(fba.allocator(), storage.len) catch unreachable;
+        var replies: types.MoveList = .{};
         pos.generate_legal_moves(comptime color.invert(), &replies);
-        for (replies.items) |reply| {
+        for (replies.items()) |reply| {
             if (reply.to_u16() == entry.bestmove.to_u16()) return reply;
         }
         return types.Move.empty();
@@ -1000,10 +1015,9 @@ pub const Searcher = struct {
     // Root candidates: legal moves, narrowed to `searchmoves` and to the
     // tablebase-optimal set. Falls back to the wider set if a filter empties it.
     fn build_root_moves(self: *Searcher, pos: *position.Position, comptime color: types.Color) void {
-        var fba = std.heap.FixedBufferAllocator.init(std.mem.sliceAsBytes(&self.root_moves));
-        var legal = std.array_list.Managed(types.Move).initCapacity(fba.allocator(), MAX_MOVES) catch unreachable;
+        var legal: types.MoveList = .{};
         pos.generate_legal_moves(color, &legal);
-        const legal_count = legal.items.len;
+        const legal_count = legal.len;
 
         if (self.search_move_count > 0) {
             keep_moves(&legal, self.search_moves[0..self.search_move_count]);
@@ -1011,19 +1025,21 @@ pub const Searcher = struct {
         if (self.syzygy_root_active) {
             self.filter_tb_optimal(&legal);
         }
-        self.root_move_count = legal.items.len;
+        @memcpy(self.root_moves[0..legal.len], legal.items());
+        self.root_move_count = legal.len;
         self.root_restricted = self.root_move_count < legal_count;
     }
 
-    fn keep_moves(list: *std.array_list.Managed(types.Move), allowed: []const types.Move) void {
+    fn keep_moves(list: *types.MoveList, allowed: []const types.Move) void {
+        const moves = list.mutable_items();
         var kept: usize = 0;
-        for (list.items) |m| {
+        for (moves) |m| {
             if (contains_move(allowed, m)) {
-                list.items[kept] = m;
+                moves[kept] = m;
                 kept += 1;
             }
         }
-        if (kept > 0) list.shrinkRetainingCapacity(kept);
+        if (kept > 0) list.truncate(kept);
     }
 
     inline fn contains_move(moves: []const types.Move, move: types.Move) bool {
@@ -1038,15 +1054,16 @@ pub const Searcher = struct {
     }
 
     // Narrows a root move list to the root candidates minus lines already reported.
-    fn filter_root_moves(self: *Searcher, list: *std.array_list.Managed(types.Move)) void {
+    fn filter_root_moves(self: *Searcher, list: *types.MoveList) void {
+        const moves = list.mutable_items();
         var kept: usize = 0;
-        for (list.items) |m| {
+        for (moves) |m| {
             if (self.root_restricted and !contains_move(self.root_moves[0..self.root_move_count], m)) continue;
             if (self.is_root_excluded(m)) continue;
-            list.items[kept] = m;
+            moves[kept] = m;
             kept += 1;
         }
-        list.shrinkRetainingCapacity(kept);
+        list.truncate(kept);
     }
 
     pub fn is_draw(self: *Searcher, pos: *position.Position, threefold: bool) bool {
@@ -1092,15 +1109,16 @@ pub const Searcher = struct {
         return n;
     }
 
-    fn filter_tb_optimal(self: *Searcher, list: *std.array_list.Managed(types.Move)) void {
+    fn filter_tb_optimal(self: *Searcher, list: *types.MoveList) void {
+        const moves = list.mutable_items();
         var kept: usize = 0;
-        for (list.items) |m| {
+        for (moves) |m| {
             if (self.root_move_is_tb_optimal(m)) {
-                list.items[kept] = m;
+                moves[kept] = m;
                 kept += 1;
             }
         }
-        if (kept > 0) list.shrinkRetainingCapacity(kept);
+        if (kept > 0) list.truncate(kept);
     }
 
     fn root_move_is_tb_optimal(self: *Searcher, m: types.Move) bool {
@@ -1461,13 +1479,10 @@ pub const Searcher = struct {
                     tt_eval < probcut_beta))
                 {
                     // Generate captures only
-                    var pc_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-                    var pc_fba = std.heap.FixedBufferAllocator.init(&pc_bytes);
-                    var pc_movelist = std.array_list.Managed(types.Move).initCapacity(pc_fba.allocator(), 218) catch unreachable;
-                    defer pc_movelist.deinit();
+                    var pc_movelist: types.MoveList = .{};
                     pos.generate_q_moves(color, &pc_movelist);
 
-                    for (pc_movelist.items) |move| {
+                    for (pc_movelist.items()) |move| {
                         // SEE filter: only try captures that could plausibly gain enough
                         if (!see.see_threshold(pos, move, probcut_beta - static_eval)) {
                             continue;
@@ -1525,30 +1540,19 @@ pub const Searcher = struct {
         // >> Step 5: Search
 
         // Step 5.1: Move Generation
-        var ml_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-        var ml_fba = std.heap.FixedBufferAllocator.init(&ml_bytes);
-        var movelist = std.array_list.Managed(types.Move).initCapacity(ml_fba.allocator(), 218) catch unreachable;
-        defer movelist.deinit();
+        var movelist: types.MoveList = .{};
         pos.generate_legal_moves(color, &movelist);
         if (is_root and (self.root_restricted or self.root_excluded_count > 0)) {
             self.filter_root_moves(&movelist);
         }
-        const move_size = movelist.items.len;
 
-        var quiet_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-        var quiet_fba = std.heap.FixedBufferAllocator.init(&quiet_bytes);
-        var quiet_moves = std.array_list.Managed(types.Move).initCapacity(quiet_fba.allocator(), 218) catch unreachable;
-        defer quiet_moves.deinit();
-
-        var capture_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-        var capture_fba = std.heap.FixedBufferAllocator.init(&capture_bytes);
-        var capture_moves = std.array_list.Managed(types.Move).initCapacity(capture_fba.allocator(), 218) catch unreachable;
-        defer capture_moves.deinit();
+        var quiet_moves: types.MoveList = .{};
+        var capture_moves: types.MoveList = .{};
 
         self.killer[self.ply + 1][0] = types.Move.empty();
         self.killer[self.ply + 1][1] = types.Move.empty();
 
-        if (move_size == 0) {
+        if (movelist.len == 0) {
             if (in_check) {
                 // Checkmate
                 return -hce.MateScore + @as(i32, @intCast(self.ply));
@@ -1559,10 +1563,8 @@ pub const Searcher = struct {
         }
 
         // Step 5.2: Move Ordering
-        var score_bytes: [256 * @sizeOf(i32)]u8 = undefined;
-        var score_fba = std.heap.FixedBufferAllocator.init(&score_bytes);
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, is_null, score_fba.allocator());
-        defer evallist.deinit();
+        var picker: movepick.MovePicker(is_null) = undefined;
+        picker.init(.at(self, pos, hashmove), &movelist);
 
         // Step 5.3: Move Iteration
         var best_move = types.Move.empty();
@@ -1573,23 +1575,27 @@ pub const Searcher = struct {
         var quiet_count: usize = 0;
         var legals: usize = 0;
 
-        var index: usize = 0;
-        while (index < move_size) : (index += 1) {
-            var move = movepick.getNextBest(&movelist, &evallist, index);
+        while (picker.next()) |move| {
+            const index = picker.index();
             if (move.to_u16() == self.exclude_move[self.ply].to_u16()) {
                 continue;
             }
 
+            const killers = self.killer[self.ply];
             const is_capture = move.is_capture();
-            const is_killer = move.to_u16() == self.killer[self.ply][0].to_u16() or move.to_u16() == self.killer[self.ply][1].to_u16();
+            const is_killer = move.to_u16() == killers[0].to_u16() or move.to_u16() == killers[1].to_u16();
 
             if (!is_capture) {
                 quiet_count += 1;
             }
 
             const is_important = is_killer or move.is_promotion();
+            const prunable_quiet = is_prunable_quiet(move, killers);
 
-            if (skip_quiet and !is_capture and !is_important) {
+            if (skip_quiet and prunable_quiet) {
+                if (only_prunable_quiets(picker.unpicked(), killers)) {
+                    break;
+                }
                 continue;
             }
 
@@ -1607,7 +1613,7 @@ pub const Searcher = struct {
                     }
                 }
 
-                if (!is_important and !is_capture and depth <= parameters.LMPDepth) {
+                if (prunable_quiet and depth <= parameters.LMPDepth) {
                     // Step 5.4a: Late Move Pruning
                     var late = parameters.LMPBase + parameters.LMPMultiplier * depth * depth / 100;
                     if (improving) {
@@ -1627,7 +1633,7 @@ pub const Searcher = struct {
                 }
 
                 // Step 5.4b: Futility Pruning
-                if (!is_important and !is_capture and depth <= parameters.FPDepth and
+                if (prunable_quiet and depth <= parameters.FPDepth and
                     @as(i32, @intCast(@abs(alpha))) < hce.MateScore - hce.MaxMate and
                     static_eval + parameters.FPBase + parameters.FPMargin * lmr_depth <= alpha)
                 {
@@ -1690,6 +1696,8 @@ pub const Searcher = struct {
 
             self.ttable.prefetch(pos.prefetch_key_after(move));
 
+            const is_winning_capture = is_capture and picker.current_is_winning_capture();
+
             self.move_history[self.ply] = move;
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
@@ -1698,7 +1706,6 @@ pub const Searcher = struct {
 
             var score: i32 = 0;
             const min_lmr_move: usize = if (on_pv) parameters.LMRMinMovePV else parameters.LMRMinMoveNonPV;
-            const is_winning_capture = is_capture and evallist.items[index] >= movepick.SortWinningCaptureFloor;
             if (on_pv and legals == 1) {
                 score = -self.negamax(pos, opp_color, mode, new_depth, -beta, -alpha, false, NodeType.PV, false);
             } else {
@@ -1762,9 +1769,9 @@ pub const Searcher = struct {
             _ = self.hash_history.pop();
 
             if (is_capture) {
-                capture_moves.append(move) catch unreachable;
+                capture_moves.append(move);
             } else {
-                quiet_moves.append(move) catch unreachable;
+                quiet_moves.append(move);
             }
 
             if (is_root and self.thread_id == 0) {
@@ -1803,7 +1810,7 @@ pub const Searcher = struct {
         const adj: i32 = @max(@as(i32, 0), @min(parameters.HistoryBonusMax, @as(i32, @intCast(if (static_eval <= alpha) depth + 1 else depth)) * parameters.HistoryBonusMultiplier - parameters.HistoryBonusOffset));
 
         if (alpha >= beta) {
-            for (capture_moves.items) |m| {
+            for (capture_moves.items()) |m| {
                 const slot = self.capture_history_entry(pos, m);
                 const bonus = if (m.to_u16() == best_move.to_u16()) adj else -adj;
                 slot.* += @intCast(bonus - @divTrunc(@as(i32, slot.*) * adj, parameters.HistoryGravityMax));
@@ -1824,7 +1831,7 @@ pub const Searcher = struct {
 
             const b = best_move.to_u16();
             const max_history: i32 = parameters.HistoryGravityMax;
-            for (quiet_moves.items) |m| {
+            for (quiet_moves.items()) |m| {
                 const is_best = m.to_u16() == b;
                 const hist = self.history[@backingInt(color)][m.from][m.to] * adj;
                 if (is_best) {
@@ -1931,26 +1938,19 @@ pub const Searcher = struct {
 
         self.record_node();
 
-        var qml_bytes: [256 * @sizeOf(types.Move)]u8 = undefined;
-        var qml_fba = std.heap.FixedBufferAllocator.init(&qml_bytes);
-        var movelist = std.array_list.Managed(types.Move).init(qml_fba.allocator());
-        defer movelist.deinit();
+        var movelist: types.MoveList = .{};
         if (CONTEMPT != 0) {
-            movelist.ensureTotalCapacityPrecise(218) catch unreachable;
             if (in_check) {
                 pos.generate_legal_moves(color, &movelist);
-                if (movelist.items.len == 0) {
+                if (movelist.len == 0) {
                     return -hce.MateScore + @as(i32, @intCast(self.ply));
                 }
             } else {
                 pos.generate_q_moves(color, &movelist);
-                if (movelist.items.len == 0) {
-                    var legal_storage: [1]types.Move = undefined;
-                    var legal_fba = std.heap.FixedBufferAllocator.init(std.mem.asBytes(&legal_storage));
-                    var legal = std.array_list.Managed(types.Move).initCapacity(legal_fba.allocator(), 1) catch unreachable;
-                    defer legal.deinit();
+                if (movelist.len == 0) {
+                    var legal: types.MoveList = .{};
                     pos.generate_legal_moves(color, &legal);
-                    if (legal.items.len == 0) {
+                    if (legal.len == 0) {
                         return self.contempt_score();
                     }
                 }
@@ -2001,34 +2001,29 @@ pub const Searcher = struct {
 
         // Step 4.1: Q Move Generation
         if (CONTEMPT == 0) {
-            movelist.ensureTotalCapacityPrecise(218) catch unreachable;
             if (in_check) {
                 pos.generate_legal_moves(color, &movelist);
-                if (movelist.items.len == 0) {
+                if (movelist.len == 0) {
                     return -hce.MateScore + @as(i32, @intCast(self.ply));
                 }
             } else {
                 pos.generate_q_moves(color, &movelist);
             }
         }
-        const move_size = movelist.items.len;
 
         // Step 4.2: Q Move Ordering
-        var qscore_bytes: [256 * @sizeOf(i32)]u8 = undefined;
-        var qscore_fba = std.heap.FixedBufferAllocator.init(&qscore_bytes);
-        var evallist = movepick.scoreMoves(self, pos, &movelist, hashmove, false, qscore_fba.allocator());
-        defer evallist.deinit();
+        var picker: movepick.MovePicker(false) = undefined;
+        picker.init(.at(self, pos, hashmove), &movelist);
 
         // Step 4.3: Q Move Iteration
-        var index: usize = 0;
-
-        while (index < move_size) : (index += 1) {
-            var move = movepick.getNextBest(&movelist, &evallist, index);
+        while (picker.next()) |move| {
             const is_capture = move.is_capture();
 
-            if (!in_check and is_capture and index > 0) {
-                const see_score = evallist.items[index];
-                if (see_score < movepick.SortWinningCaptureFloor) {
+            if (!in_check and is_capture and picker.index() > 0) {
+                if (!picker.current_is_winning_capture()) {
+                    if (only_captures(picker.unpicked())) {
+                        break;
+                    }
                     continue;
                 }
                 if (!see.see_threshold(pos, move, -parameters.QSSEEMargin)) {
