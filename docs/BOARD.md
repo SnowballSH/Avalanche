@@ -94,7 +94,10 @@ capture line, a pin that appears during the exchange, en passant and king recapt
   move. A full history refuses the append. The search pairs each append with a pop, and a
   refused append would make the pop take a key of the game, so there the refusal is
   `unreachable`, and a compile-time check in `search.zig` holds `HISTORY_CAPACITY` to the longest
-  game plus `MAX_PLY`.
+  game plus `MAX_PLY`. It is `unreachable` as well where a history starts over: the `position`
+  command (which stops reading moves at `MAX_HISTORY_PLY`), `bench`, a new datagen game and a
+  helper adopting the root all append to a history they have just cleared. Only datagen's random
+  opening ignores a refusal, because its length is an option that nothing bounds.
 - The repetition scan compares the keys two, four, ... plies back, as far as `fifty + 3`. It is
   not narrowed to `4 ..= fifty`, although no real game repeats outside that window: a null move
   adds to the fifty-move counter without adding a key, so a key two entries back can be a real

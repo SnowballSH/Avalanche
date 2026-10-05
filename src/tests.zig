@@ -812,13 +812,13 @@ test "eval: determinism same position twice" {
     defer support.destroy_position(pos);
 
     pos.set_fen("r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq -"[0..]);
-    const a = support.network_output(pos);
-    const b = support.network_output(pos);
-    try expect(a == b);
+    const recomputed = support.network_output(pos);
+    try expect(recomputed == support.network_output(pos));
 
-    const c = hce.evaluate_nnue_comptime(pos, types.Color.White);
-    const d = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
-    try expect(c == d);
+    const stored = hce.evaluate_nnue_comptime(pos, types.Color.White);
+    const cached = hce.evaluate_nnue_comptime(pos, types.Color.White);
+    try expect(stored == cached);
+    try expect(cached == pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos));
 }
 
 test "eval: nnue incremental equals fresh refresh (startpos)" {
@@ -1193,6 +1193,22 @@ test "search: stalemate scores as draw" {
     try expect(score == 0);
 }
 
+const SearchOutcome = struct { score: i32, nodes: u64 };
+
+/// A new searcher and a cleared transposition table; the evaluation cache of `pos` is kept.
+fn search_start_position(pos: *position.Position) SearchOutcome {
+    pos.set_fen(types.DEFAULT_FEN[0..]);
+    tt.GlobalTT.clear();
+    var searcher = search.Searcher.new();
+    defer searcher.deinit();
+    searcher.force_thinking = true;
+    searcher.silent_output = true;
+    searcher.shared.stop = false;
+    searcher.reset_heuristics(true);
+    const score = searcher.iterative_deepening(pos, types.Color.White, 7);
+    return .{ .score = score, .nodes = searcher.shared.nodes };
+}
+
 test "search: deterministic node counts and score" {
     var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
     defer io_threaded.deinit();
@@ -1207,34 +1223,16 @@ test "search: deterministic node counts and score" {
 
     const pos = try support.new_position();
     defer support.destroy_position(pos);
+    const other = try support.new_position();
+    defer support.destroy_position(other);
 
-    // Run 1
-    pos.set_fen(types.DEFAULT_FEN[0..]);
-    tt.GlobalTT.clear();
-    var s1 = search.Searcher.new();
-    defer s1.deinit();
-    s1.force_thinking = true;
-    s1.silent_output = true;
-    s1.shared.stop = false;
-    s1.reset_heuristics(true);
-    const score1 = s1.iterative_deepening(pos, types.Color.White, 7);
-    const nodes1 = s1.shared.nodes;
+    const cold = search_start_position(pos);
+    const cold_again = search_start_position(other);
+    const warm = search_start_position(pos);
 
-    // Run 2: fresh searcher, cleared TT + heuristics, identical starting position
-    pos.set_fen(types.DEFAULT_FEN[0..]);
-    tt.GlobalTT.clear();
-    var s2 = search.Searcher.new();
-    defer s2.deinit();
-    s2.force_thinking = true;
-    s2.silent_output = true;
-    s2.shared.stop = false;
-    s2.reset_heuristics(true);
-    const score2 = s2.iterative_deepening(pos, types.Color.White, 7);
-    const nodes2 = s2.shared.nodes;
-
-    try expect(score1 == score2);
-    try expect(nodes1 == nodes2);
-    try expect(nodes1 > 0);
+    try expect(cold.nodes > 0);
+    try std.testing.expectEqual(cold, cold_again);
+    try std.testing.expectEqual(cold, warm);
 }
 
 test "zobrist: castling rights are part of the position key" {

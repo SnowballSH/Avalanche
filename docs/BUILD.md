@@ -170,8 +170,9 @@ every other binary the script prints why it did not run (`not run: host CPU lack
 it ends with the list of what ran and what was only inspected. `REQUIRE_RUN=1` makes a binary
 that could not run a failure.
 
-In CI, the job `tiers` runs the script on every pull request, with `-Dversion=ci` so that
-unchanged sources are cache hits:
+In CI, the job `build` puts its native binary through `scripts/verify_binary.sh` on Linux, macOS
+and Windows, and the job `tiers` runs the release script on every pull request, with
+`-Dversion=ci` so that unchanged sources are cache hits:
 
 | Runner | Built per pull request | Run there |
 |---|---|---|

@@ -24,13 +24,14 @@ Lowering `Threads` shuts down surplus workers and frees their tables.
 A helper takes over the root once per search, not per job: the main thread
 copies the game state (`Position.copy_game_state`: the piece bitboards, the
 occupancy, the mailbox, the keys, the side to move, the ply counters, the
-castling setup and the current undo entry, 458 bytes in all), the game's hash
+castling setup, the Chess960 flag and the current undo entry, 458 bytes in
+all), the game's hash
 history and the root move list, and the helper rebuilds its accumulator on its
 own thread from its own Finny table before its first job.
 Every job unwinds back to the root, so an aspiration re-search costs each
 helper the excluded MultiPV moves, its stop flag and the job itself. Copying
 the whole `Position` instead cost 157 KB per helper per re-search (80 MB at
-512 threads) and replaced each helper's warm Finny table with the main
+512 threads; a `Position` is 244 KB today) and replaced each helper's warm Finny table with the main
 thread's. After a network is loaded (`EvalFile`), a helper drops its Finny
 table and its evaluation cache when it next rebuilds its root: both carry the
 generation of the network they were filled with.

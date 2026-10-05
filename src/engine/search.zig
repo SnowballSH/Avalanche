@@ -281,6 +281,9 @@ comptime {
     if (@sizeOf(CrossThreadState) > std.atomic.cache_line) {
         @compileError("CrossThreadState must fit one cache line");
     }
+    if (@offsetOf(Searcher, "shared") != 0) {
+        @compileError("Searcher.shared must be the searcher's first cache line");
+    }
 }
 
 pub const Searcher = struct {
