@@ -29,6 +29,7 @@ test {
     _ = @import("engine/uci/go.zig");
     _ = @import("tests/uci_options.zig");
     _ = @import("engine/numa.zig");
+    _ = @import("platform/large_memory.zig");
     _ = @import("tests/thread_pool.zig");
     _ = @import("tests/smp_root.zig");
     _ = @import("engine/datagen/options.zig");

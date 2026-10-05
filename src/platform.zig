@@ -11,6 +11,8 @@ pub var io: std.Io = undefined;
 
 pub const allocator: std.mem.Allocator = if (is_wasm) std.heap.wasm_allocator else std.heap.c_allocator;
 
+pub const large_memory = @import("platform/large_memory.zig");
+
 const host = if (is_wasm) struct {
     extern "env" fn avalanche_write(ptr: [*]const u8, len: usize) void;
     extern "env" fn avalanche_now_ms() f64;

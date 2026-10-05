@@ -1,13 +1,11 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
-const builtin = @import("builtin");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
 const hce = @import("hce.zig");
 
 pub const MB: usize = 1 << 20;
-pub const KB: usize = 1 << 10;
 pub const MAX_HASH_MB: usize = 1048576;
 
 pub const Bound = enum(u2) {
@@ -38,97 +36,23 @@ comptime {
     }
 }
 
-const tt_allocator = platform.allocator;
+const large_memory = platform.large_memory;
 
-fn parallelMemset(data: []i128, num_threads: usize) void {
-    const len = data.len;
-    if (len == 0) return;
-    if (comptime !platform.has_threads) return @memset(data, 0);
-
-    const MIN_ENTRIES_PER_THREAD = 1024 * 1024 / @sizeOf(i128);
-    const max_useful_threads = @max(1, len / MIN_ENTRIES_PER_THREAD);
-    const threads_to_use = @max(1, @min(num_threads, @min(max_useful_threads, search.MAX_THREADS)));
-    if (threads_to_use <= 1) {
-        @memset(data, 0);
-        return;
-    }
-
-    const chunk_size = len / threads_to_use;
-    var thread_handles: [search.MAX_THREADS]?std.Thread = undefined;
-
-    for (0..threads_to_use) |i| {
-        const start = i * chunk_size;
-        const end = if (i == threads_to_use - 1) len else (i + 1) * chunk_size;
-        thread_handles[i] = std.Thread.spawn(.{ .stack_size = 2 * 1024 * 1024 }, memsetWorker, .{data[start..end]}) catch null;
-        if (thread_handles[i] == null) {
-            @memset(data[start..end], 0);
-        }
-    }
-
-    for (0..threads_to_use) |i| {
-        if (thread_handles[i]) |t| {
-            t.join();
-        }
-    }
-}
-
-fn memsetWorker(slice: []i128) void {
-    @memset(slice, 0);
-}
-
-fn memsetThreadCount() usize {
+fn first_touch_threads() usize {
     if (comptime !platform.has_threads) return 1;
     if (search.THREADS_CONFIGURED) return search.NUM_THREADS + 1;
     return std.Thread.getCpuCount() catch 1;
 }
 
-pub const TT_ALIGN: usize = if (builtin.target.os.tag == .linux) 2 * MB else std.atomic.cache_line;
+pub const TT_ALIGN: usize = large_memory.ALIGNMENT;
 
 // `&.{}` would carry @alignOf(i128), contradicting the declared alignment.
 var empty_table: [0]i128 align(TT_ALIGN) = .{};
-
-fn adviseHugePages(data: []align(TT_ALIGN) i128) bool {
-    if (builtin.target.os.tag != .linux) return false;
-    const MADV_HUGEPAGE = 14;
-    const ptr: [*]align(TT_ALIGN) u8 = @ptrCast(data.ptr);
-    std.posix.madvise(ptr, data.len * @sizeOf(i128), MADV_HUGEPAGE) catch return false;
-    return true;
-}
-
-fn hugePageBytes(addr: usize) u64 {
-    if (builtin.target.os.tag != .linux) return 0;
-    const file = std.Io.Dir.cwd().openFile(platform.io, "/proc/self/smaps", .{}) catch return 0;
-    defer file.close(platform.io);
-
-    var buf: [1 << 15]u8 = undefined;
-    var stream = file.readerStreaming(platform.io, &buf);
-    const reader = &stream.interface;
-    var in_range = false;
-    while (reader.takeDelimiterInclusive('\n') catch null) |line| {
-        if (std.mem.indexOfScalar(u8, line, '-')) |dash| {
-            if (std.mem.indexOfScalar(u8, line, ' ')) |space| {
-                if (dash < space) {
-                    const start = std.fmt.parseInt(usize, line[0..dash], 16) catch continue;
-                    const end = std.fmt.parseInt(usize, line[dash + 1 .. space], 16) catch continue;
-                    in_range = addr >= start and addr < end;
-                    continue;
-                }
-            }
-        }
-        if (in_range and std.mem.startsWith(u8, line, "AnonHugePages:")) {
-            var it = std.mem.tokenizeAny(u8, line["AnonHugePages:".len..], " \tkB\r\n");
-            const kb = it.next() orelse return 0;
-            return (std.fmt.parseInt(u64, kb, 10) catch 0) * KB;
-        }
-    }
-    return 0;
-}
 
 pub const TranspositionTable = struct {
     data: []align(TT_ALIGN) i128,
     size: usize,
     age: u5,
-    huge_page_bytes: u64 = 0,
 
     pub fn new() TranspositionTable {
         return TranspositionTable{
@@ -139,9 +63,7 @@ pub const TranspositionTable = struct {
     }
 
     pub fn deinit(self: *TranspositionTable) void {
-        if (self.data.len != 0) {
-            tt_allocator.free(self.data);
-        }
+        large_memory.free(self.data);
         self.data = &empty_table;
         self.size = 0;
     }
@@ -153,22 +75,20 @@ pub const TranspositionTable = struct {
         }
         const requested_size: usize = @intCast(@max(1, @min(bytes / @sizeOf(Item), std.math.maxInt(usize))));
 
-        const new_data = tt_allocator.alignedAlloc(i128, .fromByteUnits(TT_ALIGN), requested_size) catch return;
-        _ = adviseHugePages(new_data);
-
-        const num_threads = memsetThreadCount();
-        parallelMemset(new_data, num_threads);
+        const new_data = large_memory.alloc_populated(i128, requested_size, "hash", first_touch_threads()) catch return;
 
         self.deinit();
         self.data = new_data;
         self.size = new_data.len;
-        self.huge_page_bytes = hugePageBytes(@intFromPtr(new_data.ptr));
     }
 
-    pub inline fn clear(self: *TranspositionTable) void {
-        if (self.size == 0) return;
-        const num_threads = memsetThreadCount();
-        parallelMemset(self.data, num_threads);
+    pub fn clear(self: *TranspositionTable) void {
+        large_memory.zero(std.mem.sliceAsBytes(self.data), first_touch_threads());
+    }
+
+    /// How much of the table the OS backs with huge pages right now.
+    pub fn huge_page_bytes(self: *const TranspositionTable) u64 {
+        return large_memory.huge_page_bytes(std.mem.sliceAsBytes(self.data));
     }
 
     pub inline fn do_age(self: *TranspositionTable) void {
