@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const build_options = @import("build_options");
 const platform = @import("../platform.zig");
 
@@ -107,14 +106,25 @@ pub const head = switch (HEAD) {
 
 pub const NNUEWeights = Network(HEAD);
 
-const MODEL_ALIGN = if (builtin.target.os.tag == .linux) 2 * 1024 * 1024 else std.atomic.cache_line;
-var model_storage: NNUEWeights align(MODEL_ALIGN) = undefined;
-
 // Read in place on wasm to avoid a second 25 MB copy in linear memory. It must
 // be a var: through a const, every MODEL access would be folded at comptime.
 var embedded_model: [@sizeOf(NNUEWeights)]u8 align(@alignOf(NNUEWeights)) = NNUE_SOURCE[0..@sizeOf(NNUEWeights)].*;
 
-pub const MODEL: *const NNUEWeights = if (platform.is_wasm) @ptrCast(&embedded_model) else &model_storage;
+/// The network in use. Natively `do_nnue` points it at a copy in large memory
+/// (docs/MEMORY.md), which `install` overwrites.
+pub var MODEL: *const NNUEWeights = if (platform.is_wasm) @ptrCast(&embedded_model) else undefined;
+
+var model_storage: ?*NNUEWeights = null;
+
+/// Where a native build keeps the network: allocated on first use, never freed.
+fn storage() *NNUEWeights {
+    return model_storage orelse {
+        const block = platform.large_memory.create(NNUEWeights, "network") catch @panic("out of memory for the network");
+        model_storage = block;
+        MODEL = block;
+        return block;
+    };
+}
 
 /// What the head derives from `MODEL`; `prepare` keeps it in step.
 pub var prepared: switch (HEAD) {
@@ -129,14 +139,6 @@ pub var generation: u32 = 0;
 fn prepare() void {
     generation +%= 1;
     if (HEAD == .multi) prepared = .init(&MODEL.head, l1_shift(&MODEL.header));
-}
-
-fn adviseHugePages() void {
-    if (builtin.target.os.tag != .linux) return;
-    const MADV_HUGEPAGE = 14;
-    const bytes = std.mem.asBytes(&model_storage);
-    const ptr: [*]align(2 * 1024 * 1024) u8 = @alignCast(bytes.ptr);
-    std.posix.madvise(ptr, bytes.len, MADV_HUGEPAGE) catch {};
 }
 
 pub const EMBEDDED_NAME = "<embedded>";
@@ -224,11 +226,10 @@ comptime {
 }
 
 pub fn do_nnue() void {
-    adviseHugePages();
-    // Copy straight into the global. Do NOT assign through a by-value temporary.
+    // Copy straight into the storage. Do NOT assign through a by-value temporary.
     // A 25 MB MODEL on the stack may cause overflow.
     if (!platform.is_wasm) {
-        @memcpy(std.mem.asBytes(&model_storage), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
+        @memcpy(std.mem.asBytes(storage()), NNUE_SOURCE[0..@sizeOf(NNUEWeights)]);
     }
     // Validate the network in use rather than NNUE_SOURCE: on wasm, referencing
     // the embedded bytes at runtime would emit a second 25 MB copy of them.
@@ -254,7 +255,7 @@ pub fn read_file(path: []const u8) ![]u8 {
 /// setting it up again). Not for wasm, which reads the embedded network in place.
 pub fn install(bytes: []const u8) NetworkError!void {
     try validate(bytes);
-    @memcpy(std.mem.asBytes(&model_storage), bytes);
+    @memcpy(std.mem.asBytes(storage()), bytes);
     prepare();
 }
 
