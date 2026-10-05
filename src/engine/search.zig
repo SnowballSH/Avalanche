@@ -83,7 +83,6 @@ inline fn reserve_next_iteration(
 }
 
 pub const MAX_PLY = 200;
-const KEY_HISTORY_CAPACITY = @typeInfo(@FieldType(position.Position, "history")).array.len + 1;
 pub const MAX_MOVES = 256;
 pub const MAX_MULTI_PV = MAX_MOVES;
 
@@ -186,8 +185,8 @@ comptime {
     if (MAX_PLY + 2 > nnue.STACK_CAP) {
         @compileError("nnue.STACK_CAP must exceed MAX_PLY: a search that rebased the accumulator stack would pop into the wrong frame");
     }
-    if (MAX_PLY > 256) {
-        @compileError("MAX_PLY must be <= 256: position.Position.history has exactly 256 entries of slack above MAX_HISTORY_PLY (src/chess/position.zig:9,62) for search play_move calls, and position.zig cannot import search.zig to enforce this locally");
+    if (position.MAX_HISTORY_PLY + 1 + MAX_PLY > position.HISTORY_CAPACITY) {
+        @compileError("position.HISTORY_CAPACITY must cover the starting position, position.MAX_HISTORY_PLY game moves and MAX_PLY search plies: Position.history has one entry per position and Searcher.hash_history at most one key per entry, and position.zig cannot import search.zig to enforce this locally");
     }
 }
 
@@ -329,7 +328,7 @@ pub const Searcher = struct {
             .continuation = platform.allocator.create([12][64][64][64]i16) catch unreachable,
             .root_board = board,
         };
-        self.hash_history = KeyHistory.init(platform.allocator, KEY_HISTORY_CAPACITY) catch unreachable;
+        self.hash_history = KeyHistory.init(platform.allocator, position.HISTORY_CAPACITY) catch unreachable;
         self.reset_heuristics(true);
     }
 
@@ -1475,7 +1474,7 @@ pub const Searcher = struct {
                         self.moved_piece_history[self.ply] = pos.mailbox[move.from];
                         self.ply += 1;
                         pos.play_move(color, move);
-                        self.hash_history.append(pos.hash) catch {};
+                        self.hash_history.append(pos.hash) catch unreachable;
                         self.ttable.prefetch(pos.hash);
 
                         // Quick qsearch verification
@@ -1692,7 +1691,7 @@ pub const Searcher = struct {
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
-            self.hash_history.append(pos.hash) catch {};
+            self.hash_history.append(pos.hash) catch unreachable;
 
             var score: i32 = 0;
             const min_lmr_move: usize = if (on_pv) parameters.LMRMinMovePV else parameters.LMRMinMoveNonPV;
@@ -2040,7 +2039,7 @@ pub const Searcher = struct {
             self.moved_piece_history[self.ply] = pos.mailbox[move.from];
             self.ply += 1;
             pos.play_move(color, move);
-            self.hash_history.append(pos.hash) catch {};
+            self.hash_history.append(pos.hash) catch unreachable;
             const score = -self.quiescence_search(pos, opp_color, mode, -beta, -alpha);
             self.ply -= 1;
             pos.undo_move(color, move);
