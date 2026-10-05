@@ -40,6 +40,8 @@ test {
     _ = @import("engine/netscale.zig");
     _ = @import("tests/netscale.zig");
     _ = @import("tests/nnue_multi.zig");
+    _ = @import("tests/nnue_lazy.zig");
+    _ = @import("engine/nnue/eval_cache.zig");
 }
 
 test "Basic Piece and Color" {
@@ -756,7 +758,7 @@ test "eval: nnue weights load and dimensions" {
 }
 
 fn evaluate_nnue_scalar(pos: *position.Position, comptime turn: types.Color) i32 {
-    const accumulator = pos.evaluator.nnue_evaluator.current();
+    const accumulator = pos.evaluator.nnue_evaluator.accumulator(pos);
     const pieces = types.popcount_usize(pos.all_all_pieces());
     const bucket = @min((pieces -| 2) / 4, weights.OUTPUT_SIZE - 1);
     const own = if (turn == types.Color.White) &accumulator.white else &accumulator.black;
@@ -842,11 +844,11 @@ test "eval: nnue incremental equals fresh refresh (startpos)" {
     pos.set_fen(types.DEFAULT_FEN[0..]);
 
     // set_fen forced a full_refresh; this is the reference value.
-    const fresh0 = hce.evaluate_nnue_comptime(pos, types.Color.White);
+    const fresh0 = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
 
     // Force another full refresh from the same board: must be identical.
     pos.evaluator.full_refresh(pos);
-    const fresh1 = hce.evaluate_nnue_comptime(pos, types.Color.White);
+    const fresh1 = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
     try expect(fresh0 == fresh1);
 }
 
@@ -870,14 +872,14 @@ test "eval: nnue incremental equals fresh refresh after moves" {
     pos.play_move(types.Color.Black, m4);
 
     // Incremental accumulator value (built via play_move toggles).
-    const incremental_w = hce.evaluate_nnue_comptime(pos, types.Color.White);
-    const incremental_b = hce.evaluate_nnue_comptime(pos, types.Color.Black);
+    const incremental_w = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
+    const incremental_b = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.Black, pos);
 
     // Rebuild the accumulator from scratch off the current mailbox; the
     // incrementally-updated SIMD accumulator must match a fresh refresh.
     pos.evaluator.full_refresh(pos);
-    const fresh_w = hce.evaluate_nnue_comptime(pos, types.Color.White);
-    const fresh_b = hce.evaluate_nnue_comptime(pos, types.Color.Black);
+    const fresh_w = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
+    const fresh_b = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.Black, pos);
 
     try expect(incremental_w == fresh_w);
     try expect(incremental_b == fresh_b);
@@ -897,8 +899,8 @@ fn expect_nnue_matches_fresh(pos: *position.Position) !void {
     reference.turn = pos.turn;
     reference.evaluator.full_refresh(reference);
 
-    const actual = pos.evaluator.nnue_evaluator.current();
-    const expected = reference.evaluator.nnue_evaluator.current();
+    const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
+    const expected = reference.evaluator.nnue_evaluator.accumulator(reference);
     try std.testing.expectEqualSlices(i16, expected.white[0..], actual.white[0..]);
     try std.testing.expectEqualSlices(i16, expected.black[0..], actual.black[0..]);
 }
@@ -1052,9 +1054,9 @@ test "eval: nnue incremental equals fresh after a capture" {
     const m3 = types.Move.new_from_string(pos, "e4d5"[0..]); // capture
     pos.play_move(types.Color.White, m3);
 
-    const incremental = hce.evaluate_nnue_comptime(pos, types.Color.Black);
+    const incremental = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.Black, pos);
     pos.evaluator.full_refresh(pos);
-    const fresh = hce.evaluate_nnue_comptime(pos, types.Color.Black);
+    const fresh = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.Black, pos);
     try expect(incremental == fresh);
 }
 

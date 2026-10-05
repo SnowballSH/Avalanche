@@ -17,9 +17,9 @@ fn play(pos: *position.Position, text: []const u8) !void {
     }
 }
 
-fn expect_same_evaluation(a: *const position.Position, b: *const position.Position) !void {
-    const acc_a = a.evaluator.nnue_evaluator.current();
-    const acc_b = b.evaluator.nnue_evaluator.current();
+fn expect_same_evaluation(a: *position.Position, b: *position.Position) !void {
+    const acc_a = a.evaluator.nnue_evaluator.accumulator(a);
+    const acc_b = b.evaluator.nnue_evaluator.accumulator(b);
     try expect(std.mem.eql(i16, &acc_a.white, &acc_b.white));
     try expect(std.mem.eql(i16, &acc_a.black, &acc_b.black));
     try expectEqual(a.evaluator.nnue_evaluator.evaluate(a.turn, a), b.evaluator.nnue_evaluator.evaluate(b.turn, b));

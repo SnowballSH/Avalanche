@@ -4,15 +4,8 @@ const builtin = @import("builtin");
 pub const weights = @import("weights.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
-
-const FeaturePair = struct {
-    white: usize,
-    black: usize,
-
-    inline fn row(self: FeaturePair, comptime color: types.Color) usize {
-        return if (color == types.Color.White) self.white else self.black;
-    }
-};
+const zobrist = @import("../chess/zobrist.zig");
+const EvalCache = @import("nnue/eval_cache.zig").EvalCache;
 
 const HALF_BUCKET_LAYOUT: [32]usize = .{
     0,  1,  2,  3,
@@ -42,9 +35,17 @@ inline fn king_square(pos: *const position.Position, color: types.Color) types.S
     return @as(types.Square, @fromBackingInt(@intCast(index)));
 }
 
+inline fn pov_square(sq: types.Square, comptime perspective: types.Color) usize {
+    return if (perspective == types.Color.White) sq.index() else sq.index() ^ 56;
+}
+
 inline fn perspective_king_sq(pos: *const position.Position, comptime perspective: types.Color) usize {
-    const k = king_square(pos, perspective).index();
-    return if (perspective == types.Color.White) k else k ^ 56;
+    return pov_square(king_square(pos, perspective), perspective);
+}
+
+inline fn king_bucket_state(pos: *const position.Position, comptime perspective: types.Color) KingBucketState {
+    if (comptime weights.NUM_INPUT_BUCKETS == 1) return .{};
+    return KingBucketState.from_king(perspective_king_sq(pos, perspective));
 }
 
 inline fn king_mirror(king_pov: usize) bool {
@@ -77,35 +78,6 @@ const KingBucketState = struct {
         return self.bucket == other.bucket and self.flip == other.flip;
     }
 };
-
-inline fn nnue_index_flat(piece: types.Piece, sq: types.Square) FeaturePair {
-    const code: usize = @backingInt(piece);
-    const piece_offset = (code & 7) * 64;
-    const color_offset = (code >> 3) * 384;
-    const white = color_offset + piece_offset + sq.index();
-    const black = (color_offset ^ 384) + piece_offset + (sq.index() ^ 56);
-    return .{
-        .white = white * weights.HIDDEN_SIZE,
-        .black = black * weights.HIDDEN_SIZE,
-    };
-}
-
-inline fn nnue_index_buckets(
-    piece: types.Piece,
-    sq: types.Square,
-    white_state: KingBucketState,
-    black_state: KingBucketState,
-) FeaturePair {
-    const code: usize = @backingInt(piece);
-    const piece_offset = (code & 7) * 64;
-    const color_offset = (code >> 3) * 384;
-    const white = (color_offset + piece_offset + sq.index()) ^ white_state.flip;
-    const black = ((color_offset ^ 384) + piece_offset + (sq.index() ^ 56)) ^ black_state.flip;
-    return .{
-        .white = white_state.weight_offset + white * weights.HIDDEN_SIZE,
-        .black = black_state.weight_offset + black * weights.HIDDEN_SIZE,
-    };
-}
 
 fn feature_index_pov(
     piece: types.Piece,
@@ -145,11 +117,6 @@ pub const Accumulator = struct {
     white: Perspective align(64),
     black: Perspective align(64),
 
-    pub inline fn clear(self: *Accumulator) void {
-        self.white = weights.MODEL.layer_1_bias;
-        self.black = weights.MODEL.layer_1_bias;
-    }
-
     inline fn perspective(self: anytype, comptime color: types.Color) @TypeOf(&self.white) {
         return if (color == types.Color.White) &self.white else &self.black;
     }
@@ -173,24 +140,55 @@ else
 
 pub const STACK_CAP = 256;
 
-pub const Stack = struct {
-    frames: [STACK_CAP]Accumulator,
-    kings: [STACK_CAP][2]KingBucketState,
+const Feature = struct {
+    piece: types.Piece,
+    square: types.Square,
 };
 
-const UpdateTarget = struct { dst: *Accumulator, src: *const Accumulator };
+const MAX_CHANGES = 2;
+
+/// What the move that led to a frame changed, and which perspectives of the
+/// frame hold their accumulator. See "Lazy updates" in docs/NNUE.md.
+const FrameState = struct {
+    adds: [MAX_CHANGES]Feature = undefined,
+    subs: [MAX_CHANGES]Feature = undefined,
+    add_count: u8 = 0,
+    sub_count: u8 = 0,
+    rebuild: [2]bool = .{ false, false },
+    computed: [2]bool = .{ false, false },
+
+    const stale: FrameState = .{ .rebuild = .{ true, true } };
+    const fresh: FrameState = .{ .computed = .{ true, true } };
+
+    fn record(self: *FrameState, comptime added: usize, comptime removed: usize, adds: [added]Feature, subs: [removed]Feature) void {
+        if (self.add_count + added > MAX_CHANGES or self.sub_count + removed > MAX_CHANGES) {
+            self.rebuild = .{ true, true };
+            return;
+        }
+        inline for (adds) |feature| {
+            self.adds[self.add_count] = feature;
+            self.add_count += 1;
+        }
+        inline for (subs) |feature| {
+            self.subs[self.sub_count] = feature;
+            self.sub_count += 1;
+        }
+    }
+};
+
+pub const Stack = struct {
+    frames: [STACK_CAP]Accumulator,
+    states: [STACK_CAP]FrameState,
+};
 
 pub const NNUE = struct {
     stack: ?*Stack = null,
+    cache: ?*EvalCache = null,
     depth: u16 = 0,
-    frame_written: bool = true,
+    /// Between `push` and `commit`: piece changes belong to the move being played.
+    recording: bool = false,
     in_undo: bool = false,
     piece_count: u8 = 0,
-    king_state: [2]KingBucketState = .{ .{}, .{} },
-    king_state_ready: bool = weights.NUM_INPUT_BUCKETS == 1,
-    /// Set for a perspective whose king left its bucket in the move being
-    /// played: `reconcile_king_buckets` rebuilds it, so updates skip it.
-    refresh_pending: [2]bool = .{ false, false },
     finny: FinnyTable = if (weights.NUM_INPUT_BUCKETS > 1) undefined else {},
     finny_ready: bool = false,
 
@@ -198,82 +196,97 @@ pub const NNUE = struct {
         return .{};
     }
 
-    pub fn ensure_stack(self: *NNUE) void {
+    pub fn ensure_storage(self: *NNUE) void {
         if (self.stack == null) {
             self.stack = platform.allocator.create(Stack) catch unreachable;
+            self.stack.?.states[0] = .stale;
+        }
+        if (self.cache == null) {
+            self.cache = platform.allocator.create(EvalCache) catch unreachable;
+            self.cache.?.clear();
         }
     }
 
-    pub fn release_stack(self: *NNUE) void {
+    pub fn release_storage(self: *NNUE) void {
         if (self.stack) |s| platform.allocator.destroy(s);
+        if (self.cache) |c| platform.allocator.destroy(c);
         self.stack = null;
+        self.cache = null;
     }
 
-    pub inline fn current(self: *const NNUE) *Accumulator {
+    /// A fresh evaluator on the storage of `previous`, for an empty board.
+    pub fn reusing(previous: *const NNUE) NNUE {
+        const self: NNUE = .{ .stack = previous.stack, .cache = previous.cache };
+        if (self.stack) |s| s.states[0] = .stale;
+        return self;
+    }
+
+    /// Required after the network weights change.
+    pub fn discard_caches(self: *NNUE) void {
+        self.finny_ready = false;
+        if (self.cache) |c| c.clear();
+    }
+
+    inline fn current(self: *const NNUE) *Accumulator {
         return &self.stack.?.frames[self.depth];
     }
 
-    inline fn update_target(self: *NNUE) UpdateTarget {
-        const stack = self.stack.?;
-        const dst = &stack.frames[self.depth];
-        if (self.frame_written) return .{ .dst = dst, .src = dst };
-        self.frame_written = true;
-        return .{ .dst = dst, .src = &stack.frames[self.depth - 1] };
+    inline fn frame_state(self: *const NNUE) *FrameState {
+        return &self.stack.?.states[self.depth];
     }
 
-    pub inline fn push(self: *NNUE) void {
-        if (self.depth + 1 == STACK_CAP) self.rebase();
-        self.stack.?.kings[self.depth] = self.king_state;
+    /// The accumulators of the current position, brought up to date.
+    pub fn accumulator(self: *NNUE, pos: *const position.Position) *const Accumulator {
+        self.materialize(pos);
+        return self.current();
+    }
+
+    /// Opens the frame of a move; `pos` is still the position before it.
+    pub inline fn push(self: *NNUE, pos: *const position.Position) void {
+        if (self.depth + 1 == STACK_CAP) self.rebase(pos);
         self.depth += 1;
-        self.frame_written = false;
+        self.frame_state().* = .{};
+        self.recording = true;
+    }
+
+    /// Closes the frame of a move; `pos` is the position after it.
+    pub inline fn commit(self: *NNUE, pos: *const position.Position, comptime mover: types.Color, king_moved: bool) void {
+        self.recording = false;
+        if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
+        if (king_moved) self.flag_king_bucket_change(pos, mover);
     }
 
     pub inline fn pop(self: *NNUE) void {
         self.depth -= 1;
-        self.king_state = self.stack.?.kings[self.depth];
-        self.frame_written = true;
     }
 
-    fn rebase(self: *NNUE) void {
+    fn rebase(self: *NNUE, pos: *const position.Position) void {
+        self.materialize(pos);
         const stack = self.stack.?;
         stack.frames[0] = stack.frames[self.depth];
+        stack.states[0] = .fresh;
         self.depth = 0;
     }
 
-    pub fn reset_depth(self: *NNUE) void {
-        if (self.depth != 0) self.rebase();
-        self.frame_written = true;
+    pub fn reset_depth(self: *NNUE, pos: *const position.Position) void {
+        if (self.depth != 0) self.rebase(pos);
     }
 
-    inline fn index_cached(self: *const NNUE, piece: types.Piece, sq: types.Square) FeaturePair {
-        if (comptime weights.NUM_INPUT_BUCKETS == 1) {
-            return nnue_index_flat(piece, sq);
-        }
-        const w = self.king_state[0];
-        const b = self.king_state[1];
-        return nnue_index_buckets(piece, sq, w, b);
-    }
-
-    /// Applies one piece change of the move being played to both perspectives.
-    fn update(self: *NNUE, comptime added: usize, comptime removed: usize, adds: [added]FeaturePair, subs: [removed]FeaturePair) void {
-        const t = self.update_target();
-        inline for (.{ types.Color.White, types.Color.Black }) |color| {
-            if (!self.refresh_pending[@backingInt(color)]) {
-                var add_rows: [added]usize = undefined;
-                var sub_rows: [removed]usize = undefined;
-                inline for (&add_rows, adds) |*row, feature| row.* = feature.row(color);
-                inline for (&sub_rows, subs) |*row, feature| row.* = feature.row(color);
-                apply_rows(added, removed, t.dst.perspective(color), t.src.perspective(color), add_rows, sub_rows);
-            }
+    fn flag_king_bucket_change(self: *NNUE, pos: *const position.Position, comptime mover: types.Color) void {
+        const frame = self.frame_state();
+        const king = types.Piece.new_comptime(mover, types.PieceType.King);
+        const now = KingBucketState.from_king(perspective_king_sq(pos, mover));
+        for (frame.subs[0..frame.sub_count]) |feature| {
+            if (feature.piece != king) continue;
+            const before = KingBucketState.from_king(pov_square(feature.square, mover));
+            if (!before.same_slot(now)) frame.rebuild[@backingInt(mover)] = true;
+            return;
         }
     }
 
-    inline fn note_king_move(self: *NNUE, pc: types.Piece, to: types.Square) void {
-        if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
-        if (pc.piece_type() != types.PieceType.King) return;
-        const color = @backingInt(pc.color());
-        const king_pov = if (pc.color() == types.Color.White) to.index() else to.index() ^ 56;
-        if (!self.king_state[color].same_slot(KingBucketState.from_king(king_pov))) self.refresh_pending[color] = true;
+    inline fn change(self: *NNUE, comptime added: usize, comptime removed: usize, adds: [added]Feature, subs: [removed]Feature) void {
+        if (self.in_undo) return;
+        if (self.recording) self.frame_state().record(added, removed, adds, subs) else self.frame_state().* = .stale;
     }
 
     pub inline fn toggle(self: *NNUE, comptime on: bool, piece: types.Piece, sq: types.Square) void {
@@ -282,34 +295,78 @@ pub const NNUE = struct {
         } else {
             self.piece_count -= 1;
         }
-        if (self.in_undo) return;
-        if (comptime weights.NUM_INPUT_BUCKETS > 1) {
-            if (!self.king_state_ready) return;
-        }
-        const feature = self.index_cached(piece, sq);
-        if (on) self.update(1, 0, .{feature}, .{}) else self.update(0, 1, .{}, .{feature});
+        const feature: Feature = .{ .piece = piece, .square = sq };
+        if (on) self.change(1, 0, .{feature}, .{}) else self.change(0, 1, .{}, .{feature});
     }
 
-    pub fn refresh_accumulator(self: *NNUE, pos: *position.Position) void {
-        self.frame_written = true;
-        self.refresh_pending = .{ false, false };
-        self.piece_count = @intCast(types.popcount_usize(pos.all_all_pieces()));
-        if (comptime weights.NUM_INPUT_BUCKETS == 1) {
-            const acc = self.current();
-            acc.clear();
-            for (pos.mailbox, 0..) |pc, i| {
-                if (pc == types.Piece.NO_PIECE) continue;
-                const feature = nnue_index_flat(pc, @as(types.Square, @fromBackingInt(@intCast(i))));
-                inline for (.{ types.Color.White, types.Color.Black }) |color| {
-                    apply_rows(1, 0, acc.perspective(color), acc.perspective(color), .{feature.row(color)}, .{});
-                }
+    pub inline fn move(self: *NNUE, pc: types.Piece, from: types.Square, to: types.Square) void {
+        self.change(1, 1, .{.{ .piece = pc, .square = to }}, .{.{ .piece = pc, .square = from }});
+    }
+
+    pub inline fn capture(self: *NNUE, captured: types.Piece, pc: types.Piece, from: types.Square, to: types.Square) void {
+        self.piece_count -= 1;
+        self.change(1, 2, .{.{ .piece = pc, .square = to }}, .{ .{ .piece = pc, .square = from }, .{ .piece = captured, .square = to } });
+    }
+
+    fn materialize(self: *NNUE, pos: *const position.Position) void {
+        inline for (.{ types.Color.White, types.Color.Black }) |perspective| self.materialize_perspective(pos, perspective);
+    }
+
+    /// Frame 0 is always computed or marked for a rebuild, which ends the walk down.
+    fn materialize_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
+        const p = @backingInt(perspective);
+        const states = &self.stack.?.states;
+        var base: usize = self.depth;
+        while (!states[base].computed[p]) : (base -= 1) {
+            if (states[base].rebuild[p]) {
+                self.rebuild_perspective(pos, perspective);
+                states[self.depth].computed[p] = true;
+                return;
             }
-        } else {
-            self.ensure_finny();
-            self.refresh_perspective(pos, types.Color.White);
-            self.refresh_perspective(pos, types.Color.Black);
-            self.sync_king_state(pos);
         }
+        if (base == self.depth) return;
+        const king = king_bucket_state(pos, perspective);
+        for (base + 1..@as(usize, self.depth) + 1) |frame| self.apply_frame(frame, perspective, king);
+    }
+
+    fn apply_frame(self: *NNUE, frame: usize, comptime perspective: types.Color, king: KingBucketState) void {
+        const stack = self.stack.?;
+        const changes = &stack.states[frame];
+        const dst = stack.frames[frame].perspective(perspective);
+        const src = stack.frames[frame - 1].perspective(perspective);
+        const SHAPES = MAX_CHANGES + 1;
+        switch (@as(usize, changes.add_count) * SHAPES + changes.sub_count) {
+            inline 0...SHAPES * SHAPES - 1 => |shape| {
+                const added = shape / SHAPES;
+                const removed = shape % SHAPES;
+                var add_rows: [added]usize = undefined;
+                var sub_rows: [removed]usize = undefined;
+                inline for (&add_rows, changes.adds[0..added]) |*row, feature| row.* = feature_index_pov(feature.piece, feature.square, perspective, king);
+                inline for (&sub_rows, changes.subs[0..removed]) |*row, feature| row.* = feature_index_pov(feature.piece, feature.square, perspective, king);
+                apply_rows(added, removed, dst, src, add_rows, sub_rows);
+            },
+            else => unreachable,
+        }
+        changes.computed[@backingInt(perspective)] = true;
+    }
+
+    fn rebuild_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
+        if (comptime weights.NUM_INPUT_BUCKETS > 1) return self.refresh_perspective(pos, perspective);
+        const dst = self.current().perspective(perspective);
+        dst.* = weights.MODEL.layer_1_bias;
+        for (pos.mailbox, 0..) |pc, i| {
+            if (pc == types.Piece.NO_PIECE) continue;
+            const row = feature_index_pov(pc, @as(types.Square, @fromBackingInt(@intCast(i))), perspective, .{});
+            apply_rows(1, 0, dst, dst, .{row}, .{});
+        }
+    }
+
+    /// Rebuilds both accumulators of the current frame from the pieces on the board.
+    pub fn refresh_accumulator(self: *NNUE, pos: *const position.Position) void {
+        self.recording = false;
+        self.piece_count = @intCast(types.popcount_usize(pos.all_all_pieces()));
+        inline for (.{ types.Color.White, types.Color.Black }) |perspective| self.rebuild_perspective(pos, perspective);
+        self.frame_state().* = .fresh;
     }
 
     fn ensure_finny(self: *NNUE) void {
@@ -322,27 +379,6 @@ pub const NNUE = struct {
             }
         }
         self.finny_ready = true;
-    }
-
-    fn sync_king_state(self: *NNUE, pos: *const position.Position) void {
-        inline for ([_]types.Color{ types.Color.White, types.Color.Black }) |color| {
-            const kp = perspective_king_sq(pos, color);
-            self.king_state[@backingInt(color)] = KingBucketState.from_king(kp);
-        }
-        self.king_state_ready = true;
-    }
-
-    pub fn reconcile_king_buckets(self: *NNUE, pos: *position.Position, comptime color: types.Color) void {
-        if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
-        self.ensure_finny();
-        const kp = perspective_king_sq(pos, color);
-        const now = KingBucketState.from_king(kp);
-        const prev = self.king_state[@backingInt(color)];
-        if (!prev.same_slot(now)) {
-            self.refresh_perspective(pos, color);
-            self.king_state[@backingInt(color)] = now;
-        }
-        self.refresh_pending[@backingInt(color)] = false;
     }
 
     fn refresh_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
@@ -400,31 +436,22 @@ pub const NNUE = struct {
         }
     }
 
-    pub inline fn move(self: *NNUE, pc: types.Piece, from: types.Square, to: types.Square) void {
-        if (self.in_undo) return;
-        if (comptime weights.NUM_INPUT_BUCKETS > 1) {
-            if (!self.king_state_ready) return;
-        }
-        self.note_king_move(pc, to);
-        self.update(1, 1, .{self.index_cached(pc, to)}, .{self.index_cached(pc, from)});
-    }
-
-    pub inline fn capture(self: *NNUE, captured: types.Piece, pc: types.Piece, from: types.Square, to: types.Square) void {
-        self.piece_count -= 1;
-        if (self.in_undo) return;
-        if (comptime weights.NUM_INPUT_BUCKETS > 1) {
-            if (!self.king_state_ready) return;
-        }
-        self.note_king_move(pc, to);
-        self.update(1, 2, .{self.index_cached(pc, to)}, .{ self.index_cached(pc, from), self.index_cached(captured, to) });
-    }
-
-    pub inline fn evaluate(self: *const NNUE, turn: types.Color, pos: *const position.Position) i32 {
+    pub inline fn evaluate(self: *NNUE, turn: types.Color, pos: *const position.Position) i32 {
         return if (turn == types.Color.White) self.evaluate_comptime(types.Color.White, pos) else self.evaluate_comptime(types.Color.Black, pos);
     }
 
-    pub inline fn evaluate_comptime(self: *const NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
-        const acc = self.current();
+    /// The network's output for `turn`, which need not be the side to move.
+    pub inline fn evaluate_comptime(self: *NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
+        const key = if (pos.turn == turn) pos.hash else pos.hash ^ zobrist.TurnHash;
+        const cache = self.cache.?;
+        if (cache.get(key)) |output| return output;
+        const output = self.evaluate_uncached(turn, pos);
+        cache.put(key, output);
+        return output;
+    }
+
+    pub fn evaluate_uncached(self: *NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
+        const acc = self.accumulator(pos);
         if (comptime builtin.mode == .debug) {
             std.debug.assert(self.piece_count == types.popcount_usize(pos.all_all_pieces()));
         }

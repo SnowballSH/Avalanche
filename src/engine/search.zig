@@ -237,7 +237,7 @@ pub fn reset_helper_heuristics() void {
 /// Required after the network weights change: helpers keep their own Finny tables.
 pub fn discard_helper_evaluation_caches() void {
     std.debug.assert(!helpers_are_live());
-    for (0..helper_pool.count()) |i| helper(i).root_board.evaluator.nnue_evaluator.finny_ready = false;
+    for (0..helper_pool.count()) |i| helper(i).root_board.evaluator.nnue_evaluator.discard_caches();
 }
 
 pub fn shutdown_helpers() void {
@@ -579,7 +579,7 @@ pub const Searcher = struct {
         self.parent_nodes = null;
         self.shared_nodes.store(0, .monotonic);
         self.root_history_len = self.hash_history.items.len;
-        pos.evaluator.nnue_evaluator.reset_depth();
+        pos.evaluator.nnue_evaluator.reset_depth(pos);
         self.time_stop = false;
         self.reset_heuristics(false);
         self.nodes = 0;

@@ -102,8 +102,8 @@ fn expect_nnue_matches_fresh(pos: *position.Position) !void {
     reference.turn = pos.turn;
     reference.evaluator.full_refresh(reference);
 
-    const actual = pos.evaluator.nnue_evaluator.current();
-    const expected = reference.evaluator.nnue_evaluator.current();
+    const actual = pos.evaluator.nnue_evaluator.accumulator(pos);
+    const expected = reference.evaluator.nnue_evaluator.accumulator(reference);
     try std.testing.expectEqualSlices(i16, expected.white[0..], actual.white[0..]);
     try std.testing.expectEqualSlices(i16, expected.black[0..], actual.black[0..]);
 }

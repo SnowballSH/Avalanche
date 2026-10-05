@@ -468,7 +468,7 @@ test "multi net: the feature transformer of parity matches the engine's accumula
     defer support.destroy_position(pos);
     for (bench.FENS) |fen| {
         pos.set_fen(fen);
-        const engine = pos.evaluator.nnue_evaluator.current();
+        const engine = pos.evaluator.nnue_evaluator.accumulator(pos);
         var acc: arch.Accumulator = undefined;
         parity.accumulate(weights.MODEL, pos, types.Color.White, &acc);
         try expect(std.mem.eql(i16, &acc, &engine.white));

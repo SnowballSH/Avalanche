@@ -83,20 +83,21 @@ pub const Position = struct {
 
     pub fn init(self: *Position) void {
         self.evaluator.nnue_evaluator.stack = null;
+        self.evaluator.nnue_evaluator.cache = null;
         self.uci_chess960 = false;
-        self.evaluator.nnue_evaluator.ensure_stack();
+        self.evaluator.nnue_evaluator.ensure_storage();
         self.reset();
     }
 
     /// Recomputes evaluation state from scratch, discarding cached
     /// accumulators; required after the network weights change.
     pub fn refresh_evaluation(self: *Position) void {
-        self.evaluator.nnue_evaluator.finny_ready = false;
+        self.evaluator.nnue_evaluator.discard_caches();
         self.evaluator.full_refresh(self);
     }
 
     pub fn deinit(self: *Position) void {
-        self.evaluator.nnue_evaluator.release_stack();
+        self.evaluator.nnue_evaluator.release_storage();
     }
 
     /// Installs `src`'s current position without touching the evaluator, so
@@ -129,15 +130,13 @@ pub const Position = struct {
     }
 
     pub fn reset(self: *Position) void {
-        const stack = self.evaluator.nnue_evaluator.stack;
+        const evaluator = hce.DynamicEvaluator.reusing(&self.evaluator);
         const uci_chess960 = self.uci_chess960;
         self.* = .{ .uci_chess960 = uci_chess960 };
         @memset(self.piece_bitboards[0..types.N_PIECES], 0);
         @memset(self.mailbox[0..types.N_SQUARES], types.Piece.NO_PIECE);
         self.history[0] = UndoInfo.new();
-        self.evaluator = hce.DynamicEvaluator{};
-        self.evaluator.nnue_evaluator.stack = stack;
-        self.evaluator.nnue_evaluator.current().clear();
+        self.evaluator = evaluator;
     }
 
     pub fn new() Position {
@@ -594,7 +593,7 @@ pub const Position = struct {
     // Moving pieces
 
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
-        self.evaluator.nnue_evaluator.push();
+        self.evaluator.nnue_evaluator.push(self);
         self.turn = self.turn.invert();
         self.hash ^= zobrist.TurnHash;
         self.game_ply += 1;
@@ -696,11 +695,7 @@ pub const Position = struct {
             },
         }
 
-        if (comptime @import("../engine/weights.zig").NUM_INPUT_BUCKETS > 1) {
-            if (pt == types.PieceType.King) {
-                self.evaluator.nnue_evaluator.reconcile_king_buckets(self, color);
-            }
-        }
+        self.evaluator.nnue_evaluator.commit(self, color, pt == types.PieceType.King);
 
         if (comptime builtin.mode == .debug) {
             std.debug.assert(self.pawn_hash == self.compute_pawn_hash());
