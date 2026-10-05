@@ -10,7 +10,7 @@ Where the engine's large data lives, which of it is on huge pages, and why.
 | Network weights              | 24.2 MiB             | process, read-only            | two or three random 2 KiB rows per perspective per node   |
 | Continuation history         | 6.0 MiB              | each search thread            | a few 8 KiB sub-tables per node, chosen by the last moves |
 | `Searcher` (other histories) | 473 KiB              | each search thread            | random: corrections 192 KiB, butterfly 32 KiB, PV 79 KiB  |
-| Accumulator stack            | 1.0 MiB              | each `Position`               | two adjacent 4 KiB frames per node, by ply                |
+| Evaluator storage            | 2.0 MiB              | each `Position`               | two adjacent 4 KiB accumulator frames per node, by ply, and one random 8-byte entry of the 1 MiB evaluation cache |
 | `Position` with Finny table  | 154 KiB              | each `Position`               | board state every node, one 2 KiB Finny entry per refresh |
 
 A search thread therefore owns 7.6 MiB, not counting its 64 MiB of mostly untouched stack.
@@ -112,6 +112,13 @@ treats as unreachable.
   4 KiB pages.
 - **Continuation history** (`search.zig`): exactly 6 MiB, three huge pages with no slack. Label
   `search`.
+- **Evaluator storage** (`nnue.zig`): the accumulator frames, their move records and the
+  evaluation cache of a `Position` are one block. A compile-time check keeps it within one huge
+  page, which is why the frame stack has 254 entries and not 256: the first huge page is resident
+  in full once it is touched, and a second one would be for 3 KiB of records. Label `evaluator`.
+  EPYC 9R14 (Zen 4), single thread, against the block coming from the C allocator on 4 KiB pages:
+  `bench` +0.4% (seven rounds, 0.998 to 1.011), 3 s searches +0.2% (1.000 to 1.005), and 0.8 ms
+  less start-up.
 
 ### Checking it
 
@@ -195,9 +202,9 @@ the butterfly history (32 KiB of `i32`; every other history is `i16`), counter m
 capture history (9 KiB) and the rows of `pv` in use (400 bytes per ply). Together about 250 KiB:
 more than L1, well inside L2, and about 65 pages of 4 KiB.
 
-The accumulator stack is touched two frames at a time, and a frame is exactly 4 KiB, so on small
-pages it needs two to four TLB entries that change slowly. The Finny table is touched one 2 KiB
-entry per king-bucket refresh.
+The accumulator frames are touched two at a time, and a frame is exactly 4 KiB. The evaluation
+cache is probed at one random entry per move played. Both are in the evaluator's block, one huge
+page on Linux. The Finny table is touched one 2 KiB entry per king-bucket refresh.
 
 One thing for whoever owns thread scaling: with a node limit (`go nodes`, soft nodes) every helper
 adds to the main searcher's `shared_nodes` on every node, and that counter shares a cache line with
@@ -205,15 +212,14 @@ the main thread's `timer`, `ttable` and limits.
 
 ## Not done
 
-- **One block per search thread.** `Searcher` (473 KiB), a `Position` (154 KiB) and its
-  accumulator stack (1,032 KiB) together are 1.6 MiB and would fit one huge page next to the
-  continuation history: 8 MiB per thread, all of it huge. Today they come from the C allocator on
-  4 KiB pages. Giving each its own block would cost 2 MiB apiece, 12 MiB per thread instead of
-  7.6, and a huge page is resident in full once one byte of it is written. Packing them needs one
-  owner for the three, and there is none: a helper searches its `Searcher`'s `root_board`, the main
-  thread searches the UCI layer's `Position`, `bench` and datagen bring their own, and a
-  `Searcher` is created by value in several places. Worth doing if a measurement on 4 KiB-page
-  hardware shows that the `Searcher` tables or the stack matter.
+- **One block per search thread.** `Searcher` (473 KiB) and a `Position` (154 KiB) would fit a
+  huge page of their own next to the continuation history and the evaluator storage. Today they
+  come from the C allocator on 4 KiB pages. A block each would cost 2 MiB apiece, since a huge
+  page is resident in full once one byte of it is written; packing both into one needs one owner
+  for the two, and there is none: a helper searches its `Searcher`'s `root_board`, the main thread
+  searches the UCI layer's `Position`, `bench` and datagen bring their own, and a `Searcher` is
+  created by value in several places. Worth doing if a measurement on 4 KiB-page hardware shows
+  that the `Searcher` tables matter.
 - **Windows large pages.** `VirtualAlloc(MEM_LARGE_PAGES)` needs `SeLockMemoryPrivilege`, which an
   administrator must grant to the account and the process must then enable in its token. The
   fallback when it is missing is easy; the path where it is present cannot be exercised by this
