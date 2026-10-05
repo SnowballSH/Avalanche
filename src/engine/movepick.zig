@@ -192,95 +192,91 @@ pub fn PickerOver(comptime Context: type, comptime block_len: usize) type {
     };
 }
 
-pub fn MovePicker(comptime follows_null_move: bool) type {
-    return PickerOver(SearchContext(follows_null_move), native_block_len);
-}
+pub const MovePicker = PickerOver(SearchContext, native_block_len);
 
-fn SearchContext(comptime follows_null_move: bool) type {
-    return struct {
-        const Self = @This();
-        const continuation_plies_ago = [_]usize{ 0, 1, 3 };
-        const ContinuationTable = [64][64]i16;
+const SearchContext = struct {
+    const Self = @This();
+    const continuation_plies_ago = [_]usize{ 0, 1, 3 };
+    const ContinuationTable = [64][64]i16;
 
-        searcher: *search.Searcher,
-        pos: *position.Position,
-        hashmove: types.Move,
-        killers: [2]types.Move,
-        // Empty when there is none: no legal move encodes as 0.
-        counter_move: types.Move,
-        history: *const [64][64]i32,
-        continuations: [continuation_plies_ago.len]?*const ContinuationTable,
-        continuation_weights: [continuation_plies_ago.len]i32,
+    searcher: *search.Searcher,
+    pos: *position.Position,
+    hashmove: types.Move,
+    killers: [2]types.Move,
+    // Empty when there is none: no legal move encodes as 0.
+    counter_move: types.Move,
+    history: *const [64][64]i32,
+    continuations: [continuation_plies_ago.len]?*const ContinuationTable,
+    continuation_weights: [continuation_plies_ago.len]i32,
 
-        pub fn at(searcher: *search.Searcher, pos: *position.Position, hashmove: types.Move) Self {
-            const ply = searcher.ply;
-            var continuations: [continuation_plies_ago.len]?*const ContinuationTable = @splat(null);
-            if (!follows_null_move) {
-                for (continuation_plies_ago, &continuations) |plies_ago, *table| {
-                    if (ply < plies_ago + 1) continue;
-                    const prev = searcher.move_history[ply - plies_ago - 1];
-                    if (prev.to_u16() == 0) continue;
-                    table.* = &searcher.continuation[searcher.moved_piece_history[ply - plies_ago - 1].pure_index()][prev.to];
-                }
+    pub fn at(searcher: *search.Searcher, pos: *position.Position, hashmove: types.Move, without_continuation_history: bool) Self {
+        const ply = searcher.ply;
+        var continuations: [continuation_plies_ago.len]?*const ContinuationTable = @splat(null);
+        if (!without_continuation_history) {
+            for (continuation_plies_ago, &continuations) |plies_ago, *table| {
+                if (ply < plies_ago + 1) continue;
+                const prev = searcher.move_history[ply - plies_ago - 1];
+                if (prev.to_u16() == 0) continue;
+                table.* = &searcher.continuation[searcher.moved_piece_history[ply - plies_ago - 1].pure_index()][prev.to];
             }
-            const last = if (ply > 0) searcher.move_history[ply - 1] else types.Move.empty();
+        }
+        const last = if (ply > 0) searcher.move_history[ply - 1] else types.Move.empty();
+        return .{
+            .searcher = searcher,
+            .pos = pos,
+            .hashmove = hashmove,
+            .killers = searcher.killer[ply],
+            .counter_move = if (ply >= 1) searcher.counter_moves[@backingInt(pos.turn)][last.from][last.to] else types.Move.empty(),
+            .history = &searcher.history[@backingInt(pos.turn)],
+            .continuations = continuations,
+            .continuation_weights = .{ parameters.ContHistWeight1, parameters.ContHistWeight2, parameters.ContHistWeight4 },
+        };
+    }
+
+    pub fn exchange_wins(self: *const Self, move: types.Move) bool {
+        return see.see_threshold(self.pos, move, -parameters.MovepickSEEMargin);
+    }
+
+    pub inline fn score(self: *const Self, move: types.Move) ScoredMove {
+        const pos = self.pos;
+        var bonus: i32 = 0;
+        if (move.is_promotion()) {
+            if (move.get_flags().promote_type() == types.PieceType.Queen) {
+                bonus = 1_000_000;
+            } else if (move.get_flags().promote_type() == types.PieceType.Knight) {
+                bonus = 650_000;
+            }
+        }
+        if (self.hashmove.to_u16() == move.to_u16()) {
+            return .{ .score = bonus + SortHash, .kind = .hash_move };
+        }
+        if (move.is_capture()) {
+            const capture_history: i32 = self.searcher.capture_history_entry(pos, move).*;
+            if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
+                return .{ .score = bonus + SortWinningCapture + MVV_LVA[0][0] * CaptureVictimScale + capture_history };
+            }
+            const victim_attacker = MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
             return .{
-                .searcher = searcher,
-                .pos = pos,
-                .hashmove = hashmove,
-                .killers = searcher.killer[ply],
-                .counter_move = if (ply >= 1) searcher.counter_moves[@backingInt(pos.turn)][last.from][last.to] else types.Move.empty(),
-                .history = &searcher.history[@backingInt(pos.turn)],
-                .continuations = continuations,
-                .continuation_weights = .{ parameters.ContHistWeight1, parameters.ContHistWeight2, parameters.ContHistWeight4 },
+                .score = bonus + SortWinningCapture + victim_attacker * CaptureVictimScale + capture_history,
+                .kind = .assumes_winning_exchange,
             };
         }
 
-        pub fn exchange_wins(self: *const Self, move: types.Move) bool {
-            return see.see_threshold(self.pos, move, -parameters.MovepickSEEMargin);
+        if (self.killers[0].to_u16() == move.to_u16()) {
+            return .{ .score = bonus + SortKiller1 };
+        }
+        if (self.killers[1].to_u16() == move.to_u16()) {
+            return .{ .score = bonus + SortKiller2 };
+        }
+        if (self.counter_move.to_u16() == move.to_u16()) {
+            return .{ .score = bonus + SortCounterMove };
         }
 
-        pub inline fn score(self: *const Self, move: types.Move) ScoredMove {
-            const pos = self.pos;
-            var bonus: i32 = 0;
-            if (move.is_promotion()) {
-                if (move.get_flags().promote_type() == types.PieceType.Queen) {
-                    bonus = 1_000_000;
-                } else if (move.get_flags().promote_type() == types.PieceType.Knight) {
-                    bonus = 650_000;
-                }
-            }
-            if (self.hashmove.to_u16() == move.to_u16()) {
-                return .{ .score = bonus + SortHash, .kind = .hash_move };
-            }
-            if (move.is_capture()) {
-                const capture_history: i32 = self.searcher.capture_history_entry(pos, move).*;
-                if (pos.mailbox[move.to] == types.Piece.NO_PIECE) {
-                    return .{ .score = bonus + SortWinningCapture + MVV_LVA[0][0] * CaptureVictimScale + capture_history };
-                }
-                const victim_attacker = MVV_LVA[pos.mailbox[move.to].piece_type().index()][pos.mailbox[move.from].piece_type().index()];
-                return .{
-                    .score = bonus + SortWinningCapture + victim_attacker * CaptureVictimScale + capture_history,
-                    .kind = .assumes_winning_exchange,
-                };
-            }
-
-            if (self.killers[0].to_u16() == move.to_u16()) {
-                return .{ .score = bonus + SortKiller1 };
-            }
-            if (self.killers[1].to_u16() == move.to_u16()) {
-                return .{ .score = bonus + SortKiller2 };
-            }
-            if (self.counter_move.to_u16() == move.to_u16()) {
-                return .{ .score = bonus + SortCounterMove };
-            }
-
-            var quiet_score = bonus + SortQuiet + self.history[move.from][move.to];
-            for (self.continuations, self.continuation_weights) |continuation, weight| {
-                const table = continuation orelse continue;
-                quiet_score += @divTrunc(@as(i32, table[move.from][move.to]) * weight, 128);
-            }
-            return .{ .score = quiet_score };
+        var quiet_score = bonus + SortQuiet + self.history[move.from][move.to];
+        for (self.continuations, self.continuation_weights) |continuation, weight| {
+            const table = continuation orelse continue;
+            quiet_score += @divTrunc(@as(i32, table[move.from][move.to]) * weight, 128);
         }
-    };
-}
+        return .{ .score = quiet_score };
+    }
+};
