@@ -478,7 +478,7 @@ test "multi net: the feature transformer of parity matches the engine's accumula
 }
 
 fn expect_accumulators_rebuilt(pos: *position.Position) !void {
-    const engine = pos.evaluator.nnue_evaluator.current();
+    const engine = pos.evaluator.nnue_evaluator.accumulator(pos);
     var rebuilt: Accumulators = undefined;
     parity.accumulate(weights.MODEL, pos, types.Color.White, &rebuilt.own);
     parity.accumulate(weights.MODEL, pos, types.Color.Black, &rebuilt.opp);

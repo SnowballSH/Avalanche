@@ -19,25 +19,6 @@ const FENS = [_][]const u8{
     "bnrqkrnb/pppppppp/8/8/8/8/PPPPPPPP/BNRQKRNB w FCfc - 0 1",
 };
 
-fn legal_moves(pos: *position.Position, list: *MoveList) void {
-    list.clearRetainingCapacity();
-    switch (pos.turn) {
-        inline else => |color| pos.generate_legal_moves(color, list),
-    }
-}
-
-fn play(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        inline else => |color| pos.play_move(color, move),
-    }
-}
-
-fn undo(pos: *position.Position, move: types.Move) void {
-    switch (pos.turn) {
-        inline else => |color| pos.undo_move(comptime color.invert(), move),
-    }
-}
-
 fn expect_matches_rebuild(pos: *position.Position, reference: *position.Position) !void {
     reference.copy_game_state(pos);
     reference.rebuild_evaluation();
@@ -74,15 +55,16 @@ test "lazy accumulators: a random walk of moves and take-backs matches a rebuild
         pos.set_fen(fen);
         var depth: usize = 0;
         for (0..1500) |_| {
-            legal_moves(pos, &moves);
+            moves.clearRetainingCapacity();
+            support.legal_moves(pos, &moves);
             const go_back = depth == played.len or moves.items.len == 0 or (depth > 0 and random.uintLessThan(u8, 5) < 2);
             if (go_back) {
                 if (depth == 0) break;
                 depth -= 1;
-                undo(pos, played[depth]);
+                support.undo(pos, played[depth]);
             } else {
                 played[depth] = moves.items[random.uintLessThan(usize, moves.items.len)];
-                play(pos, played[depth]);
+                support.play(pos, played[depth]);
                 depth += 1;
             }
             if (random.uintLessThan(u8, 4) == 0) try expect_matches_rebuild(pos, reference);
@@ -101,7 +83,7 @@ test "lazy accumulators: frames that were never evaluated survive the stack runn
     pos.set_fen(types.DEFAULT_FEN);
     const shuffle = [_][]const u8{ "g1f3", "g8f6", "f3g1", "f6g8" };
     for (0..2 * nnue.STACK_CAP + 3) |ply| {
-        play(pos, types.Move.new_from_string(pos, shuffle[ply % shuffle.len]));
+        support.play(pos, types.Move.new_from_string(pos, shuffle[ply % shuffle.len]));
     }
     try expect_matches_rebuild(pos, reference);
 }
