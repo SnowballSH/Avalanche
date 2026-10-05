@@ -143,28 +143,3 @@ test "applyRmw matches @atomicRmw for every operation" {
         }
     }
 }
-
-pub fn AtomicValue(comptime T: type) type {
-    if (has_threads) return std.atomic.Value(T);
-    return struct {
-        raw: T,
-
-        const Self = @This();
-
-        pub fn init(value: T) Self {
-            return .{ .raw = value };
-        }
-
-        pub inline fn load(self: *const Self, comptime order: std.lang.AtomicOrder) T {
-            return atomicLoad(T, &self.raw, order);
-        }
-
-        pub inline fn store(self: *Self, value: T, comptime order: std.lang.AtomicOrder) void {
-            atomicStore(T, &self.raw, value, order);
-        }
-
-        pub inline fn fetchAdd(self: *Self, operand: T, comptime order: std.lang.AtomicOrder) T {
-            return atomicRmw(T, &self.raw, .Add, operand, order);
-        }
-    };
-}

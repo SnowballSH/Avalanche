@@ -18,7 +18,6 @@ pub const SearchJob = struct {
 };
 
 const Job = union(enum) {
-    idle,
     reset_heuristics,
     search: SearchJob,
     quit,
@@ -28,41 +27,31 @@ const Job = union(enum) {
 /// allocated and initialised on the worker's own thread after NUMA placement,
 /// so its tables are first touched on the worker's node.
 pub const Worker = struct {
+    job_posted: std.Io.Event align(std.atomic.cache_line) = .unset,
+    idle: std.Io.Event = .unset,
+    job: Job = undefined,
     helper_index: usize,
     searcher: *Searcher = undefined,
     thread: std.Thread = undefined,
-    mutex: std.Io.Mutex = .init,
-    cond: std.Io.Condition = .init,
-    job: Job = .idle,
-    busy: bool = true,
 
     fn submit(self: *Worker, job: Job) void {
-        self.mutex.lockUncancelable(platform.io);
-        std.debug.assert(!self.busy);
+        std.debug.assert(self.is_idle());
+        self.idle.reset();
         self.job = job;
-        self.busy = true;
-        self.mutex.unlock(platform.io);
-        self.cond.broadcast(platform.io);
+        self.job_posted.set(platform.io);
+    }
+
+    pub fn is_idle(self: *const Worker) bool {
+        return self.idle.isSet();
     }
 
     pub fn wait_idle(self: *Worker) void {
-        self.mutex.lockUncancelable(platform.io);
-        while (self.busy) self.cond.waitUncancelable(platform.io, &self.mutex);
-        self.mutex.unlock(platform.io);
+        self.idle.waitUncancelable(platform.io);
     }
 
-    fn finish(self: *Worker) void {
-        self.mutex.lockUncancelable(platform.io);
-        self.job = .idle;
-        self.busy = false;
-        self.mutex.unlock(platform.io);
-        self.cond.broadcast(platform.io);
-    }
-
-    fn next_job(self: *Worker) Job {
-        self.mutex.lockUncancelable(platform.io);
-        defer self.mutex.unlock(platform.io);
-        while (self.job == .idle) self.cond.waitUncancelable(platform.io, &self.mutex);
+    fn take_job(self: *Worker) Job {
+        self.job_posted.waitUncancelable(platform.io);
+        self.job_posted.reset();
         return self.job;
     }
 
@@ -70,11 +59,11 @@ pub const Worker = struct {
         numa.place_current_thread(self.helper_index + 1);
         self.searcher = platform.allocator.create(Searcher) catch @panic("out of memory for helper searcher");
         self.searcher.init();
-        self.finish();
+        self.searcher.thread_id = self.helper_index + 1;
+        self.idle.set(platform.io);
 
         while (true) {
-            switch (self.next_job()) {
-                .idle => unreachable,
+            switch (self.take_job()) {
                 .reset_heuristics => {
                     self.searcher.age_pending = false;
                     self.searcher.has_searched = false;
@@ -84,11 +73,10 @@ pub const Worker = struct {
                 .quit => {
                     self.searcher.deinit();
                     platform.allocator.destroy(self.searcher);
-                    self.finish();
                     return;
                 },
             }
-            self.finish();
+            self.idle.set(platform.io);
         }
     }
 };
@@ -141,6 +129,13 @@ pub const ThreadPool = struct {
 
     pub fn wait_all(self: *ThreadPool) void {
         for (self.workers.items) |w| w.wait_idle();
+    }
+
+    pub fn all_idle(self: *const ThreadPool) bool {
+        for (self.workers.items) |w| {
+            if (!w.is_idle()) return false;
+        }
+        return true;
     }
 
     pub fn deinit(self: *ThreadPool) void {

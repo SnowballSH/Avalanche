@@ -217,6 +217,15 @@ pub const NodeType = enum {
 };
 
 pub const MAX_THREADS = 512;
+const STOP_CHECK_INTERVAL = 16;
+const LIMIT_CHECK_INTERVAL = 1024;
+
+comptime {
+    if (LIMIT_CHECK_INTERVAL % STOP_CHECK_INTERVAL != 0) {
+        @compileError("limits are only checked on nodes that also check the stop flag");
+    }
+}
+
 pub const MAX_SEARCH_THREADS: usize = if (platform.has_threads) MAX_THREADS else 1;
 pub var NUM_THREADS: usize = 0;
 pub var THREADS_CONFIGURED: bool = false;
@@ -229,10 +238,9 @@ pub var CONTEMPT: i32 = 0;
 pub const MAX_CONTEMPT: i32 = 100;
 
 pub var helper_pool: thread_pool.ThreadPool = .{};
-pub var helpers_live: bool = false;
 
 pub fn helpers_are_live() bool {
-    return @atomicLoad(bool, &helpers_live, .acquire);
+    return !helper_pool.all_idle();
 }
 
 inline fn helper(index: usize) *Searcher {
@@ -261,7 +269,23 @@ pub fn shutdown_helpers() void {
 /// Indexed by the earlier move's piece and target square, then by the move's squares.
 pub const ContinuationHistory = [12][64][64][64]i16;
 
+pub const CrossThreadState = struct {
+    stop: bool = false,
+    pondering: bool = false,
+    is_searching: bool = false,
+    nodes: u64 = 0,
+    tbhits: u64 = 0,
+};
+
+comptime {
+    if (@sizeOf(CrossThreadState) > std.atomic.cache_line) {
+        @compileError("CrossThreadState must fit one cache line");
+    }
+}
+
 pub const Searcher = struct {
+    shared: CrossThreadState align(std.atomic.cache_line) = .{},
+
     min_depth: usize = 1,
     max_millis: u64 = 0,
     ideal_time: u64 = 0,
@@ -274,14 +298,8 @@ pub const Searcher = struct {
 
     time_stop: bool = false,
 
-    nodes: u64 = 0,
     ply: u32 = 0,
     seldepth: u32 = 0,
-    stop: bool = false,
-    is_searching: bool = false,
-    parent_stop: ?*bool = null,
-    shared_nodes: platform.AtomicValue(u64) = platform.AtomicValue(u64).init(0),
-    parent_nodes: ?*platform.AtomicValue(u64) = null,
     root_history_len: usize = 0,
 
     exclude_move: [MAX_PLY]types.Move = undefined,
@@ -316,14 +334,12 @@ pub const Searcher = struct {
 
     node_spent_table: [64][64]u64 = undefined,
 
-    tbhits: u64 = 0,
     syzygy_root_active: bool = false,
     syzygy_root: syzygy.RootResult = undefined,
 
     multi_pv: usize = 1,
     strength: strength_model.Strength = .{},
     infinite: bool = false,
-    pondering: bool = false,
     mate_in: ?i32 = null,
     search_moves: [MAX_MOVES]types.Move = undefined,
     search_move_count: usize = 0,
@@ -494,51 +510,48 @@ pub const Searcher = struct {
     }
 
     inline fn stop_requested(self: *Searcher) bool {
-        if (@atomicLoad(bool, &self.stop, .monotonic)) return true;
+        if (@atomicLoad(bool, &self.shared.stop, .monotonic)) return true;
         if (platform.hostStopRequested()) {
-            @atomicStore(bool, &self.stop, true, .monotonic);
+            @atomicStore(bool, &self.shared.stop, true, .monotonic);
             return true;
         }
-        if (self.parent_stop) |parent| {
-            if (@atomicLoad(bool, parent, .monotonic)) return true;
-        }
         return false;
+    }
+
+    inline fn must_unwind(self: *Searcher) bool {
+        if (self.shared.nodes % STOP_CHECK_INTERVAL != 0) return false;
+        if (self.shared.nodes % LIMIT_CHECK_INTERVAL != 0) return @atomicLoad(bool, &self.shared.stop, .monotonic);
+        return self.stop_requested() or self.hard_limit_reached();
     }
 
     inline fn record_node(self: *Searcher) void {
-        self.nodes += 1;
-        if (self.parent_nodes) |counter| {
-            _ = counter.fetchAdd(1, .monotonic);
-        } else if (self.thread_id == 0 and (self.max_nodes != null or self.soft_max_nodes != null)) {
-            _ = self.shared_nodes.fetchAdd(1, .monotonic);
-        }
+        platform.atomicStore(u64, &self.shared.nodes, self.shared.nodes + 1, .monotonic);
     }
 
-    pub inline fn total_nodes(self: *Searcher) u64 {
-        if (self.parent_nodes) |counter| {
-            return counter.load(.monotonic);
+    /// The whole search on the main thread; a helper only counts its own nodes.
+    pub inline fn total_nodes(self: *const Searcher) u64 {
+        var total = self.shared.nodes;
+        if (self.thread_id == 0) {
+            for (0..NUM_THREADS) |i| total += platform.atomicLoad(u64, &helper(i).shared.nodes, .monotonic);
         }
-        if (self.thread_id == 0 and (self.max_nodes != null or self.soft_max_nodes != null)) {
-            return self.shared_nodes.load(.monotonic);
-        }
-        return self.nodes;
+        return total;
     }
 
-    pub inline fn should_stop(self: *Searcher) bool {
-        if (self.stop_requested()) return true;
-        if (self.max_nodes != null and self.total_nodes() >= self.max_nodes.?) return true;
+    pub inline fn hard_limit_reached(self: *Searcher) bool {
         if (self.thread_id != 0) return false;
-        if (self.uses_clock() and self.max_millis > 0 and self.timer.read() / std.time.ns_per_ms >= self.max_millis) return true;
-        return false;
+        if (self.max_nodes) |limit| {
+            if (self.total_nodes() >= limit) return true;
+        }
+        return self.uses_clock() and self.max_millis > 0 and self.timer.read() / std.time.ns_per_ms >= self.max_millis;
     }
 
-    pub inline fn should_not_continue(self: *Searcher, factor: f32) bool {
-        if (self.stop_requested()) return true;
+    inline fn soft_limit_reached(self: *Searcher, factor: f32) bool {
         if (self.thread_id != 0) return false;
         if (self.iterative_deepening_depth <= self.min_depth) return false;
-        if (self.soft_max_nodes != null and self.total_nodes() >= self.soft_max_nodes.?) return true;
-        if (self.uses_clock() and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @as(u64, @intFromFloat(@floor(@as(f32, @floatFromInt(self.ideal_time)) * factor))))) return true;
-        return false;
+        if (self.soft_max_nodes) |limit| {
+            if (self.total_nodes() >= limit) return true;
+        }
+        return self.uses_clock() and self.timer.read() / std.time.ns_per_ms >= @min(self.max_millis, @as(u64, @intFromFloat(@floor(@as(f32, @floatFromInt(self.ideal_time)) * factor))));
     }
 
     // Root-relative: negate on even plies. Store draws as 0 in the TT and
@@ -592,16 +605,13 @@ pub const Searcher = struct {
         const outW = out_file.writer();
         self.info_out = outW;
         defer self.info_out = null;
-        @atomicStore(bool, &self.is_searching, true, .release);
-        self.parent_stop = null;
-        self.parent_nodes = null;
-        self.shared_nodes.store(0, .monotonic);
+        @atomicStore(bool, &self.shared.is_searching, true, .release);
         self.root_history_len = self.hash_history.items.len;
         pos.evaluator.nnue_evaluator.reset_depth(pos);
         self.time_stop = false;
         self.reset_heuristics(false);
-        self.nodes = 0;
-        self.tbhits = 0;
+        self.shared.nodes = 0;
+        self.shared.tbhits = 0;
         self.best_move = types.Move.empty();
         self.ponder_move = types.Move.empty();
         self.line_count = 0;
@@ -643,7 +653,7 @@ pub const Searcher = struct {
             }
             self.wait_for_release();
             self.ttable.do_age();
-            @atomicStore(bool, &self.is_searching, false, .release);
+            @atomicStore(bool, &self.shared.is_searching, false, .release);
             if (!self.silent_output) {
                 outW.writeAll("bestmove 0000" ++ line_ending) catch {};
                 outW.flush() catch {};
@@ -665,8 +675,8 @@ pub const Searcher = struct {
         std.debug.assert(NUM_THREADS <= helper_pool.count());
         var ti: usize = 0;
         while (ti < NUM_THREADS) : (ti += 1) {
-            helper(ti).nodes = 0;
-            helper(ti).tbhits = 0;
+            helper(ti).shared.nodes = 0;
+            helper(ti).shared.tbhits = 0;
             helper(ti).age_pending = helper(ti).has_searched;
             helper(ti).adopt_root(self, pos);
         }
@@ -741,9 +751,9 @@ pub const Searcher = struct {
                 factor *= @as(f32, @floatFromInt(parameters.TmScoreJumpMultiplier)) / 100.0;
             }
 
-            if (tdepth >= parameters.NodeTmDepth and self.nodes > 0) {
+            if (tdepth >= parameters.NodeTmDepth and self.shared.nodes > 0) {
                 const bm_nodes = self.node_spent_table[bm.from][bm.to];
-                const frac = @as(f32, @floatFromInt(bm_nodes)) / @as(f32, @floatFromInt(self.nodes));
+                const frac = @as(f32, @floatFromInt(bm_nodes)) / @as(f32, @floatFromInt(self.shared.nodes));
                 const node_base = @as(f32, @floatFromInt(parameters.NodeTmBase)) / 100.0;
                 const node_mult = @as(f32, @floatFromInt(parameters.NodeTmMultiplier)) / 100.0;
                 const node_scale = std.math.clamp(
@@ -756,8 +766,8 @@ pub const Searcher = struct {
 
             const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
             const iteration_cost = @max(@as(u64, 1), elapsed_ms -| previous_iteration_end_ms);
-            const iteration_nodes = @max(@as(u64, 1), self.nodes -| previous_iteration_nodes);
-            const normal_stop = self.should_not_continue(factor);
+            const iteration_nodes = @max(@as(u64, 1), self.shared.nodes -| previous_iteration_nodes);
+            const normal_stop = self.stop_requested() or self.soft_limit_reached(factor);
             const score_delta: i32 = @intCast(@abs(score - prev_score));
             const reserve_stop = !normal_stop and self.uses_clock() and self.ideal_time < self.max_millis and
                 reserve_next_iteration(
@@ -774,7 +784,7 @@ pub const Searcher = struct {
                 );
             previous_iteration_end_ms = elapsed_ms;
             previous_iteration_cost = iteration_cost;
-            previous_iteration_nodes = self.nodes;
+            previous_iteration_nodes = self.shared.nodes;
             previous_iteration_node_cost = iteration_nodes;
             prev_score = score;
 
@@ -803,7 +813,7 @@ pub const Searcher = struct {
 
         self.wait_for_release();
         self.ttable.do_age();
-        @atomicStore(bool, &self.is_searching, false, .release);
+        @atomicStore(bool, &self.shared.is_searching, false, .release);
 
         if (!self.silent_output) {
             outW.writeAll("bestmove ") catch {};
@@ -859,7 +869,7 @@ pub const Searcher = struct {
                 self.stop_helpers();
             }
 
-            if (self.time_stop or self.should_stop()) {
+            if (self.time_stop or self.stop_requested() or self.hard_limit_reached()) {
                 return null;
             }
 
@@ -903,12 +913,9 @@ pub const Searcher = struct {
 
     /// Node and tablebase counts summed over the main thread and all helpers.
     fn collect_stats(self: *Searcher) InfoStats {
-        var nodes: u64 = self.nodes;
-        var tbhits: u64 = self.tbhits;
-        for (0..NUM_THREADS) |i| {
-            nodes += helper(i).nodes;
-            tbhits += helper(i).tbhits;
-        }
+        const nodes = self.total_nodes();
+        var tbhits: u64 = self.shared.tbhits;
+        for (0..NUM_THREADS) |i| tbhits += platform.atomicLoad(u64, &helper(i).shared.tbhits, .monotonic);
         const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
         return .{
             .nodes = nodes,
@@ -985,11 +992,11 @@ pub const Searcher = struct {
 
     pub inline fn is_pondering(self: *Searcher) bool {
         if (platform.hostPonderhitRequested()) self.ponderhit();
-        return @atomicLoad(bool, &self.pondering, .acquire);
+        return @atomicLoad(bool, &self.shared.pondering, .acquire);
     }
 
     pub fn ponderhit(self: *Searcher) void {
-        @atomicStore(bool, &self.pondering, false, .release);
+        @atomicStore(bool, &self.shared.pondering, false, .release);
     }
 
     inline fn uses_clock(self: *Searcher) bool {
@@ -1004,7 +1011,7 @@ pub const Searcher = struct {
             const repeated = self.count_repetitions(pos) > 1;
             if (syzygy.probe_root(pos, repeated)) |rr| {
                 if (rr.count > 0) {
-                    self.tbhits += 1;
+                    self.shared.tbhits += 1;
                     self.syzygy_root = rr;
                     self.syzygy_root_active = true;
                 }
@@ -1142,25 +1149,15 @@ pub const Searcher = struct {
     }
 
     pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
-        @atomicStore(bool, &helpers_live, true, .release);
         for (0..NUM_THREADS) |i| {
-            const id: usize = i + 1;
             const h = helper(i);
-            h.max_millis = self.max_millis;
-            h.max_nodes = self.max_nodes;
-            h.soft_max_nodes = self.soft_max_nodes;
-            h.ttable = self.ttable;
-            h.thread_id = id;
-            h.parent_stop = &self.stop;
-            h.parent_nodes = if (self.max_nodes != null or self.soft_max_nodes != null) &self.shared_nodes else null;
-            h.root_history_len = self.root_history_len;
-            h.copy_root_candidates(self);
+            h.copy_root_exclusions(self);
             std.debug.assert(h.root_board.hash == pos.hash and h.hash_history.items.len == self.hash_history.items.len);
-            @atomicStore(bool, &h.stop, false, .monotonic);
+            @atomicStore(bool, &h.shared.stop, false, .monotonic);
             helper_pool.start_search(i, .{
                 .color = color,
                 .mode = mode,
-                .depth = if (id % 2 == 1) depth_ + 1 else depth_,
+                .depth = if (h.thread_id % 2 == 1) depth_ + 1 else depth_,
                 .alpha = alpha_,
                 .beta = beta_,
             });
@@ -1168,25 +1165,27 @@ pub const Searcher = struct {
     }
 
     /// Takes over the main thread's root once per search; every job unwinds
-    /// back to it, so aspiration attempts need no further copying. The
-    /// evaluator is rebuilt later on the helper's own thread.
+    /// back to it, so an aspiration attempt only passes on the excluded root
+    /// moves. The evaluator is rebuilt later on the helper's own thread.
     pub fn adopt_root(self: *Searcher, main: *const Searcher, pos: *const position.Position) void {
         self.root_board.copy_game_state(pos);
         self.root_evaluation_pending = true;
         self.hash_history.clearRetainingCapacity();
         self.hash_history.appendSlice(main.hash_history.items) catch {};
-    }
-
-    fn copy_root_candidates(self: *Searcher, main: *const Searcher) void {
+        self.root_history_len = main.root_history_len;
+        self.ttable = main.ttable;
         self.root_move_count = main.root_move_count;
         self.root_restricted = main.root_restricted;
         @memcpy(self.root_moves[0..main.root_move_count], main.root_moves[0..main.root_move_count]);
+    }
+
+    fn copy_root_exclusions(self: *Searcher, main: *const Searcher) void {
         self.root_excluded_count = main.root_excluded_count;
         @memcpy(self.root_excluded[0..main.root_excluded_count], main.root_excluded[0..main.root_excluded_count]);
     }
 
     pub fn start_helper(self: *Searcher, color: types.Color, mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
-        @atomicStore(bool, &self.is_searching, true, .release);
+        @atomicStore(bool, &self.shared.is_searching, true, .release);
         self.has_searched = true;
         if (self.age_pending) {
             self.age_pending = false;
@@ -1208,12 +1207,11 @@ pub const Searcher = struct {
                 inline else => |m| _ = self.negamax(self.root_board, c, m, depth_, alpha_, beta_, false, NodeType.Root, false),
             },
         }
-        @atomicStore(bool, &self.is_searching, false, .release);
+        @atomicStore(bool, &self.shared.is_searching, false, .release);
     }
 
     pub fn stop_helpers(_: *Searcher) void {
-        defer @atomicStore(bool, &helpers_live, false, .release);
-        for (0..NUM_THREADS) |i| @atomicStore(bool, &helper(i).stop, true, .monotonic);
+        for (0..NUM_THREADS) |i| @atomicStore(bool, &helper(i).shared.stop, true, .monotonic);
         for (0..NUM_THREADS) |i| helper_pool.worker(i).wait_idle();
     }
 
@@ -1228,7 +1226,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparations
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 1023 == 0 and self.should_stop()) {
+        if (self.must_unwind()) {
             self.time_stop = true;
             return 0;
         }
@@ -1327,7 +1325,7 @@ pub const Searcher = struct {
             syzygy.piece_count(pos) <= syzygy.max_pieces())
         {
             if (syzygy.probe_wdl(pos)) |wdl| {
-                self.tbhits += 1;
+                platform.atomicStore(u64, &self.shared.tbhits, self.shared.tbhits + 1, .monotonic);
                 const tb_flag: tt.Bound, const tb_score: i32 = switch (wdl) {
                     .win => .{ tt.Bound.Lower, TB_WIN_SCORE - @as(i32, @intCast(self.ply)) },
                     .loss => .{ tt.Bound.Upper, @as(i32, @intCast(self.ply)) - TB_WIN_SCORE },
@@ -1692,7 +1690,7 @@ pub const Searcher = struct {
 
             const new_depth = @as(usize, @intCast(@as(i32, @intCast(depth)) + extension - 1));
 
-            const nodes_before = self.nodes;
+            const nodes_before = self.shared.nodes;
 
             self.ttable.prefetch(pos.prefetch_key_after(move));
 
@@ -1775,7 +1773,7 @@ pub const Searcher = struct {
             }
 
             if (is_root and self.thread_id == 0) {
-                self.node_spent_table[move.from][move.to] += self.nodes - nodes_before;
+                self.node_spent_table[move.from][move.to] += self.shared.nodes - nodes_before;
             }
 
             if (self.time_stop) {
@@ -1918,7 +1916,7 @@ pub const Searcher = struct {
         // >> Step 1: Preparation
 
         // Step 1.1: Stop if time is up
-        if (self.nodes & 1023 == 0 and self.should_stop()) {
+        if (self.must_unwind()) {
             self.time_stop = true;
             return 0;
         }

@@ -43,6 +43,16 @@ const RootCase = struct { fen: []const u8, moves: []const []const u8 };
 // One helper adopts every root in turn, so each rebuild runs against a Finny
 // table warmed by unrelated positions. The king walks cross input buckets and
 // the mirroring boundary.
+fn enter_root(s: *search.Searcher, pos: *position.Position, case: RootCase) !void {
+    pos.set_fen(case.fen);
+    s.hash_history.clearRetainingCapacity();
+    try s.hash_history.append(pos.hash);
+    for (case.moves) |move| {
+        try play(pos, move);
+        try s.hash_history.append(pos.hash);
+    }
+}
+
 const root_cases = [_]RootCase{
     .{ .fen = types.DEFAULT_FEN, .moves = &.{} },
     .{ .fen = types.DEFAULT_FEN, .moves = &.{ "e2e4", "e7e5", "e1e2", "e8e7", "e2d3", "e7d6" } },
@@ -148,16 +158,10 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
     // Consecutive searches from different roots, as in a game.
     for (root_cases) |case| {
         tt.GlobalTT.clear();
-        pos.set_fen(case.fen);
-        s.hash_history.clearRetainingCapacity();
-        try s.hash_history.append(pos.hash);
-        for (case.moves) |move| {
-            try play(pos, move);
-            try s.hash_history.append(pos.hash);
-        }
+        try enter_root(&s, pos, case);
         const root_hash = pos.hash;
 
-        s.stop = false;
+        s.shared.stop = false;
         switch (pos.turn) {
             .White => _ = s.iterative_deepening(pos, .White, 9),
             .Black => _ = s.iterative_deepening(pos, .Black, 9),
@@ -173,7 +177,7 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
 
         for (0..search.helper_count()) |i| {
             const h = search.helper_pool.worker(i).searcher;
-            helper_nodes += h.nodes;
+            helper_nodes += h.shared.nodes;
             try expectEqual(root_hash, h.root_board.hash);
             try expectEqual(s.hash_history.items.len, h.hash_history.items.len);
             try expectEqual(@as(u16, 0), h.root_board.evaluator.nnue_evaluator.depth);
@@ -181,4 +185,64 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
         }
     }
     try expect(helper_nodes > 0);
+}
+
+test "smp root: the node budget is compared with the nodes of every thread" {
+    if (comptime !platform.has_threads) return error.SkipZigTest;
+    platform.io = std.testing.io;
+    support.init_search();
+
+    search.set_helper_count(2);
+    defer search.set_helper_count(0);
+
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+
+    const budget: u64 = 50_000;
+    s.max_nodes = budget;
+    const helper = search.helper_pool.worker(1).searcher;
+    defer helper.shared.nodes = 0;
+
+    helper.shared.nodes = budget - 1;
+    try expect(!s.hard_limit_reached());
+    helper.shared.nodes = budget;
+    try expectEqual(budget, s.total_nodes());
+    try expect(s.hard_limit_reached());
+}
+
+test "smp root: a node budget ends a search that the main thread alone would continue" {
+    if (comptime !platform.has_threads) return error.SkipZigTest;
+    platform.io = std.testing.io;
+    support.init_search();
+    tt.GlobalTT.reset(16);
+
+    search.set_helper_count(3);
+    defer search.set_helper_count(0);
+
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    var s = search.Searcher.new();
+    defer s.deinit();
+    s.force_thinking = true;
+    s.silent_output = true;
+
+    const budget: u64 = 200_000;
+    s.max_nodes = budget;
+    s.soft_max_nodes = budget;
+    for (root_cases[1..3]) |case| {
+        tt.GlobalTT.clear();
+        try enter_root(&s, pos, case);
+        s.shared.stop = false;
+        switch (pos.turn) {
+            .White => _ = s.iterative_deepening(pos, .White, null),
+            .Black => _ = s.iterative_deepening(pos, .Black, null),
+        }
+
+        var helper_nodes: u64 = 0;
+        for (0..search.helper_count()) |i| helper_nodes += search.helper_pool.worker(i).searcher.shared.nodes;
+        try expectEqual(s.shared.nodes + helper_nodes, s.total_nodes());
+        try expect(s.total_nodes() >= budget);
+        try expect(s.shared.nodes < budget);
+    }
 }

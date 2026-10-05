@@ -210,10 +210,6 @@ The accumulator frames are touched two at a time, and a frame is exactly 4 KiB. 
 cache is probed at one random entry per move played. Both are in the evaluator's block, one huge
 page on Linux. The Finny table is touched one 2 KiB entry per king-bucket refresh.
 
-One thing for whoever owns thread scaling: with a node limit (`go nodes`, soft nodes) every helper
-adds to the main searcher's `shared_nodes` on every node, and that counter shares a cache line with
-the main thread's `timer`, `ttable` and limits.
-
 ## Not done
 
 - **One block per search thread.** `Searcher` (473 KiB) and a `Position` (154 KiB) would fit a

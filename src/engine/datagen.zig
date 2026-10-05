@@ -268,7 +268,7 @@ pub const DatagenSingle = struct {
     fn resetSearchStateForGame(self: *DatagenSingle, pos: *position.Position) void {
         for (&self.searchers) |*s| {
             s.reset_heuristics(true);
-            @atomicStore(bool, &s.stop, false, .monotonic);
+            @atomicStore(bool, &s.shared.stop, false, .monotonic);
             s.time_stop = false;
             s.force_thinking = false;
             s.hash_history.clearRetainingCapacity();
@@ -291,7 +291,7 @@ pub const DatagenSingle = struct {
         var s = self.activeSearcher(pos.turn);
         s.time_stop = false;
         s.force_thinking = false;
-        @atomicStore(bool, &s.stop, false, .monotonic);
+        @atomicStore(bool, &s.shared.stop, false, .monotonic);
 
         const score: i32 = switch (pos.turn) {
             inline else => |turn| switch (self.config.raw_eval) {
@@ -300,7 +300,7 @@ pub const DatagenSingle = struct {
         };
         const white_score = if (pos.turn == types.Color.White) score else -score;
 
-        @atomicStore(bool, &s.stop, false, .monotonic);
+        @atomicStore(bool, &s.shared.stop, false, .monotonic);
         s.time_stop = false;
         s.force_thinking = false;
 

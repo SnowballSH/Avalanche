@@ -33,6 +33,7 @@ test {
     _ = @import("engine/tt.zig");
     _ = @import("tests/thread_pool.zig");
     _ = @import("tests/smp_root.zig");
+    _ = @import("tests/tt_concurrency.zig");
     _ = @import("engine/datagen/options.zig");
     _ = @import("engine/datagen/adjudicator.zig");
     _ = @import("tests/datagen.zig");
@@ -1127,7 +1128,7 @@ test "search: mate in 1 (white back-rank)" {
     defer s.deinit();
     s.force_thinking = true;
     s.silent_output = true;
-    s.stop = false;
+    s.shared.stop = false;
     s.reset_heuristics(true);
 
     const score = s.iterative_deepening(pos, types.Color.White, 4);
@@ -1162,7 +1163,7 @@ test "search: mate in 1 (black back-rank)" {
     defer s.deinit();
     s.force_thinking = true;
     s.silent_output = true;
-    s.stop = false;
+    s.shared.stop = false;
     s.reset_heuristics(true);
 
     const score = s.iterative_deepening(pos, types.Color.Black, 4);
@@ -1200,7 +1201,7 @@ test "search: forced node-limited search continues after reporting mate" {
     // run out of depth. Search policy is deliberately independent of output.
     s.silent_output = true;
     s.max_nodes = 30_000;
-    s.stop = false;
+    s.shared.stop = false;
     s.reset_heuristics(true);
 
     const score = s.iterative_deepening(pos, types.Color.Black, null);
@@ -1234,7 +1235,7 @@ test "search: stalemate scores as draw" {
     defer s.deinit();
     s.force_thinking = true;
     s.silent_output = true;
-    s.stop = false;
+    s.shared.stop = false;
     s.reset_heuristics(true);
 
     const score = s.iterative_deepening(pos, types.Color.Black, 4);
@@ -1264,10 +1265,10 @@ test "search: deterministic node counts and score" {
     defer s1.deinit();
     s1.force_thinking = true;
     s1.silent_output = true;
-    s1.stop = false;
+    s1.shared.stop = false;
     s1.reset_heuristics(true);
     const score1 = s1.iterative_deepening(pos, types.Color.White, 7);
-    const nodes1 = s1.nodes;
+    const nodes1 = s1.shared.nodes;
 
     // Run 2: fresh searcher, cleared TT + heuristics, identical starting position
     pos.init();
@@ -1277,10 +1278,10 @@ test "search: deterministic node counts and score" {
     defer s2.deinit();
     s2.force_thinking = true;
     s2.silent_output = true;
-    s2.stop = false;
+    s2.shared.stop = false;
     s2.reset_heuristics(true);
     const score2 = s2.iterative_deepening(pos, types.Color.White, 7);
-    const nodes2 = s2.nodes;
+    const nodes2 = s2.shared.nodes;
 
     try expect(score1 == score2);
     try expect(nodes1 == nodes2);
