@@ -227,3 +227,18 @@ Tried and left out:
   The list's length is otherwise reloaded after every move stored. 0.18%
   fewer instructions, and no difference in cycles over nine alternating
   pairs on the M4.
+
+## Compile-time and run-time parameters of the search
+
+`negamax` is compiled once per value of its compile-time parameters. The side to move, the
+evaluation mode and the node type (root, PV, non-PV) stay compile-time: the board code is
+specialised by color, and the node type removes whole blocks (root reporting, PV bookkeeping,
+pruning). Whether the node follows a null move or a singular verification (`is_null`) and whether
+it is an expected cut node (`cutnode`) are run-time values: they only feed conditions, and as
+compile-time parameters they doubled the function twice over for the non-PV nodes, 24 copies of
+about 8 KiB each instead of 12. The move picker takes the first of them as
+`without_continuation_history`, which is all it uses it for.
+
+Single thread, nine alternating rounds, node counts identical: EPYC 9R14 (Zen 4) `bench` +1.2%,
+3 s searches +1.0%; EPYC 9R45 (Zen 5) +1.1% and +0.5%. Making the node type a run-time value as
+well (four copies) lost 0.8% on the EPYC 9R45 and was left out.

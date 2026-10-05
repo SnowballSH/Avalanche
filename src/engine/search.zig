@@ -1215,7 +1215,7 @@ pub const Searcher = struct {
         for (0..NUM_THREADS) |i| helper_pool.worker(i).wait_idle();
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32, comptime is_null: bool, comptime node: NodeType, comptime cutnode: bool) i32 {
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32, is_null: bool, comptime node: NodeType, cutnode: bool) i32 {
         var alpha = alpha_;
         var beta = beta_;
         var depth = depth_;
@@ -1561,8 +1561,8 @@ pub const Searcher = struct {
         }
 
         // Step 5.2: Move Ordering
-        var picker: movepick.MovePicker(is_null) = undefined;
-        picker.init(.at(self, pos, hashmove), &movelist);
+        var picker: movepick.MovePicker = undefined;
+        picker.init(.at(self, pos, hashmove, is_null), &movelist);
 
         // Step 5.3: Move Iteration
         var best_move = types.Move.empty();
@@ -2010,8 +2010,8 @@ pub const Searcher = struct {
         }
 
         // Step 4.2: Q Move Ordering
-        var picker: movepick.MovePicker(false) = undefined;
-        picker.init(.at(self, pos, hashmove), &movelist);
+        var picker: movepick.MovePicker = undefined;
+        picker.init(.at(self, pos, hashmove, false), &movelist);
 
         // Step 4.3: Q Move Iteration
         while (picker.next()) |move| {
