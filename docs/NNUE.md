@@ -57,36 +57,71 @@ transposition table, quiescence evaluates before it probes the table, razoring h
 was just evaluated to quiescence, and every re-search and every new iteration walks over the
 leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) are of
 a position evaluated earlier in the run. So every `Position` (one per search thread) keeps a
-direct-mapped table of 2^16 outputs, 16 bytes an entry: the 64-bit key and the output. The slot is
-the low bits of the Zobrist hash (the transposition table uses the high ones); the key is the
-whole hash, with the side-to-move key folded in when the output is asked for the side not to move.
-The scaling the search applies to the output (`EvalScale`, material, the fifty-move counter) comes
-after the cache, because the counter is not part of the hash. The table is cleared when the
-network changes (`discard_caches`). Hit rate on `bench` by table size:
+direct-mapped table of 2^17 outputs, 1 MiB. An entry is 8 bytes: the output in 24 bits (no head
+can produce more than 18) and 40 further bits of the Zobrist hash. The slot is the low 17 bits of
+the hash (the transposition table uses the high ones), so 57 bits of the hash are compared, more
+than the transposition table compares. The side-to-move key is folded into the hash when the
+output is asked for the side not to move. The scaling the search applies to the output
+(`EvalScale`, material, the fifty-move counter) comes after the cache, because the counter is not
+part of the hash. The table is cleared when the network changes (`discard_caches`).
+
+Hit rate by table size, measured with whole 64-bit keys:
 
 | Entries | 2^10 | 2^12 | 2^14 | 2^16 | 2^18 | 2^20 | unbounded |
 |---|---|---|---|---|---|---|---|
-| Hits | 14.1% | 17.8% | 23.1% | 29.8% | 34.6% | 36.5% | 37.4% |
+| `bench` (depth 14, 15.5M nodes) | 14.1% | 17.8% | 23.1% | 29.8% | 34.6% | 36.5% | 37.4% |
+| the same positions to depth 18 (91.0M nodes) | | | | 22.5% | 27.9% | | |
 
 **Lazy updates.** `push` (first thing in `play_move`) opens a frame, `toggle`, `move` and `capture`
 record the piece changes in it, and `commit` closes it; for a king move it compares the bucket and
 mirror side of the king's old and new square and marks that perspective for a rebuild if they
-differ. Nothing else happens until an evaluation misses the cache. It then brings each perspective
-of the current frame up to date: it walks down the stack to the nearest frame that holds this
-perspective and applies the recorded changes frame by frame on the way back up, so the frames in
-between are computed as well, and the next evaluation in that subtree starts from them. If the
-walk meets a frame marked for a rebuild first, the perspective is rebuilt for the current position
-from the Finny table instead: the frames in between have nothing to continue from, and the pieces
-of an earlier frame are no longer known. The bottom frame always holds its accumulators or is
-marked for a rebuild, which ends the walk. A piece changed outside a move (`add_piece` on a
-position being set up) marks the current frame for a rebuild of both perspectives, and so does a
-move with more changes than a frame records. When the stack is full, the current frame is computed
-and moved to the bottom.
+differ. `commit` then looks the new position up in the evaluation cache. If its evaluation is
+there, the frame is left as a record: nothing is computed, and nothing will be unless a
+descendant needs it. Otherwise the frame's accumulators are computed at once.
 
-Without the cache this saves little: 94% of the frames of a `bench` run are evaluated or lie
-below an evaluated one. With it, a frame is only needed below an evaluation that *misses*, and of
-the 13.84M frames a `bench` run opens, 10.39M (75.1%) are. A move with several piece changes
-(castling, en passant, promotion) is one pass per perspective where it used to be one per change.
+Bringing a perspective of the current frame up to date walks down the stack to the nearest frame
+that holds this perspective and applies the recorded changes frame by frame on the way back up,
+so the frames in between are computed as well and the next evaluation in that subtree starts from
+them. If the walk meets a frame marked for a rebuild first, the perspective is rebuilt for the
+current position from the Finny table instead: the frames in between have nothing to continue
+from, and the pieces of an earlier frame are no longer known. The bottom frame always holds its
+accumulators or is marked for a rebuild, which ends the walk. A piece changed outside a move
+(`add_piece` on a position being set up) marks the current frame for a rebuild of both
+perspectives, and so does a move with more changes than a frame records. When the stack is full,
+the current frame is computed and moved to the bottom. An evaluation that misses the cache does
+the same walk, which is where the frames skipped at `commit` are computed when a position below
+them needs them.
+
+Why `commit` computes eagerly on a miss, and does not wait for the evaluation: the rows of an
+update come from all over a 25 MiB table, and in `play_move` that memory traffic overlaps the
+transposition-table probe of the new node, which is fetched at the same time. Deferred to the
+evaluation, the same work runs after the probe and on the critical path of the head. And without
+the cache there is little to skip: 94% of the frames of a `bench` run are evaluated or lie below
+an evaluated one. EPYC 9R14 (Zen 4, 512-bit build), single thread, alternating runs, against the
+eager updates this replaced; `bench`, and four positions searched for 3 s with a 256 MiB hash:
+
+| Variant | `bench` | 3 s searches |
+|---|---|---|
+| deferred to the evaluation, no cache | -4.9% | -5.6% |
+| eager as before, with the cache (2^16 entries of 16 bytes) | +0.6% | -1.2% |
+| deferred to the evaluation, with that cache (EPYC 9R45) | +2.8% | -2.6% |
+| eager on a cache miss, with that cache | +4.7% | +0.3% |
+| eager on a cache miss, 2^16 entries of 8 bytes | +5.1% | +1.7% |
+| eager on a cache miss, 2^17 entries of 8 bytes (what the engine does) | +5.3% | +1.1% |
+
+A frame holds two perspectives. Per frame, 2.0 were computed before; now 1.40 are in `bench`, and
+1.53 at depth 18 with 2^16 entries (1.42 with 2^18). The cache alone gains little on this machine,
+where the head takes 117 ns and a probe of a table that does not stay in the second-level cache
+is not free; what pays is that a hit also makes the accumulators unnecessary. The gain is smaller
+in the long searches because the hit rate is lower and because a node there waits for its
+transposition-table entry to come from memory whatever else it does. A move with several piece
+changes (castling, en passant, promotion) is one pass per perspective where it used to be one per
+change; such moves are 0.7% of the frames.
+
+Tried and left out: prefetching the cache slot when the search prefetches the transposition-table
+entry, before the move is played (EPYC 9R45: `bench` +0.5%, the 3 s searches -0.3%, within the
+noise of that measurement), and 16-byte entries with the whole key (the first three rows of the
+table against the last three: the smaller table stays in the caches better).
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
 instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of

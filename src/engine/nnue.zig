@@ -244,11 +244,14 @@ pub const NNUE = struct {
         self.recording = true;
     }
 
-    /// Closes the frame of a move; `pos` is the position after it.
+    /// Closes the frame of a move; `pos` is the position after it. Its accumulators are
+    /// computed now unless the cache already holds its evaluation.
     pub inline fn commit(self: *NNUE, pos: *const position.Position, comptime mover: types.Color, king_moved: bool) void {
         self.recording = false;
-        if (comptime weights.NUM_INPUT_BUCKETS == 1) return;
-        if (king_moved) self.flag_king_bucket_change(pos, mover);
+        if (comptime weights.NUM_INPUT_BUCKETS > 1) {
+            if (king_moved) self.flag_king_bucket_change(pos, mover);
+        }
+        if (self.storage.?.cache.get(pos.hash) == null) self.materialize(pos);
     }
 
     pub inline fn pop(self: *NNUE) void {
