@@ -2,7 +2,9 @@ const std = @import("std");
 
 /// Keys of the positions of a game followed by those of the line being
 /// searched, oldest first, in a buffer that never grows. The methods carry the
-/// names of the `std.ArrayList` ones they stand in for.
+/// names of the `std.ArrayList` ones they stand in for. A full history refuses
+/// an `append`; a caller that pairs it with `pop` must not let that pass, or
+/// the `pop` takes a key that was there before.
 pub const KeyHistory = struct {
     items: []u64,
     capacity: usize,
@@ -36,12 +38,6 @@ pub const KeyHistory = struct {
         self.items.len += keys.len;
     }
 
-    pub fn appendNTimes(self: *KeyHistory, key: u64, count: usize) error{Overflow}!void {
-        if (count > self.capacity - self.items.len) return error.Overflow;
-        @memset(self.items.ptr[self.items.len..][0..count], key);
-        self.items.len += count;
-    }
-
     pub fn clearRetainingCapacity(self: *KeyHistory) void {
         self.items.len = 0;
     }
@@ -54,8 +50,8 @@ test "key history: appends, pops and refuses to overflow" {
     try std.testing.expectEqual(@as(?u64, null), history.pop());
     try history.append(1);
     try history.appendSlice(&.{ 2, 3 });
-    try std.testing.expectError(error.Overflow, history.appendNTimes(9, 2));
-    try history.appendNTimes(4, 1);
+    try std.testing.expectError(error.Overflow, history.appendSlice(&.{ 9, 9 }));
+    try history.append(4);
     try std.testing.expectError(error.Overflow, history.append(5));
     try std.testing.expectError(error.Overflow, history.appendSlice(&.{5}));
     try std.testing.expectEqualSlices(u64, &.{ 1, 2, 3, 4 }, history.items);
