@@ -298,6 +298,7 @@ test "draw: the repetition scan matches the reference on random key histories" {
 
 const Snapshot = struct {
     piece_bitboards: [types.N_PIECES]types.Bitboard,
+    occupancy: [types.N_COLORS]types.Bitboard,
     mailbox: [types.N_SQUARES]types.Piece,
     turn: types.Color,
     game_ply: u32,
@@ -307,6 +308,7 @@ const Snapshot = struct {
     fn of(pos: *const position.Position) Snapshot {
         return .{
             .piece_bitboards = pos.piece_bitboards,
+            .occupancy = pos.occupancy,
             .mailbox = pos.mailbox,
             .turn = pos.turn,
             .game_ply = pos.game_ply,
@@ -323,11 +325,20 @@ fn undo(pos: *position.Position, move: types.Move) void {
     }
 }
 
+fn occupancy_of_pieces(pos: *const position.Position) [types.N_COLORS]types.Bitboard {
+    var occupancy: [types.N_COLORS]types.Bitboard = .{ 0, 0 };
+    for (pos.mailbox, 0..) |piece, sq| {
+        if (piece != types.Piece.NO_PIECE) occupancy[@backingInt(piece.color())] |= types.SquareIndexBB[sq];
+    }
+    return occupancy;
+}
+
 fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, moves: []const types.Move) !void {
     const fen = pos.basic_fen(std.testing.allocator);
     defer std.testing.allocator.free(fen);
     fresh.set_fen(fen);
     try expectEqual(fresh.keys(), pos.keys());
+    try expectEqual(occupancy_of_pieces(pos), pos.occupancy);
 
     const before = Snapshot.of(pos);
     for (moves) |move| {
@@ -340,7 +351,7 @@ fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, m
     try expectEqual(before, Snapshot.of(pos));
 }
 
-test "make/unmake: keys match a position set from the FEN, and undoing any move restores the position" {
+test "make/unmake: keys and occupancy match the board, and undoing any move restores the position" {
     const fresh = try support.new_position();
     defer support.destroy_position(fresh);
     try walk_random_games(0x0D0_0BAD_F00D_A11_0E5, 6, 120, fresh, expect_moves_round_trip);

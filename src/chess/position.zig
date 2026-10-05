@@ -59,6 +59,8 @@ pub const UndoInfo = struct {
 pub const Position = struct {
     // Bitboards of each piece
     piece_bitboards: [types.N_PIECES]types.Bitboard = undefined,
+    // Squares occupied by each color
+    occupancy: [types.N_COLORS]types.Bitboard = .{ 0, 0 },
     // Mailbox representation of the board
     mailbox: [types.N_SQUARES]types.Piece = undefined,
     // Current player
@@ -116,6 +118,7 @@ pub const Position = struct {
     /// played from here never read the entries below it.
     pub fn copy_game_state(self: *Position, src: *const Position) void {
         self.piece_bitboards = src.piece_bitboards;
+        self.occupancy = src.occupancy;
         self.mailbox = src.mailbox;
         self.turn = src.turn;
         self.game_ply = src.game_ply;
@@ -506,9 +509,11 @@ pub const Position = struct {
 
             self.toggle_keys(captured, zobrist.ZobristTable[captured.index()][to.index()]);
             self.piece_bitboards[captured.index()] &= ~types.SquareIndexBB[to.index()];
+            self.occupancy[@backingInt(captured.color())] &= ~types.SquareIndexBB[to.index()];
 
             self.toggle_keys(moving, zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()]);
             self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+            self.occupancy[@backingInt(moving.color())] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
             self.mailbox[to.index()] = moving;
             self.mailbox[from.index()] = types.Piece.NO_PIECE;
         } else {
@@ -522,9 +527,11 @@ pub const Position = struct {
     }
 
     inline fn place(self: *Position, pc: types.Piece, sq: types.Square, comptime keyed: bool) void {
+        std.debug.assert(pc != types.Piece.NO_PIECE);
         self.evaluator.add_piece(pc, sq, self);
         self.mailbox[sq.index()] = pc;
         self.piece_bitboards[pc.index()] |= types.SquareIndexBB[sq.index()];
+        self.occupancy[@backingInt(pc.color())] |= types.SquareIndexBB[sq.index()];
         if (keyed) self.toggle_keys(pc, zobrist.ZobristTable[pc.index()][sq.index()]);
     }
 
@@ -533,14 +540,17 @@ pub const Position = struct {
         const pc = self.mailbox[sq.index()];
         if (keyed) self.toggle_keys(pc, zobrist.ZobristTable[pc.index()][sq.index()]);
         self.piece_bitboards[pc.index()] &= ~types.SquareIndexBB[sq.index()];
+        self.occupancy[@backingInt(pc.color())] &= ~types.SquareIndexBB[sq.index()];
         self.mailbox[sq.index()] = types.Piece.NO_PIECE;
     }
 
     inline fn relocate(self: *Position, from: types.Square, to: types.Square, comptime keyed: bool) void {
         const moving = self.mailbox[from.index()];
+        std.debug.assert(moving != types.Piece.NO_PIECE);
         self.evaluator.move_piece_quiet(from, to, self);
         if (keyed) self.toggle_keys(moving, zobrist.ZobristTable[moving.index()][from.index()] ^ zobrist.ZobristTable[moving.index()][to.index()]);
         self.piece_bitboards[moving.index()] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
+        self.occupancy[@backingInt(moving.color())] ^= types.SquareIndexBB[from.index()] | types.SquareIndexBB[to.index()];
         self.mailbox[to.index()] = moving;
         self.mailbox[from.index()] = types.Piece.NO_PIECE;
     }
@@ -560,10 +570,7 @@ pub const Position = struct {
     }
 
     pub inline fn all_pieces(self: *const Position, comptime color: types.Color) types.Bitboard {
-        return if (color == types.Color.White)
-            self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.WHITE_ROOK.index()] | self.piece_bitboards[types.Piece.WHITE_QUEEN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()]
-        else
-            self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_ROOK.index()] | self.piece_bitboards[types.Piece.BLACK_QUEEN.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()];
+        return self.occupancy[@backingInt(color)];
     }
 
     pub inline fn all_all_pieces(self: *const Position) types.Bitboard {
