@@ -46,11 +46,11 @@ pub const UciInterface = struct {
                 self.search_thread = null;
             }
         }
-        @atomicStore(bool, &self.searcher.is_searching, false, .release);
+        @atomicStore(bool, &self.searcher.shared.is_searching, false, .release);
     }
 
     fn stop_search(self: *UciInterface) void {
-        @atomicStore(bool, &self.searcher.stop, true, .monotonic);
+        @atomicStore(bool, &self.searcher.shared.stop, true, .monotonic);
         self.join_search();
     }
 
@@ -102,7 +102,7 @@ pub const UciInterface = struct {
             return true;
         }
 
-        if (@atomicLoad(bool, &self.searcher.is_searching, .acquire)) {
+        if (@atomicLoad(bool, &self.searcher.shared.is_searching, .acquire)) {
             try out.print("info string ignored while searching: {s}" ++ nl, .{std.mem.trim(u8, line, "\r\n")});
             return true;
         }
@@ -229,15 +229,15 @@ pub const UciInterface = struct {
         s.strength = self.settings.playing_strength();
         s.search_move_count = cmd.search_move_count;
         @memcpy(s.search_moves[0..cmd.search_move_count], cmd.search_moves[0..cmd.search_move_count]);
-        @atomicStore(bool, &s.pondering, cmd.ponder, .release);
+        @atomicStore(bool, &s.shared.pondering, cmd.ponder, .release);
 
         const instant_single_reply = budget.managed and !cmd.ponder and !cmd.infinite;
         numa.init();
 
-        @atomicStore(bool, &s.stop, false, .monotonic);
+        @atomicStore(bool, &s.shared.stop, false, .monotonic);
         // Mark searching BEFORE spawning so a second `go` arriving before the
         // worker starts cannot pass the is_searching guard and double-spawn.
-        @atomicStore(bool, &s.is_searching, true, .release);
+        @atomicStore(bool, &s.shared.is_searching, true, .release);
 
         if (comptime platform.has_threads) {
             self.search_thread = std.Thread.spawn(
