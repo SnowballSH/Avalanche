@@ -59,7 +59,7 @@ LTC_TC="${LTC_TC:-60.0+0.6}" ; LTC_OPTS="${LTC_OPTS:-Threads=1 Hash=64}" ; LTC_W
 SKIP_LTC="${SKIP_LTC:-0}"
 
 # Base (reference) net. Set BASE_TOKEN to reuse an existing engine row/binary.
-BASE_NAME="${BASE_NAME:-dianguang-3}" ; BASE_NET="${BASE_NET:-$REPO/nets/dianguang-3.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
+BASE_NAME="${BASE_NAME:-dianguang-4}" ; BASE_NET="${BASE_NET:-$REPO/nets/dianguang-4.nnue}" ; BASE_TOKEN="${BASE_TOKEN:-}"
 
 # Candidates to test. Pass them as CLI args, or list them here. Format as above, e.g.
 #   CANDIDATES=( "mynet:$REPO/nets/mynet.nnue" )
