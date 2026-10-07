@@ -102,7 +102,7 @@ describe("wasm engine", () => {
     const output = run("go depth 1");
     assert.match(
       output[0] ?? "",
-      /^info string NNUE evaluation using dianguang-3 \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/,
+      /^info string NNUE evaluation using dianguang-4 \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/,
     );
   });
 
