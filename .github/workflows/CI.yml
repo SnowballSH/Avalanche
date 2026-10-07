@@ -42,7 +42,7 @@ jobs:
         # mlugg/setup-zig@v2 is the maintained successor to goto-bus-stop/setup-zig:
         # it knows the current release channel and ziglang.org download
         # layout, verifies the release minisign signature, and caches the global
-        # zig cache (~/.cache/zig) keyed on build.zig[.zon] across runs.
+        # zig cache (~/.cache/zig), which holds the maker executable, across runs.
         uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}

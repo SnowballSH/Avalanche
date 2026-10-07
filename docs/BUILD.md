@@ -4,13 +4,15 @@ Avalanche builds with Zig 0.17.0 and nothing else: `build.zig` compiles the engi
 probing code in `src/pyrrhic` (C, through the bundled Clang) and its bindings (the `translate_c`
 package and its C front end `aro`, vendored under `deps/` and named by path in `build.zig.zon`).
 
-The two packages are the official Zig Software Foundation ones, copied from the package cache at
-the commits named in the commit that added them (translate-c 875969d, aro d0c8c4d). They are vendored rather than fetched
+The two packages are the official Zig Software Foundation ones at translate-c 875969d and aro
+d0c8c4d. They are vendored rather than fetched
 because their host, Codeberg, rate-limits and sometimes refuses the fetch from build machines and
 cloud workers, and a fetch that returns the wrong content fails the build with a hash mismatch.
 `deps/translate-c/build.zig.zon` is the upstream file with its `aro` dependency pointed at
-`../aro`; nothing else in `deps/` is modified. To upgrade, replace both directories from a Zig
-package cache (`~/.cache/zig/p/<package>/`) and re-apply that one edit.
+`../aro`; nothing else in `deps/` is modified. To upgrade, `zig fetch` the new commits of
+`git+https://codeberg.org/ziglang/translate-c` and `git+https://codeberg.org/ziglang/arocc`, extract
+the resulting `~/.cache/zig/p/<name>-<hash>.tar.gz` files over the two directories (translate-c's
+archive nests its tree one directory deeper) and re-apply that one edit.
 
 ```sh
 zig build --release=fast      # zig-out/bin/Avalanche, for the CPU of this machine
