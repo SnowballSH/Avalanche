@@ -2,7 +2,17 @@
 
 Avalanche builds with Zig 0.17.0 and nothing else: `build.zig` compiles the engine, the Syzygy
 probing code in `src/pyrrhic` (C, through the bundled Clang) and its bindings (the `translate_c`
-package, pinned in `build.zig.zon`).
+package and its C front end `aro`, vendored under `deps/` and named by path in `build.zig.zon`).
+
+The two packages are the official Zig Software Foundation ones at translate-c 875969d and aro
+d0c8c4d. They are vendored rather than fetched
+because their host, Codeberg, rate-limits and sometimes refuses the fetch from build machines and
+cloud workers, and a fetch that returns the wrong content fails the build with a hash mismatch.
+`deps/translate-c/build.zig.zon` is the upstream file with its `aro` dependency pointed at
+`../aro`; nothing else in `deps/` is modified. To upgrade, `zig fetch` the new commits of
+`git+https://codeberg.org/ziglang/translate-c` and `git+https://codeberg.org/ziglang/arocc`, extract
+the resulting `~/.cache/zig/p/<name>-<hash>.tar.gz` files over the two directories (translate-c's
+archive nests its tree one directory deeper) and re-apply that one edit.
 
 ```sh
 zig build --release=fast      # zig-out/bin/Avalanche, for the CPU of this machine
@@ -257,8 +267,8 @@ checks that the network given as `EVALFILE` is the one embedded, and parses the 
 with OpenBench's regular expressions; CI runs it on Linux.
 
 A worker therefore runs the paths of its own CPU. The build must not depend on anything a worker
-lacks: no option of `build.zig` is required, and the only downloads are the `translate_c` package
-and its own dependency `aro`, which Zig caches.
+lacks: no option of `build.zig` is required, and nothing is downloaded, since the `translate_c`
+package and its dependency `aro` are vendored.
 
 ## Tried and left out
 

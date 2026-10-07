@@ -38,8 +38,9 @@ GPL-3.0. See [`LICENSE`](LICENSE).
 
 `zig build --release=fast`
 
-Avalanche builds with **Zig 0.17.0**. The first build downloads the official
-[translate-c](https://codeberg.org/ziglang/translate-c) package, which generates the bindings for the Syzygy probing code.
+Avalanche builds with **Zig 0.17.0** and nothing else: the official
+[translate-c](https://codeberg.org/ziglang/translate-c) package, which generates the bindings for the Syzygy probing
+code, is vendored under `deps/`, so a build never downloads anything.
 
 ```sh
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
