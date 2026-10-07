@@ -1419,8 +1419,9 @@ test "qsearch: contempt draw keeps fail-soft provenance" {
 
     const pos = try support.new_position();
     defer support.destroy_position(pos);
-    // Bxc6+ removes Black's last non-king piece, reaching the known KBvK draw.
-    pos.set_fen("4k3/8/2q5/1B6/8/8/8/4K3 w - - 0 1");
+    // Bxc6+ removes Black's last non-king piece, reaching the known KBvK draw. A knight, not a
+    // queen: a hanging queen reads as a won position to a net trained on search scores.
+    pos.set_fen("4k3/8/2n5/1B6/8/8/8/4K3 w - - 0 1");
 
     var s = search.Searcher.new();
     defer s.deinit();

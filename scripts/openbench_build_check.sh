@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
-cp "$ROOT/nets/dianguang-3.nnue" "$WORK/candidate.nnue"
+cp "$ROOT/nets/dianguang-4.nnue" "$WORK/candidate.nnue"
 (cd "$ROOT" && make -j EXE="$WORK/Avalanche-ob" CC=zig EVALFILE="$WORK/candidate.nnue")
 test -x "$WORK/Avalanche-ob"
 printf 'position startpos\ngo depth 1\nquit\n' | "$WORK/Avalanche-ob" > "$WORK/uci.txt"

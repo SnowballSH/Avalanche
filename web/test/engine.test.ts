@@ -87,7 +87,7 @@ describe("wasm engine", () => {
   it("embeds the network exactly once", async () => {
     const [module, network] = await Promise.all([
       stat(wasmUrl),
-      stat(new URL("../../nets/dianguang-3.nnue", import.meta.url)),
+      stat(new URL("../../nets/dianguang-4.nnue", import.meta.url)),
     ]);
     assert.ok(module.size > network.size, "network missing from the module");
     assert.ok(

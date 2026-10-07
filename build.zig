@@ -70,7 +70,7 @@ pub fn build(b: *std.Build) void {
     const targetName = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
     // The embedded NNUE is selectable via -Dnet=<path> without editing this file.
     // It is imported under the name "nnue", which weights.zig @embedFile's.
-    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/dianguang-3.nnue";
+    const netPath = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse "nets/dianguang-4.nnue";
     const net: std.Build.LazyPath = if (std.fs.path.isAbsolute(netPath))
         .{ .cwd_relative = netPath }
     else
