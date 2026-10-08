@@ -67,8 +67,6 @@ jobs:
       - name: Unit tests
         run: zig build test
 
-      # Optimised code differs from Debug code and has been miscompiled before (docs/NNUE.md,
-      # "Refresh loop").
       - name: Unit tests (fast)
         run: zig build test -Doptimize=fast
 

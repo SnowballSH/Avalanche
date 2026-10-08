@@ -449,7 +449,6 @@ pub const NNUE = struct {
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
             var lanes: V = entry.acc[i..][0..UPDATE_LANES].*;
-            // The removed rows are summed and subtracted once, see "Refresh loop" in docs/NNUE.md.
             var removed: V = @splat(0);
             for (adds[0..add_n]) |row| lanes +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
             for (subs[0..sub_n]) |row| removed +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);

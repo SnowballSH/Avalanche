@@ -2,15 +2,14 @@ const std = @import("std");
 
 pub var show_wdl: bool = false;
 
-// m = min(240, ply) / 64; fitted with scripts/fit_wdl.py on Dianguang-3's self-play data, see docs/UCI.md.
+// m = min(240, ply) / 64
 const AS: [4]f64 = .{ -5.54409777, 26.13299996, -21.08835777, 151.38796569 };
 const BS: [4]f64 = .{ -5.54304227, 43.84033986, -122.10523447, 160.43050028 };
 
 const SCORE_CLAMP: f64 = 2000.0;
 const MAX_PLY: usize = 240;
 
-/// a(1): the internal score at which the side to move wins half of its games at ply 64. UCI scores are
-/// reported in units of it, so `cp 100` is a 50% win chance.
+/// a(1), the unit of UCI scores: `cp 100` is a 50% win chance.
 pub const PAWN_VALUE: i32 = @intFromFloat(@round(AS[0] + AS[1] + AS[2] + AS[3]));
 
 pub fn normalized(score: i32) i32 {

@@ -1148,9 +1148,6 @@ test "search: forced node-limited search continues after reporting mate" {
     var s = search.Searcher.new();
     defer s.deinit();
     s.force_thinking = true;
-    // Black mates in 3 and the search sees it within a few thousand nodes, where the old mate
-    // cutoff stopped. The node limit bounds the test and sits far below what the search needs to
-    // run out of depth. Search policy is deliberately independent of output.
     s.silent_output = true;
     s.max_nodes = 30_000;
     s.shared.stop = false;
@@ -1419,8 +1416,6 @@ test "qsearch: contempt draw keeps fail-soft provenance" {
 
     const pos = try support.new_position();
     defer support.destroy_position(pos);
-    // Bxc6+ removes Black's last non-king piece, reaching the known KBvK draw. A knight, not a
-    // queen: a hanging queen reads as a won position to a net trained on search scores.
     pos.set_fen("4k3/8/2n5/1B6/8/8/8/4K3 w - - 0 1");
 
     var s = search.Searcher.new();
