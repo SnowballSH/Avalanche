@@ -82,6 +82,7 @@ test "normalized scores put a 50% win chance at 100 cp and round to nearest" {
     try std.testing.expectEqual(@as(i32, 100), normalized(PAWN_VALUE));
     try std.testing.expectEqual(@as(i32, -100), normalized(-PAWN_VALUE));
     try std.testing.expectEqual(@as(i32, 0), normalized(0));
+    try std.testing.expectEqual(@as(i32, 25), normalized(37));
     try std.testing.expectEqual(normalized(37), -normalized(-37));
     const p = predict(PAWN_VALUE, 64);
     try std.testing.expect(p.win >= 490 and p.win <= 510);
