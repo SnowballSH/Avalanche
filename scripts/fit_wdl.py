@@ -446,7 +446,7 @@ def main() -> int:
             fmt = "pgn"
         else:
             fmt = "bullet"
-    x_var = args.x_var or ("ply" if fmt == "viri" else "material")
+    x_var = args.x_var or ("material" if fmt == "bullet" else "ply")
     if fmt == "bullet" and x_var == "ply":
         print("bulletformat does not store the ply; use --x-var material", file=sys.stderr)
         return 1
