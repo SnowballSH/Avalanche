@@ -26,7 +26,7 @@ make EXE=name [EVALFILE=net]  # what OpenBench runs, see below
 | Option | Meaning |
 |---|---|
 | `-Dtarget=`, `-Dcpu=` | Target triple and CPU. Without `-Dtarget` the build is for this machine and its exact CPU; with `-Dtarget` and no `-Dcpu` it is for the target's baseline CPU (see "CPU baselines") |
-| `-Dnet=<path>` | Network to embed (default `nets/dianguang-4.nnue`); `-Dhead` and `-Dbuckets` describe it when the file cannot (docs/NNUE.md) |
+| `-Dnet=<path>` | Network to embed (default `nets/dianguang-5.nnue`); `-Dhead` and `-Dbuckets` describe it when the file cannot (docs/NNUE.md) |
 | `-Dversion=<x.y.z>` | Version reported by `uci`. Without it a build reports its build time, which is why the configuration is never cached (`b.graph.poisonCache()`) |
 | `-Dstrip=true` | No debug information in the binary. The release script passes it |
 | `-Dtarget-name=<name>` | File name of the binary |

@@ -87,7 +87,7 @@ describe("wasm engine", () => {
   it("embeds the network exactly once", async () => {
     const [module, network] = await Promise.all([
       stat(wasmUrl),
-      stat(new URL("../../nets/dianguang-4.nnue", import.meta.url)),
+      stat(new URL("../../nets/dianguang-5.nnue", import.meta.url)),
     ]);
     assert.ok(module.size > network.size, "network missing from the module");
     assert.ok(
@@ -102,7 +102,7 @@ describe("wasm engine", () => {
     const output = run("go depth 1");
     assert.match(
       output[0] ?? "",
-      /^info string NNUE evaluation using dianguang-4 \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/,
+      /^info string NNUE evaluation using dianguang-5 \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/,
     );
   });
 

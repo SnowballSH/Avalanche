@@ -64,7 +64,7 @@ Tunable search parameters are also exposed as spin options for SPSA.
 - **Network name**: every `go` (and `eval`) starts with
   `info string NNUE evaluation using <name> (<architecture>, <size> MiB)`,
   where `<name>` is the stem of the `-Dnet` file the binary embeds (e.g.
-  `dianguang-4`) or the file name of the network loaded with `EvalFile`.
+  `dianguang-5`) or the file name of the network loaded with `EvalFile`.
 - **EvalFile**: a file is validated (architecture, exact size, weight ranges)
   into a temporary buffer before it replaces the active network, so a bad file
   never leaves the engine without a network; cached accumulators are then
