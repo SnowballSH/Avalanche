@@ -126,7 +126,7 @@ fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const Roo
     if (is_mate_score) {
         w.print("mate {}", .{mate_distance(score) * @as(i32, if (score > 0) 1 else -1)}) catch {};
     } else {
-        w.print("cp {}", .{score}) catch {};
+        w.print("cp {}", .{wdl_model.normalized(score)}) catch {};
     }
     switch (bound) {
         .exact => {},
@@ -642,7 +642,7 @@ pub const Searcher = struct {
                 if (in_check) {
                     outW.writeAll("mate 0") catch {};
                 } else {
-                    outW.print("cp {}", .{terminal}) catch {};
+                    outW.print("cp {}", .{wdl_model.normalized(terminal)}) catch {};
                 }
                 if (wdl_model.show_wdl) {
                     const p = if (in_check)
@@ -2125,11 +2125,11 @@ test "info line: bound annotation follows the score in Stockfish order" {
     var w = std.Io.Writer.fixed(&buf);
     print_line(&w, &pos, &line, 1, .lower, stats);
     try std.testing.expectEqualStrings(
-        "info depth 9 seldepth 12 multipv 1 score cp 42 lowerbound nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ line_ending,
+        "info depth 9 seldepth 12 multipv 1 score cp 28 lowerbound nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ line_ending,
         w.buffered(),
     );
 
     w = std.Io.Writer.fixed(&buf);
     print_line(&w, &pos, &line, 2, .exact, stats);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "multipv 2 score cp 42 nodes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "multipv 2 score cp 28 nodes") != null);
 }

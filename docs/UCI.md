@@ -76,3 +76,10 @@ Tunable search parameters are also exposed as spin options for SPSA.
 - Output lines use CRLF on Windows and the Stockfish field order
   (`depth seldepth multipv score [wdl] nodes nps hashfull tbhits time pv`),
   which some GUIs require to record PVs.
+- `score cp` is normalized: `cp 100` is the internal score at which the side to move wins half of its
+  games at ply 64 under the engine's win-rate model (`src/engine/wdl.zig`; 151 internal centipawns), as in
+  Stockfish, so evaluations stay comparable across networks. `UCI_ShowWDL` permille, the `eval` command
+  and the data written by `datagen` use the internal score. The model is a logistic in the score whose
+  midpoint `a` and width `b` are cubics in `min(ply, 240) / 64`. To refit it for a new network, run
+  `scripts/fit_wdl.py --data '<its training data>/*.viribin'` on held-out self-play chunks; it prints the
+  two coefficient arrays and the calibration by score bucket.

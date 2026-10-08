@@ -50,6 +50,7 @@ Run `scripts/sprt.py --help` for full option reference.
 | `prepare_data.sh` | Preprocess raw self-play data for training |
 | `install_net.sh` | Install a trained `.nnue` file into `nets/` |
 | `update_bench.sh` | Rebuild and update `bench.nodes` and `nnue-speed.checksum` after a search or network change |
+| `fit_wdl.py` | Refit the UCI win-rate model (`src/engine/wdl.zig`) on self-play data; see [UCI.md](../docs/UCI.md) |
 | `verify_binary.sh` | Run a built binary and check its `bench` node count and `nnue-speed` checksum (and, optionally, its SIMD paths) |
 
 Tune bulk datagen book composition by editing `scripts/datagen_a_lot.json`.
