@@ -122,6 +122,9 @@ Supported features include Chess960 and Double Fischer Random Chess, pondering, 
 
 All Neural Networks used by Avalanche are trained through self-play. There have been several generations of reinforcement learning, listed below by codenames:
 
+- Dianguang-5 电光
+  - `768x16 -> 1024 -> pairwise -> 16x2 -> 32 -> 1x8`
+  - Dianguang-4's data and recipe, trained for 1,200 superbatches instead of 800
 - Dianguang-4 电光
   - `768x16 -> 1024 -> pairwise -> 16x2 -> 32 -> 1x8`
   - Dianguang-3's recipe on 4 billion new positions labelled by Dianguang-3 at 8,000 nodes
