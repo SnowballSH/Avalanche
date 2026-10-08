@@ -1149,6 +1149,7 @@ test "search: forced node-limited search continues after reporting mate" {
     defer s.deinit();
     s.force_thinking = true;
     s.silent_output = true;
+    // Above the nodes of the mate in 3, far below running out of depth.
     s.max_nodes = 30_000;
     s.shared.stop = false;
     s.reset_heuristics(true);

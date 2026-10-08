@@ -283,3 +283,7 @@ package and its dependency `aro` are vendored.
 - **Building the release binaries with a CPU model's tuning** (`znver4`, `cortex_a76`) instead of
   a feature level. A model brings features its siblings lack and tuning only its own
   microarchitecture wants; the rows above name features and keep LLVM's generic tuning.
+
+## Timer
+
+`src/chess/types.zig` keeps its own monotonic timer: the standard library has had none since Zig 0.16.

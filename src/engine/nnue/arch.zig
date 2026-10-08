@@ -24,7 +24,7 @@ pub const WIDEST_VECTOR_BITS: comptime_int = if (builtin.target.cpu.arch == .aar
 /// For declaring LLVM intrinsics: passes every vector, masks included, as a vector.
 pub const intrinsic_call: std.lang.CallingConvention = if (builtin.target.cpu.arch == .x86_64) .{ .x86_64_vectorcall = .{} } else .c;
 
-/// The bytes of `value` read as a `To`; the array casts `@bitCast` compiles bit by bit (docs/NNUE.md).
+/// The bytes of `value` read as a `To`; `@bitCast` compiles array casts bit by bit (docs/NNUE.md).
 pub inline fn reinterpret(comptime To: type, value: anytype) To {
     comptime std.debug.assert(@bitSizeOf(To) == @bitSizeOf(@TypeOf(value)) and @bitSizeOf(To) == 8 * @sizeOf(To));
     return @as(*align(1) const To, @ptrCast(&value)).*;

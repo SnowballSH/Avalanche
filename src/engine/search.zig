@@ -118,7 +118,6 @@ inline fn mate_distance(score: i32) i32 {
     return @divTrunc(hce.MateScore - @as(i32, @intCast(@abs(score))) + 1, 2);
 }
 
-// Field order follows Stockfish; some GUIs drop PVs from other orderings.
 pub const TB_UCI_SCORE: i32 = 50000;
 
 /// Tablebase scores map to `TB_UCI_SCORE - ply`, everything else to the normalized scale (docs/UCI.md).
@@ -129,6 +128,7 @@ pub fn uci_centipawns(score: i32) i32 {
     return if (score > 0) TB_UCI_SCORE - plies_to_win else plies_to_win - TB_UCI_SCORE;
 }
 
+// Field order follows Stockfish; some GUIs drop PVs from other orderings.
 fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const RootLine, multipv: usize, bound: ScoreBound, stats: InfoStats) void {
     const score = line.score;
     w.print("info depth {} seldepth {} multipv {} score ", .{ line.depth, line.seldepth, multipv }) catch {};
