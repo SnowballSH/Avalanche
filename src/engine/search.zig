@@ -118,6 +118,16 @@ inline fn mate_distance(score: i32) i32 {
     return @divTrunc(hce.MateScore - @as(i32, @intCast(@abs(score))) + 1, 2);
 }
 
+pub const TB_UCI_SCORE: i32 = 50000;
+
+/// Tablebase scores map to `TB_UCI_SCORE - ply`, everything else to the normalized scale (docs/UCI.md).
+pub fn uci_centipawns(score: i32) i32 {
+    const magnitude: i32 = @intCast(@abs(score));
+    if (magnitude < SCORE_PLY_ADJ) return wdl_model.normalized(score);
+    const plies_to_win = TB_WIN_SCORE - magnitude;
+    return if (score > 0) TB_UCI_SCORE - plies_to_win else plies_to_win - TB_UCI_SCORE;
+}
+
 // Field order follows Stockfish; some GUIs drop PVs from other orderings.
 fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const RootLine, multipv: usize, bound: ScoreBound, stats: InfoStats) void {
     const score = line.score;
@@ -126,7 +136,7 @@ fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const Roo
     if (is_mate_score) {
         w.print("mate {}", .{mate_distance(score) * @as(i32, if (score > 0) 1 else -1)}) catch {};
     } else {
-        w.print("cp {}", .{wdl_model.normalized(score)}) catch {};
+        w.print("cp {}", .{uci_centipawns(score)}) catch {};
     }
     switch (bound) {
         .exact => {},
@@ -2125,11 +2135,18 @@ test "info line: bound annotation follows the score in Stockfish order" {
     var w = std.Io.Writer.fixed(&buf);
     print_line(&w, &pos, &line, 1, .lower, stats);
     try std.testing.expectEqualStrings(
-        "info depth 9 seldepth 12 multipv 1 score cp 28 lowerbound nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ line_ending,
+        std.fmt.comptimePrint("info depth 9 seldepth 12 multipv 1 score cp {} lowerbound nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4", .{comptime uci_centipawns(42)}) ++ line_ending,
         w.buffered(),
     );
 
     w = std.Io.Writer.fixed(&buf);
     print_line(&w, &pos, &line, 2, .exact, stats);
-    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), "multipv 2 score cp 28 nodes") != null);
+    try std.testing.expect(std.mem.indexOf(u8, w.buffered(), std.fmt.comptimePrint("multipv 2 score cp {} nodes", .{comptime uci_centipawns(42)})) != null);
+}
+
+test "uci score: tablebase scores map to the fixed band by plies to the win" {
+    try std.testing.expectEqual(TB_UCI_SCORE - 7, uci_centipawns(TB_WIN_SCORE - 7));
+    try std.testing.expectEqual(7 - TB_UCI_SCORE, uci_centipawns(7 - TB_WIN_SCORE));
+    try std.testing.expectEqual(wdl_model.normalized(SCORE_PLY_ADJ - 1), uci_centipawns(SCORE_PLY_ADJ - 1));
+    try std.testing.expect(uci_centipawns(3000) < uci_centipawns(TB_WIN_SCORE - MAX_PLY));
 }

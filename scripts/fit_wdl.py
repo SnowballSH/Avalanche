@@ -10,6 +10,7 @@
     draw = 1 - win - loss
 
 Usage:
+    python3 scripts/fit_wdl.py --format pgn --score-scale 1.51 --data "games/*.pgn"
     python3 scripts/fit_wdl.py
     python3 scripts/fit_wdl.py --data 'data/*.viribin' --samples 20000000
     python3 scripts/fit_wdl.py --emit /tmp/wdl_coeffs.zig
@@ -18,8 +19,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import bz2
 import glob
 import os
+import re
 import sys
 from multiprocessing import Pool
 
@@ -144,6 +147,65 @@ def scan_viri(job) -> tuple[np.ndarray, int, int]:
     else:  # piece count is not recoverable from the move stream alone
         raise SystemExit("--x-var material requires --format bullet")
     accumulate(counts, t_bin, score, outcome)
+    return counts, total, int(mask.sum())
+
+
+PGN_COMMENT = re.compile(r"\{([^}]*)\}")
+PGN_SCORE = re.compile(r"^([+-])(M?)(\d+(?:\.\d+)?)/")
+
+
+def scan_pgn(job) -> tuple[np.ndarray, int, int]:
+    """Games as a match runner (cutechess, fastchess) writes them: every move carries a comment that starts with
+    the engine's score in pawns from the mover's side, e.g. `{+0.35/18 1.2s}`. The scores are in the engine's
+    UCI units, which `score_scale` turns back into internal centipawns; book moves (`{book}`) are skipped and
+    mate scores are clamped to the score limit."""
+    path, keep_prob, min_ply, max_abs_score, seed, x_var, score_scale = job
+    empty = np.zeros((n_t_bins(x_var), N_SCORE_BINS, 3), dtype=np.int64)
+    if x_var != "ply":
+        raise SystemExit("--format pgn fits against the ply; use --x-var ply")
+    opener = bz2.open if path.endswith(".bz2") else open
+    with opener(path, "rt", encoding="utf-8", errors="replace") as handle:
+        text = handle.read()
+    plies: list[int] = []
+    scores: list[int] = []
+    outcomes: list[int] = []
+    for game in re.split(r"\n(?=\[Event )", text):
+        if not game.strip():
+            continue
+        result = re.search(r'\[Result "([^"]+)"\]', game)
+        if result is None or result[1] not in ("1-0", "0-1", "1/2-1/2"):
+            continue
+        white_result = {"1-0": 2, "1/2-1/2": 1, "0-1": 0}[result[1]]
+        fen = re.search(r'\[FEN "([^"]+)"\]', game)
+        fields = fen[1].split() if fen else []
+        ply0 = (int(fields[5]) - 1) * 2 + (1 if fields[1] == "b" else 0) if len(fields) >= 6 else 0
+        body = game[game.rindex("]") + 1 :]
+        ply = ply0
+        for comment in PGN_COMMENT.findall(body):
+            match = PGN_SCORE.match(comment.strip())
+            if match is None:
+                ply += 1
+                continue
+            sign = 1 if match[1] == "+" else -1
+            raw = SCORE_LIMIT if match[2] else float(match[3]) * 100.0 * score_scale
+            white_to_move = ply % 2 == 0
+            plies.append(ply)
+            scores.append(int(round(sign * min(raw, SCORE_LIMIT))))
+            outcomes.append(white_result if white_to_move else 2 - white_result)
+            ply += 1
+    total = len(scores)
+    if total == 0:
+        return empty, 0, 0
+    ply_a = np.asarray(plies, dtype=np.int64)
+    score = np.asarray(scores, dtype=np.int64)
+    outcome = np.asarray(outcomes, dtype=np.int64)
+    mask = (ply_a >= min_ply) & (np.abs(score) <= max_abs_score)
+    if keep_prob < 1.0:
+        mask &= np.random.default_rng(seed).random(total) < keep_prob
+    if not mask.any():
+        return empty, total, 0
+    counts = empty
+    accumulate(counts, np.minimum(ply_a[mask] // PLY_STEP, N_PLY_BINS - 1), score[mask], outcome[mask])
     return counts, total, int(mask.sum())
 
 
@@ -351,7 +413,7 @@ def main() -> int:
         default=None,
         help="file or glob (repeatable); default data/old_data/*.viribin",
     )
-    ap.add_argument("--format", choices=["auto", "viri", "bullet"], default="auto")
+    ap.add_argument("--format", choices=["auto", "viri", "bullet", "pgn"], default="auto")
     ap.add_argument("--x-var", choices=["ply", "material"], default=None, help="default: ply for viri, material for bullet")
     ap.add_argument("--samples", type=int, default=8_000_000, help="approximate number of positions to fit on")
     ap.add_argument("--workers", type=int, default=min(48, os.cpu_count() or 1))
@@ -359,6 +421,12 @@ def main() -> int:
     ap.add_argument("--max-abs-score", type=int, default=SCORE_LIMIT)
     ap.add_argument("--seed", type=int, default=20260728)
     ap.add_argument("--emit", default=None, help="also write the Zig snippet to this path")
+    ap.add_argument(
+        "--score-scale",
+        type=float,
+        default=1.0,
+        help="pgn only: internal centipawns per UCI centipawn (PAWN_VALUE / 100 for a normalizing engine)",
+    )
     args = ap.parse_args()
 
     patterns = args.data or ["data/old_data/*.viribin"]
@@ -372,7 +440,12 @@ def main() -> int:
 
     fmt = args.format
     if fmt == "auto":
-        fmt = "viri" if all(p.endswith(".viribin") for p in paths) else "bullet"
+        if all(p.endswith(".viribin") for p in paths):
+            fmt = "viri"
+        elif all(p.endswith((".pgn", ".pgn.bz2")) for p in paths):
+            fmt = "pgn"
+        else:
+            fmt = "bullet"
     x_var = args.x_var or ("ply" if fmt == "viri" else "material")
     if fmt == "bullet" and x_var == "ply":
         print("bulletformat does not store the ply; use --x-var material", file=sys.stderr)
@@ -396,6 +469,15 @@ def main() -> int:
             for p in paths
         ]
         worker = scan_viri
+    elif fmt == "pgn":
+        # About 120 bytes per commented move.
+        est_positions = max(1, int(total_bytes / 120))
+        keep = min(1.0, args.samples / est_positions)
+        jobs = [
+            (p, keep, args.min_ply, args.max_abs_score, int(rng.integers(1 << 62)), x_var, args.score_scale)
+            for p in paths
+        ]
+        worker = scan_pgn
     else:
         # The file is already shuffled, so contiguous blocks are an unbiased and
         # far more I/O-friendly sample than scattered single records.

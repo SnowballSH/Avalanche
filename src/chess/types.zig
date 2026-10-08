@@ -2,7 +2,6 @@ const std = @import("std");
 const platform = @import("../platform.zig");
 const position = @import("position.zig");
 
-// Monotonic timer; std has none since Zig 0.16.
 pub const Timer = struct {
     start_ns: i96,
 
