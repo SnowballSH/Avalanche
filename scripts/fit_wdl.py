@@ -10,7 +10,7 @@
     draw = 1 - win - loss
 
 Usage:
-    python3 scripts/fit_wdl.py --format pgn --score-scale 1.51 --data "games/*.pgn"
+    python3 scripts/fit_wdl.py --format pgn --score-scale <pawn value of the engine that played / 100> --data "games/*.pgn"
     python3 scripts/fit_wdl.py
     python3 scripts/fit_wdl.py --data 'data/*.viribin' --samples 20000000
     python3 scripts/fit_wdl.py --emit /tmp/wdl_coeffs.zig
@@ -414,7 +414,7 @@ def main() -> int:
         help="file or glob (repeatable); default data/old_data/*.viribin",
     )
     ap.add_argument("--format", choices=["auto", "viri", "bullet", "pgn"], default="auto")
-    ap.add_argument("--x-var", choices=["ply", "material"], default=None, help="default: ply for viri, material for bullet")
+    ap.add_argument("--x-var", choices=["ply", "material"], default=None, help="default: material for bullet, ply otherwise")
     ap.add_argument("--samples", type=int, default=8_000_000, help="approximate number of positions to fit on")
     ap.add_argument("--workers", type=int, default=min(48, os.cpu_count() or 1))
     ap.add_argument("--min-ply", type=int, default=0)

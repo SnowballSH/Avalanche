@@ -82,7 +82,9 @@ Tunable search parameters are also exposed as spin options for SPSA.
   `50000 - plies` to the conversion, with the sign of the result. `UCI_ShowWDL` permille, the `eval` command
   and the data written by `datagen` use the internal score. The model is a logistic in the score whose
   midpoint `a` and width `b` are cubics in `min(ply, 240) / 64`; the shipped coefficients were fitted on
-  13,000 games of the engine at 40+0.4. To refit it for a new network, run
+  13,000 games of the engine at 40+0.4, their scores unscaled with the pawn value of the build that played
+  them. To refit it for a new network, run
   `scripts/fit_wdl.py --data '<its training data>/*.viribin'` on held-out self-play chunks, or
-  `--format pgn --score-scale <PAWN_VALUE / 100>` on match games, whose scores are in UCI units; it prints
+  `--format pgn --score-scale <PAWN_VALUE of the build that played the games / 100>` on match games,
+  whose scores are in UCI units; it prints
   the two coefficient arrays and the calibration by score bucket.

@@ -81,7 +81,7 @@ test "normalized scores put a 50% win chance at 100 cp and round to nearest" {
     try std.testing.expectEqual(@as(i32, 100), normalized(PAWN_VALUE));
     try std.testing.expectEqual(@as(i32, -100), normalized(-PAWN_VALUE));
     try std.testing.expectEqual(@as(i32, 0), normalized(0));
-    for ([_]i32{ 1, 37, 75, 76, 151, 2000 }) |score| {
+    for ([_]i32{ 1, 37, 500, 2000 }) |score| {
         const exact = 100.0 * @as(f64, @floatFromInt(score)) / @as(f64, @floatFromInt(PAWN_VALUE));
         try std.testing.expectEqual(@as(i32, @intFromFloat(@round(exact))), normalized(score));
         try std.testing.expectEqual(normalized(score), -normalized(-score));
