@@ -3,8 +3,8 @@ const std = @import("std");
 pub var show_wdl: bool = false;
 
 // m = min(240, ply) / 64
-const AS: [4]f64 = .{ -5.54409777, 26.13299996, -21.08835777, 151.38796569 };
-const BS: [4]f64 = .{ -5.54304227, 43.84033986, -122.10523447, 160.43050028 };
+const AS: [4]f64 = .{ -1.94427095, 17.60229338, -16.25767549, 139.03011346 };
+const BS: [4]f64 = .{ -3.49822308, 24.88336871, -50.05295749, 63.04117979 };
 
 const SCORE_CLAMP: f64 = 2000.0;
 const MAX_PLY: usize = 240;
@@ -81,8 +81,11 @@ test "normalized scores put a 50% win chance at 100 cp and round to nearest" {
     try std.testing.expectEqual(@as(i32, 100), normalized(PAWN_VALUE));
     try std.testing.expectEqual(@as(i32, -100), normalized(-PAWN_VALUE));
     try std.testing.expectEqual(@as(i32, 0), normalized(0));
-    try std.testing.expectEqual(@as(i32, 25), normalized(37));
-    try std.testing.expectEqual(normalized(37), -normalized(-37));
+    for ([_]i32{ 1, 37, 500, 2000 }) |score| {
+        const exact = 100.0 * @as(f64, @floatFromInt(score)) / @as(f64, @floatFromInt(PAWN_VALUE));
+        try std.testing.expectEqual(@as(i32, @intFromFloat(@round(exact))), normalized(score));
+        try std.testing.expectEqual(normalized(score), -normalized(-score));
+    }
     const p = predict(PAWN_VALUE, 64);
     try std.testing.expect(p.win >= 490 and p.win <= 510);
 }

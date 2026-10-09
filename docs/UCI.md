@@ -77,12 +77,14 @@ Tunable search parameters are also exposed as spin options for SPSA.
   (`depth seldepth multipv score [wdl] nodes nps hashfull tbhits time pv`),
   which some GUIs require to record PVs.
 - `score cp` is normalized: `cp 100` is the internal score at which the side to move wins half of its
-  games at ply 64 under the engine's win-rate model (`src/engine/wdl.zig`; 151 internal centipawns), as in
+  games at ply 64 under the engine's win-rate model (`src/engine/wdl.zig`; 138 internal centipawns), as in
   Stockfish, so evaluations stay comparable across networks. A tablebase win or loss is reported as
   `50000 - plies` to the conversion, with the sign of the result. `UCI_ShowWDL` permille, the `eval` command
   and the data written by `datagen` use the internal score. The model is a logistic in the score whose
   midpoint `a` and width `b` are cubics in `min(ply, 240) / 64`; the shipped coefficients were fitted on
-  held-out positions of Dianguang-5's training data. To refit it for a new network, run
+  13,000 games of the engine at 40+0.4, their scores unscaled with the pawn value of the build that played
+  them. To refit it for a new network, run
   `scripts/fit_wdl.py --data '<its training data>/*.viribin'` on held-out self-play chunks, or
-  `--format pgn --score-scale <PAWN_VALUE / 100>` on match games, whose scores are in UCI units; it prints
+  `--format pgn --score-scale <PAWN_VALUE of the build that played the games / 100>` on match games,
+  whose scores are in UCI units; it prints
   the two coefficient arrays and the calibration by score bucket.
