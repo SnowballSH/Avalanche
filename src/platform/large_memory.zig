@@ -1,15 +1,13 @@
-//! Large, long-lived memory in blocks straight from the OS: on transparent
-//! huge pages on Linux, on ordinary pages elsewhere. See docs/MEMORY.md.
+//! Large, long-lived memory in blocks straight from the OS. See docs/MEMORY.md.
 
 const std = @import("std");
 const builtin = @import("builtin");
 const platform = @import("../platform.zig");
 
-pub const has_huge_pages = builtin.target.os.tag == .linux and !platform.is_wasm;
+pub const has_huge_pages = platform.is_linux;
 
 pub const HUGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
 
-/// Where a block starts; natively it is mapped as a whole number of these.
 pub const ALIGNMENT: usize = if (has_huge_pages)
     HUGE_PAGE_SIZE
 else if (platform.is_wasm)
@@ -19,16 +17,12 @@ else
 
 pub const Error = std.mem.Allocator.Error;
 
-/// Runs on a thread before it backs part `index` of the `parts` of a block,
-/// to move the thread to where that part should live.
 pub const Placement = *const fn (index: usize, parts: usize) void;
 
 pub fn empty(comptime T: type) []align(ALIGNMENT) T {
     return @as([*]align(ALIGNMENT) T, @ptrFromInt(ALIGNMENT))[0..0];
 }
 
-/// `n` zeroed items; a page is backed when it is first written. Linux lists
-/// the block as `[anon:avalanche-<label>]`.
 pub fn alloc(comptime T: type, n: usize, comptime label: [:0]const u8) Error![]align(ALIGNMENT) T {
     comptime std.debug.assert(@alignOf(T) <= ALIGNMENT and @sizeOf(T) != 0);
     if (n == 0) return empty(T);
@@ -43,8 +37,6 @@ pub fn alloc(comptime T: type, n: usize, comptime label: [:0]const u8) Error![]a
     return @as([*]align(ALIGNMENT) T, @ptrCast(block.ptr))[0..n];
 }
 
-/// `alloc` with every page backed on return. Up to `threads` parts are backed
-/// at once; with a `placement`, each on a thread of its own that it has placed.
 pub fn alloc_populated(comptime T: type, n: usize, comptime label: [:0]const u8, threads: usize, placement: ?Placement) Error![]align(ALIGNMENT) T {
     const items = try alloc(T, n, label);
     if (!platform.is_wasm) in_parallel(std.mem.sliceAsBytes(items), threads, placement, touch_pages);
@@ -66,13 +58,10 @@ pub fn destroy(comptime T: type, item: *align(ALIGNMENT) T) void {
     free(T, one);
 }
 
-/// Zeroes `bytes` in up to `threads` parts at once.
 pub fn zero(bytes: []u8, threads: usize) void {
     in_parallel(bytes, threads, null, zero_bytes);
 }
 
-/// How much of `bytes` is on huge pages right now; an upper bound where Linux
-/// has merged the block with its neighbours.
 pub fn huge_page_bytes(bytes: []const u8) u64 {
     if (!has_huge_pages or bytes.len == 0) return 0;
     const file = std.Io.Dir.cwd().openFile(platform.io, "/proc/self/smaps", .{}) catch return 0;
@@ -82,7 +71,6 @@ pub fn huge_page_bytes(bytes: []const u8) u64 {
     return smaps_huge_bytes(&stream.interface, @intFromPtr(bytes.ptr), bytes.len);
 }
 
-/// Bytes mapped and not yet freed. Counted in Debug builds and in tests.
 pub fn live_bytes() usize {
     return platform.atomicLoad(usize, &live, .monotonic);
 }
@@ -131,9 +119,6 @@ fn in_parallel(bytes: []u8, threads: usize, placement: ?Placement, comptime work
     in_parts(bytes, part_count(bytes.len, threads), placement, work);
 }
 
-/// Runs `work` over at most `parts` consecutive parts of `bytes`, each a whole
-/// number of huge pages. The calling thread takes the last part unless there
-/// is a `placement`.
 fn in_parts(bytes: []u8, parts: usize, placement: ?Placement, comptime work: fn ([]u8) void) void {
     std.debug.assert(parts >= 1 and parts <= MAX_PARTS);
     const placed_work = struct {
@@ -179,8 +164,6 @@ fn touch_pages(bytes: []u8) void {
     }
 }
 
-/// The `AnonHugePages` of every mapping in the `smaps` text that overlaps the
-/// `len` bytes at `first`, capped at `len`.
 fn smaps_huge_bytes(smaps: *std.Io.Reader, first: usize, len: usize) u64 {
     const HUGE_FIELD = "AnonHugePages:";
     var total: u64 = 0;
@@ -199,7 +182,6 @@ fn smaps_huge_bytes(smaps: *std.Io.Reader, first: usize, len: usize) u64 {
 
 const Range = struct { first: usize, end: usize };
 
-/// The address range of an smaps mapping header, `<first>-<end> <perms> ...` in hexadecimal.
 fn mapping_range(line: []const u8) ?Range {
     const dash = std.mem.findScalar(u8, line, '-') orelse return null;
     const space = std.mem.findScalarPos(u8, line, dash, ' ') orelse return null;
@@ -244,7 +226,6 @@ const PlacementRecorder = struct {
     }
 };
 
-/// How many OS pages of `block` are in memory, by `mincore`.
 fn resident_pages(block: []align(ALIGNMENT) u8) !usize {
     const vec = try testing.allocator.alloc(u8, page_count(block.len));
     defer testing.allocator.free(vec);

@@ -40,6 +40,23 @@ test "thread pool: grows, resets in parallel, shrinks and shuts down" {
     try expectEqual(@as(usize, 0), pool.count());
 }
 
+test "thread pool: a shut-down pool holds no memory and can be started again" {
+    if (comptime !platform.has_threads) return error.SkipZigTest;
+    platform.io = std.testing.io;
+    support.init_tables();
+    search.init_lmr();
+
+    var pool: thread_pool.ThreadPool = .{};
+    pool.resize(2);
+    pool.deinit();
+    try expectEqual(@as(usize, 0), pool.count());
+    try expectEqual(@as(usize, 0), pool.workers.capacity);
+
+    pool.resize(1);
+    defer pool.deinit();
+    try expectEqual(@as(usize, 1), pool.count());
+}
+
 const STRESS_HELPERS = 3;
 const STRESS_CYCLES = 2000;
 const STRESS_RESET_EVERY = 500;

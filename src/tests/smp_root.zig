@@ -31,9 +31,6 @@ fn expect_matches_fresh(pos: *position.Position) !void {
 
 const RootCase = struct { fen: []const u8, moves: []const []const u8 };
 
-// One helper adopts every root in turn, so each rebuild runs against a Finny
-// table warmed by unrelated positions. The king walks cross input buckets and
-// the mirroring boundary.
 const root_cases = [_]RootCase{
     .{ .fen = types.DEFAULT_FEN, .moves = &.{} },
     .{ .fen = types.DEFAULT_FEN, .moves = &.{ "e2e4", "e7e5", "e1e2", "e8e7", "e2d3", "e7d6" } },
@@ -76,7 +73,6 @@ test "smp root: adopted root evaluates like a fresh set_fen" {
         try expect_same_evaluation(main, helper);
         try expect_matches_fresh(helper);
 
-        // Moves from the adopted root update incrementally and unwind back to it.
         const helper_moves = helper.legal_moves();
         for (helper_moves.items()) |move| {
             support.play(helper, move);
@@ -87,6 +83,8 @@ test "smp root: adopted root evaluates like a fresh set_fen" {
         try expect_same_evaluation(main, helper);
     }
 }
+
+const PLIES_LEFT_FROM_AN_EARLIER_GAME = 40;
 
 test "smp root: helper sees a repetition from before the root" {
     support.init_search();
@@ -99,8 +97,7 @@ test "smp root: helper sees a repetition from before the root" {
     defer main.deinit();
     var helper = search.Searcher.new();
     defer helper.deinit();
-    // Leftover history from an earlier, longer game must not survive.
-    for (0..40) |_| try helper.hash_history.append(pos.hash);
+    for (0..PLIES_LEFT_FROM_AN_EARLIER_GAME) |_| try helper.hash_history.append(pos.hash);
 
     try main.hash_history.append(pos.hash);
     for ([_][]const u8{ "g1f3", "g8f6", "f3g1" }) |move| {
@@ -140,7 +137,6 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
     s.silent_output = true;
 
     var helper_nodes: u64 = 0;
-    // Consecutive searches from different roots, as in a game.
     for (root_cases) |case| {
         tt.GlobalTT.clear();
         try enter_root(&s, pos, case);
