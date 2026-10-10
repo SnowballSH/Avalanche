@@ -19,7 +19,9 @@ exact size of a single-layer network and no multi-layer header, `NotANetwork` to
 without that header, `UnsupportedHeader` to one whose header differs (or is cut short), and
 `WrongSize` to one with a valid header and another length. A single-layer build answers
 `WrongArchitecture` to a file with the multi-layer header and `WrongSize` to any other length. A
-file larger than both layouts is not read at all (`StreamTooLong`).
+file is read up to the size of the larger of the two layouts, so that a network of the other
+architecture is still recognised and named as such; a file larger than both is not read at all
+(`StreamTooLong`).
 
 Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
 `src/engine/nnue/head_single.zig`, `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig`
@@ -32,15 +34,20 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
   (bullet's `ChessBucketsMirrored`, layout `BUCKET_LAYOUT_16`). For a perspective, with squares
   flipped vertically for black, the king on `k` and `m = 7` if the king is on files e to h, else 0:
   `feature = 768 * bucket[k] + 384 * [piece is the opponent's] + 64 * piece_type + (square ^ m)`.
+  `-Dbuckets=1` builds an engine for a network without king buckets (bullet's `Chess768`): one
+  bucket and no mirroring, so `bucket[k]` and `m` are always 0. The default is `-Dbuckets=16`.
 - **Accumulator.** Per perspective, `acc[i] = l0b[i] + sum over active features f of l0w[f][i]`,
-  i16, `i < 1024`. Quantised by `QA = 255`: 255 is 1.0.
+  i16, `i < 1024`. Quantised by `QA = 255`: 255 is 1.0. The engine keeps every accumulator
+  aligned to 64 bytes, and a head receives it through a pointer type that carries the alignment
+  (`arch.AccumulatorPtr`), so the heads' vector loads are aligned loads at every vector width.
 - **Output bucket.** `b = min((piece_count - 2) / 4, 7)`.
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
 **Accumulator updates** (`src/engine/nnue.zig`). A move opens the next frame of a stack and
-records in it the features that appeared and disappeared (one of each for a quiet move, a second
-removal for a capture, two of each for castling) and whether its king left its bucket or crossed
+records in it the features that appeared and disappeared (one of each for a quiet move or a
+promotion, a second removal for a capture, en passant and capturing promotions included, two of
+each for castling; no legal move changes more) and whether its king left its bucket or crossed
 the mirror line. The frame's accumulators are computed at once, or later when an evaluation
 needs them ("Lazy updates" below), each perspective in one pass: the values of the frame below
 plus the rows of the features that appeared, minus those that disappeared. When a king moves to
@@ -48,8 +55,15 @@ another bucket or crosses the mirror line, every feature of that king's perspect
 perspective is then not updated at all: it is rebuilt from the "Finny table", a cache with one
 accumulator per perspective, mirror side and bucket and the piece sets it was computed for. The
 rebuild adds and removes only the rows by which the position differs from the cached one, and
-writes the result to the cache and to the frame in the same pass. Wrapping arithmetic makes the
-order of the additions irrelevant.
+writes the result to the cache and to the frame in the same pass. Updates and rebuilds add and
+subtract with wrapping arithmetic: only the finished accumulator has to fit an i16, not every
+partial sum, so the order of the rows is irrelevant.
+
+The frames, the records of their moves and the evaluation cache of a `Position` are one block of
+large memory (docs/MEMORY.md, "What uses it"). A position allocates it once and keeps it through
+`reset` and every `set_fen`: the evaluator of the new position takes the block over with an empty
+stack whose bottom frame is marked for a rebuild, and the cache keeps its entries, which hold for
+any position of the same network.
 
 **Evaluation cache** (`src/engine/nnue/eval_cache.zig`). The network's output is a function of
 the pieces and of the side it is computed for, and the search asks for it again and again for the
@@ -71,7 +85,10 @@ scaling the search applies to the output (`EvalScale`, material, the fifty-move 
 after the cache, because the counter is not part of the hash. A cache belongs to the network it
 was filled with: `weights.generation` changes with every network that becomes active, and a
 position whose evaluation is rebuilt under another generation clears its cache and its Finny
-table first.
+table first. The rebuild is the caller's part: whoever makes another network the active one
+(`weights.load`, `weights.install`) refreshes the evaluation of every position it keeps
+(`Position.refresh_evaluation`) or sets it up again. Until then such a position still holds the
+accumulators of the network before.
 
 Hit rate by table size, measured with whole 64-bit keys:
 

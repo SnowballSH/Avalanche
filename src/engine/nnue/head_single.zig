@@ -1,4 +1,4 @@
-//! Single-layer head: `(1024)x2 -> SCReLU -> 1x8`, i16 weights.
+//! See "Single-layer head" in docs/NNUE.md.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -14,7 +14,6 @@ const SCALE = arch.SCALE;
 pub const OUTPUT_WEIGHT_MIN: i16 = -128;
 pub const OUTPUT_WEIGHT_MAX: i16 = 127;
 
-/// The part of the architecture name after the feature transformer.
 pub const DESCRIPTION = std.fmt.comptimePrint("{d}", .{OUTPUT_SIZE});
 
 pub const Weights = extern struct {
@@ -24,8 +23,6 @@ pub const Weights = extern struct {
 
 pub const ValidateError = error{OutputWeightOutOfRange};
 
-/// Checks the head's bytes (the layout of `Weights`) for the output-weight
-/// range the SIMD inference assumes.
 pub fn validate(bytes: []const u8) ValidateError!void {
     const layer_2 = bytes[@offsetOf(Weights, "layer_2")..][0..@sizeOf(@FieldType(Weights, "layer_2"))];
     var i: usize = 0;
@@ -43,9 +40,7 @@ comptime {
     std.debug.assert(HIDDEN_SIZE % (OUTPUT_LANES * 4) == 0);
 }
 
-/// Pairwise signed i16 dot product. Optimized x86 builds use pmaddwd directly;
-/// Debug and other architectures retain the portable expression. LLVM leaves
-/// x86 intrinsics unresolved at -Doptimize=debug, hence the explicit mode guard.
+/// LLVM leaves target intrinsics unresolved at -Doptimize=debug, hence the mode guards.
 inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
     if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isX86()) {
         if (comptime OUTPUT_LANES == 32 and builtin.target.cpu.has(.x86, .avx512f) and builtin.target.cpu.has(.x86, .avx512bw)) {
@@ -69,7 +64,6 @@ inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
     return even + odd;
 }
 
-/// Evaluation in centipawns for the side to move, whose accumulator is `own`.
 pub inline fn evaluate(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     const w2 = &head.layer_2[bucket];
 

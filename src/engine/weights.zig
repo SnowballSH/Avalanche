@@ -9,31 +9,19 @@ pub const arch = @import("nnue/arch.zig");
 pub const head_single = @import("nnue/head_single.zig");
 pub const head_multi = @import("nnue/head_multi.zig");
 
-/// King input buckets. 1 = flat Chess768; 16 = ChessBucketsMirrored.
 pub const NUM_INPUT_BUCKETS: usize = build_options.input_buckets;
 
 pub const INPUT_SIZE: usize = 768 * NUM_INPUT_BUCKETS;
 pub const HIDDEN_SIZE: usize = arch.HIDDEN_SIZE;
 pub const OUTPUT_SIZE: usize = arch.OUTPUT_SIZE;
-pub const OUTPUT_WEIGHT_MIN: i16 = head_single.OUTPUT_WEIGHT_MIN;
-pub const OUTPUT_WEIGHT_MAX: i16 = head_single.OUTPUT_WEIGHT_MAX;
 
-/// The layers after the feature transformer. docs/NNUE.md specifies both.
 pub const Head = enum { single, multi };
 
-/// A multi-layer network file starts with this; a single-layer one has no
-/// header and starts with feature-transformer weights.
 pub const MAGIC = "AVALNNUE";
 pub const HEADER_SIZE = 64;
 pub const FORMAT_VERSION = 2;
 
-/// Where the header keeps the network's L1 shift, a u32.
 pub const L1_SHIFT_OFFSET = MAGIC.len + 12 * 4;
-
-/// The header of a multi-layer network this build can run, with L1 shift 0:
-/// the magic, then little-endian u32 fields. A file must match it byte for
-/// byte except for its L1 shift, which is 0..7.
-pub const MULTI_HEADER: [HEADER_SIZE]u8 = multi_header(0);
 
 pub fn multi_header(shift: head_multi.L1Shift) [HEADER_SIZE]u8 {
     const fields = [_]u32{
@@ -59,7 +47,6 @@ pub fn multi_header(shift: head_multi.L1Shift) [HEADER_SIZE]u8 {
     return header;
 }
 
-/// The L1 shift of a validated header.
 pub inline fn l1_shift(header: *const [HEADER_SIZE]u8) head_multi.L1Shift {
     return @truncate(header[L1_SHIFT_OFFSET]);
 }
@@ -74,8 +61,6 @@ fn has_magic(bytes: []const u8) bool {
     return std.mem.startsWith(u8, bytes, MAGIC);
 }
 
-/// The quantised network file, byte for byte (little-endian), including the
-/// trailing padding bullet adds to reach a multiple of 64 bytes.
 pub fn Network(comptime kind: Head) type {
     return switch (kind) {
         .single => extern struct {
@@ -92,8 +77,6 @@ pub fn Network(comptime kind: Head) type {
     };
 }
 
-/// The head this build runs: `-Dhead`, or by default whichever the embedded
-/// network is.
 pub const HEAD: Head = switch (build_options.head) {
     .auto => if (has_magic(NNUE_SOURCE)) .multi else .single,
     .single => .single,
@@ -107,19 +90,13 @@ pub const head = switch (HEAD) {
 
 pub const NNUEWeights = Network(HEAD);
 
-/// The embedded network, aligned for inference: the only copy of it in the
-/// executable. Wasm runs on it in place to avoid a second 25 MB in linear memory.
 const embedded_model align(@alignOf(NNUEWeights)) = NNUE_SOURCE.*;
 const embedded_bytes: *align(@alignOf(NNUEWeights)) const [@sizeOf(NNUEWeights)]u8 = embedded_model[0..@sizeOf(NNUEWeights)];
 
-/// The network in use: the embedded image until `adopt` has copied a network
-/// into large memory (docs/MEMORY.md).
 pub var MODEL: *const NNUEWeights = @ptrCast(embedded_bytes);
 
 var model_block: ?*align(large_memory.ALIGNMENT) NNUEWeights = null;
 
-/// Copies `bytes`, a validated network, into the block, allocated on first use
-/// and never freed, and makes it the network in use.
 fn adopt(bytes: *const [@sizeOf(NNUEWeights)]u8) void {
     const block = model_block orelse large_memory.create(NNUEWeights, "network") catch @panic("out of memory for the network");
     model_block = block;
@@ -128,14 +105,11 @@ fn adopt(bytes: *const [@sizeOf(NNUEWeights)]u8) void {
     prepare();
 }
 
-/// What the head derives from `MODEL`; `prepare` keeps it in step.
 pub var prepared: switch (HEAD) {
     .single => void,
     .multi => head_multi.Prepared,
 } = undefined;
 
-/// Changes whenever another network becomes the active one; what was computed
-/// with the previous network is recognised by an older value.
 pub var generation: u32 = 0;
 
 fn prepare() void {
@@ -145,33 +119,24 @@ fn prepare() void {
 
 pub const EMBEDDED_NAME = "<embedded>";
 
-/// Shown to users, e.g. "768x16->1024->8".
 pub const ARCHITECTURE = std.fmt.comptimePrint("768x{d}->{d}->{s}", .{ NUM_INPUT_BUCKETS, HIDDEN_SIZE, head.DESCRIPTION });
 
 var active_name_buf: [std.fs.max_name_bytes]u8 = undefined;
 var active_name: []const u8 = build_options.net_name;
 
-/// Name of the network in use: the embedded network's name (the stem of the
-/// `-Dnet` file it was built from) or the file name of the loaded EvalFile.
 pub fn active_network() []const u8 {
     return active_name;
 }
 
-/// Whether a network can be loaded from a file at runtime. Wasm has no file
-/// system and reads the embedded network in place.
 pub const supports_eval_file = !platform.is_wasm;
 
 pub const NetworkError = error{ NotANetwork, WrongSize, WrongArchitecture, UnsupportedHeader, OutputWeightOutOfRange, WeightOutOfRange, BiasOutOfRange };
 
-/// Checks that `bytes` is a network of architecture `kind`: the exact
-/// quantised layout with every weight inside the range inference assumes.
 pub fn validate_as(comptime kind: Head, bytes: []const u8) NetworkError!void {
     const Net = Network(kind);
     switch (kind) {
         .single => if (has_magic(bytes)) return NetworkError.WrongArchitecture,
         .multi => {
-            // Without the magic it is a single-layer network only if it has
-            // exactly that size; anything else is not a network at all.
             if (!has_magic(bytes)) {
                 return if (bytes.len == @sizeOf(Network(.single))) NetworkError.WrongArchitecture else NetworkError.NotANetwork;
             }
@@ -186,8 +151,6 @@ pub fn validate_as(comptime kind: Head, bytes: []const u8) NetworkError!void {
     };
 }
 
-/// Evaluation of the active network in centipawns for the side to move, whose
-/// accumulator is `own`.
 pub inline fn evaluate(own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     return switch (HEAD) {
         .single => head_single.evaluate(&MODEL.head, own, opp, bucket),
@@ -195,12 +158,10 @@ pub inline fn evaluate(own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucke
     };
 }
 
-/// Checks that `bytes` is a network this build can run.
 pub fn validate(bytes: []const u8) NetworkError!void {
     return validate_as(HEAD, bytes);
 }
 
-/// A sentence for the user about a failed `load`.
 pub fn explain(err: anyerror) []const u8 {
     return switch (err) {
         NetworkError.WrongArchitecture => switch (HEAD) {
@@ -232,30 +193,17 @@ pub fn do_nnue() void {
     if (platform.is_wasm) prepare() else adopt(embedded_bytes);
 }
 
-/// Large enough to read a network of either architecture, so that a file of
-/// the other one is named as such rather than as too large.
 pub const MAX_FILE_SIZE = @max(@sizeOf(Network(.single)), @sizeOf(Network(.multi)));
 
-/// The whole file at `path`, for `install`. The caller frees it with
-/// `platform.allocator`.
 pub fn read_file(path: []const u8) ![]u8 {
     return std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(MAX_FILE_SIZE + 1));
 }
 
-/// Replaces the active network's weights with `bytes`, a whole network file,
-/// keeping its name. Every network enters through here, so `bytes` gets the
-/// checks of `validate`: this build's architecture, header and weight ranges.
-/// The active network is untouched on error. Callers must refresh the
-/// evaluation of every position they keep (`Position.refresh_evaluation`, or
-/// setting it up again). Not for wasm, which reads the embedded network in place.
 pub fn install(bytes: []const u8) NetworkError!void {
     try validate(bytes);
     adopt(bytes[0..@sizeOf(NNUEWeights)]);
 }
 
-/// Replaces the active network with the file at `path`, or with the embedded
-/// network for `EMBEDDED_NAME`. The active network is untouched on error.
-/// Callers must refresh the evaluation of every position they keep.
 pub fn load(path: []const u8) !void {
     if (comptime !supports_eval_file) return error.Unsupported;
     if (std.mem.eql(u8, path, EMBEDDED_NAME)) {

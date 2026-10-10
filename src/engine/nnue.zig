@@ -94,14 +94,10 @@ fn feature_index_pov(
     return state.weight_offset + feature * weights.HIDDEN_SIZE;
 }
 
-// Wide source vectors let LLVM unroll accumulator updates aggressively. Each
-// head picks its own vector width for inference.
 const UPDATE_LANES: usize = 32;
 
 const Perspective = [weights.HIDDEN_SIZE]i16;
 
-/// `dst = src + the added feature rows - the removed ones`. The arithmetic
-/// wraps: only the result has to fit, not every partial sum.
 fn apply_rows(comptime added: usize, comptime removed: usize, dst: *align(64) Perspective, src: *align(64) const Perspective, add_rows: [added]usize, sub_rows: [removed]usize) void {
     const V = @Vector(UPDATE_LANES, i16);
     const m1 = &weights.MODEL.layer_1;
@@ -133,7 +129,6 @@ const FinnyEntry = struct {
     }
 };
 
-/// Finny table: [perspective_color][mirror][bucket]
 const FinnyTable = if (weights.NUM_INPUT_BUCKETS > 1)
     [2][2][weights.NUM_INPUT_BUCKETS]FinnyEntry
 else
@@ -148,8 +143,6 @@ const Feature = struct {
 
 const MAX_CHANGES = 2;
 
-/// What the move that led to a frame changed, and which perspectives of the
-/// frame hold their accumulator. See "Lazy updates" in docs/NNUE.md.
 const FrameState = struct {
     adds: [MAX_CHANGES]Feature = undefined,
     subs: [MAX_CHANGES]Feature = undefined,
@@ -174,17 +167,13 @@ const FrameState = struct {
     }
 };
 
-/// The heap memory of an evaluator. It outlives `Position.reset`.
 pub const Storage = struct {
     frames: [STACK_CAP]Accumulator,
     states: [STACK_CAP]FrameState,
     cache: EvalCache,
-    /// `weights.generation` of the network the cache and the Finny table were filled with.
     network_generation: u32,
 };
 
-/// The piece changes a legal move can make: quiet moves and promotions, captures
-/// (en passant and capturing promotions too), castling.
 const MOVE_SHAPES = [_]struct { added: usize, removed: usize }{
     .{ .added = 1, .removed = 1 },
     .{ .added = 1, .removed = 2 },
@@ -200,7 +189,6 @@ comptime {
 pub const NNUE = struct {
     storage: ?*align(large_memory.ALIGNMENT) Storage = null,
     depth: u16 = 0,
-    /// Between `push` and `commit`: piece changes belong to the move being played.
     recording: bool = false,
     in_undo: bool = false,
     piece_count: u8 = 0,
@@ -223,7 +211,6 @@ pub const NNUE = struct {
         self.storage = null;
     }
 
-    /// Takes over the storage of an evaluator that was reset; the board is empty.
     pub fn adopt_storage(self: *NNUE, storage: ?*align(large_memory.ALIGNMENT) Storage) void {
         self.storage = storage;
         self.depth = 0;
@@ -233,7 +220,6 @@ pub const NNUE = struct {
         }
     }
 
-    /// Drops what was computed with another network.
     fn follow_network(self: *NNUE) void {
         const storage = self.storage.?;
         if (storage.network_generation == weights.generation) return;
@@ -256,13 +242,11 @@ pub const NNUE = struct {
         return computed[0] and computed[1];
     }
 
-    /// The accumulators of the current position, brought up to date.
     pub fn accumulator(self: *NNUE, pos: *const position.Position) *const Accumulator {
         self.materialize(pos);
         return self.current();
     }
 
-    /// Opens the frame of a move; `pos` is still the position before it.
     pub inline fn push(self: *NNUE, pos: *const position.Position) void {
         if (self.depth + 1 == STACK_CAP) self.rebase(pos);
         self.depth += 1;
@@ -270,8 +254,6 @@ pub const NNUE = struct {
         self.recording = true;
     }
 
-    /// Closes the frame of a move; `pos` is the position after it. Its accumulators are
-    /// computed now unless the cache already holds its evaluation.
     pub inline fn commit(self: *NNUE, pos: *const position.Position, comptime mover: types.Color, king_moved: bool) void {
         self.recording = false;
         if (comptime weights.NUM_INPUT_BUCKETS > 1) {
@@ -336,11 +318,11 @@ pub const NNUE = struct {
         inline for (.{ types.Color.White, types.Color.Black }) |perspective| self.materialize_perspective(pos, perspective);
     }
 
-    /// Frame 0 is always computed or marked for a rebuild, which ends the walk down.
     fn materialize_perspective(self: *NNUE, pos: *const position.Position, comptime perspective: types.Color) void {
         const p = @backingInt(perspective);
         const states = &self.storage.?.states;
         var base: usize = self.depth;
+        // Frame 0 is always computed or marked for a rebuild, which ends the walk down.
         while (!states[base].computed[p]) : (base -= 1) {
             if (states[base].rebuild[p]) {
                 self.rebuild_perspective(pos, perspective);
@@ -383,7 +365,6 @@ pub const NNUE = struct {
         }
     }
 
-    /// Rebuilds both accumulators of the current frame from the pieces on the board.
     pub fn refresh_accumulator(self: *NNUE, pos: *const position.Position) void {
         self.follow_network();
         self.recording = false;
@@ -442,13 +423,13 @@ pub const NNUE = struct {
             }
         }
 
-        // One pass brings the cached accumulator up to date and copies it.
         const V = @Vector(UPDATE_LANES, i16);
         const m1 = &weights.MODEL.layer_1;
         const dst = self.current().perspective(perspective);
         var i: usize = 0;
         while (i < weights.HIDDEN_SIZE) : (i += UPDATE_LANES) {
             var lanes: V = entry.acc[i..][0..UPDATE_LANES].*;
+            // Summed and subtracted once: LLVM miscompiles a row-by-row subtraction here (docs/NNUE.md, "Refresh loop").
             var removed: V = @splat(0);
             for (adds[0..add_n]) |row| lanes +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
             for (subs[0..sub_n]) |row| removed +%= @as(V, m1[row + i ..][0..UPDATE_LANES].*);
@@ -462,7 +443,6 @@ pub const NNUE = struct {
         return if (turn == types.Color.White) self.evaluate_comptime(types.Color.White, pos) else self.evaluate_comptime(types.Color.Black, pos);
     }
 
-    /// The network's output for `turn`, which need not be the side to move.
     pub inline fn evaluate_comptime(self: *NNUE, comptime turn: types.Color, pos: *const position.Position) i32 {
         const key = if (pos.turn == turn) pos.hash else pos.hash ^ zobrist.TurnHash;
         const cache = &self.storage.?.cache;

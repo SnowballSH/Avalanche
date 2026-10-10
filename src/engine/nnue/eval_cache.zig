@@ -1,4 +1,4 @@
-//! Remembers the network's output per position; see "Evaluation cache" in docs/NNUE.md.
+//! See "Evaluation cache" in docs/NNUE.md.
 
 const std = @import("std");
 
@@ -35,7 +35,6 @@ pub const EvalCache = struct {
         return if (entry.check == Entry.check_of(key) and entry.output != VACANT) entry.output else null;
     }
 
-    /// `output` must lie strictly inside the range of `Output`; every network head does.
     pub inline fn put(self: *EvalCache, key: u64, output: i32) void {
         std.debug.assert(output > VACANT and output <= std.math.maxInt(Output));
         self.entries[slot(key)] = .{ .output = @intCast(output), .check = Entry.check_of(key) };
