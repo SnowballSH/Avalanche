@@ -182,9 +182,9 @@ nested, and 0.998 to 1.000 with the layout described here. The counts that
 (113.19 G in a run of 43.9 G cycles, 112.67 G in one of 28.7 G, same binary),
 which is more than the layouts differ by. All of these builds are commit
 870eeab with only this work on top: the absolute counts are not those of a
-build that also has the other changes of pull requests #104 to #111. `ply`
-alone is used on 74 lines of `negamax` and `quiescence_search`, so nesting it
-has a cost in the source and no measured gain.
+build that also has the later changes. `ply` alone is used on 74 lines of
+`negamax` and `quiescence_search`, so nesting it has a cost in the source and
+no measured gain.
 
 ### Transposition table
 
@@ -209,11 +209,10 @@ adopted:
   113.99 G instructions against 113.75 G in one run each, on a machine where
   repeated runs of one binary differ by more than that. Both builds are
   commit 870eeab with only this work on top: the absolute counts are not
-  those of a build that also has the other changes of pull requests #104 to
-  #111. The atomic OR works on a line the core already holds; `lock or` is
-  usually quoted at about 20 cycles, around 1% of a node on a current x86
-  core, which bounds what removing it can give there. That has not been
-  measured on x86.
+  those of a build that also has the later changes. The atomic OR works on a
+  line the core already holds; `lock or` is usually quoted at about 20
+  cycles, around 1% of a node on a current x86 core, which bounds what
+  removing it can give there. That has not been measured on x86.
 - It does not scale differently. The lock is per entry and the line has to
   come to the storing core in exclusive state for a plain store just the
   same; two threads meet on one entry only when they store the same position

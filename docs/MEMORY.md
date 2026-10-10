@@ -63,9 +63,10 @@ Rounding a block up to whole huge pages matters: Linux only installs a huge page
 
 `alloc` backs nothing until a page is written, and Linux then puts the page on the node of the
 thread that wrote it. That places the per-thread tables of a helper: the helper thread is bound to
-its node first and then allocates and clears its own `Searcher` and continuation history
-(docs/THREADS.md). The main searcher is the exception. The UCI thread creates it, and that thread
-is not bound, so the main thread's tables are on whatever node the UCI thread ran on.
+its node first, when search threads are bound at all (docs/THREADS.md, "NUMA placement"), and then
+allocates and clears its own `Searcher` and continuation history. The main searcher is the
+exception. The UCI thread creates it, and that thread is not bound, so the main thread's tables
+are on whatever node the UCI thread ran on.
 
 `alloc_populated` is for the table the search threads share. It splits the block into up to
 `threads` parts of at least 32 MiB and backs each part by storing one byte to every page: the OS
@@ -89,10 +90,9 @@ Limits of that, as the code stands:
 - A table is not moved afterwards. One created before `Threads` or `NumaPolicy` changed stays
   where it is until `Hash` is set again.
 - Without a placement (a single node, too few threads to bind, `NumaPolicy none`, other operating
-  systems) no thread is
-  bound: the calling thread backs the last part itself, and a table under 64 MiB starts no thread
-  at all, because engines under test are started thousands of times on busy machines. The 32 MiB
-  per part is a judgement, not a measurement.
+  systems) no thread is bound: the calling thread backs the last part itself, and a table under
+  64 MiB starts no thread at all, because engines under test are started thousands of times on
+  busy machines. The 32 MiB per part is a judgement, not a measurement.
 - A private table (`tt.Sharing.private`: datagen gives every game thread its own two) is backed
   by the thread that creates it, in one part and with no thread started. Datagen creates all of
   them on its main thread before the game threads exist.
@@ -199,8 +199,7 @@ macOS on the same Apple M4 (16 KiB pages, no huge pages to ask for) is unchanged
 112.80 billion after, in alternating runs, and the three start-up sessions above took the same
 time within noise (medians of 15 runs: 20.9 against 21.2 ms, 43.6 against 42.9 ms, 26.8 against
 26.1 ms). Both builds are on commit 870eeab, one without this change and one with it alone: the
-absolute counts are not those of a build that also has the other changes of pull requests #104 to
-#111.
+absolute counts are not those of a build that also has the later changes.
 
 ## The per-thread data, reviewed for cache and TLB behaviour
 
