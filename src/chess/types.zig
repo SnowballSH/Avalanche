@@ -24,7 +24,6 @@ pub const Color = enum(u8) {
     }
 };
 
-pub const N_DIRS: usize = 8;
 pub const Direction = enum(i32) {
     North = 8,
     NorthEast = 9,
@@ -35,7 +34,6 @@ pub const Direction = enum(i32) {
     West = -1,
     NorthWest = 7,
 
-    // Double Push
     NorthNorth = 16,
     SouthSouth = -16,
 
@@ -60,7 +58,6 @@ pub const PieceType = enum(u8) {
 
 pub const PieceString = "PNBRQK~>pnbrqk.";
 pub const DEFAULT_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq -";
-// Tricky position
 pub const KIWIPETE_FEN = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -";
 pub const ENDGAME_FEN = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - ";
 
@@ -104,8 +101,6 @@ pub const Piece = enum(u8) {
         return if (@backingInt(self) <= 5) @backingInt(self) else @backingInt(self) - 2;
     }
 };
-
-// Square & Bitboard
 
 pub const Bitboard = u64;
 
@@ -212,8 +207,6 @@ pub const Rank = enum(u8) {
     }
 };
 
-// Magic stuff
-
 // zig fmt: off
 pub const SquareToString = [_][:0]const u8{
     "a1", "b1", "c1", "d1", "e1", "f1", "g1", "h1",
@@ -275,27 +268,6 @@ pub const SquareIndexBB = [_]Bitboard{
 
 // zig fmt: on
 
-pub fn debug_print_bitboard(b: Bitboard) void {
-    var i: i32 = 56;
-    while (i >= 0) : (i -= 8) {
-        var j: i32 = 0;
-        while (j < 8) : (j += 1) {
-            if ((b >> @as(u6, @intCast(i + j))) & 1 != 0) {
-                platform.print("1 ", .{});
-            } else {
-                platform.print("0 ", .{});
-            }
-        }
-        platform.print("\n", .{});
-    }
-    platform.print("\n", .{});
-}
-
-pub const k1: Bitboard = 0x5555555555555555;
-pub const k2: Bitboard = 0x3333333333333333;
-pub const k3: Bitboard = 0x0f0f0f0f0f0f0f0f;
-pub const kf: Bitboard = 0x0101010101010101;
-
 pub inline fn popcount(x: Bitboard) i32 {
     return @as(i32, @intCast(@popCount(x)));
 }
@@ -306,21 +278,6 @@ pub inline fn popcount_usize(x: Bitboard) usize {
 
 pub inline fn lsb(x: Bitboard) i32 {
     return @as(i32, @intCast(@ctz(x)));
-    // Ancient machines:
-    //const DEBRUIJN64: [64]i32 = .{
-    //    // zig fmt: off
-    //    0, 47,  1, 56, 48, 27,  2, 60,
-    //    57, 49, 41, 37, 28, 16,  3, 61,
-    //    54, 58, 35, 52, 50, 42, 21, 44,
-    //    38, 32, 29, 23, 17, 11,  4, 62,
-    //    46, 55, 26, 59, 40, 36, 15, 53,
-    //    34, 51, 20, 43, 31, 22, 10, 45,
-    //    25, 39, 14, 33, 19, 30,  9, 24,
-    //    13, 18,  8, 12,  7,  6,  5, 63
-    //    // zig fmt: on
-    //};
-    // const MagicNumber: Bitboard = 0x03f79d71b4cb0a89;
-    // return DEBRUIJN64[(MagicNumber *% (x ^ (x-%1))) >> 58];
 }
 
 pub inline fn pop_lsb(x: *Bitboard) Square {
@@ -344,7 +301,6 @@ pub inline fn shift_bitboard(x: Bitboard, comptime d: Direction) Bitboard {
     };
 }
 
-pub const MoveTypeString = [_][:0]const u8{ "", "", " O-O", " O-O-O", "N", "B", "R", "Q", " (capture)", "", " e.p.", "", "N (capture)", "B (capture)", "R (capture)", "Q (capture)" };
 pub const PromMoveTypeString = [_][:0]const u8{ "", "", "", " ", "n", "b", "r", "q", "", "", "", "", "n", "b", "r", "q" };
 
 pub const MoveFlags = enum(u4) {
@@ -384,7 +340,6 @@ pub const PC_BISHOP: u4 = 0b1101;
 pub const PC_ROOK: u4 = 0b1110;
 pub const PC_QUEEN: u4 = 0b1111;
 
-// Packed Struct makes it fit into a 16-bit integer.
 pub const Move = packed struct {
     flags: u4,
     from: u6,
@@ -410,10 +365,6 @@ pub const Move = packed struct {
         return Move{ .flags = 0, .from = 0, .to = 0 };
     }
 
-    pub inline fn clone(self: Move) Move {
-        return Move{ .flags = self.flags, .from = self.from, .to = self.to };
-    }
-
     pub inline fn new_from_to(from: Square, to: Square) Move {
         return Move{ .flags = 0, .from = @as(u6, @intCast(@backingInt(from))), .to = @as(u6, @intCast(@backingInt(to))) };
     }
@@ -422,11 +373,6 @@ pub const Move = packed struct {
         return Move{ .flags = @backingInt(flag), .from = @as(u6, @intCast(@backingInt(from))), .to = @as(u6, @intCast(@backingInt(to))) };
     }
 
-    // Returns the matching legal move, or Move.empty() (to_u16() == 0) if the
-    // string is malformed or names no legal move. Callers must check the result;
-    // a real legal move never has from == to, so the empty() sentinel is unambiguous.
-    // Castling is accepted as king-captures-rook, and additionally as
-    // king-to-destination unless the position uses Chess960 notation.
     pub fn new_from_string(pos: *position.Position, move: []const u8) Move {
         const from = parse_square(move, 0) orelse return Move.empty();
         const to = parse_square(move, 2) orelse return Move.empty();
@@ -474,25 +420,16 @@ pub const Move = packed struct {
         return self.from == other.from and self.to == other.to;
     }
 
-    pub fn debug_print(self: Move) void {
-        platform.print("{s}{s}{s}", .{
-            SquareToString[self.from],
-            SquareToString[self.to],
-            MoveTypeString[self.flags],
-        });
-    }
-
     pub inline fn is_castle(self: Move) bool {
         return self.flags == @backingInt(MoveFlags.OO) or self.flags == @backingInt(MoveFlags.OOO);
     }
 
-    // Castling moves are encoded king-captures-rook; this is the square the king lands on.
     pub inline fn castle_king_destination(self: Move) Square {
         const file: File = if (self.to > self.from) .GFILE else .CFILE;
         return Square.new(file, self.get_from().rank());
     }
 
-    pub fn uci_print(self: Move, writer: anytype, chess960: bool) void {
+    pub fn uci_print(self: Move, writer: *std.Io.Writer, chess960: bool) void {
         const to = if (self.is_castle() and !chess960) self.castle_king_destination().index() else self.to;
         writer.print("{s}{s}", .{
             SquareToString[self.from],

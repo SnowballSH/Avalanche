@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
 const zobrist = @import("zobrist.zig");
+const position = @import("position.zig");
 
 const SIZE: usize = 8192;
 
@@ -16,17 +17,14 @@ fn h2(x: u64) usize {
     return @as(usize, @intCast((x / SIZE) % SIZE));
 }
 
-/// Encode from/to squares into a u16 (from in low 6 bits, to in bits 6-11).
 inline fn encode_move(from: u8, to: u8) u16 {
     return @as(u16, from) | (@as(u16, to) << 6);
 }
 
-/// Decode from square from the encoded u16.
 inline fn decode_from(m: u16) u8 {
     return @as(u8, @truncate(m & 0x3F));
 }
 
-/// Decode to square from the encoded u16.
 inline fn decode_to(m: u16) u8 {
     return @as(u8, @truncate((m >> 6) & 0x3F));
 }
@@ -36,15 +34,13 @@ pub fn init() void {
     @memset(&moves, 0);
     var count: usize = 0;
 
-    var color: usize = 0;
-    while (color < 2) : (color += 1) {
+    for ([_]types.Color{ .White, .Black }) |color| {
         const piece_types = [_]types.PieceType{ types.PieceType.Knight, types.PieceType.Bishop, types.PieceType.Rook, types.PieceType.Queen, types.PieceType.King };
         for (piece_types) |pt| {
-            const piece = types.Piece.new(@as(types.Color, @fromBackingInt(@intCast(color))), pt);
+            const piece = types.Piece.new(color, pt);
             const piece_idx = piece.index();
 
-            var sq_a: usize = 0;
-            while (sq_a < 64) : (sq_a += 1) {
+            for (0..types.N_SQUARES) |sq_a| {
                 const attacks = tables.get_attacks(pt, @as(types.Square, @fromBackingInt(@intCast(sq_a))), 0);
 
                 var atk_bb = attacks;
@@ -76,8 +72,7 @@ pub fn init() void {
     std.debug.assert(count == 3668);
 }
 
-/// Detect whether the side to move can force a repetition via one reversible move.
-pub fn has_upcoming_repetition(pos: anytype, hash_history: []const u64, ply: u32) bool {
+pub fn has_upcoming_repetition(pos: *const position.Position, hash_history: []const u64, ply: u32) bool {
     const occ = pos.all_all_pieces();
     const original = pos.hash;
     const fifty = pos.history[pos.game_ply].fifty;

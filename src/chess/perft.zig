@@ -1,16 +1,14 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("types.zig");
-const tables = @import("tables.zig");
-const zobrist = @import("zobrist.zig");
 const position = @import("position.zig");
 
-pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) usize {
+pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) u64 {
     if (depth == 0) {
         return 1;
     }
 
-    var nodes: usize = 0;
+    var nodes: u64 = 0;
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
     var list: types.MoveList = .{};
@@ -29,8 +27,8 @@ pub fn perft(comptime color: types.Color, pos: *position.Position, depth: u32) u
 }
 
 pub fn perft_div(comptime color: types.Color, pos: *position.Position, depth: u32) void {
-    var nodes: usize = 0;
-    var branch: usize = 0;
+    var nodes: u64 = 0;
+    var branch: u64 = 0;
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
     var list: types.MoveList = .{};
@@ -57,7 +55,7 @@ pub fn perft_test(pos: *position.Position, depth: u32) void {
     platform.print("Running Perft {}:\n", .{depth});
 
     const timer = types.Timer.start();
-    var nodes: usize = 0;
+    var nodes: u64 = 0;
 
     if (pos.turn == types.Color.White) {
         nodes = perft(types.Color.White, pos, depth);

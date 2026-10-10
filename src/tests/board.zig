@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
+const perft = @import("../chess/perft.zig");
 const utils = @import("../chess/utils.zig");
 const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
@@ -25,7 +26,6 @@ const WALK_FENS = [_][]const u8{
     "qnbnr1kr/ppp1b1pp/4p3/3p1p2/8/2NPP3/PPP1BPPP/QNB1R1KR w HEhe - 1 9",
 };
 
-/// Calls `visit(context, pos, moves)` on every position of seeded random games from `WALK_FENS`.
 fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: anytype, comptime visit: anytype) !void {
     support.init_tables();
     const pos = try support.new_position();
@@ -46,8 +46,6 @@ fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: 
     }
 }
 
-/// The exchange evaluation as it was before pins were found without slider
-/// lookups; `see.see_threshold` must agree with it on every move and threshold.
 const reference_see = struct {
     fn pinned_pieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
         const opp = comptime color.invert();
@@ -152,7 +150,24 @@ const reference_see = struct {
     }
 };
 
-const SEE_THRESHOLDS = [_]i32{ -2000, -995, -994, -700, -522, -521, -347, -346, -309, -308, -215, -94, -93, -1, 0, 1, 93, 94, 215, 308, 346, 428, 521, 648, 994, 1300 };
+fn weight(piece_type: types.PieceType) i32 {
+    return see.SeeWeight[piece_type.index()];
+}
+
+const SEE_THRESHOLDS = blk: {
+    const exchanged = [_]types.PieceType{ .Pawn, .Knight, .Bishop, .Rook, .Queen };
+    const beyond_any_exchange = 2 * weight(.Queen) + 1;
+    var bounds: []const i32 = &.{ -beyond_any_exchange, -1, 0, 1, beyond_any_exchange };
+    for (exchanged, 0..) |piece_type, lighter_count| {
+        const whole = weight(piece_type);
+        bounds = bounds ++ [_]i32{ -whole - 1, -whole, whole, whole + 1 };
+        for (exchanged[0..lighter_count]) |lighter| {
+            const difference = whole - weight(lighter);
+            bounds = bounds ++ [_]i32{ -difference, difference };
+        }
+    }
+    break :blk bounds[0..bounds.len].*;
+};
 
 fn expect_see_matches_reference(prng: *utils.PRNG, pos: *position.Position, moves: []const types.Move) !void {
     for (moves) |move| {
@@ -303,9 +318,8 @@ fn attackers_of_king_to_move(pos: *const position.Position) types.Bitboard {
 }
 
 fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, moves: []const types.Move) !void {
-    const fen = pos.basic_fen(std.testing.allocator);
-    defer std.testing.allocator.free(fen);
-    fresh.set_fen(fen);
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
+    fresh.set_fen(pos.write_fen(&fen_buf));
     try expectEqual(fresh.keys(), pos.keys());
     try expectEqual(occupancy_of_pieces(pos), pos.occupancy);
     try expectEqual(attackers_of_king_to_move(pos), pos.history[pos.game_ply].king_attackers);
@@ -338,25 +352,24 @@ fn set_up(pos: *position.Position, fen: []const u8) MoveList {
 const SeeCase = struct {
     fen: []const u8,
     move: []const u8,
-    /// What the exchange is worth: it passes this bound and fails the next.
     value: i32,
 };
 
 const SEE_CASES = [_]SeeCase{
     // The bishop is pinned by the queen and takes on the line of the pin; the rook behind it
     // then makes the queen's recapture a loss.
-    .{ .fen = "3r3k/6b1/8/8/8/5N2/8/Q6K w - - 0 1", .move = "f3d4", .value = -308 },
+    .{ .fen = "3r3k/6b1/8/8/8/5N2/8/Q6K w - - 0 1", .move = "f3d4", .value = -weight(.Knight) },
     // The pawn's recapture leaves the rook alone between its king and the bishop, so the
     // rook is pinned for the rest of the exchange.
-    .{ .fen = "7k/6r1/5p2/6n1/8/5N2/8/BK4R1 w - - 0 1", .move = "f3g5", .value = 93 },
+    .{ .fen = "7k/6r1/5p2/6n1/8/5N2/8/BK4R1 w - - 0 1", .move = "f3g5", .value = weight(.Pawn) },
     // En passant: the bishop behind the capturing pawn joins the exchange.
-    .{ .fen = "4k3/3p4/8/2pP4/8/8/6B1/4K3 w - c6 0 2", .move = "d5c6", .value = 93 },
+    .{ .fen = "4k3/3p4/8/2pP4/8/8/6B1/4K3 w - c6 0 2", .move = "d5c6", .value = weight(.Pawn) },
     // The king is the last attacker of an undefended rook, ...
-    .{ .fen = "4k3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = 93 - 521 },
+    .{ .fen = "4k3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = weight(.Pawn) - weight(.Rook) },
     // ... of a rook defended through the square it came from, ...
-    .{ .fen = "3rk3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = 93 },
+    .{ .fen = "3rk3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = weight(.Pawn) },
     // ... and of a rook that the other king defends.
-    .{ .fen = "8/8/8/8/8/2k5/3pK3/3R4 w - - 0 1", .move = "d1d2", .value = 93 },
+    .{ .fen = "8/8/8/8/8/2k5/3pK3/3R4 w - - 0 1", .move = "d1d2", .value = weight(.Pawn) },
 };
 
 test "see: pins on the capture line, pins that appear during the exchange, en passant and king recaptures" {
@@ -402,6 +415,79 @@ test "fen: set_fen finds the pieces attacking the king of the side to move" {
         };
         try expectEqual(case.attackers != 0, attacked);
     }
+}
+
+test "fen: write_fen reproduces the FEN a position was set from" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const fens = [_][]const u8{
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "rnbqkbnr/pppp1ppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 3",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w Kq - 5 20",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 b - - 99 151",
+    };
+    var buf: [position.FEN_CAPACITY]u8 = undefined;
+    for (fens) |fen| {
+        pos.set_fen(fen);
+        try std.testing.expectEqualStrings(fen, pos.write_fen(&buf));
+    }
+}
+
+fn has_en_passant_capture(moves: []const types.Move) bool {
+    for (moves) |move| {
+        if (move.get_flags() == .EN_PASSANT) return true;
+    }
+    return false;
+}
+
+test "fen: set_fen keeps an en-passant square that a pawn of the side to move can capture on" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const cases = [_]struct { fen: []const u8, square: types.Square }{
+        .{ .fen = "4k3/8/8/3Pp3/8/8/8/4K3 w - e6 0 1", .square = .e6 },
+        .{ .fen = "4k3/8/8/8/3pP3/8/8/4K3 b - e3 0 1", .square = .e3 },
+    };
+    for (cases) |case| {
+        const moves = set_up(pos, case.fen);
+        try expectEqual(case.square, pos.history[pos.game_ply].ep_sq);
+        try expect(has_en_passant_capture(moves.items()));
+    }
+}
+
+test "fen: set_fen drops an en-passant square that no double push can have left" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    const without_square = try support.new_position();
+    defer support.destroy_position(without_square);
+
+    const cases = [_]struct { placement: []const u8, square: []const u8 }{
+        .{ .placement = "8/8/8/3Pk3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/8/3P4/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/8/3PP3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/4n3/3Pp3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/4p3/8/3Pp3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/8/8/8/3Pp3/8/4K3 w -", .square = "e4" },
+        .{ .placement = "4k3/8/8/8/3pp3/8/8/4K3 b -", .square = "e3" },
+    };
+    var buf: [position.FEN_CAPACITY]u8 = undefined;
+    for (cases) |case| {
+        const moves = set_up(pos, try std.mem.print(&buf, "{s} {s} 0 1", .{ case.placement, case.square }));
+        try expectEqual(types.Square.NO_SQUARE, pos.history[pos.game_ply].ep_sq);
+        try expect(!has_en_passant_capture(moves.items()));
+
+        without_square.set_fen(try std.mem.print(&buf, "{s} - 0 1", .{case.placement}));
+        try expectEqual(without_square.keys(), pos.keys());
+    }
+}
+
+test "perft: positions are counted in 64 bits on every target" {
+    const pos: *position.Position = undefined;
+    try expectEqual(u64, @TypeOf(perft.perft(.White, pos, 0)));
 }
 
 test "make/unmake: castling in which king and rook swap squares" {

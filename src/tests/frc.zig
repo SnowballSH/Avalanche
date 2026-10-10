@@ -14,10 +14,9 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 
 const PerftCase = struct {
     fen: []const u8,
-    nodes: []const usize,
+    nodes: []const u64,
 };
 
-// Reference counts produced independently with python-chess (chess960=True).
 const PERFT_SUITE = [_]PerftCase{
     .{ .fen = "bqnb1rkr/pp3ppp/3ppn2/2p5/5P2/P2P4/NPP1P1PP/BQ1BNRKR w HFhf - 2 9", .nodes = &.{ 21, 528, 12189, 326672 } },
     .{ .fen = "2nnrbkr/p1qppppp/8/1ppb4/6PP/3PP3/PPP2P2/BQNNRBKR w HEhe - 1 9", .nodes = &.{ 21, 807, 18002, 667366 } },
@@ -33,7 +32,6 @@ const PERFT_SUITE = [_]PerftCase{
     .{ .fen = "rkrnnqbb/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFca - 0 1", .nodes = &.{ 20, 400, 9014, 202136 } },
 };
 
-// Positions isolating Chess960 castling corner cases.
 const CASTLING_EDGE_SUITE = [_]PerftCase{
     // King already on its destination file; rook on the adjacent file.
     .{ .fen = "1k6/8/8/8/8/8/8/RK5R w A - 0 1", .nodes = &.{ 24, 70, 1872, 9476 } },
@@ -54,7 +52,7 @@ const init_tables = support.init_tables;
 const new_position = support.new_position;
 const destroy_position = support.destroy_position;
 
-fn perft_from(pos: *position.Position, depth: u32) usize {
+fn perft_from(pos: *position.Position, depth: u32) u64 {
     return switch (pos.turn) {
         .White => perft.perft(.White, pos, depth),
         .Black => perft.perft(.Black, pos, depth),
@@ -160,7 +158,7 @@ test "frc: double fischer random starts match reference perft" {
     const pos = try new_position();
     defer destroy_position(pos);
 
-    const cases = [_]struct { white: u16, black: u16, nodes: [4]usize }{
+    const cases = [_]struct { white: u16, black: u16, nodes: [4]u64 }{
         .{ .white = 123, .black = 876, .nodes = .{ 20, 400, 8930, 196471 } },
         .{ .white = 0, .black = 959, .nodes = .{ 20, 400, 9014, 202136 } },
         .{ .white = 518, .black = 0, .nodes = .{ 20, 400, 8902, 199818 } },
@@ -191,11 +189,10 @@ test "frc: incremental hash, fen and nnue agree with a fresh position after ever
 
         const root_hash = pos.hash;
         const root_board = pos.mailbox;
+        var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
         for (moves.items()) |move| {
             play(pos, move);
-            const fen = pos.basic_fen(std.testing.allocator);
-            defer std.testing.allocator.free(fen);
-            fresh.set_fen(fen);
+            fresh.set_fen(pos.write_fen(&fen_buf));
             try expectEqual(fresh.hash, pos.hash);
             try expectEqual(fresh.castling_rights(), pos.castling_rights());
             try support.expect_nnue_matches_fresh(pos);
@@ -219,11 +216,10 @@ test "frc: fen castling field accepts Shredder and X-FEN and writes X-FEN" {
         .{ "rr2k2r/8/8/8/8/8/8/R2K3R w KQb - 0 1", "rr2k2r/8/8/8/8/8/8/R2K3R w KQb - 0 1" },
         .{ "4k3/8/8/8/8/8/8/R3K2R w XYZ - 0 1", "4k3/8/8/8/8/8/8/R3K2R w - - 0 1" },
     };
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
     for (cases) |case| {
         pos.set_fen(case[0]);
-        const fen = pos.basic_fen(std.testing.allocator);
-        defer std.testing.allocator.free(fen);
-        try expectEqualStrings(case[1], fen);
+        try expectEqualStrings(case[1], pos.write_fen(&fen_buf));
     }
 }
 
@@ -257,14 +253,9 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
 }
 
 test "frc: search returns a legal move from a double fischer random position" {
-    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer io_threaded.deinit();
-    platform.io = io_threaded.io();
-
-    init_tables();
-    search.init_lmr();
+    platform.io = std.testing.io;
+    support.init_search();
     tt.GlobalTT.reset(16);
-    search.NUM_THREADS = 0;
 
     const pos = try new_position();
     defer destroy_position(pos);

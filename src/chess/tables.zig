@@ -95,8 +95,6 @@ pub inline fn sliding_attack(square_: types.Square, occ: types.Bitboard, mask: t
         reverse_bitboard(reverse_bitboard(mask & occ) -% reverse_bitboard(types.SquareIndexBB[square]) *% 2)) & mask;
 }
 
-// ROOK MAGIC BITBOARDS
-
 inline fn get_rook_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return sliding_attack(square, occ, types.MaskFile[@backingInt(square.file())]) | sliding_attack(square, occ, types.MaskRank[@backingInt(square.rank())]);
 }
@@ -125,9 +123,7 @@ const RookMagics = [64]types.Bitboard{
 };
 
 pub fn init_rook_attacks() void {
-    var sq: usize = @backingInt(types.Square.a1);
-
-    while (sq <= @backingInt(types.Square.h8)) : (sq += 1) {
+    for (0..types.N_SQUARES) |sq| {
         const edges = ((types.MaskRank[types.File.AFILE.index()] | types.MaskRank[types.File.HFILE.index()]) & ~types.MaskRank[types.rank_plain(sq)]) |
             ((types.MaskFile[types.File.AFILE.index()] | types.MaskFile[types.File.HFILE.index()]) & ~types.MaskFile[types.file_plain(sq)]);
 
@@ -152,18 +148,14 @@ pub fn init_rook_attacks() void {
     }
 }
 
-// Returns the bitboard for rook attacks
 pub inline fn get_rook_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return RookAttacks[square.index()][@intCast(((occ & RookAttackMasks[square.index()]) *% RookMagics[square.index()]) >> @as(u6, @intCast(RookAttackShifts[square.index()])))];
 }
 
-// Returns x-ray attacks, which is the attack when the first-layer blockers are removed.
 pub inline fn get_xray_rook_attacks(square: types.Square, occ: types.Bitboard, blockers: types.Bitboard) types.Bitboard {
     const attacks = get_rook_attacks(square, occ);
     return attacks ^ get_rook_attacks(square, occ ^ (blockers & attacks));
 }
-
-// BISHOP MAGIC BITBOARDS
 
 inline fn get_bishop_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return sliding_attack(square, occ, types.MaskDiagonal[@as(usize, @intCast(square.diagonal()))]) | sliding_attack(square, occ, types.MaskAntiDiagonal[@as(usize, @intCast(square.anti_diagonal()))]);
@@ -193,9 +185,7 @@ const BishopMagics = [64]types.Bitboard{
 };
 
 pub fn init_bishop_attacks() void {
-    var sq: usize = @backingInt(types.Square.a1);
-
-    while (sq <= @backingInt(types.Square.h8)) : (sq += 1) {
+    for (0..types.N_SQUARES) |sq| {
         const edges = ((types.MaskRank[types.File.AFILE.index()] | types.MaskRank[types.File.HFILE.index()]) & ~types.MaskRank[types.rank_plain(sq)]) |
             ((types.MaskFile[types.File.AFILE.index()] | types.MaskFile[types.File.HFILE.index()]) & ~types.MaskFile[types.file_plain(sq)]);
 
@@ -220,29 +210,20 @@ pub fn init_bishop_attacks() void {
     }
 }
 
-// Returns the bitboard for bishop attacks
 pub inline fn get_bishop_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return BishopAttacks[square.index()][@intCast(((occ & BishopAttackMasks[square.index()]) *% BishopMagics[square.index()]) >> @as(u6, @intCast(BishopAttackShifts[square.index()])))];
 }
 
-// Returns x-ray attacks, which is the attack when the first-layer blockers are removed.
 pub inline fn get_xray_bishop_attacks(square: types.Square, occ: types.Bitboard, blockers: types.Bitboard) types.Bitboard {
     const attacks = get_bishop_attacks(square, occ);
     return attacks ^ get_bishop_attacks(square, occ ^ (blockers & attacks));
 }
 
-// Squares between squares
-
-// Bitboard for the squares between two squares, 0 if they are not aligned
 pub var SquaresBetween: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);
 
 pub fn init_squares_between() void {
-    var sq1: usize = @backingInt(types.Square.a1);
-
-    while (sq1 <= @backingInt(types.Square.h8)) : (sq1 += 1) {
-        var sq2: usize = @backingInt(types.Square.a1);
-
-        while (sq2 <= @backingInt(types.Square.h8)) : (sq2 += 1) {
+    for (0..types.N_SQUARES) |sq1| {
+        for (0..types.N_SQUARES) |sq2| {
             const sqs = types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
             if (types.file_plain(sq1) == types.file_plain(sq2) or types.rank_plain(sq1) == types.rank_plain(sq2)) {
                 SquaresBetween[sq1][sq2] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq1))), sqs) & get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq2))), sqs);
@@ -255,18 +236,11 @@ pub fn init_squares_between() void {
     }
 }
 
-// Line between squares
-
-// Bitboard for line of two squares, 0 if they are not aligned
 pub var LineOf: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);
 
 pub fn init_line_between() void {
-    var sq1: usize = @backingInt(types.Square.a1);
-
-    while (sq1 <= @backingInt(types.Square.h8)) : (sq1 += 1) {
-        var sq2: usize = @backingInt(types.Square.a1);
-
-        while (sq2 <= @backingInt(types.Square.h8)) : (sq2 += 1) {
+    for (0..types.N_SQUARES) |sq1| {
+        for (0..types.N_SQUARES) |sq2| {
             if (types.file_plain(sq1) == types.file_plain(sq2) or types.rank_plain(sq1) == types.rank_plain(sq2)) {
                 LineOf[sq1][sq2] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq1))), 0) & get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq2))), 0) | types.SquareIndexBB[sq1] | types.SquareIndexBB[sq2];
             } else if (types.diagonal_plain(sq1) == types.diagonal_plain(sq2) or types.anti_diagonal_plain(sq1) == types.anti_diagonal_plain(sq2)) {
@@ -278,19 +252,16 @@ pub fn init_line_between() void {
     }
 }
 
-// Pseudo-legal attacks array
-
 pub var PseudoLegalAttacks: [types.N_PT][64]types.Bitboard = std.mem.zeroes([types.N_PT][64]types.Bitboard);
 pub var PawnAttacks: [types.N_COLORS][64]types.Bitboard = std.mem.zeroes([types.N_COLORS][64]types.Bitboard);
 
 pub fn init_pseudo_legal() void {
-    std.mem.copyForwards(types.Bitboard, PawnAttacks[0][0..64], WhitePawnAttacks[0..64]);
-    std.mem.copyForwards(types.Bitboard, PawnAttacks[1][0..64], BlackPawnAttacks[0..64]);
-    std.mem.copyForwards(types.Bitboard, PseudoLegalAttacks[@backingInt(types.PieceType.Knight)][0..64], KnightAttacks[0..64]);
-    std.mem.copyForwards(types.Bitboard, PseudoLegalAttacks[@backingInt(types.PieceType.King)][0..64], KingAttacks[0..64]);
-    var sq: usize = @backingInt(types.Square.a1);
+    PawnAttacks[@backingInt(types.Color.White)] = WhitePawnAttacks;
+    PawnAttacks[@backingInt(types.Color.Black)] = BlackPawnAttacks;
+    PseudoLegalAttacks[@backingInt(types.PieceType.Knight)] = KnightAttacks;
+    PseudoLegalAttacks[@backingInt(types.PieceType.King)] = KingAttacks;
 
-    while (sq <= @backingInt(types.Square.h8)) : (sq += 1) {
+    for (0..types.N_SQUARES) |sq| {
         PseudoLegalAttacks[@backingInt(types.PieceType.Bishop)][sq] = get_bishop_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), 0);
         PseudoLegalAttacks[@backingInt(types.PieceType.Rook)][sq] = get_rook_attacks_for_init(@as(types.Square, @fromBackingInt(@intCast(sq))), 0);
         PseudoLegalAttacks[@backingInt(types.PieceType.Queen)][sq] = PseudoLegalAttacks[@backingInt(types.PieceType.Bishop)][sq] | PseudoLegalAttacks[@backingInt(types.PieceType.Rook)][sq];
@@ -314,12 +285,10 @@ pub inline fn get_attacks(pt: types.PieceType, sq: types.Square, occ: types.Bitb
     };
 }
 
-// Get Pawn attacks of a given color and square
 pub inline fn get_pawn_attacks(comptime color: types.Color, sq: types.Square) types.Bitboard {
     return PawnAttacks[@backingInt(color)][sq.index()];
 }
 
-// Get Pawn attacks of every pawn on bitboard
 pub inline fn get_pawn_attacks_bb(comptime color: types.Color, bb: types.Bitboard) types.Bitboard {
     return if (color == types.Color.White)
         types.shift_bitboard(bb, types.Direction.NorthWest) | types.shift_bitboard(bb, types.Direction.NorthEast)
