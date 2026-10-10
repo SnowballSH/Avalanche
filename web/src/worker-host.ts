@@ -1,18 +1,18 @@
-import { Engine, type WasmSource } from "./engine.ts";
+import { Engine, EngineCrashError, type WasmSource } from "./engine.ts";
 import type { ClientMessage, WorkerPort } from "./protocol.ts";
 import { SearchSignals } from "./search-signals.ts";
 
 export type WasmLoader = (url: string) => WasmSource | Promise<WasmSource>;
 
-/** Runs the engine inside a worker, executing client messages strictly in order. */
 export function serveEngine(port: WorkerPort, load: WasmLoader): void {
   let engine: Engine | undefined;
   let signals: SearchSignals | null = null;
   let currentSeq = 0;
-  let quit = false;
+  let serving = true;
   let queue = Promise.resolve();
 
   const handle = async (message: ClientMessage): Promise<void> => {
+    if (!serving) return;
     switch (message.type) {
       case "init":
         signals = message.signalBuffer ? new SearchSignals(message.signalBuffer) : null;
@@ -27,21 +27,26 @@ export function serveEngine(port: WorkerPort, load: WasmLoader): void {
         return;
       case "command":
         if (!engine) throw new Error("Command received before init");
-        if (quit) return;
         currentSeq = message.seq;
-        if (!engine.send(message.command)) {
-          quit = true;
+        if (engine.send(message.command) === "quit") {
+          serving = false;
           port.postMessage({ type: "quit" });
         }
         return;
     }
   };
 
+  const report = (error: unknown): void => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (error instanceof EngineCrashError) {
+      serving = false;
+      port.postMessage({ type: "crash", message });
+    } else {
+      port.postMessage({ type: "error", message });
+    }
+  };
+
   port.onMessage((message) => {
-    queue = queue
-      .then(() => handle(message))
-      .catch((error: unknown) => {
-        port.postMessage({ type: "error", message: error instanceof Error ? error.message : String(error) });
-      });
+    queue = queue.then(() => handle(message)).catch(report);
   });
 }

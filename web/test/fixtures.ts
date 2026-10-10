@@ -9,6 +9,11 @@ const nativeBinary = fileURLToPath(new URL("../../zig-out/bin/Avalanche", import
 
 let compiled: Promise<WebAssembly.Module> | undefined;
 
+export function compileEngineModule(): Promise<WebAssembly.Module> {
+  compiled ??= readFile(wasmUrl).then((bytes) => WebAssembly.compile(bytes));
+  return compiled;
+}
+
 export interface CapturingEngine {
   readonly engine: Engine;
   readonly lines: string[];
@@ -16,9 +21,8 @@ export interface CapturingEngine {
 }
 
 export async function createCapturingEngine(): Promise<CapturingEngine> {
-  compiled ??= readFile(wasmUrl).then((bytes) => WebAssembly.compile(bytes));
   const lines: string[] = [];
-  const engine = await Engine.create(await compiled, { onLine: (line) => lines.push(line) });
+  const engine = await Engine.create(await compileEngineModule(), { onLine: (line) => lines.push(line) });
   return {
     engine,
     lines,

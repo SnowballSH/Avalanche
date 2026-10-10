@@ -1,4 +1,4 @@
-import type { ClientPort } from "./protocol.ts";
+import type { ClientPort, WorkerMessage } from "./protocol.ts";
 import { type SearchSignal, SearchSignals } from "./search-signals.ts";
 
 export interface ClientOptions {
@@ -16,15 +16,17 @@ const SIGNALLING_COMMANDS: ReadonlyMap<string, SearchSignal> = new Map([
   ["ponderhit", "ponderhit"],
 ]);
 
-/** Non-blocking handle to an engine running in a worker. */
+function verbOf(command: string): string {
+  const line = command.replace(/^[\r\n]+|[\r\n]+$/g, "");
+  return line.split(" ").find((token) => token !== "") ?? "";
+}
+
 export class AvalancheClient {
   readonly #port: ClientPort;
   readonly #signals: SearchSignals | null;
   #seq = 0;
   #closed = false;
-  // Searches sent but not yet answered by "bestmove". While one runs the worker
-  // is blocked inside wasm, so the client itself answers "isready".
-  #pendingSearches = 0;
+  #searchesAwaitingBestmove = 0;
   #onLine: (line: string) => void = () => undefined;
   readonly #whenClosed: PromiseWithResolvers<void> = Promise.withResolvers();
 
@@ -41,7 +43,9 @@ export class AvalancheClient {
     const signals = SearchSignals.tryCreate();
     const client = new AvalancheClient(port, signals);
     client.#onLine = (line) => {
-      if (line.startsWith("bestmove")) client.#pendingSearches = Math.max(0, client.#pendingSearches - 1);
+      if (line.startsWith("bestmove")) {
+        client.#searchesAwaitingBestmove = Math.max(0, client.#searchesAwaitingBestmove - 1);
+      }
       onLine?.(line);
     };
 
@@ -74,13 +78,15 @@ export class AvalancheClient {
             if (ready) report(new Error(message.message));
             else failFatally(new Error(message.message));
             return;
+          case "crash":
+            failFatally(new Error(message.message));
+            return;
         }
       });
       port.postMessage({ type: "init", wasmUrl: String(wasmUrl), signalBuffer: signals?.buffer ?? null });
     });
   }
 
-  /** False when "stop"/"ponderhit" can only take effect after the running search ends (no SharedArrayBuffer). */
   get canInterrupt(): boolean {
     return this.#signals !== null;
   }
@@ -89,22 +95,21 @@ export class AvalancheClient {
     return this.#closed;
   }
 
-  /** Resolves once the client is closed, either by terminate() or by the engine processing "quit". */
   get whenClosed(): Promise<void> {
     return this.#whenClosed.promise;
   }
 
   send(command: string): void {
-    if (this.#closed) throw new Error("Engine has quit");
+    if (this.#closed) throw new Error("Engine client is closed");
     const seq = ++this.#seq;
-    const verb = command.trim().split(/\s+/, 1)[0] ?? "";
-    if (verb === "isready" && this.#pendingSearches > 0) {
+    const verb = verbOf(command);
+    if (verb === "isready" && this.#searchesAwaitingBestmove > 0) {
       queueMicrotask(() => {
         this.#onLine("readyok");
       });
       return;
     }
-    if (verb === "go") this.#pendingSearches++;
+    if (verb === "go") this.#searchesAwaitingBestmove++;
     const signal = SIGNALLING_COMMANDS.get(verb);
     if (signal) this.#signals?.request(signal, seq);
     this.#port.postMessage({ type: "command", seq, command });
@@ -124,7 +129,7 @@ export function webWorkerPort(worker: Worker): ClientPort {
       worker.postMessage(message);
     },
     onMessage: (listener) => {
-      worker.addEventListener("message", (event: MessageEvent<Parameters<typeof listener>[0]>) => {
+      worker.addEventListener("message", (event: MessageEvent<WorkerMessage>) => {
         listener(event.data);
       });
     },

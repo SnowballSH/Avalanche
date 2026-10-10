@@ -1,4 +1,4 @@
-//! wasm32-freestanding entry point. The host ABI is specified in docs/WASM.md.
+//! See docs/WASM.md.
 
 const std = @import("std");
 const platform = @import("platform.zig");

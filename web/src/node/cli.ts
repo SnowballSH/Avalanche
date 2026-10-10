@@ -15,14 +15,13 @@ const client = await startNodeClient(pathToFileURL(wasmPath), {
   },
 });
 
-let quitSent = false;
-for await (const line of createInterface({ input: process.stdin })) {
-  client.send(line);
-  quitSent = line.trim() === "quit";
-  if (quitSent) break;
+const commands = createInterface({ input: process.stdin });
+void client.whenClosed.then(() => {
+  commands.close();
+});
+for await (const command of commands) {
+  if (client.closed) break;
+  client.send(command);
 }
-if (!quitSent) client.send("quit");
+if (!client.closed) client.send("quit");
 await client.whenClosed;
-// Leaving the readline loop does not release stdin; a GUI keeps the pipe open
-// after "quit", so stdin would otherwise keep the process alive.
-process.stdin.destroy();
