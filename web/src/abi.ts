@@ -16,18 +16,24 @@ export interface AvalancheExports {
   readonly avalanche_bench: () => void;
 }
 
-const REQUIRED_FUNCTIONS = [
-  "avalanche_init",
-  "avalanche_input_ptr",
-  "avalanche_input_cap",
-  "avalanche_command",
-  "avalanche_bench",
-] as const satisfies readonly (keyof AvalancheExports)[];
+type FunctionExportName = {
+  [Name in keyof AvalancheExports]: AvalancheExports[Name] extends (...args: never[]) => unknown
+    ? Name
+    : never;
+}[keyof AvalancheExports];
+
+const FUNCTION_EXPORTS = {
+  avalanche_init: true,
+  avalanche_input_ptr: true,
+  avalanche_input_cap: true,
+  avalanche_command: true,
+  avalanche_bench: true,
+} as const satisfies Record<FunctionExportName, true>;
 
 export function assertAvalancheExports(
   exports: WebAssembly.Exports,
 ): asserts exports is WebAssembly.Exports & AvalancheExports {
-  const missing: string[] = REQUIRED_FUNCTIONS.filter((name) => typeof exports[name] !== "function");
+  const missing = Object.keys(FUNCTION_EXPORTS).filter((name) => typeof exports[name] !== "function");
   if (!(exports["memory"] instanceof WebAssembly.Memory)) missing.push("memory");
   if (missing.length > 0) {
     throw new TypeError(`Not an Avalanche wasm module; missing exports: ${missing.join(", ")}`);

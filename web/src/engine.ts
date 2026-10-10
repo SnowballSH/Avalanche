@@ -14,15 +14,27 @@ export interface EngineOptions {
   readonly ponderhitRequested?: () => boolean;
 }
 
-/** Synchronous UCI engine: send() blocks until the command, including any search, completes. */
+export type EngineStatus = "running" | "quit";
+
+export class EngineCrashError extends Error {
+  constructor(cause: unknown) {
+    super(`Engine crashed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    this.name = "EngineCrashError";
+  }
+}
+
 export class Engine {
   readonly #exports: AvalancheExports;
   readonly #encoder = new TextEncoder();
   readonly #inputPtr: number;
   readonly #inputCap: number;
+  #crash: EngineCrashError | null = null;
 
   private constructor(exports: AvalancheExports) {
     this.#exports = exports;
+    this.#enter(() => {
+      exports.avalanche_init();
+    });
     this.#inputPtr = exports.avalanche_input_ptr();
     this.#inputCap = exports.avalanche_input_cap();
   }
@@ -50,25 +62,35 @@ export class Engine {
     const exports = (await instantiate(source, imports)).exports;
     assertAvalancheExports(exports);
     output.memory = exports.memory;
-    exports.avalanche_init();
     return new Engine(exports);
   }
 
-  /** Returns false once the engine has received "quit". */
-  send(command: string): boolean {
+  send(command: string): EngineStatus {
     const input = new Uint8Array(this.#exports.memory.buffer, this.#inputPtr, this.#inputCap);
     const line = `${command}\n`;
     const { read, written } = this.#encoder.encodeInto(line, input);
     if (read < line.length) throw new RangeError(`UCI command exceeds ${String(this.#inputCap)} bytes`);
-    return this.#exports.avalanche_command(written) !== 0;
+    return this.#enter(() => this.#exports.avalanche_command(written)) === 0 ? "quit" : "running";
   }
 
   bench(): void {
-    this.#exports.avalanche_bench();
+    this.#enter(() => {
+      this.#exports.avalanche_bench();
+    });
   }
 
   get memoryBytes(): number {
     return this.#exports.memory.buffer.byteLength;
+  }
+
+  #enter<Result>(call: () => Result): Result {
+    if (this.#crash) throw this.#crash;
+    try {
+      return call();
+    } catch (cause) {
+      this.#crash = new EngineCrashError(cause);
+      throw this.#crash;
+    }
   }
 }
 
