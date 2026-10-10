@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Usage: scripts/datagen_throughput.sh <threads> <positions> [extra datagen args...]
-# Prints positions/second/thread for the current build with all threads loaded.
-# Extra args must not repeat nodes, hardmult, positions, seed or out: datagen rejects repeated keys.
+# See "Scripts" in docs/DATAGEN.md.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 THREADS="${1:?threads}"
