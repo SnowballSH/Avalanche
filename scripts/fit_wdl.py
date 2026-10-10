@@ -211,7 +211,7 @@ class ViriJob:
         headers, first_move, n_moves = headers[played], first_move[played], (terminator - first_move)[played]
 
         black_first = (headers["side_and_en_passant"] & VIRI_BLACK_TO_MOVE) != 0
-        first_ply = np.maximum(0, (headers["fullmove"].astype(np.int64) - 1) * 2) + black_first
+        starting_ply = np.maximum(0, (headers["fullmove"].astype(np.int64) - 1) * 2) + black_first
         moves_before_game = np.cumsum(n_moves) - n_moves
         move_in_game = np.arange(n_moves.sum(), dtype=np.int64) - np.repeat(moves_before_game, n_moves)
         moves = words[np.repeat(first_move, n_moves) + move_in_game].view(VIRI_MOVE)
@@ -219,7 +219,7 @@ class ViriJob:
         white_outcome = np.repeat(headers["white_outcome"].astype(np.int64), n_moves)
         white_to_move = np.repeat(~black_first, n_moves) ^ (move_in_game % 2 == 1)
         return self.sampling.ply_histogram(
-            ply=np.repeat(first_ply, n_moves) + move_in_game,
+            ply=np.repeat(starting_ply, n_moves) + move_in_game,
             score=np.where(white_to_move, white_score, -white_score),
             outcome=np.where(white_to_move, white_outcome, Outcome.WIN - white_outcome),
             seed=self.seed,
@@ -647,7 +647,15 @@ def argument_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--data", action="append", help=f"file or glob (repeatable); default {DEFAULT_DATA}")
-    parser.add_argument("--format", choices=[AUTO_FORMAT, *FORMATS], default=AUTO_FORMAT)
+    parser.add_argument(
+        "--format",
+        choices=[AUTO_FORMAT, *FORMATS],
+        default=AUTO_FORMAT,
+        help=(
+            f"{AUTO_FORMAT} picks by file suffix; {BULLET.name} files are sampled in contiguous blocks, "
+            "so they must already be shuffled"
+        ),
+    )
     parser.add_argument(
         "--samples", type=int, default=8_000_000, help="approximate number of positions to fit on"
     )
