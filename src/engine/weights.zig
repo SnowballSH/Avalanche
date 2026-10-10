@@ -11,7 +11,7 @@ pub const head_multi = @import("nnue/head_multi.zig");
 
 pub const NUM_INPUT_BUCKETS: usize = build_options.input_buckets;
 
-pub const INPUT_SIZE: usize = 768 * NUM_INPUT_BUCKETS;
+pub const INPUT_SIZE: usize = arch.FEATURES_PER_BUCKET * NUM_INPUT_BUCKETS;
 pub const HIDDEN_SIZE: usize = arch.HIDDEN_SIZE;
 pub const OUTPUT_SIZE: usize = arch.OUTPUT_SIZE;
 
@@ -119,7 +119,7 @@ fn prepare() void {
 
 pub const EMBEDDED_NAME = "<embedded>";
 
-pub const ARCHITECTURE = std.fmt.comptimePrint("768x{d}->{d}->{s}", .{ NUM_INPUT_BUCKETS, HIDDEN_SIZE, head.DESCRIPTION });
+pub const ARCHITECTURE = std.fmt.comptimePrint("{d}x{d}->{d}->{s}", .{ arch.FEATURES_PER_BUCKET, NUM_INPUT_BUCKETS, HIDDEN_SIZE, head.DESCRIPTION });
 
 var active_name_buf: [std.fs.max_name_bytes]u8 = undefined;
 var active_name: []const u8 = build_options.net_name;

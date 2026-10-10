@@ -1,7 +1,6 @@
 //! See "Single-layer head" in docs/NNUE.md.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const arch = @import("arch.zig");
 
 const HIDDEN_SIZE = arch.HIDDEN_SIZE;
@@ -40,21 +39,9 @@ comptime {
     std.debug.assert(HIDDEN_SIZE % (OUTPUT_LANES * 4) == 0);
 }
 
-/// LLVM leaves target intrinsics unresolved at -Doptimize=debug, hence the mode guards.
 inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
-    if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isX86()) {
-        if (comptime OUTPUT_LANES == 32 and builtin.target.cpu.has(.x86, .avx512f) and builtin.target.cpu.has(.x86, .avx512bw)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.avx512.pmaddw.d.512" }).*(a, b);
-        }
-        if (comptime OUTPUT_LANES == 16 and builtin.target.cpu.has(.x86, .avx2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.avx2.pmadd.wd" }).*(a, b);
-        }
-        if (comptime OUTPUT_LANES == 8 and builtin.target.cpu.has(.x86, .sse2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.sse2.pmadd.wd" }).*(a, b);
-        }
-    }
-    if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isWasm() and OUTPUT_LANES == 8) {
-        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.wasm.dot" }).*(a, b);
+    if (comptime arch.pair_products_intrinsic(@bitSizeOf(OutputI16))) |name| {
+        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = name }).*(a, b);
     }
 
     const a_parts = std.simd.deinterlace(2, a);

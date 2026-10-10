@@ -3,6 +3,7 @@ const platform = @import("../platform.zig");
 const large_memory = platform.large_memory;
 const builtin = @import("builtin");
 pub const weights = @import("weights.zig");
+const arch = @import("nnue/arch.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const zobrist = @import("../chess/zobrist.zig");
@@ -65,7 +66,7 @@ const KingBucketState = struct {
     inline fn from_king(king_pov: usize) KingBucketState {
         const bucket = king_input_bucket(king_pov);
         return .{
-            .weight_offset = bucket * 768 * weights.HIDDEN_SIZE,
+            .weight_offset = bucket * arch.FEATURES_PER_BUCKET * weights.HIDDEN_SIZE,
             .bucket = @intCast(bucket),
             .flip = if (king_mirror(king_pov)) 7 else 0,
         };
@@ -87,8 +88,8 @@ fn feature_index_pov(
     state: KingBucketState,
 ) usize {
     const code: usize = @backingInt(piece);
-    const piece_offset = (code & 7) * 64;
-    const color_offset = ((code >> 3) ^ @backingInt(perspective)) * 384;
+    const piece_offset = (code & 7) * arch.FEATURES_PER_PIECE;
+    const color_offset = ((code >> 3) ^ @backingInt(perspective)) * arch.FEATURES_PER_COLOR;
     const oriented_sq = sq.index() ^ (if (perspective == types.Color.White) 0 else 56);
     const feature = (color_offset + piece_offset + oriented_sq) ^ state.flip;
     return state.weight_offset + feature * weights.HIDDEN_SIZE;
@@ -457,7 +458,7 @@ pub const NNUE = struct {
         if (comptime builtin.mode == .debug) {
             std.debug.assert(self.piece_count == types.popcount_usize(pos.all_all_pieces()));
         }
-        const bucket = @min((self.piece_count -| 2) / 4, weights.OUTPUT_SIZE - 1);
+        const bucket = arch.output_bucket(self.piece_count);
 
         const own = if (turn == types.Color.White) &acc.white else &acc.black;
         const opp = if (turn == types.Color.White) &acc.black else &acc.white;
