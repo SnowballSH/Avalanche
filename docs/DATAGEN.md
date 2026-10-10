@@ -216,9 +216,10 @@ OpenBench runs `make -j EXE=<path> CC=<compiler> EVALFILE=<absolute .nnue path>`
 
 ## Opening generation for OpenBench
 
-For its datagen workloads OpenBench starts the engine as `./engine "genfens N seed S book <None|path>" "quit"` and
-reads `N` lines of the form `info string genfens <fen>`, after which the engine exits. Avalanche accepts `frc` or
-`dfrc` as a further word.
+For its datagen workloads OpenBench asks the engine for openings with the command
+`genfens N seed S book <None|path>` and reads `N` lines of the form `info string genfens <fen>`. In Avalanche
+`genfens` is one of the commands of the UCI loop listed in [UCI.md](UCI.md): it prints the openings and then ends the
+engine without waiting for a `quit`. `frc` or `dfrc` is accepted as a further word.
 
 Each opening is a random book line followed by 1 to 3 random legal moves or, without a book, the start position
 (with `frc` a random Chess960 start, with `dfrc` an independent random start for each side) followed by 9 to 12
