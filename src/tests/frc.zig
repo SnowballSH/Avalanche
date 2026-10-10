@@ -17,7 +17,6 @@ const PerftCase = struct {
     nodes: []const u64,
 };
 
-// Reference counts produced independently with python-chess (chess960=True).
 const PERFT_SUITE = [_]PerftCase{
     .{ .fen = "bqnb1rkr/pp3ppp/3ppn2/2p5/5P2/P2P4/NPP1P1PP/BQ1BNRKR w HFhf - 2 9", .nodes = &.{ 21, 528, 12189, 326672 } },
     .{ .fen = "2nnrbkr/p1qppppp/8/1ppb4/6PP/3PP3/PPP2P2/BQNNRBKR w HEhe - 1 9", .nodes = &.{ 21, 807, 18002, 667366 } },
@@ -33,7 +32,6 @@ const PERFT_SUITE = [_]PerftCase{
     .{ .fen = "rkrnnqbb/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFca - 0 1", .nodes = &.{ 20, 400, 9014, 202136 } },
 };
 
-// Positions isolating Chess960 castling corner cases.
 const CASTLING_EDGE_SUITE = [_]PerftCase{
     // King already on its destination file; rook on the adjacent file.
     .{ .fen = "1k6/8/8/8/8/8/8/RK5R w A - 0 1", .nodes = &.{ 24, 70, 1872, 9476 } },

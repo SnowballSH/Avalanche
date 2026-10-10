@@ -26,7 +26,6 @@ const WALK_FENS = [_][]const u8{
     "qnbnr1kr/ppp1b1pp/4p3/3p1p2/8/2NPP3/PPP1BPPP/QNB1R1KR w HEhe - 1 9",
 };
 
-/// Calls `visit(context, pos, moves)` on every position of seeded random games from `WALK_FENS`.
 fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: anytype, comptime visit: anytype) !void {
     support.init_tables();
     const pos = try support.new_position();
@@ -47,8 +46,6 @@ fn walk_random_games(seed: u128, walks_per_fen: usize, max_ply: usize, context: 
     }
 }
 
-/// The exchange evaluation as it was before pins were found without slider
-/// lookups; `see.see_threshold` must agree with it on every move and threshold.
 const reference_see = struct {
     fn pinned_pieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
         const opp = comptime color.invert();
@@ -355,7 +352,6 @@ fn set_up(pos: *position.Position, fen: []const u8) MoveList {
 const SeeCase = struct {
     fen: []const u8,
     move: []const u8,
-    /// What the exchange is worth: it passes this bound and fails the next.
     value: i32,
 };
 

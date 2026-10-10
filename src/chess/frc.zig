@@ -1,8 +1,7 @@
+//! See docs/CHESS960.md.
 const std = @import("std");
 const types = @import("types.zig");
 
-/// Chess960 starting positions in Scharnagl numbering; index 518 is the
-/// standard chess setup.
 pub const N_POSITIONS: u16 = 960;
 pub const STANDARD_INDEX: u16 = 518;
 
@@ -49,7 +48,6 @@ fn place_on_nth_empty(rank: *[8]?types.PieceType, nth: usize, piece: types.Piece
 
 pub const FEN_CAPACITY = 64;
 
-/// Double Fischer Random start: each side gets its own Chess960 back rank.
 pub fn dfrc_fen(white_index: u16, black_index: u16, buf: *[FEN_CAPACITY]u8) []const u8 {
     var black: [8]u8 = undefined;
     var white: [8]u8 = undefined;
@@ -57,7 +55,7 @@ pub fn dfrc_fen(white_index: u16, black_index: u16, buf: *[FEN_CAPACITY]u8) []co
         bc.* = types.PieceString[types.Piece.new(.Black, b).index()];
         wc.* = types.PieceString[types.Piece.new(.White, w).index()];
     }
-    return std.fmt.bufPrint(buf, "{s}/pppppppp/8/8/8/8/PPPPPPPP/{s} w KQkq - 0 1", .{ &black, &white }) catch unreachable;
+    return std.mem.print(buf, "{s}/pppppppp/8/8/8/8/PPPPPPPP/{s} w KQkq - 0 1", .{ &black, &white }) catch unreachable;
 }
 
 pub fn frc_fen(index: u16, buf: *[FEN_CAPACITY]u8) []const u8 {
