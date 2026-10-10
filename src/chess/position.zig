@@ -16,6 +16,10 @@ pub const MAX_HISTORY_PLY: u32 = 1920;
 /// search on top of it. search.zig checks its MAX_PLY against this.
 pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + 256;
 
+const RANK_SEPARATORS = 7;
+const LONGEST_PIECE_PLACEMENT = types.N_SQUARES + RANK_SEPARATORS;
+pub const FEN_CAPACITY = LONGEST_PIECE_PLACEMENT + std.fmt.count(" w KQkq a3 {d} {d}", .{ std.math.maxInt(u16), std.math.maxInt(u32) });
+
 pub const Keys = struct {
     hash: u64 = 0,
     pawn_hash: u64 = 0,
@@ -376,98 +380,47 @@ pub const Position = struct {
         return self.start_ply + self.game_ply;
     }
 
-    pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
-        var buf: [128]u8 = undefined;
-        const fen: []u8 = &buf;
-        var index: usize = 0;
+    pub fn write_fen(self: *const Position, buf: *[FEN_CAPACITY]u8) []const u8 {
+        var writer: std.Io.Writer = .fixed(buf);
+        self.print_fen(&writer) catch unreachable;
+        return writer.buffered();
+    }
 
-        var i: i32 = 56;
-        while (i >= 0) : (i -= 8) {
+    fn print_fen(self: *const Position, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        for (0..8) |ranks_below_top| {
+            const rank = 7 - ranks_below_top;
+            if (ranks_below_top != 0) try writer.writeByte('/');
             var empty_count: u8 = 0;
-            var j: i32 = 0;
-            while (j < 8) : (j += 1) {
-                const idx = @as(usize, @intCast(i + j));
-
-                if (self.mailbox[idx] == types.Piece.NO_PIECE) {
+            for (self.mailbox[rank * 8 ..][0..8]) |piece| {
+                if (piece == types.Piece.NO_PIECE) {
                     empty_count += 1;
-                } else {
-                    const pieceChar = types.PieceString[self.mailbox[idx].index()];
-                    if (empty_count > 0) {
-                        fen[index] = empty_count + '0';
-                        index += 1;
-                        empty_count = 0;
-                    }
-                    fen[index] = pieceChar;
-                    index += 1;
+                    continue;
                 }
+                if (empty_count > 0) try writer.writeByte('0' + empty_count);
+                empty_count = 0;
+                try writer.writeByte(types.PieceString[piece.index()]);
             }
-            if (empty_count > 0) {
-                fen[index] = empty_count + '0';
-                index += 1;
-            }
-            if (i > 0) {
-                fen[index] = '/';
-                index += 1;
-            }
+            if (empty_count > 0) try writer.writeByte('0' + empty_count);
         }
 
-        fen[index] = ' ';
-        index += 1;
-
-        fen[index] = if (self.turn == types.Color.White) 'w' else 'b';
-        index += 1;
-
-        fen[index] = ' ';
-        index += 1;
+        try writer.print(" {c} ", .{@as(u8, if (self.turn == .White) 'w' else 'b')});
 
         const rights = self.castling_rights();
-        const castle_start = index;
+        if (rights == castling.NO_RIGHTS) try writer.writeByte('-');
         for ([_]types.Color{ .White, .Black }) |color| {
             for ([_]castling.Side{ .King, .Queen }) |side| {
-                if (rights & castling.right(color, side) != 0) {
-                    fen[index] = self.castling_symbol(color, side);
-                    index += 1;
-                }
+                if (rights & castling.right(color, side) != 0) try writer.writeByte(self.castling_symbol(color, side));
             }
         }
-        if (index == castle_start) {
-            fen[index] = '-';
-            index += 1;
-        }
 
-        fen[index] = ' ';
-        index += 1;
+        const undo = &self.history[self.game_ply];
+        const en_passant: []const u8 = if (undo.ep_sq == types.Square.NO_SQUARE) "-" else types.SquareToString[undo.ep_sq.index()];
+        try writer.print(" {s} {d} {d}", .{ en_passant, undo.fifty, self.absolute_ply() / 2 + 1 });
+    }
 
-        const ep = self.history[self.game_ply].ep_sq;
-        if (ep == types.Square.NO_SQUARE) {
-            fen[index] = '-';
-            index += 1;
-        } else {
-            const ep_str = types.SquareToString[ep.index()];
-            fen[index] = ep_str[0];
-            index += 1;
-            fen[index] = ep_str[1];
-            index += 1;
-        }
-
-        fen[index] = ' ';
-        index += 1;
-
-        var fifty_buf: [8]u8 = undefined;
-        const fifty_str = std.fmt.bufPrint(&fifty_buf, "{}", .{self.history[self.game_ply].fifty}) catch "0";
-        @memcpy(fen[index..][0..fifty_str.len], fifty_str);
-        index += fifty_str.len;
-
-        fen[index] = ' ';
-        index += 1;
-
-        const fullmove: u32 = @max(@as(u32, 1), self.absolute_ply() / 2 + 1);
-        var fm_buf: [8]u8 = undefined;
-        const fm_str = std.fmt.bufPrint(&fm_buf, "{}", .{fullmove}) catch "1";
-        @memcpy(fen[index..][0..fm_str.len], fm_str);
-        index += fm_str.len;
-
-        return allocator.dupe(u8, fen[0..index]) catch unreachable;
+    pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
+        var buf: [FEN_CAPACITY]u8 = undefined;
+        return allocator.dupe(u8, self.write_fen(&buf)) catch @panic("out of memory");
     }
 
     pub inline fn phase(self: *const Position) usize {

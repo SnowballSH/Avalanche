@@ -55,7 +55,7 @@ and re-added around the king move.
 - FEN input accepts `KQkq` (X-FEN: outermost rook on that wing) and Shredder
   file letters (`HAha`, `HFhf`, ...). Rights that do not name an actual rook on
   the back rank are dropped.
-- FEN output (`basic_fen`) writes X-FEN: `K`/`Q` when the castling rook is the
+- FEN output (`write_fen`) writes X-FEN: `K`/`Q` when the castling rook is the
   outermost rook on its wing, otherwise the rook's file letter.
 
 ## Start positions

@@ -37,6 +37,11 @@ optimiser as a fact, so breaking it is undefined behaviour. Before, moving from 
 was tolerated: it wrote "no piece" to the destination and touched only the spare bitboard and a
 zero key. No caller does it; `move_piece` and `move_piece_quiet` are private to `Position`.
 
+## FEN
+
+`write_fen` writes into a buffer of `FEN_CAPACITY` bytes, the length of the longest text it can
+produce, so it needs no allocator and cannot fail. docs/CHESS960.md describes the castling field.
+
 ## King attackers
 
 `history[game_ply].king_attackers` holds the enemy pieces attacking the king of the side to move,

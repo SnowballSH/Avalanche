@@ -191,11 +191,10 @@ test "frc: incremental hash, fen and nnue agree with a fresh position after ever
 
         const root_hash = pos.hash;
         const root_board = pos.mailbox;
+        var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
         for (moves.items()) |move| {
             play(pos, move);
-            const fen = pos.basic_fen(std.testing.allocator);
-            defer std.testing.allocator.free(fen);
-            fresh.set_fen(fen);
+            fresh.set_fen(pos.write_fen(&fen_buf));
             try expectEqual(fresh.hash, pos.hash);
             try expectEqual(fresh.castling_rights(), pos.castling_rights());
             try support.expect_nnue_matches_fresh(pos);
@@ -219,11 +218,10 @@ test "frc: fen castling field accepts Shredder and X-FEN and writes X-FEN" {
         .{ "rr2k2r/8/8/8/8/8/8/R2K3R w KQb - 0 1", "rr2k2r/8/8/8/8/8/8/R2K3R w KQb - 0 1" },
         .{ "4k3/8/8/8/8/8/8/R3K2R w XYZ - 0 1", "4k3/8/8/8/8/8/8/R3K2R w - - 0 1" },
     };
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
     for (cases) |case| {
         pos.set_fen(case[0]);
-        const fen = pos.basic_fen(std.testing.allocator);
-        defer std.testing.allocator.free(fen);
-        try expectEqualStrings(case[1], fen);
+        try expectEqualStrings(case[1], pos.write_fen(&fen_buf));
     }
 }
 

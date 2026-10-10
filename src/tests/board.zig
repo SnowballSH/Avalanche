@@ -303,9 +303,8 @@ fn attackers_of_king_to_move(pos: *const position.Position) types.Bitboard {
 }
 
 fn expect_moves_round_trip(fresh: *position.Position, pos: *position.Position, moves: []const types.Move) !void {
-    const fen = pos.basic_fen(std.testing.allocator);
-    defer std.testing.allocator.free(fen);
-    fresh.set_fen(fen);
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
+    fresh.set_fen(pos.write_fen(&fen_buf));
     try expectEqual(fresh.keys(), pos.keys());
     try expectEqual(occupancy_of_pieces(pos), pos.occupancy);
     try expectEqual(attackers_of_king_to_move(pos), pos.history[pos.game_ply].king_attackers);
@@ -401,6 +400,24 @@ test "fen: set_fen finds the pieces attacking the king of the side to move" {
             .Black => pos.in_check(.Black),
         };
         try expectEqual(case.attackers != 0, attacked);
+    }
+}
+
+test "fen: write_fen reproduces the FEN a position was set from" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const fens = [_][]const u8{
+        "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+        "rnbqkbnr/pppp1ppp/8/8/3pP3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 3",
+        "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w Kq - 5 20",
+        "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 b - - 99 151",
+    };
+    var buf: [position.FEN_CAPACITY]u8 = undefined;
+    for (fens) |fen| {
+        pos.set_fen(fen);
+        try std.testing.expectEqualStrings(fen, pos.write_fen(&buf));
     }
 }
 
