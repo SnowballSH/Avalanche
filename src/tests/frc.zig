@@ -14,7 +14,7 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 
 const PerftCase = struct {
     fen: []const u8,
-    nodes: []const usize,
+    nodes: []const u64,
 };
 
 // Reference counts produced independently with python-chess (chess960=True).
@@ -54,7 +54,7 @@ const init_tables = support.init_tables;
 const new_position = support.new_position;
 const destroy_position = support.destroy_position;
 
-fn perft_from(pos: *position.Position, depth: u32) usize {
+fn perft_from(pos: *position.Position, depth: u32) u64 {
     return switch (pos.turn) {
         .White => perft.perft(.White, pos, depth),
         .Black => perft.perft(.Black, pos, depth),
@@ -160,7 +160,7 @@ test "frc: double fischer random starts match reference perft" {
     const pos = try new_position();
     defer destroy_position(pos);
 
-    const cases = [_]struct { white: u16, black: u16, nodes: [4]usize }{
+    const cases = [_]struct { white: u16, black: u16, nodes: [4]u64 }{
         .{ .white = 123, .black = 876, .nodes = .{ 20, 400, 8930, 196471 } },
         .{ .white = 0, .black = 959, .nodes = .{ 20, 400, 9014, 202136 } },
         .{ .white = 518, .black = 0, .nodes = .{ 20, 400, 8902, 199818 } },

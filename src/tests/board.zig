@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
+const perft = @import("../chess/perft.zig");
 const utils = @import("../chess/utils.zig");
 const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
@@ -469,6 +470,11 @@ test "fen: set_fen drops an en-passant square that no double push can have left"
         without_square.set_fen(try std.mem.print(&buf, "{s} - 0 1", .{case.placement}));
         try expectEqual(without_square.keys(), pos.keys());
     }
+}
+
+test "perft: positions are counted in 64 bits on every target" {
+    const pos: *position.Position = undefined;
+    try expectEqual(u64, @TypeOf(perft.perft(.White, pos, 0)));
 }
 
 test "make/unmake: castling in which king and rook swap squares" {
