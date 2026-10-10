@@ -7,7 +7,6 @@
 **/*.bson
 *.epd
 
-# Private for now
 marlinflow/**/*
 marlinflow
 lichess-bot
@@ -35,7 +34,6 @@ cutechess-cli
 
 fastchess
 
-# SPRT testing tool
 .sprt-cache/
 
 data_*.txt
@@ -45,7 +43,6 @@ data/
 CLAUDE.md
 *.pyc
 
-# Documentation drafts (not tracked)
 docs/SCRIPTS.md
 docs/TESTING.md
 docs/TRAINING.md
@@ -54,7 +51,6 @@ docs/TRAINING_GUIDE.md
 bin/**
 bullet/
 
-# Training build artifacts (source is tracked, build output is not)
 training/target/
 training/checkpoints/
 training/experiment_log.md
@@ -62,7 +58,6 @@ training/experiment_log.md
 OpenBench/
 OpenBench.wiki/
 
-# Archived/old networks and local build outputs
 old_nnue/
 engines_built/
 tmp/
@@ -71,7 +66,6 @@ scripts/openbench_inject_local.sh
 scripts/openbench_inject_tune.sh
 scripts/openbench_inject_final.sh
 
-# Search-experiment notes & patches (local working artifacts)
 ideas/
 search_patches/
 search_ideas.md

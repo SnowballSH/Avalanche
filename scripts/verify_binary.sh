@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# Runs an engine binary built from this tree with the default network and checks what no target
-# may change: the bench node count (bench.nodes) and the nnue-speed checksum (nnue-speed.checksum).
-# With a second argument, nnue-speed must also report those SIMD paths.
-#   scripts/verify_binary.sh <binary> ["128-bit vectors, pairwise umull, L1 sdot, L2 wide"]
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BIN="$1"
+BIN="${1:?usage: verify_binary.sh <binary> [SIMD paths that nnue-speed must report]}"
 PATHS="${2:-}"
 
 fail() {
