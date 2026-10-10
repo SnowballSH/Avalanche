@@ -56,8 +56,6 @@ fn ScriptedPicker(comptime block_len: usize) type {
     return movepick.PickerOver(ScriptedContext, block_len);
 }
 
-// The move ordering the search was tuned with: every score known up front, then one
-// swap-on-improvement scan per pick.
 const ReferenceOrder = struct {
     moves: [capacity]types.Move = undefined,
     scores: [capacity]i32 = undefined,
@@ -75,11 +73,10 @@ const ReferenceOrder = struct {
     fn pick(self: *ReferenceOrder, step: usize) types.Move {
         var cur_move = self.moves[step];
         var cur_score = self.scores[step];
-        var j = step + 1;
-        while (j < self.len) : (j += 1) {
-            if (cur_score < self.scores[j]) {
-                std.mem.swap(types.Move, &self.moves[j], &cur_move);
-                std.mem.swap(i32, &self.scores[j], &cur_score);
+        for (self.moves[step + 1 .. self.len], self.scores[step + 1 .. self.len]) |*move, *score| {
+            if (cur_score < score.*) {
+                std.mem.swap(types.Move, move, &cur_move);
+                std.mem.swap(i32, score, &cur_score);
             }
         }
         self.moves[step] = cur_move;
@@ -175,7 +172,7 @@ fn random_script(random: std.Random, script: *Script, len: usize) void {
         script.exchange_queries[id] = 0;
     }
     if (len > 0 and random.boolean()) {
-        const promotion_bonus = [_]i32{ 0, 650_000, 1_000_000 };
+        const promotion_bonus = [_]i32{ 0, movepick.SortKnightPromotion, movepick.SortQueenPromotion };
         script.scored[random.uintLessThan(usize, len)] = .{
             .score = movepick.SortHash + promotion_bonus[random.uintLessThan(usize, promotion_bonus.len)],
             .kind = .hash_move,
@@ -228,7 +225,6 @@ fn expect_same_order(comptime Picker: type, random: std.Random, script: *Script,
     }
 }
 
-// `negamax` once `skip_quiet` is set from pick `prune_after` on, with and without leaving the loop early.
 fn expect_quiet_pruning_exit_is_exact(comptime Picker: type, random: std.Random, script: *Script, len: usize) !bool {
     const killers = random_killers(random, script, len);
     const prune_after = random.uintAtMost(usize, len);
@@ -261,7 +257,6 @@ fn expect_quiet_pruning_exit_is_exact(comptime Picker: type, random: std.Random,
     return left_early;
 }
 
-// `quiescence_search` outside check, with and without leaving the loop at the first losing capture.
 fn expect_losing_capture_exit_is_exact(comptime Picker: type, script: *Script, len: usize) !bool {
     var reference = ReferenceOrder.init(script, len);
     var expected: Searched = .{};

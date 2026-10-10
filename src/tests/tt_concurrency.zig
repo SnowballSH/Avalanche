@@ -46,8 +46,8 @@ fn entry_of(table: *const tt.TranspositionTable, hash: u64, variant: u8) tt.Item
 fn same_payload(a: tt.Item, b: tt.Item) bool {
     var x = a;
     var y = b;
-    x._padding = 0;
-    y._padding = 0;
+    x.sequence = 0;
+    y.sequence = 0;
     return @as(u128, @bitCast(x)) == @as(u128, @bitCast(y));
 }
 
@@ -106,6 +106,25 @@ test "tt: a stored entry reads back and replacement follows depth, bound and pos
     table.set(other, entry_of(&table, other, 1));
     try expect(table.get(hash) == null);
     try expect(same_payload(table.get(other).?, entry_of(&table, other, 1)));
+}
+
+test "tt: every store advances the entry's sequence, which wraps without locking the entry" {
+    platform.io = std.testing.io;
+    var table = tt.TranspositionTable.new();
+    defer table.deinit();
+    table.reset(1);
+
+    const Sequence = @FieldType(tt.Item, "sequence");
+    const always_replacing: u8 = 0;
+    try expectEqual(tt.Bound.Exact, bound_of(always_replacing));
+
+    const hash = hash_of(&table, 2, 0);
+    for (1..std.math.maxInt(Sequence) + 3) |stores| {
+        table.set(hash, entry_of(&table, hash, always_replacing));
+        const found = table.get(hash) orelse return error.TestUnexpectedResult;
+        try expectEqual(@as(Sequence, @truncate(stores)), found.sequence);
+        try expect(same_payload(found, entry_of(&table, hash, always_replacing)));
+    }
 }
 
 test "tt: concurrent probes only return entries some thread stored for that key" {
