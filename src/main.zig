@@ -1,13 +1,12 @@
 const std = @import("std");
-const types = @import("chess/types.zig");
 const platform = @import("platform.zig");
 const tables = @import("chess/tables.zig");
 const zobrist = @import("chess/zobrist.zig");
 const cuckoo = @import("chess/cuckoo.zig");
-const position = @import("chess/position.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
 const interface = @import("engine/interface.zig");
+const uci_options = @import("engine/uci/options.zig");
 const weights = @import("engine/weights.zig");
 const nnue_parity = @import("engine/nnue/parity.zig");
 const bench = @import("engine/bench.zig");
@@ -16,7 +15,12 @@ const datagen_options = @import("engine/datagen/options.zig");
 const tbfilter = @import("engine/tbfilter.zig");
 const netscale = @import("engine/netscale.zig");
 
-const arch = @import("build_options");
+const USAGE =
+    \\Usage: Avalanche                       UCI on standard input
+    \\       Avalanche "<UCI command>" ...   every argument is run as one UCI command line, then UCI on standard input
+    \\       Avalanche <tool> [arguments]    bench, datagen, tbfilter, netscale, nnue-parity, nnue-random or nnue-speed
+    \\
+;
 
 const DATAGEN_USAGE =
     \\Usage: datagen <threads> [book.epd | book=path] [key=value ...]
@@ -82,7 +86,7 @@ pub fn main(init: std.process.Init) anyerror!void {
     tables.init_all();
     zobrist.init_zobrist();
     cuckoo.init();
-    tt.GlobalTT.reset(16);
+    tt.GlobalTT.reset(uci_options.DEFAULT_HASH_MB);
     defer tt.GlobalTT.deinit();
     weights.do_nnue();
     search.init_lmr();
@@ -90,29 +94,27 @@ pub fn main(init: std.process.Init) anyerror!void {
     // toSlice works on all targets (Args.Iterator.init is a Windows compile error).
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len >= 2) {
-        const second = args[1];
-        if (std.mem.eql(u8, second, "bench")) {
+        const tool = args[1];
+        if (std.mem.eql(u8, tool, "bench")) {
             try bench.bench();
             return;
         }
-        if (std.mem.eql(u8, second, "datagen")) {
+        if (std.mem.eql(u8, tool, "datagen")) {
             return run_datagen(args[2..]);
         }
 
-        // Network tools; docs/NNUE.md.
-        if (std.mem.startsWith(u8, second, "nnue-")) {
-            const code = nnue_parity.run(second, args[2..]);
+        if (std.mem.startsWith(u8, tool, "nnue-")) {
+            const code = nnue_parity.run(tool, args[2..]);
             if (code != 0) std.process.exit(code);
             return;
         }
 
-        if (std.mem.eql(u8, second, "tbfilter")) {
-            // Usage: tbfilter <input.bin> <output.bin> tb=<path> [threads=..] [men=5] [max=..] [rule50=keep|on|off]
+        if (std.mem.eql(u8, tool, "tbfilter")) {
             const code = tbfilter.run(args[2..]);
             if (code != 0) std.process.exit(code);
             return;
         }
-        if (std.mem.eql(u8, second, "netscale")) {
+        if (std.mem.eql(u8, tool, "netscale")) {
             var buffer: [512]u8 = undefined;
             var stdout = platform.Stdout.init(&buffer);
             var err_buffer: [512]u8 = undefined;
@@ -125,8 +127,16 @@ pub fn main(init: std.process.Init) anyerror!void {
         }
     }
 
-    const inter = std.heap.c_allocator.create(interface.UciInterface) catch unreachable;
-    inter.init();
-    defer std.heap.c_allocator.destroy(inter);
-    return inter.main_loop();
+    const startup_commands = args[@min(1, args.len)..];
+    for (startup_commands) |command| {
+        if (!interface.is_command(command)) {
+            std.debug.print("Avalanche: '{s}' is neither a tool nor a UCI command\n{s}", .{ command, USAGE });
+            std.process.exit(2);
+        }
+    }
+
+    const uci = try platform.allocator.create(interface.UciInterface);
+    defer platform.allocator.destroy(uci);
+    uci.init();
+    return uci.main_loop(startup_commands);
 }

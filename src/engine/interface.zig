@@ -1,3 +1,5 @@
+//! See docs/UCI.md.
+
 const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
@@ -19,24 +21,44 @@ const nl = search.line_ending;
 
 const Tokens = std.mem.TokenIterator(u8, .scalar);
 
+const SEARCH_THREAD_STACK_BYTES = 64 * 1024 * 1024;
+const OVERHEAD_PER_HELPER_MS: u64 = 5;
+const MAX_HELPER_OVERHEAD_MS: u64 = 25;
+
+const AnytimeCommand = enum { quit, stop, ponderhit, isready };
+
+const IdleCommand = enum { uci, setoption, ucinewgame, position, go, d, eval, perft, perftdiv, spsa, @"spsa++", genfens };
+
+pub fn is_command(line: []const u8) bool {
+    var tokens = tokenize(line);
+    const word = tokens.next() orelse return false;
+    return std.meta.stringToEnum(AnytimeCommand, word) != null or std.meta.stringToEnum(IdleCommand, word) != null;
+}
+
 pub const UciInterface = struct {
     position: position.Position,
     search_thread: ?std.Thread,
     searcher: search.Searcher,
     settings: options.Settings,
 
-    pub fn new() UciInterface {
-        var ui: UciInterface = undefined;
-        ui.init();
-        return ui;
-    }
-
     pub fn init(self: *UciInterface) void {
         self.position.init();
-        self.position.set_fen(types.DEFAULT_FEN[0..]);
         self.search_thread = null;
         self.searcher.init();
         self.settings = .{};
+        self.set_root(types.DEFAULT_FEN);
+    }
+
+    pub fn deinit(self: *UciInterface) void {
+        self.stop_search();
+        self.searcher.deinit();
+        self.position.deinit();
+    }
+
+    fn set_root(self: *UciInterface, fen: []const u8) void {
+        self.position.set_fen(fen);
+        self.searcher.hash_history.clear();
+        self.searcher.hash_history.append(self.position.hash) catch unreachable;
     }
 
     fn join_search(self: *UciInterface) void {
@@ -54,7 +76,7 @@ pub const UciInterface = struct {
         self.join_search();
     }
 
-    pub fn main_loop(self: *UciInterface) !void {
+    pub fn main_loop(self: *UciInterface, startup_commands: []const []const u8) !void {
         var in_buf: [1 << 16]u8 = undefined;
         var in_file = std.Io.File.stdin().readerStreaming(platform.io, &in_buf);
         const stdin = &in_file.interface;
@@ -63,9 +85,7 @@ pub const UciInterface = struct {
         const stdout = out_file.writer();
 
         defer {
-            self.stop_search();
-            self.searcher.deinit();
-            self.position.deinit();
+            self.deinit();
             search.shutdown_helpers();
             syzygy.deinit();
         }
@@ -73,95 +93,95 @@ pub const UciInterface = struct {
         try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)" ++ nl, .{build_options.version});
         try stdout.flush();
 
+        if (!try self.run_commands(startup_commands, stdout)) return;
         while (true) {
             const line = stdin.takeDelimiterInclusive('\n') catch |e| switch (e) {
                 error.EndOfStream, error.StreamTooLong => break,
                 else => return e,
             };
-            if (!try self.handle_command(line, stdout)) break;
-            try stdout.flush();
+            if (!try self.run_commands(&.{line}, stdout)) break;
         }
     }
 
-    /// Runs one UCI command line. Returns false when the engine should exit.
-    pub fn handle_command(self: *UciInterface, line: []const u8, out: *std.Io.Writer) !bool {
-        var tokens = std.mem.tokenizeScalar(u8, std.mem.trim(u8, line, "\r\n"), ' ');
-        const command = tokens.next() orelse return true;
-
-        if (eql(command, "quit")) {
-            self.stop_search();
-            return false;
-        } else if (eql(command, "stop")) {
-            self.stop_search();
-            return true;
-        } else if (eql(command, "ponderhit")) {
-            self.searcher.ponderhit();
-            return true;
-        } else if (eql(command, "isready")) {
-            try out.writeAll("readyok" ++ nl);
-            return true;
-        }
-
-        if (@atomicLoad(bool, &self.searcher.shared.is_searching, .acquire)) {
-            try out.print("info string ignored while searching: {s}" ++ nl, .{std.mem.trim(u8, line, "\r\n")});
-            return true;
-        }
-        self.join_search();
-
-        if (eql(command, "uci")) {
-            try out.writeAll("id name Avalanche " ++ build_options.version ++ nl);
-            try out.writeAll("id author Yinuo Huang" ++ nl ++ nl);
-            try options.print_all(out);
-            try out.writeAll("uciok" ++ nl);
-        } else if (eql(command, "setoption")) {
-            options.set_option(tokens.rest(), .{ .settings = &self.settings, .position = &self.position, .out = out }) catch |err| {
-                try out.print("info string setoption failed ({s}): {s}" ++ nl, .{ @errorName(err), tokens.rest() });
-            };
-        } else if (eql(command, "ucinewgame")) {
-            self.searcher.deinit();
-            self.searcher = search.Searcher.new();
-            search.reset_helper_heuristics();
-            tt.GlobalTT.clear();
-            self.position.set_fen(types.DEFAULT_FEN[0..]);
-        } else if (eql(command, "position")) {
-            self.set_position(&tokens);
-        } else if (eql(command, "go")) {
-            try self.start_search(&tokens, out);
-        } else if (eql(command, "d")) {
-            self.position.debug_print();
-        } else if (eql(command, "eval")) {
-            try self.print_evaluation(out);
-        } else if (eql(command, "perft") or eql(command, "perftdiv")) {
-            const depth = @max(std.fmt.parseUnsigned(u32, tokens.next() orelse "1", 10) catch 1, 1);
-            self.position.evaluator.nnue_evaluator.reset_depth(&self.position);
-            if (eql(command, "perft")) {
-                perft.perft_test(&self.position, depth);
-            } else switch (self.position.turn) {
-                .White => perft.perft_div(.White, &self.position, depth),
-                .Black => perft.perft_div(.Black, &self.position, depth),
-            }
-        } else if (eql(command, "spsa") or eql(command, "spsa++")) {
-            const focused = eql(command, "spsa++");
-            for (parameters.TunableParams) |tunable| {
-                if (focused and !tunable.worth_tuning) continue;
-                const live = parameters.live_uci_value(tunable.name) orelse tunable.value;
-                try out.print("{s}, int, {d}, {d}, {d}, {d}, {d}" ++ nl, .{ tunable.name, live, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
-            }
-        } else if (!platform.is_wasm and eql(command, "genfens")) {
-            // OpenBench datagen: generate FENs for the rest of the line, then exit.
-            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-            defer arena.deinit();
-            var args = std.array_list.Managed([]const u8).init(arena.allocator());
-            try args.append("genfens");
-            while (tokens.next()) |tok| try args.append(tok);
-            genfens.run(args.items) catch {};
-            return false;
+    pub fn run_commands(self: *UciInterface, lines: []const []const u8, out: *std.Io.Writer) !bool {
+        for (lines) |line| {
+            const keep_running = try self.handle_command(line, out);
+            try out.flush();
+            if (!keep_running) return false;
         }
         return true;
     }
 
-    /// Static evaluation from White's point of view: the raw network output and
-    /// the final score the search uses (after endgame handling and scaling).
+    pub fn handle_command(self: *UciInterface, line: []const u8, out: *std.Io.Writer) !bool {
+        var tokens = tokenize(line);
+        const word = tokens.next() orelse return true;
+
+        if (std.meta.stringToEnum(AnytimeCommand, word)) |command| {
+            switch (command) {
+                .quit => {
+                    self.stop_search();
+                    return false;
+                },
+                .stop => self.stop_search(),
+                .ponderhit => self.searcher.ponderhit(),
+                .isready => try out.writeAll("readyok" ++ nl),
+            }
+            return true;
+        }
+
+        if (@atomicLoad(bool, &self.searcher.shared.is_searching, .acquire)) {
+            try out.print("info string ignored while searching: {s}" ++ nl, .{tokens.buffer});
+            return true;
+        }
+        self.join_search();
+
+        switch (std.meta.stringToEnum(IdleCommand, word) orelse return true) {
+            .uci => {
+                try out.writeAll("id name Avalanche " ++ build_options.version ++ nl);
+                try out.writeAll("id author Yinuo Huang" ++ nl ++ nl);
+                try options.print_all(out);
+                try out.writeAll("uciok" ++ nl);
+            },
+            .setoption => options.set_option(tokens.rest(), .{ .settings = &self.settings, .position = &self.position, .out = out }) catch |err| {
+                try out.print("info string setoption failed ({s}): {s}" ++ nl, .{ @errorName(err), tokens.rest() });
+            },
+            .ucinewgame => self.new_game(),
+            .position => self.set_position(&tokens),
+            .go => try self.start_search(&tokens, out),
+            .d => self.position.debug_print(),
+            .eval => try self.print_evaluation(out),
+            .perft => self.run_perft(&tokens, .total),
+            .perftdiv => self.run_perft(&tokens, .per_move),
+            .spsa => try print_tunables(out, .all),
+            .@"spsa++" => try print_tunables(out, .worth_tuning),
+            .genfens => if (!platform.is_wasm) {
+                try run_genfens(&tokens);
+                return false;
+            },
+        }
+        return true;
+    }
+
+    fn new_game(self: *UciInterface) void {
+        self.searcher.deinit();
+        self.searcher = search.Searcher.new();
+        search.reset_helper_heuristics();
+        tt.GlobalTT.clear();
+        self.set_root(types.DEFAULT_FEN);
+    }
+
+    fn run_perft(self: *UciInterface, tokens: *Tokens, report: enum { total, per_move }) void {
+        const depth = @max(std.fmt.parseUnsigned(u32, tokens.next() orelse "1", 10) catch 1, 1);
+        self.position.evaluator.nnue_evaluator.reset_depth(&self.position);
+        switch (report) {
+            .total => perft.perft_test(&self.position, depth),
+            .per_move => switch (self.position.turn) {
+                .White => perft.perft_div(.White, &self.position, depth),
+                .Black => perft.perft_div(.Black, &self.position, depth),
+            },
+        }
+    }
+
     fn print_evaluation(self: *UciInterface, out: *std.Io.Writer) !void {
         const pos = &self.position;
         const white_sign: i32 = if (pos.turn == .White) 1 else -1;
@@ -177,7 +197,7 @@ pub const UciInterface = struct {
     fn set_position(self: *UciInterface, tokens: *Tokens) void {
         const kind = tokens.next() orelse return;
         if (eql(kind, "startpos")) {
-            self.position.set_fen(types.DEFAULT_FEN[0..]);
+            self.set_root(types.DEFAULT_FEN);
         } else if (eql(kind, "fen")) {
             var fen_buf: [256]u8 = undefined;
             var fen = std.Io.Writer.fixed(&fen_buf);
@@ -188,13 +208,10 @@ pub const UciInterface = struct {
                 fen.writeAll(tok) catch return;
             }
             if (fen.end == 0) return;
-            self.position.set_fen(fen.buffered());
+            self.set_root(fen.buffered());
         } else {
             return;
         }
-
-        self.searcher.hash_history.clear();
-        self.searcher.hash_history.append(self.position.hash) catch unreachable;
 
         if (!eql(tokens.next() orelse return, "moves")) return;
         while (tokens.next()) |tok| {
@@ -211,8 +228,8 @@ pub const UciInterface = struct {
 
     fn start_search(self: *UciInterface, tokens: *Tokens, out: *std.Io.Writer) !void {
         const cmd = go.GoCommand.parse(tokens, &self.position);
-        const overhead = search.MOVE_OVERHEAD + @min(@as(u64, search.NUM_THREADS) * 5, 25);
-        const budget = go.allocate_time(&cmd, self.position.turn, overhead);
+        const helper_overhead = @min(@as(u64, search.NUM_THREADS) * OVERHEAD_PER_HELPER_MS, MAX_HELPER_OVERHEAD_MS);
+        const budget = go.allocate_time(&cmd, self.position.turn, search.MOVE_OVERHEAD + helper_overhead);
 
         try print_network(out);
         try out.flush();
@@ -241,7 +258,7 @@ pub const UciInterface = struct {
 
         if (comptime platform.has_threads) {
             self.search_thread = std.Thread.spawn(
-                .{ .stack_size = 64 * 1024 * 1024 },
+                .{ .stack_size = SEARCH_THREAD_STACK_BYTES },
                 run_search,
                 .{ s, &self.position, cmd.depth, instant_single_reply },
             ) catch |e| std.debug.panic("Could not spawn main thread!\n{}", .{e});
@@ -251,8 +268,26 @@ pub const UciInterface = struct {
     }
 };
 
-/// Like Stockfish, every search starts by naming the network, so logs and GUIs
-/// show which evaluation produced the analysis (relevant with EvalFile).
+fn tokenize(line: []const u8) Tokens {
+    return std.mem.tokenizeScalar(u8, std.mem.trim(u8, line, "\r\n"), ' ');
+}
+
+fn print_tunables(out: *std.Io.Writer, selection: enum { all, worth_tuning }) !void {
+    for (parameters.TunableParams) |tunable| {
+        if (selection == .worth_tuning and !tunable.worth_tuning) continue;
+        const live = parameters.live_uci_value(tunable.name) orelse tunable.value;
+        try out.print("{s}, int, {d}, {d}, {d}, {d}, {d}" ++ nl, .{ tunable.name, live, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
+    }
+}
+
+fn run_genfens(tokens: *Tokens) !void {
+    var arguments: std.ArrayList([]const u8) = .empty;
+    defer arguments.deinit(platform.allocator);
+    try arguments.append(platform.allocator, "genfens");
+    while (tokens.next()) |token| try arguments.append(platform.allocator, token);
+    genfens.run(arguments.items) catch {};
+}
+
 fn print_network(out: *std.Io.Writer) !void {
     try out.print("info string NNUE evaluation using {s} ({s}, {d} MiB)" ++ nl, .{
         weights.active_network(),

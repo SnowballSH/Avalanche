@@ -10,6 +10,7 @@ const perft = @import("chess/perft.zig");
 const see = @import("engine/see.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
+const interface = @import("engine/interface.zig");
 const support = @import("tests/support.zig");
 const expect = std.testing.expect;
 
@@ -1131,4 +1132,56 @@ test "qsearch: contempt draw keeps fail-soft provenance" {
     const score = f.quiescence(beta - 1, beta);
     try expect(score == draw_score);
     try expect(tt.GlobalTT.get(f.pos.hash) == null);
+}
+
+fn new_uci() !*interface.UciInterface {
+    support.init_engine();
+    const ui = try std.testing.allocator.create(interface.UciInterface);
+    ui.init();
+    return ui;
+}
+
+fn destroy_uci(ui: *interface.UciInterface) void {
+    ui.deinit();
+    std.testing.allocator.destroy(ui);
+}
+
+test "uci: the search history holds the root key before any position command and after ucinewgame" {
+    const ui = try new_uci();
+    defer destroy_uci(ui);
+    var buf: [256]u8 = undefined;
+    var out = std.Io.Writer.fixed(&buf);
+
+    try std.testing.expectEqualSlices(u64, &.{ui.position.hash}, ui.searcher.hash_history.items);
+
+    try expect(try ui.handle_command("position startpos moves e2e4 e7e5\n", &out));
+    try std.testing.expectEqual(@as(usize, 3), ui.searcher.hash_history.items.len);
+    try std.testing.expectEqual(ui.position.hash, ui.searcher.hash_history.items[2]);
+
+    try expect(try ui.handle_command("ucinewgame\n", &out));
+    try std.testing.expectEqualSlices(u64, &.{ui.position.hash}, ui.searcher.hash_history.items);
+}
+
+test "uci: a command-line argument is accepted only when its first word is a UCI command" {
+    for ([_][]const u8{ "quit", "isready", "go depth 5", "setoption name Hash value 64", "genfens 100 seed 1 book None", "spsa++" }) |argument| {
+        try expect(interface.is_command(argument));
+    }
+    for ([_][]const u8{ "", "--version", "--help", "tbfliter", "Go depth 5", "benchmark" }) |argument| {
+        try expect(!interface.is_command(argument));
+    }
+}
+
+test "uci: startup commands run in order and nothing runs after quit" {
+    const ui = try new_uci();
+    defer destroy_uci(ui);
+    var buf: [256]u8 = undefined;
+
+    var out = std.Io.Writer.fixed(&buf);
+    try expect(try ui.run_commands(&.{ "position startpos moves e2e4", "isready" }, &out));
+    try std.testing.expectEqualStrings("readyok" ++ search.line_ending, out.buffered());
+    try std.testing.expectEqual(@as(usize, 2), ui.searcher.hash_history.items.len);
+
+    out = std.Io.Writer.fixed(&buf);
+    try expect(!try ui.run_commands(&.{ "quit", "isready" }, &out));
+    try std.testing.expectEqual(@as(usize, 0), out.buffered().len);
 }
