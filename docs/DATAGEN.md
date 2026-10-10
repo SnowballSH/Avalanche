@@ -232,8 +232,8 @@ skipped positions, which only a book of finished positions produces.
 ## Tablebase cleaning
 
 ```
-Avalanche tbfilter <input> <output> tb=<dir[:dir]> [format=bullet|viri] [men=N] [rule50=keep|on|off]
-                   [threads=N] [max=N]
+Avalanche tbfilter <input | in=PATH> <output | out=PATH> tb=<dir[:dir]> [format=bullet|viri] [men=N]
+                   [rule50=keep|on|off] [threads=N] [max=N]
 ```
 
 `tbfilter` probes the Syzygy WDL tables for every position of at most `men` pieces (2 to 7, default 5, and never
@@ -242,13 +242,18 @@ contradicts the game result. Cursed wins and blessed losses contradict nothing u
 treats both as draws and `off` as the win or loss they are without the fifty-move rule. A failed probe or missing
 table keeps the position.
 
+An argument with `=` in it is an option, so a path that contains `=` cannot be given bare: name it, as `in=PATH` or
+`out=PATH`. A bare argument is the input, or the output once the input is given.
+
 The two data formats need different treatment, so the format must be known. It is taken from the input's extension,
 `.bin` for bulletformat and `.viribin` for viriformat, the extensions datagen gives its files, and `format=`
 overrides the extension. When neither decides, `tbfilter` stops with an error instead of guessing: the bulletformat
 code run over a viriformat file would treat every 32-byte window as a record, drop some of them and still report
-success. As a second line of defence a bulletformat input must be a whole number of 32-byte records, and a viriformat
-input must replay from its first game to its last. Unknown options, repeated options and malformed values are
-errors, as are a third path and equal input and output paths. Every error exits with status 1.
+success. The output is written in the format of the input, and an output whose extension names the other format is
+refused, because the next run would take that file for what its name says. As a second line of defence a
+bulletformat input must be a whole number of 32-byte records, and a viriformat input must replay from its first game
+to its last. Unknown options, repeated options and malformed values are errors, as are a third path and equal input
+and output paths. Every error exits with status 1.
 
 ### Viriformat
 

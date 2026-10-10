@@ -132,6 +132,43 @@ test "tbfilter options: the input's extension names the format unless format= do
     try testing.expectError(error.UndecidedFormat, tbfilter.parse_config(&.{ "in", "out.viribin", "tb=tables" }, &diag));
 }
 
+test "tbfilter options: an output whose extension names the other format is refused" {
+    var diag: arguments.Diagnostic = .{};
+    try testing.expectError(error.OutputExtensionOfOtherFormat, tbfilter.parse_config(&.{ "in.viribin", "out.bin", "tb=tables" }, &diag));
+    try testing.expectEqualStrings("out.bin", diag.value);
+    try testing.expectError(error.OutputExtensionOfOtherFormat, tbfilter.parse_config(&.{ "in.bin", "out.viribin", "tb=tables" }, &diag));
+    try testing.expectError(error.OutputExtensionOfOtherFormat, tbfilter.parse_config(&.{ "in.viribin", "out.viribin", "tb=tables", "format=bullet" }, &diag));
+    try testing.expectError(error.OutputExtensionOfOtherFormat, tbfilter.parse_config(&.{ "in", "out.bin", "tb=tables", "format=viri" }, &diag));
+
+    _ = try parse(&.{ "in.viribin", "out.cleaned", "tb=tables" });
+    _ = try parse(&.{ "in.viribin", "out.bin", "tb=tables", "format=bullet" });
+}
+
+test "tbfilter options: in= and out= name the paths, so a path may contain an equals sign" {
+    const keyed = try parse(&.{ "tb=tables", "out=runs/seed=42/clean.viribin", "in=runs/seed=42/chunk.viribin" });
+    try testing.expectEqualStrings("runs/seed=42/chunk.viribin", keyed.input);
+    try testing.expectEqualStrings("runs/seed=42/clean.viribin", keyed.output);
+    try testing.expectEqual(tbfilter.Format.viri, keyed.format);
+
+    const mixed = try parse(&.{ "out=a=b.bin", "chunk.bin", "tb=tables" });
+    try testing.expectEqualStrings("chunk.bin", mixed.input);
+    try testing.expectEqualStrings("a=b.bin", mixed.output);
+    const bare_output = try parse(&.{ "in=a=b.bin", "clean.bin", "tb=tables" });
+    try testing.expectEqualStrings("a=b.bin", bare_output.input);
+    try testing.expectEqualStrings("clean.bin", bare_output.output);
+
+    var diag: arguments.Diagnostic = .{};
+    try testing.expectError(error.DuplicateKey, tbfilter.parse_config(&.{ "chunk.bin", "in=other.bin", "out.bin", "tb=tables" }, &diag));
+    try testing.expectEqualStrings("in", diag.key);
+    try testing.expectError(error.UnexpectedArgument, tbfilter.parse_config(&.{ "in=chunk.bin", "out=clean.bin", "tb=tables", "extra.bin" }, &diag));
+    try testing.expectEqualStrings("extra.bin", diag.value);
+    try testing.expectError(error.InvalidValue, tbfilter.parse_config(&.{ "in=", "clean.bin", "tb=tables" }, &diag));
+    try testing.expectEqualStrings("in", diag.key);
+    try testing.expectError(error.UnknownKey, tbfilter.parse_config(&.{ "runs/seed=42/chunk.bin", "clean.bin", "tb=tables" }, &diag));
+    try testing.expectEqualStrings("runs/seed", diag.key);
+    try testing.expectError(error.MissingArgument, parse(&.{ "in=chunk.bin", "tb=tables" }));
+}
+
 test "tbfilter options: viriformat rejects the bulletformat-only max= and threads= options" {
     var diag: arguments.Diagnostic = .{};
     _ = try tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "rule50=on" }, &diag);

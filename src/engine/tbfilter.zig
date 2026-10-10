@@ -320,7 +320,8 @@ const USAGE = std.fmt.comptimePrint(
     \\Usage: Avalanche tbfilter <input> <output> tb=<path> [options]
     \\
     \\The input's extension names its format ({s} bulletformat, {s} viriformat)
-    \\unless format= does.
+    \\unless format= does. The output is written in the same format, and its
+    \\extension must not name the other one.
     \\bulletformat: drops every <=N-man position whose recorded WDL contradicts
     \\the Syzygy tablebase.
     \\viriformat: replays each game and masks such positions with an out-of-range
@@ -330,6 +331,8 @@ const USAGE = std.fmt.comptimePrint(
     \\  tb=<path>           Syzygy tablebase directory
     \\
     \\Options:
+    \\  in=<path> out=<path>
+    \\                      <input> and <output> by name, for a path with '=' in it
     \\  format=bullet|viri  Input format (default: by the input's extension)
     \\  threads=<n>         Worker threads, 1-{d}, bulletformat only
     \\                      (default: CPU count, at most {d})
@@ -356,16 +359,24 @@ pub fn load_tablebases(tb_path: []const u8) ?u32 {
 }
 
 pub const ParseError = arguments.KeyError || arguments.ValueError ||
-    error{ MissingArgument, UnexpectedArgument, UndecidedFormat, BulletOnlyOption };
+    error{ MissingArgument, UnexpectedArgument, UndecidedFormat, OutputExtensionOfOtherFormat, BulletOnlyOption };
 
-const Key = enum { tb, format, threads, men, max, rule50 };
+const Key = enum { in, out, tb, format, threads, men, max, rule50 };
+const PATH_KEYS = [_]Key{ .in, .out };
 const BULLET_ONLY_KEYS = [_]Key{ .threads, .max };
 
+fn first_path_not_given(options: arguments.KeyValues(Key)) ?Key {
+    for (PATH_KEYS) |key| {
+        if (!options.given(key)) return key;
+    }
+    return null;
+}
+
 pub fn parse_config(args: []const []const u8, diag: *arguments.Diagnostic) ParseError!Config {
-    var paths: [2][]const u8 = undefined;
-    var path_count: usize = 0;
     var options: arguments.KeyValues(Key) = .{};
-    var tb_path: ?[]const u8 = null;
+    var input_path: ?[]const u8 = null;
+    var output_path: ?[]const u8 = null;
+    var tablebase_path: ?[]const u8 = null;
     var named_format: ?Format = null;
     var threads: ?usize = null;
     var max_men: u32 = DEFAULT_MAX_MEN;
@@ -373,18 +384,15 @@ pub fn parse_config(args: []const []const u8, diag: *arguments.Diagnostic) Parse
     var rule50: Rule50Mode = .keep;
 
     for (args) |arg| {
-        if (!arguments.is_key_value(arg)) {
-            if (path_count == paths.len) {
-                diag.* = .{ .value = arg };
-                return error.UnexpectedArgument;
-            }
-            paths[path_count] = arg;
-            path_count += 1;
-            continue;
-        }
-        const option = try options.next(arg, null, diag);
+        const key_of_bare_argument: ?Key = if (arguments.is_key_value(arg)) null else first_path_not_given(options) orelse {
+            diag.* = .{ .value = arg };
+            return error.UnexpectedArgument;
+        };
+        const option = try options.next(arg, key_of_bare_argument, diag);
         switch (option.key) {
-            .tb => tb_path = try arguments.non_empty(option.value),
+            .in => input_path = try arguments.non_empty(option.value),
+            .out => output_path = try arguments.non_empty(option.value),
+            .tb => tablebase_path = try arguments.non_empty(option.value),
             .format => named_format = try arguments.choice(Format, option.value),
             .threads => threads = try arguments.integer(usize, option.value, 1, MAX_THREADS),
             .men => max_men = try arguments.integer(u32, option.value, MIN_MEN, MAX_MEN),
@@ -393,12 +401,19 @@ pub fn parse_config(args: []const []const u8, diag: *arguments.Diagnostic) Parse
         }
     }
 
-    if (path_count != paths.len or tb_path == null) return error.MissingArgument;
-    const input, const output = paths;
+    const input = input_path orelse return error.MissingArgument;
+    const output = output_path orelse return error.MissingArgument;
+    const tb_path = tablebase_path orelse return error.MissingArgument;
     const format = named_format orelse Format.of_path(input) orelse {
         diag.* = .{ .value = input };
         return error.UndecidedFormat;
     };
+    if (Format.of_path(output)) |named_by_output| {
+        if (named_by_output != format) {
+            diag.* = .{ .value = output };
+            return error.OutputExtensionOfOtherFormat;
+        }
+    }
     if (format == .viri) {
         for (BULLET_ONLY_KEYS) |key| {
             if (options.given(key)) {
@@ -411,7 +426,7 @@ pub fn parse_config(args: []const []const u8, diag: *arguments.Diagnostic) Parse
         .format = format,
         .input = input,
         .output = output,
-        .tb_path = tb_path.?,
+        .tb_path = tb_path,
         .threads = threads,
         .max_men = max_men,
         .max_positions = max_positions,
@@ -427,6 +442,7 @@ fn report_parse_error(failure: ParseError, diag: arguments.Diagnostic) void {
         error.DuplicateKey => std.debug.print("tbfilter: option {s} is given more than once\n", .{diag.key}),
         error.InvalidValue => std.debug.print("tbfilter: invalid value '{s}' for option {s}\n", .{ diag.value, diag.key }),
         error.UndecidedFormat => std.debug.print("tbfilter: the extension of '{s}' names no format; give format=bullet or format=viri\n", .{diag.value}),
+        error.OutputExtensionOfOtherFormat => std.debug.print("tbfilter: the extension of output '{s}' names the other format; the output is written in the format of the input\n", .{diag.value}),
         error.BulletOnlyOption => std.debug.print("tbfilter: option {s} is not supported for viriformat\n", .{diag.key}),
     }
     std.debug.print("{s}", .{USAGE});
