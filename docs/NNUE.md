@@ -75,8 +75,10 @@ a position evaluated earlier in the run. So every `Position` keeps a direct-mapp
 outputs, 1 MiB. A helper thread has one such position, the root position of its `Searcher`. The
 main thread searches the position it is given (the UCI layer's, or that of `bench` or datagen),
 and its `Searcher` owns a root position as well, with a cache it does not use. An entry is 8
-bytes: the output in 20 bits (the largest any head can produce is ±131586) and 44 further bits of
-the Zobrist hash. The slot is the low 17 bits of the hash (the transposition table uses the high
+bytes: the output in 20 bits and 44 further bits of the Zobrist hash. The largest output any head
+can produce is ±207212 (the single-layer head with weights no trained network has, see there),
+and the most negative 20-bit value is never an output: it marks an entry that holds nothing. The
+slot is the low 17 bits of the hash (the transposition table uses the high
 ones), so 61 bits of the hash decide a hit, against the 32 key bits and the index of the
 transposition table. The evaluations are therefore those of the head except when two positions
 agree in those 61 bits, about once in 2^44 probes that land on another position's entry. The
@@ -190,6 +192,17 @@ out = trunc((trunc(s / 255) + bias[b]) * 400 / (255 * 64))
 Total 25200704 bytes, no header. Invariant the loader checks: every output weight is in
 [-128, 127]. The SIMD path multiplies `activation * weight` in i16, and 255 * 127 is the largest
 product that fits.
+
+`s` is kept in an i32 and added with wrapping arithmetic. For a trained network it is far inside
+the i32, and a sum that fits is exact in whatever order the vector lanes are added. The weight
+range does not bound it for every file, though: when the positive weights of a bucket add up to
+more than 33025, activations of 255 on exactly those inputs take `s` past 2³¹, and likewise for
+the negative weights. The loader does not check that total, because the limit would sit too close
+to real networks, which never saturate all of those activations at once: the positive weights of
+a bucket add up to as much as 20366 in `nets/dianguang-1.nnue`. So the evaluation is total
+instead. `s` wraps, which gives a meaningless but defined number, the same on every target and in
+every build mode, and the last step is computed in i64, because `(trunc(s / 255) + bias) * 400`
+leaves an i32 long before `s` does. Whatever a file holds, the output is within ±207212.
 
 ## Multi-layer head
 
@@ -910,9 +923,12 @@ equal.
 
 ## Tests
 
-`zig build test` in the default build covers the multi-layer head. The multi-layer head's weights
-are passed explicitly, so its tests run in a build of either head; the single-layer head is only
-evaluated through the embedded network, so its tests need a single-layer build:
+`zig build test` in the default build covers the multi-layer head. Both heads take their weights
+explicitly, so the tests of their arithmetic run in a build of either head: those of the
+multi-layer head are in `src/tests/nnue_multi.zig`, and those of the single-layer head (the
+formula on random weights, and weights at their extremes) sit beside it in
+`src/engine/nnue/head_single.zig`. The tests that evaluate positions use the embedded network, so
+they reach the single-layer head only in a single-layer build:
 `zig build test -Dnet=nets/dianguang-1.nnue`. `-Dtest-filter=<text>` runs the tests
 whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
 use `-Doptimize=safe` for those.
