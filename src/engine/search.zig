@@ -268,6 +268,10 @@ pub fn helper_count() usize {
     return helper_pool.count();
 }
 
+pub fn thread_count() usize {
+    return NUM_THREADS + 1;
+}
+
 pub fn reset_helper_heuristics() void {
     helper_pool.reset_heuristics();
 }

@@ -18,7 +18,7 @@
 | --- | --- | --- | --- |
 | Hash | spin | 16 | MB |
 | Threads | spin | 1 | persistent helper pool, see [THREADS.md](THREADS.md); max 1 on wasm |
-| NumaPolicy | combo | auto | `auto` binds threads to NUMA nodes on multi-node Linux machines, `none` leaves placement to the OS |
+| NumaPolicy | combo | auto | `auto` binds search threads to NUMA nodes on multi-node Linux machines once there are too many for one node (docs/THREADS.md), `none` leaves placement to the OS |
 | Move Overhead | spin | 25 | ms; the former name `MoveOverhead` is still accepted |
 | MultiPV | spin | 1 | up to 256 |
 | Ponder | check | false | tells GUIs pondering is supported; pondering itself is driven by `go ponder` |

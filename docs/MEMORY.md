@@ -74,9 +74,10 @@ part gets a thread of its own, which calls `placement(index, parts)` before touc
 calling thread only waits, since it must not be moved. The transposition table's placement binds
 the thread of part `i` of `n` like search thread `i * threads / n`: with a part per thread that is
 search thread `i`, and a table too small for that (under 32 MiB per thread) still has its parts
-spread evenly over all the search threads. Threads fill the nodes in order (docs/THREADS.md), so a
-table for a few threads is on the first node with them, and a table for many is spread over the
-nodes in proportion to the threads on each.
+spread evenly over all the search threads. The table has a placement only when the search threads
+are bound (docs/THREADS.md, "NUMA placement"), and it is then spread over the nodes in proportion
+to the threads on each. The thread count used for that decision is the one that will search: one,
+until `Threads` has been set.
 
 Limits of that, as the code stands:
 
@@ -85,7 +86,8 @@ Limits of that, as the code stands:
   faster by many.
 - A table is not moved afterwards. One created before `Threads` or `NumaPolicy` changed stays
   where it is until `Hash` is set again.
-- Without a placement (a single node, `NumaPolicy none`, other operating systems) no thread is
+- Without a placement (a single node, too few threads to bind, `NumaPolicy none`, other operating
+  systems) no thread is
   bound: the calling thread backs the last part itself, and a table under 64 MiB starts no thread
   at all, because engines under test are started thousands of times on busy machines. The 32 MiB
   per part is a judgement, not a measurement.

@@ -31,6 +31,7 @@ pub const Worker = struct {
     idle: std.Io.Event = .unset,
     job: Job = undefined,
     helper_index: usize,
+    search_thread_count: usize,
     searcher: *Searcher = undefined,
     thread: std.Thread = undefined,
 
@@ -56,7 +57,7 @@ pub const Worker = struct {
     }
 
     fn main(self: *Worker) void {
-        numa.place_current_thread(self.helper_index + 1);
+        numa.place_current_thread(self.helper_index + 1, self.search_thread_count);
         self.searcher = platform.allocator.create(Searcher) catch @panic("out of memory for helper searcher");
         self.searcher.init();
         self.searcher.thread_id = self.helper_index + 1;
@@ -96,18 +97,14 @@ pub const ThreadPool = struct {
     pub fn resize(self: *ThreadPool, target: usize) void {
         if (comptime !platform.has_threads) return;
         numa.init();
-        while (self.workers.items.len > target) {
-            const w = self.workers.pop().?;
-            w.submit(.quit);
-            w.thread.join();
-            platform.allocator.destroy(w);
-        }
+        const placement_changes = numa.binds_threads(self.count() + 1) != numa.binds_threads(target + 1);
+        self.release_down_to(if (placement_changes) 0 else target);
 
         const old_len = self.workers.items.len;
         self.workers.ensureTotalCapacity(target) catch return;
         while (self.workers.items.len < target) {
             const w = platform.allocator.create(Worker) catch break;
-            w.* = .{ .helper_index = self.workers.items.len };
+            w.* = .{ .helper_index = self.workers.items.len, .search_thread_count = target + 1 };
             w.thread = std.Thread.spawn(.{ .stack_size = STACK_SIZE }, Worker.main, .{w}) catch {
                 platform.allocator.destroy(w);
                 break;
@@ -115,6 +112,15 @@ pub const ThreadPool = struct {
             self.workers.appendAssumeCapacity(w);
         }
         for (self.workers.items[old_len..]) |w| w.wait_idle();
+    }
+
+    fn release_down_to(self: *ThreadPool, target: usize) void {
+        while (self.workers.items.len > target) {
+            const w = self.workers.pop().?;
+            w.submit(.quit);
+            w.thread.join();
+            platform.allocator.destroy(w);
+        }
     }
 
     pub fn start_search(self: *ThreadPool, index: usize, job: SearchJob) void {

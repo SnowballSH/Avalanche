@@ -262,7 +262,7 @@ fn print_network(out: *std.Io.Writer) !void {
 }
 
 fn run_search(searcher: *search.Searcher, pos: *position.Position, max_depth: ?u8, instant_single_reply: bool) void {
-    numa.place_current_thread(0);
+    numa.place_current_thread(0, search.thread_count());
     var depth = max_depth;
     if (instant_single_reply and legal_move_count(pos) == 1) {
         depth = 1;

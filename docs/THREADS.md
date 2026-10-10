@@ -229,13 +229,29 @@ not its concurrency scheme.
 ## NUMA placement (`src/engine/numa.zig`)
 
 On Linux the topology is read once from `/sys/devices/system/node`
-(`online` and each node's `cpulist`). With `NumaPolicy auto` (default) and
-more than one node, search thread `i` (0 = main) is bound with
-`sched_setaffinity` to the node that owns the `i`-th CPU when nodes are filled
-in order, wrapping when threads outnumber CPUs. Small thread counts therefore
-stay on one node, and large ones spread across all nodes in proportion to
-their CPU counts. `NumaPolicy none` leaves placement to the OS scheduler;
-changing the policy restarts the helpers so the new placement applies.
+(`online` and each node's `cpulist`), restricted to the CPUs the process was
+started with. `NumaPolicy none` leaves placement to the OS scheduler. With
+`NumaPolicy auto` (default) search threads are bound with `sched_setaffinity`,
+but only when there are too many of them for one node to hold comfortably:
+
+- **Whether to bind** (`Topology.needs_binding`) is Stockfish's rule: more
+  threads than half the CPUs of the largest node, or at least four threads per
+  node (counting only nodes with more than 60% of the largest node's CPUs).
+  Below that nothing is bound. One search thread is never bound: an engine
+  under test is one of many single-threaded processes on the machine, and a
+  rule that binds each of them would put every process on the same node.
+- **Where a thread goes** (`Topology.node_for_thread`): thread `i` (0 = main)
+  takes the node with the most room left in proportion to its CPU count, given
+  where threads `0..i-1` went. Equal nodes are therefore filled in turn, so the
+  second socket's cores are used before the first socket's hyperthreads, and
+  several engine processes spread over the nodes the same way instead of all
+  starting on the first. A thread's node does not depend on how many threads
+  follow it, so growing the pool leaves the existing helpers where they are.
+
+A helper is placed when its thread starts. When a change of `Threads` moves
+the thread count across the binding threshold, or `NumaPolicy` changes, the
+pool releases all helpers and starts them again, so they are either all bound
+or all unbound.
 
 On single-node machines and on other operating systems, placement is a no-op.
 

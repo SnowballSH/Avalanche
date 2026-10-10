@@ -48,14 +48,15 @@ pub const Sharing = enum {
     search_threads,
 };
 
-fn search_thread_count() usize {
+fn backing_thread_count() usize {
     if (comptime !platform.has_threads) return 1;
-    return if (search.THREADS_CONFIGURED) search.NUM_THREADS + 1 else std.Thread.getCpuCount() catch 1;
+    return if (search.THREADS_CONFIGURED) search.thread_count() else std.Thread.getCpuCount() catch 1;
 }
 
 /// Part `part` of `parts` goes where the search thread at the same fraction of all search threads runs.
 fn place_like_search_thread(part: usize, parts: usize) void {
-    numa.place_current_thread(search_thread_of_part(part, parts, search_thread_count()));
+    const threads = search.thread_count();
+    numa.place_current_thread(search_thread_of_part(part, parts, threads), threads);
 }
 
 fn search_thread_of_part(part: usize, parts: usize, threads: usize) usize {
@@ -82,7 +83,7 @@ pub const TranspositionTable = struct {
         if (comptime !platform.has_threads) return 1;
         return switch (self.sharing) {
             .private => 1,
-            .search_threads => search_thread_count(),
+            .search_threads => backing_thread_count(),
         };
     }
 
@@ -90,7 +91,7 @@ pub const TranspositionTable = struct {
         if (comptime !platform.has_threads) return null;
         if (self.sharing == .private) return null;
         numa.init();
-        return if (numa.binds_threads()) &place_like_search_thread else null;
+        return if (numa.binds_threads(search.thread_count())) &place_like_search_thread else null;
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
