@@ -26,6 +26,7 @@ describe("client protocol", () => {
   it("closes and reports once when the engine crashes", async () => {
     const { port, client, errors } = await startSession();
     port.deliver({ type: "crash", message: "Engine crashed: unreachable" });
+    port.deliver({ type: "crash", message: "Engine crashed: unreachable" });
     assert.equal(client.closed, true);
     assert.equal(port.terminated, true);
     await client.whenClosed;
@@ -33,6 +34,16 @@ describe("client protocol", () => {
     assert.throws(() => {
       client.send("isready");
     }, /closed/);
+  });
+
+  it("closes and reports once when the port fails", async () => {
+    const { port, client, errors } = await startSession();
+    port.fail(new Error("Engine worker exited with code 1"));
+    port.fail(new Error("Engine worker exited with code 1"));
+    assert.equal(client.closed, true);
+    assert.equal(port.terminated, true);
+    await client.whenClosed;
+    assert.deepEqual(errors, ["Engine worker exited with code 1"]);
   });
 
   it("rejects start when the engine crashes while starting", async () => {

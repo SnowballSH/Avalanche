@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { createServer, type Server, type ServerResponse } from "node:http";
@@ -41,16 +42,13 @@ async function sendFile(requestUrl: string, response: ServerResponse): Promise<v
   createReadStream(file).pipe(response);
 }
 
-export function startDemoServer(port: number): Promise<Server> {
+export async function startDemoServer(port: number): Promise<Server> {
   const server = createServer((request, response) => {
     sendFile(request.url ?? "/", response).catch(() => {
       response.writeHead(404, CROSS_ORIGIN_ISOLATION).end("Not found");
     });
   });
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(port, HOST, () => {
-      resolve(server);
-    });
-  });
+  server.listen(port, HOST);
+  await once(server, "listening");
+  return server;
 }
