@@ -1,5 +1,4 @@
-//! Held-out validation. bullet's `ValueTrainer::run` has neither a validation pass nor a superbatch hook,
-//! so a validated run drives `bullet_trainer::run::train` directly, the layer `ValueTrainer::run` wraps.
+//! See "Training" in docs/NNUE.md.
 
 use std::{cell::RefCell, collections::BTreeMap, fmt::Debug, sync::Arc};
 
@@ -35,8 +34,7 @@ pub struct ValidationConfig {
     pub filter: PositionFilter,
 }
 
-/// For bullet's GPU and training errors, which implement `Debug` but not `Display`.
-fn describe(error: impl Debug) -> String {
+fn debug_text(error: impl Debug) -> String {
     format!("{error:?}")
 }
 
@@ -44,8 +42,6 @@ fn sigmoid(x: f32) -> f32 {
     1.0 / (1.0 + (-x).exp())
 }
 
-/// Mirrors the mapper `ValueTrainer` builds privately for a scalar-output net without datapoint weights
-/// or a win-rate model, which is how both of this trainer's nets are built.
 fn value_mapper<I, O>(
     inputs: I,
     buckets: O,
@@ -104,13 +100,6 @@ where
     )
 }
 
-/// The summed batch loss from a forward-only function, after bullet's `ModelEvaluator`, which is fixed
-/// to a batch size of 1.
-///
-/// It runs the model up to its output and applies the loss on the host: `(sigmoid(output) - target)²`,
-/// the loss of both of this trainer's nets. The model's own loss node is not used, so a term a net adds
-/// to its training loss (`TRAIN_L1_SPARSITY`) is not part of the validation loss, which stays comparable
-/// between runs with different penalties.
 struct LossEvaluator {
     stream: Arc<Stream<ExecutionContext>>,
     function: Function<ExecutionContext>,
@@ -121,9 +110,8 @@ struct LossEvaluator {
     batch_size: usize,
 }
 
-/// A device buffer that must hold one f32 per position of a batch.
 fn batch_values(buffer: &DeviceBuffer, batch_size: usize, name: &str) -> Result<Vec<f32>, String> {
-    match buffer.to_host().map_err(describe)? {
+    match buffer.to_host().map_err(debug_text)? {
         TValue::F32(values) if values.len() == batch_size => Ok(values),
         other => Err(format!(
             "unexpected {name} tensor for a batch of {batch_size}: {other:?}"
@@ -175,13 +163,13 @@ impl LossEvaluator {
             .collect::<Result<_, String>>()?;
 
         let output_id = lowered(&output_node)?;
-        let output = Buffer::zeroed(&device, DType::F32, batch_size).map_err(describe)?;
+        let output = Buffer::zeroed(&device, DType::F32, batch_size).map_err(debug_text)?;
         let bound = BTreeMap::from([(output_id, output.clone())]);
 
-        let stream = device.new_stream().map_err(describe)?;
+        let stream = device.new_stream().map_err(debug_text)?;
         let mut function =
             Function::new(device, forward.ir().clone()).map_err(|err| err.to_string())?;
-        function.prealloc().map_err(describe)?;
+        function.prealloc().map_err(debug_text)?;
 
         Ok(Self {
             stream,
@@ -203,7 +191,6 @@ impl LossEvaluator {
         }
     }
 
-    /// The loss summed over one batch, with the trainer's current weights.
     fn batch_loss(
         &mut self,
         weights: &TensorMap<ExecutionContext>,
@@ -212,9 +199,9 @@ impl LossEvaluator {
         self.bind(weights, batch);
         self.function
             .execute(self.stream.clone(), &self.bound)
-            .map_err(describe)?
+            .map_err(debug_text)?
             .value()
-            .map_err(describe)?;
+            .map_err(debug_text)?;
 
         let outputs = batch_values(&self.output, self.batch_size, "output")?;
         let targets = batch
@@ -259,9 +246,6 @@ impl Validator {
         })
     }
 
-    /// Mean loss per position, normalised like the training loss bullet reports. Targets use the WDL
-    /// blend of `step`, so the value is comparable to the training loss of the same superbatch, less
-    /// any `TRAIN_L1_SPARSITY` penalty, which only the training loss contains.
     fn mean_loss<Opt: OptimiserState<ExecutionContext>>(
         &mut self,
         optimiser: &Optimiser<ExecutionContext, Opt>,
@@ -273,8 +257,8 @@ impl Validator {
             let host = self
                 .mapper
                 .map(&self.pool, batch, step, self.threads)
-                .map_err(describe)?;
-            let on_device = host.to_device(&device).map_err(describe)?;
+                .map_err(debug_text)?;
+            let on_device = host.to_device(&device).map_err(debug_text)?;
             total += self.evaluator.batch_loss(optimiser.weights(), &on_device)?;
         }
         Ok((total / self.positions.len() as f64) as f32)
@@ -305,10 +289,6 @@ fn save_checkpoint<Opt: OptimiserState<ExecutionContext>>(
     println!("Saved [{}]", logger::ansi(name, 31));
 }
 
-/// `ValueTrainer::run` with a validation pass after every superbatch, and one before training starts so
-/// that a broken validation setup fails before any training time is spent. Only that first pass
-/// and training itself can fail the run: a validation failure later on is a warning, validation is
-/// switched off, and training carries on to a normal `Ok`.
 #[allow(clippy::too_many_arguments)]
 pub fn run<Opt, I, O>(
     optimiser: &mut Optimiser<ExecutionContext, Opt>,
@@ -403,7 +383,7 @@ where
             }
         },
     )
-    .map_err(describe)?;
+    .map_err(debug_text)?;
 
     if let Some((superbatch, error)) = validation_error {
         eprintln!(
