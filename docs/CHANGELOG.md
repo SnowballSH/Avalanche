@@ -1,3 +1,66 @@
+# v5.0.0
+
+- Match Results
+
+STC vs Avalanche 4.0.0:
+```
+Elo   | 100.18 +- 3.85 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16
+Games | N: 10000 W: 4048 L: 1242 D: 4710
+Penta | [13, 355, 1794, 2489, 349]
+```
+
+LTC vs Avalanche 4.0.0:
+```
+Elo   | 102.22 +- 8.13 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64
+Games | N: 2000 W: 789 L: 217 D: 994
+Penta | [2, 65, 338, 549, 46]
+```
+
+VLTC vs Avalanche 4.0.0:
+```
+Elo   | 92.46 +- 30.49 (95%)
+Conf  | 120.0+1.00s Threads=1 Hash=64
+Games | N: 100 W: 36 L: 10 D: 54
+Penta | [0, 2, 20, 28, 0]
+```
+
+LTC, 4 threads, vs Avalanche 4.0.0:
+```
+Elo   | 111.37 +- 14.29 (95%)
+Conf  | 40.0+0.40s Threads=4 Hash=64
+Games | N: 500 W: 193 L: 38 D: 269
+Penta | [0, 8, 86, 149, 7]
+```
+
+STC Double Fischer Random vs the first Chess960 build (b6ac754):
+```
+Elo   | 257.94 +- 13.86 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16
+Games | N: 2006 W: 1346 L: 81 D: 579
+Penta | [2, 17, 141, 400, 443]
+```
+
+- Network: Dianguang-5 电光 (`768x16 -> 1024 -> pairwise -> 16x2 -> 32 -> 1x8`), the fifth net of the
+  Dianguang line. Two self-play runs of 4 billion positions each were generated for this release; the
+  second, labelled by Dianguang-3 at 8,000 nodes, trained Dianguang-4 and, continued to 1,200 superbatches,
+  Dianguang-5. Multi-layer head with a sparse L1, king-bucketed inputs with horizontal mirroring.
+- Search: capture history, continuation history in the late-move reduction adjustment, the transposition
+  table score as the pruning evaluation when its bound allows, LMR-reduced depth in the quiet futility and
+  SEE margins, pawn and non-pawn correction history, and an LTC SPSA tune of the search margins on the new
+  network.
+- Speed: an evaluation cache with accumulators computed only when a position needs them, a move picker
+  that evaluates exchanges on demand, incrementally maintained king attackers and occupancy, huge-page
+  memory for the hash table and the network, per-searcher node counts, and faster multi-layer inference
+  on AVX-512, AVX2, NEON and wasm.
+- UCI: `score cp` is normalized so that 100 is a 50% win chance (the win-rate model is refitted on the
+  new self-play data); `EvalFile` clears the hash table.
+- Build: Zig 0.17.0; the `translate-c` and `aro` packages are vendored so a build downloads nothing; a
+  release binary per CPU level with checked bench and NNUE-speed checksums.
+- Data: datagen batch mode, the `datatool` validator, tablebase cleaning, a trainer with held-out
+  validation, resumable runs and a selectable multi-layer head.
+
 # v4.0.0
 
 - Match Results

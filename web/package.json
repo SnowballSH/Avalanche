@@ -1,6 +1,6 @@
 {
   "name": "avalanche-wasm",
-  "version": "4.0.0",
+  "version": "5.0.0",
   "description": "WebAssembly build and host bindings for the Avalanche chess engine",
   "license": "GPL-3.0-only",
   "private": true,
