@@ -81,6 +81,7 @@ pub const Worker = struct {
 
 pub const ThreadPool = struct {
     workers: std.ArrayList(*Worker) = .empty,
+    helpers_bound: bool = false,
 
     pub fn count(self: *const ThreadPool) usize {
         return self.workers.items.len;
@@ -93,8 +94,9 @@ pub const ThreadPool = struct {
     pub fn resize(self: *ThreadPool, target: usize) void {
         if (comptime !platform.has_threads) return;
         numa.init();
-        const placement_changes = numa.binds_threads(self.count() + 1) != numa.binds_threads(target + 1);
-        self.release_down_to(if (placement_changes) 0 else target);
+        const binds_helpers = numa.binds_threads(target + 1);
+        self.release_down_to(if (binds_helpers != self.helpers_bound) 0 else target);
+        self.helpers_bound = binds_helpers;
 
         const old_len = self.workers.items.len;
         self.workers.ensureTotalCapacity(platform.allocator, target) catch return;

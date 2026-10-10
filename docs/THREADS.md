@@ -262,10 +262,13 @@ but only when there are too many of them for one node to hold comfortably:
   starting on the first. A thread's node does not depend on how many threads
   follow it, so growing the pool leaves the existing helpers where they are.
 
-A helper is placed when its thread starts. When a change of `Threads` moves
-the thread count across the binding threshold, or `NumaPolicy` changes, the
-pool releases all helpers and starts them again, so they are either all bound
-or all unbound.
+A helper is placed when its thread starts, by the decision for the thread
+count that was asked for, which the pool keeps (`ThreadPool.helpers_bound`).
+When a change of `Threads` or of `NumaPolicy` reverses that decision, the pool
+releases all helpers and starts them again, so they are either all bound or
+all unbound. When the OS refuses some of the threads, the helpers that did
+start keep the decision made for the count that was asked for, while the main
+search thread and the hash table go by the count that searches.
 
 Reading and setting a thread's CPU mask (`sched_getaffinity`,
 `sched_setaffinity`) is behind `src/platform/affinity.zig`: `current` returns
