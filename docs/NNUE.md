@@ -154,8 +154,7 @@ Tried and left out: prefetching the cache slot when the search prefetches the tr
 entry, before the move is played (a Zen 5 server CPU: `bench` +0.5%, the 3 s searches -0.3%,
 within the noise of that measurement), and 16-byte entries with the whole key (the fourth row of
 the table against the fifth: the smaller table stays in the caches better). The measurements were
-taken
-with 24 output bits and 40 hash bits in an entry.
+taken with 24 output bits and 40 hash bits in an entry.
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
 instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of
@@ -970,11 +969,10 @@ equal.
 ## Tests
 
 `zig build test` in the default build covers the multi-layer head. Both heads take their weights
-explicitly, so the tests of their arithmetic run in a build of either head: those of the
-multi-layer head are in `src/tests/nnue_multi.zig`, and those of the single-layer head (the
-formula on random weights, and weights at their extremes) sit beside it in
-`src/engine/nnue/head_single.zig`. The tests that evaluate positions use the embedded network, so
-they reach the single-layer head only in a single-layer build:
-`zig build test -Dnet=nets/dianguang-1.nnue`. `-Dtest-filter=<text>` runs the tests
-whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
-use `-Doptimize=safe` for those.
+explicitly, so the tests of their arithmetic run in a build of either head. They are in
+`src/tests/nnue_multi.zig`: those named "multi head" for the multi-layer head, and those named
+"single head" for the single-layer one (the formula on random weights, and weights at their
+extremes). The tests that evaluate positions use the embedded network, so they reach the
+single-layer head only in a single-layer build: `zig build test -Dnet=nets/dianguang-1.nnue`.
+`-Dtest-filter=<text>` runs the tests whose name contains the text. In Debug the intrinsics are
+not compiled, see "What has been executed"; use `-Doptimize=safe` for those.

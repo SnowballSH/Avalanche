@@ -7,6 +7,7 @@ const weights = @import("../engine/weights.zig");
 const bench = @import("../engine/bench.zig");
 const options = @import("../engine/uci/options.zig");
 const arch = @import("../engine/nnue/arch.zig");
+const head_single = @import("../engine/nnue/head_single.zig");
 const head_multi = @import("../engine/nnue/head_multi.zig");
 const parity = @import("../engine/nnue/parity.zig");
 const support = @import("support.zig");
@@ -22,7 +23,12 @@ fn expect_mean_well_above(tolerance_cp: f64, magnitude: parity.Difference) !void
     try expect(magnitude.mean() > 3 * tolerance_cp);
 }
 
-const Accumulators = struct { own: arch.Accumulator align(64), opp: arch.Accumulator align(64) };
+const Accumulators = struct {
+    own: arch.Accumulator align(64),
+    opp: arch.Accumulator align(64),
+
+    const saturated: Accumulators = .{ .own = @splat(arch.QA), .opp = @splat(arch.QA) };
+};
 
 const Density = enum {
     mixed,
@@ -52,6 +58,90 @@ fn random_accumulators(random: std.Random, density: Density, round: usize) Accum
     if (round % 11 == 0) @memset(&result.own, 0);
     if (round % 13 == 0) @memset(&result.opp, 255);
     return result;
+}
+
+fn single_head_sum(head: *const head_single.Weights, acc: *const Accumulators, bucket: usize) i64 {
+    const own_weights = head.layer_2[bucket][0..arch.HIDDEN_SIZE];
+    const opp_weights = head.layer_2[bucket][arch.HIDDEN_SIZE..];
+    var sum: i64 = 0;
+    for (acc.own, acc.opp, own_weights, opp_weights) |own, opp, own_weight, opp_weight| {
+        const own_activation: i64 = std.math.clamp(own, 0, arch.QA);
+        const opp_activation: i64 = std.math.clamp(opp, 0, arch.QA);
+        sum += own_activation * own_activation * own_weight + opp_activation * opp_activation * opp_weight;
+    }
+    return sum;
+}
+
+const SINGLE_HEAD_OUTPUT_ONE: i64 = arch.QA * head_single.QB;
+
+fn single_head_centipawns(sum: i32, bias: i16) i64 {
+    return @divTrunc((@as(i64, @divTrunc(sum, arch.QA)) + bias) * arch.SCALE, SINGLE_HEAD_OUTPUT_ONE);
+}
+
+fn extreme_bias_of_sign(weight: i16) i16 {
+    return if (weight > 0) std.math.maxInt(i16) else std.math.minInt(i16);
+}
+
+test "single head: a sum beyond i32 wraps instead of overflowing" {
+    const head = try std.testing.allocator.create(head_single.Weights);
+    defer std.testing.allocator.destroy(head);
+    const acc: Accumulators = .saturated;
+
+    for ([_]i16{ head_single.OUTPUT_WEIGHT_MAX, head_single.OUTPUT_WEIGHT_MIN }) |weight| {
+        const bias = extreme_bias_of_sign(weight);
+        for (&head.layer_2) |*bucket_weights| @memset(bucket_weights, weight);
+        @memset(&head.layer_2_bias, bias);
+        try head_single.validate(std.mem.asBytes(head));
+
+        const sum = single_head_sum(head, &acc, 0);
+        try expect(@abs(sum) > std.math.maxInt(i32));
+        try expectEqual(single_head_centipawns(@truncate(sum), bias), head_single.evaluate(head, &acc.own, &acc.opp, 0));
+    }
+}
+
+test "single head: a sum at the edge of i32 is scaled to centipawns without overflow" {
+    const head = try std.testing.allocator.create(head_single.Weights);
+    defer std.testing.allocator.destroy(head);
+    const acc: Accumulators = .saturated;
+
+    for ([_]i16{ head_single.OUTPUT_WEIGHT_MAX, head_single.OUTPUT_WEIGHT_MIN }) |weight| {
+        const bias = extreme_bias_of_sign(weight);
+        const fitting_weights: usize = @intCast(@divTrunc(std.math.maxInt(i32), arch.QA * arch.QA * @as(i32, @abs(weight))));
+        @memset(std.mem.asBytes(&head.layer_2), 0);
+        @memset(head.layer_2[0][0..fitting_weights], weight);
+        @memset(&head.layer_2_bias, bias);
+        try head_single.validate(std.mem.asBytes(head));
+
+        const sum = std.math.cast(i32, single_head_sum(head, &acc, 0)).?;
+        const expected = single_head_centipawns(sum, bias);
+        try expect(@abs(expected) * SINGLE_HEAD_OUTPUT_ONE > std.math.maxInt(i32));
+        try expectEqual(expected, head_single.evaluate(head, &acc.own, &acc.opp, 0));
+    }
+}
+
+test "single head: the vector path follows the formula on random weights and accumulators" {
+    const head = try std.testing.allocator.create(head_single.Weights);
+    defer std.testing.allocator.destroy(head);
+    var prng = std.Random.DefaultPrng.init(0x51_0001);
+    const random = prng.random();
+
+    for (0..8) |_| {
+        for (&head.layer_2) |*bucket_weights| {
+            for (bucket_weights) |*weight| weight.* = random.intRangeAtMost(i16, head_single.OUTPUT_WEIGHT_MIN, head_single.OUTPUT_WEIGHT_MAX);
+        }
+        for (&head.layer_2_bias) |*bias| bias.* = random.int(i16);
+        try head_single.validate(std.mem.asBytes(head));
+
+        var acc: Accumulators = undefined;
+        for (&acc.own, &acc.opp) |*own, *opp| {
+            own.* = random.intRangeAtMost(i16, -arch.QA, 2 * arch.QA);
+            opp.* = random.intRangeAtMost(i16, -arch.QA, 2 * arch.QA);
+        }
+        for (0..arch.OUTPUT_SIZE) |bucket| {
+            const sum = std.math.cast(i32, single_head_sum(head, &acc, bucket)).?;
+            try expectEqual(single_head_centipawns(sum, head.layer_2_bias[bucket]), head_single.evaluate(head, &acc.own, &acc.opp, bucket));
+        }
+    }
 }
 
 test "multi head: the SIMD path equals the scalar path on random weights" {
@@ -231,7 +321,7 @@ fn centipawns(l3_sum: i64) i32 {
 test "multi head: weights and biases at their limits overflow no sum, whatever the sign of each layer" {
     const head = try std.testing.allocator.create(head_multi.Weights);
     defer std.testing.allocator.destroy(head);
-    const acc: Accumulators = .{ .own = @splat(arch.QA), .opp = @splat(arch.QA) };
+    const acc: Accumulators = .saturated;
 
     const signs = [_]i32{ 1, -1 };
     for (signs) |l1_sign| {
@@ -454,7 +544,7 @@ test "multi net: a file in the documented layout round-trips" {
     try expect(exact_pairwise.max <= EXACT_PAIRWISE_TOLERANCE_CP);
 
     if (weights.HEAD == .multi) {
-        var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+        var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "multi.nnue", &path_buf)];
         try weights.load(path);
         defer weights.load(weights.EMBEDDED_NAME) catch unreachable;
@@ -586,10 +676,11 @@ test "multi net: incremental accumulators equal a rebuild after every move of ra
     }
 }
 
-fn zeroed_single_network() ![]u8 {
-    const single = try std.testing.allocator.alloc(u8, @sizeOf(weights.Network(.single)));
-    @memset(single, 0);
-    return single;
+fn zeroed_network(comptime kind: weights.Head) ![]u8 {
+    const bytes = try std.testing.allocator.alloc(u8, @sizeOf(weights.Network(kind)));
+    @memset(bytes, 0);
+    if (kind == .multi) @memcpy(bytes[0..weights.HEADER_SIZE], &weights.multi_header(0));
+    return bytes;
 }
 
 const HEADER_FORMAT_VERSION_OFFSET = weights.MAGIC.len;
@@ -601,7 +692,7 @@ test "multi net: the loaders reject the other architecture and damaged files" {
     const net = try random_network(0x5eed_0004, .full);
     defer std.testing.allocator.destroy(net);
     const multi = std.mem.asBytes(net);
-    const single = try zeroed_single_network();
+    const single = try zeroed_network(.single);
     defer std.testing.allocator.free(single);
 
     try weights.validate_as(.multi, multi);
@@ -642,17 +733,19 @@ test "multi net: the loaders reject the other architecture and damaged files" {
 test "multi net: EvalFile reports a network of the other architecture and keeps the current one" {
     if (weights.NUM_INPUT_BUCKETS != 16) return error.SkipZigTest;
     support.init_tables();
-    const net = try random_network(0x5eed_0004, .full);
-    defer std.testing.allocator.destroy(net);
-    const single = try zeroed_single_network();
-    defer std.testing.allocator.free(single);
+    const other_head: weights.Head = switch (weights.HEAD) {
+        .single => .multi,
+        .multi => .single,
+    };
+    const other = try zeroed_network(other_head);
+    defer std.testing.allocator.free(other);
+    try weights.validate_as(other_head, other);
 
     platform.io = std.testing.io;
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
-    const other: []const u8 = if (weights.HEAD == .single) std.mem.asBytes(net) else single;
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "other.nnue", .data = other });
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "other.nnue", &path_buf)];
 
     const pos = try support.new_position();
@@ -662,7 +755,7 @@ test "multi net: EvalFile reports a network of the other architecture and keeps 
     var settings: options.Settings = .{};
     var out_buf: [1024]u8 = undefined;
     var out = std.Io.Writer.fixed(&out_buf);
-    var args_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
+    var args_buf: [std.Io.Dir.max_path_bytes + 32]u8 = undefined;
     try options.set_option(try std.mem.print(&args_buf, "name EvalFile value {s}", .{path}), .{ .settings = &settings, .position = pos, .out = &out });
     try expect(std.mem.find(u8, out.buffered(), "WrongArchitecture") != null);
     try expect(std.mem.find(u8, out.buffered(), "-Dhead=") != null);
