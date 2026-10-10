@@ -4,51 +4,6 @@ const position = @import("../chess/position.zig");
 
 pub const SeeWeight = [_]i32{ 93, 308, 346, 521, 994, 20000 };
 
-pub fn see_score(pos: *position.Position, move: types.Move) i32 {
-    var max_depth: usize = 0;
-    var defenders: types.Bitboard = 0;
-    var piece_bb: types.Bitboard = 0;
-
-    const to_sq = move.get_to();
-    const white_pieces = pos.all_pieces(types.Color.White);
-    const black_pieces = pos.all_pieces(types.Color.Black);
-    const all_pieces = white_pieces | black_pieces;
-    var gains: [16]i32 = undefined;
-    var opp = pos.turn.invert();
-    var blockers = all_pieces & ~types.SquareIndexBB[move.to];
-
-    gains[0] = SeeWeight[pos.mailbox[move.to].piece_type().index()];
-    var last_piece_pts = SeeWeight[pos.mailbox[move.from].piece_type().index()];
-
-    var depth: usize = 1;
-    outer: while (depth < gains.len) : (depth += 1) {
-        gains[depth] = last_piece_pts - gains[depth - 1];
-        defenders = (if (opp == types.Color.White) white_pieces else black_pieces) & blockers;
-        var pt = types.PieceType.Pawn.index();
-        const ending = types.PieceType.King.index();
-        while (pt <= ending) : (pt += 1) {
-            last_piece_pts = SeeWeight[pt];
-            piece_bb = (if (pt == 0) (if (opp == types.Color.White) tables.get_pawn_attacks(types.Color.Black, to_sq) else tables.get_pawn_attacks(types.Color.White, to_sq)) else (tables.get_attacks(@as(types.PieceType, @fromBackingInt(@intCast(pt))), to_sq, blockers))) & defenders & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]);
-            if (piece_bb != 0) {
-                blockers &= ~(types.SquareIndexBB[@as(usize, @intCast(types.lsb(piece_bb)))]);
-                opp = opp.invert();
-                continue :outer;
-            }
-        }
-
-        max_depth = depth;
-        break;
-    }
-
-    if (max_depth == 0) max_depth = gains.len - 1;
-    depth = max_depth - 1;
-    while (depth >= 1) : (depth -= 1) {
-        gains[depth - 1] = -@max(-gains[depth - 1], gains[depth]);
-    }
-
-    return gains[0];
-}
-
 fn pinned_pieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
     const king_piece = types.Piece.new_comptime(color, types.PieceType.King);

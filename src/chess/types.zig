@@ -119,11 +119,6 @@ pub const Square = enum(u8) {
     NO_SQUARE,
     // zig fmt: on
 
-    pub inline fn inc(self: *Square) *Square {
-        self.* = @as(Square, @fromBackingInt(@intCast(@backingInt(self.*) + 1)));
-        return self;
-    }
-
     pub inline fn add(self: Square, d: Direction) Square {
         return @as(Square, @fromBackingInt(@intCast(@backingInt(self) + @backingInt(d))));
     }
@@ -414,10 +409,6 @@ pub const Move = packed struct {
 
     pub inline fn is_promotion(self: Move) bool {
         return (self.flags >= 4 and self.flags <= 7) or (self.flags >= 12 and self.flags <= 15);
-    }
-
-    pub inline fn equals_to(self: Move, other: Move) bool {
-        return self.from == other.from and self.to == other.to;
     }
 
     pub inline fn is_castle(self: Move) bool {

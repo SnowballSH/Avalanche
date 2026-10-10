@@ -7,7 +7,6 @@ const hce = @import("engine/hce.zig");
 const weights = @import("engine/weights.zig");
 const nnue = @import("engine/nnue.zig");
 const perft = @import("chess/perft.zig");
-const see = @import("engine/see.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
 const interface = @import("engine/interface.zig");
@@ -70,9 +69,7 @@ test "Directions" {
 }
 
 test "Square" {
-    var sq: types.Square = types.Square.d4;
-    try expect(sq.inc().* == types.Square.e4);
-    try expect(sq == types.Square.e4);
+    const sq: types.Square = types.Square.e4;
 
     try expect(sq.add(types.Direction.North) == types.Square.e5);
     try expect(sq.add(types.Direction.East) == types.Square.f4);
@@ -143,7 +140,6 @@ test "Move" {
     {
         var m = types.Move.new_from_to_flag(types.Square.e4, types.Square.e5, types.MoveFlags.CAPTURE);
         try expect(m.is_capture());
-        try expect(m.equals_to(m));
     }
 }
 
@@ -161,9 +157,6 @@ test "Magic Bitboard Sliding Pieces" {
 
     try expect(tables.get_bishop_attacks(types.Square.e4, 0x80124622004420) == 0x182442800284400);
     try expect(tables.get_bishop_attacks(types.Square.a1, 0x80124622004420) == 0x8040201008040200);
-
-    try expect(tables.get_xray_rook_attacks(types.Square.e4, 0x11014004a10d3d0, 0x100048100000) == 0x10000086001000);
-    try expect(tables.get_xray_bishop_attacks(types.Square.e4, 0x108a48c0c1294500, 0x2400000280000) == 0x180000000004400);
 }
 
 test "Squares and Line Between" {
@@ -549,85 +542,6 @@ test "fen: basic_fen board round-trips" {
         try expect(std.mem.eql(u8, board, "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R"));
         try expect(std.mem.eql(u8, it.next().?, "b"));
     }
-}
-
-test "see: free hanging knight capture is winning" {
-    const pos = try support.position_at("4k3/8/8/4n3/8/8/8/4R1K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "e1e5"[0..]);
-    try expect(mv.is_capture());
-
-    try expect(see.see_score(pos, mv) > 0);
-    try expect(see.see_score(pos, mv) == 308);
-
-    try expect(see.see_threshold(pos, mv, 0));
-    try expect(see.see_threshold(pos, mv, 200));
-    try expect(!see.see_threshold(pos, mv, 500));
-}
-
-test "see: queen captures pawn defended by pawn fails threshold 0" {
-    const pos = try support.position_at("4k3/8/3p4/4p3/8/8/8/4Q1K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "e1e5"[0..]);
-    try expect(mv.is_capture());
-
-    try expect(see.see_score(pos, mv) < 0);
-    try expect(see.see_score(pos, mv) == -808);
-
-    try expect(!see.see_threshold(pos, mv, 0));
-    try expect(!see.see_threshold(pos, mv, -100));
-}
-
-test "see: equal rook trade" {
-    const pos = try support.position_at("4r2k/8/8/4r3/8/8/8/4R1K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "e1e5"[0..]);
-    try expect(mv.is_capture());
-
-    try expect(see.see_threshold(pos, mv, 0));
-    try expect(!see.see_threshold(pos, mv, 1));
-    try expect(see.see_score(pos, mv) == 521);
-}
-
-test "see: rook captures undefended queen is strongly winning" {
-    const pos = try support.position_at("4k3/8/8/4q3/8/8/8/4R1K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "e1e5"[0..]);
-    try expect(mv.is_capture());
-
-    try expect(see.see_score(pos, mv) > 0);
-    try expect(see.see_score(pos, mv) == 994);
-    try expect(see.see_threshold(pos, mv, 500));
-    try expect(!see.see_threshold(pos, mv, 1000));
-}
-
-test "see: bishop captures pawn defended by pawn is losing" {
-    const pos = try support.position_at("4k3/8/3p4/4p3/8/2B5/8/6K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "c3e5"[0..]);
-    try expect(mv.is_capture());
-
-    try expect(see.see_score(pos, mv) < 0);
-    try expect(see.see_score(pos, mv) == -160);
-    try expect(!see.see_threshold(pos, mv, 0));
-}
-
-test "see: pawn captures undefended pawn is winning" {
-    const pos = try support.position_at("4k3/8/8/4p3/3P4/8/8/6K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "d4e5"[0..]);
-    try expect(mv.is_capture());
-
-    try expect(see.see_score(pos, mv) > 0);
-    try expect(see.see_score(pos, mv) == 93);
-    try expect(see.see_threshold(pos, mv, 50));
-    try expect(!see.see_threshold(pos, mv, 100));
 }
 
 test "eval: nnue weights load and dimensions" {
@@ -1052,15 +966,6 @@ test "fen: start_ply follows fullmove and side to move" {
 
     pos.set_fen("8/5k2/8/8/3P4/8/5K2/8 b - - 0 60");
     try expect(pos.start_ply == (60 - 1) * 2 + 1);
-}
-
-test "see: absolutely pinned pawn cannot recapture" {
-    const pos = try support.position_at("4k3/4p3/3p4/8/8/8/7Q/4R1K1 w - -");
-    defer support.destroy_position(pos);
-
-    const mv = types.Move.new_from_string(pos, "h2d6");
-    try expect(mv.is_capture());
-    try expect(see.see_threshold(pos, mv, 0));
 }
 
 test "search: maximum-mobility position exceeds 128 quiet moves safely" {

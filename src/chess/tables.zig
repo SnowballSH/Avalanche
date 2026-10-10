@@ -152,11 +152,6 @@ pub inline fn get_rook_attacks(square: types.Square, occ: types.Bitboard) types.
     return RookAttacks[square.index()][@intCast(((occ & RookAttackMasks[square.index()]) *% RookMagics[square.index()]) >> @as(u6, @intCast(RookAttackShifts[square.index()])))];
 }
 
-pub inline fn get_xray_rook_attacks(square: types.Square, occ: types.Bitboard, blockers: types.Bitboard) types.Bitboard {
-    const attacks = get_rook_attacks(square, occ);
-    return attacks ^ get_rook_attacks(square, occ ^ (blockers & attacks));
-}
-
 inline fn get_bishop_attacks_for_init(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return sliding_attack(square, occ, types.MaskDiagonal[@as(usize, @intCast(square.diagonal()))]) | sliding_attack(square, occ, types.MaskAntiDiagonal[@as(usize, @intCast(square.anti_diagonal()))]);
 }
@@ -212,11 +207,6 @@ pub fn init_bishop_attacks() void {
 
 pub inline fn get_bishop_attacks(square: types.Square, occ: types.Bitboard) types.Bitboard {
     return BishopAttacks[square.index()][@intCast(((occ & BishopAttackMasks[square.index()]) *% BishopMagics[square.index()]) >> @as(u6, @intCast(BishopAttackShifts[square.index()])))];
-}
-
-pub inline fn get_xray_bishop_attacks(square: types.Square, occ: types.Bitboard, blockers: types.Bitboard) types.Bitboard {
-    const attacks = get_bishop_attacks(square, occ);
-    return attacks ^ get_bishop_attacks(square, occ ^ (blockers & attacks));
 }
 
 pub var SquaresBetween: [64][64]types.Bitboard = std.mem.zeroes([64][64]types.Bitboard);

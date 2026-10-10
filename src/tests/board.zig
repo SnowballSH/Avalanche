@@ -356,6 +356,14 @@ const SeeCase = struct {
 };
 
 const SEE_CASES = [_]SeeCase{
+    .{ .fen = "4k3/8/8/4n3/8/8/8/4R1K1 w - - 0 1", .move = "e1e5", .value = weight(.Knight) },
+    .{ .fen = "4k3/8/8/4q3/8/8/8/4R1K1 w - - 0 1", .move = "e1e5", .value = weight(.Queen) },
+    .{ .fen = "4k3/8/8/4p3/3P4/8/8/6K1 w - - 0 1", .move = "d4e5", .value = weight(.Pawn) },
+    .{ .fen = "4r2k/8/8/4r3/8/8/8/4R1K1 w - - 0 1", .move = "e1e5", .value = 0 },
+    .{ .fen = "4k3/8/3p4/4p3/8/8/8/4Q1K1 w - - 0 1", .move = "e1e5", .value = weight(.Pawn) - weight(.Queen) },
+    .{ .fen = "4k3/8/3p4/4p3/8/2B5/8/6K1 w - - 0 1", .move = "c3e5", .value = weight(.Pawn) - weight(.Bishop) },
+    // The pawn that would recapture is pinned to its king by the rook.
+    .{ .fen = "4k3/4p3/3p4/8/8/8/7Q/4R1K1 w - - 0 1", .move = "h2d6", .value = weight(.Pawn) },
     // The bishop is pinned by the queen and takes on the line of the pin; the rook behind it
     // then makes the queen's recapture a loss.
     .{ .fen = "3r3k/6b1/8/8/8/5N2/8/Q6K w - - 0 1", .move = "f3d4", .value = -weight(.Knight) },
@@ -372,7 +380,7 @@ const SEE_CASES = [_]SeeCase{
     .{ .fen = "8/8/8/8/8/2k5/3pK3/3R4 w - - 0 1", .move = "d1d2", .value = weight(.Pawn) },
 };
 
-test "see: pins on the capture line, pins that appear during the exchange, en passant and king recaptures" {
+test "see: the exact value of free, defended and even captures, of pins before and during the exchange, en passant and king recaptures" {
     support.init_tables();
     const pos = try support.new_position();
     defer support.destroy_position(pos);
