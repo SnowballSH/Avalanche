@@ -250,9 +250,10 @@ but only when there are too many of them for one node to hold comfortably:
 - **Whether to bind** (`Topology.needs_binding`) is Stockfish's rule: more
   threads than half the CPUs of the largest node, or at least four threads per
   node (counting only nodes with more than 60% of the largest node's CPUs).
-  Below that nothing is bound. One search thread is never bound: an engine
-  under test is one of many single-threaded processes on the machine, and a
-  rule that binds each of them would put every process on the same node.
+  Below that nothing is bound. One search thread is never bound, however few
+  CPUs the nodes have: an engine under test is one of many single-threaded
+  processes on the machine, and a rule that binds each of them would put every
+  process on the same node.
 - **Where a thread goes** (`Topology.node_for_thread`): thread `i` (0 = main)
   takes the node with the most room left in proportion to its CPU count, given
   where threads `0..i-1` went. Equal nodes are therefore filled in turn, so the

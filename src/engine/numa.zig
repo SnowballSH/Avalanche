@@ -48,7 +48,7 @@ pub const Topology = struct {
     }
 
     pub fn needs_binding(self: *const Topology, thread_count: usize) bool {
-        if (!self.is_numa()) return false;
+        if (thread_count <= 1 or !self.is_numa()) return false;
         const sizes = self.node_sizes();
         const largest = std.mem.max(usize, sizes[0..self.node_count]);
         var full_size_nodes: usize = 0;
@@ -183,6 +183,10 @@ test "numa: only thread counts that one node cannot hold comfortably are bound" 
     const large_and_small = try test_topology(&.{ "0-63", "64-71" });
     try std.testing.expect(!large_and_small.needs_binding(3));
     try std.testing.expect(large_and_small.needs_binding(4));
+
+    const one_cpu_per_node = try test_topology(&.{ "3", "70" });
+    try std.testing.expect(!one_cpu_per_node.needs_binding(1));
+    try std.testing.expect(one_cpu_per_node.needs_binding(2));
 
     try std.testing.expect(!Topology.single_node().needs_binding(affinity.MAX_CPUS));
 }
