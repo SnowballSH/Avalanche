@@ -6,10 +6,13 @@ const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const weights = @import("../engine/weights.zig");
 const options = @import("../engine/uci/options.zig");
+const parameters = @import("../engine/parameters.zig");
+const syzygy = @import("../engine/syzygy.zig");
 const support = @import("support.zig");
 const build_options = @import("build_options");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
+const comptimePrint = std.fmt.comptimePrint;
 
 const Fixture = struct {
     settings: options.Settings = .{},
@@ -57,6 +60,47 @@ test "options: names with spaces, case-insensitive matching and clamping" {
     try std.testing.expectError(options.SetOptionError.UnknownOption, f.set("name NoSuchOption value 1"));
 }
 
+test "options: the value keyword with nothing after it sets an empty value" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+
+    if (syzygy.supported) {
+        try f.set("name SyzygyPath value");
+        try expectEqual(@as(usize, 0), f.output().len);
+        try f.set("name SyzygyPath value \t");
+        try expectEqual(@as(usize, 0), f.output().len);
+    }
+    if (weights.supports_eval_file) {
+        try f.set("name EvalFile value");
+        try expect(std.mem.find(u8, f.output(), "EvalFile: using " ++ build_options.net_name) != null);
+    }
+    try std.testing.expectError(options.SetOptionError.InvalidValue, f.set("name MultiPV value"));
+    try std.testing.expectError(options.SetOptionError.UnknownOption, f.set("name value"));
+}
+
+test "options: tunable parameters match case-insensitively and reject a value that is not a number" {
+    var f: Fixture = undefined;
+    try f.init();
+    defer f.deinit();
+    const tunable = parameters.TunableParams[0];
+    const saved = parameters.live_uci_value(tunable.name).?;
+    defer {
+        _ = parameters.set(tunable.name, saved);
+        if (tunable.reinit_lmr) search.init_lmr();
+    }
+
+    var lower_buf: [64]u8 = undefined;
+    var args_buf: [128]u8 = undefined;
+    const lower = std.ascii.lowerString(&lower_buf, tunable.name);
+    try expect(!std.mem.eql(u8, lower, tunable.name));
+
+    try f.set(try std.mem.print(&args_buf, "name {s} value {d}", .{ lower, tunable.min_value }));
+    try expectEqual(@as(i64, tunable.min_value), parameters.live_uci_value(tunable.name).?);
+    try std.testing.expectError(options.SetOptionError.InvalidValue, f.set(try std.mem.print(&args_buf, "name {s} value fast", .{tunable.name})));
+    try expectEqual(@as(i64, tunable.min_value), parameters.live_uci_value(tunable.name).?);
+}
+
 test "options: Move Overhead accepts its legacy name" {
     var f: Fixture = undefined;
     try f.init();
@@ -72,8 +116,8 @@ test "options: Move Overhead accepts its legacy name" {
     var listing: [16 * 1024]u8 = undefined;
     var w = std.Io.Writer.fixed(&listing);
     try options.print_all(&w);
-    try expect(std.mem.indexOf(u8, w.buffered(), "option name Move Overhead type spin") != null);
-    try expect(std.mem.indexOf(u8, w.buffered(), "option name MoveOverhead") == null);
+    try expect(std.mem.find(u8, w.buffered(), "option name Move Overhead type spin") != null);
+    try expect(std.mem.find(u8, w.buffered(), "option name MoveOverhead") == null);
 }
 
 test "options: combo values are validated" {
@@ -97,6 +141,18 @@ test "options: UCI_Chess960 toggles castling notation on the position" {
     try expect(!f.pos.chess960_notation());
 }
 
+test "options: the Syzygy defaults advertised are the values the engine starts with" {
+    if (!syzygy.supported) return error.SkipZigTest;
+    var listing: [16 * 1024]u8 = undefined;
+    var w = std.Io.Writer.fixed(&listing);
+    try options.print_all(&w);
+    var line_buf: [128]u8 = undefined;
+
+    try expect(std.mem.find(u8, w.buffered(), try std.mem.print(&line_buf, "option name SyzygyProbeDepth type spin default {d} ", .{syzygy.probe_depth})) != null);
+    try expect(std.mem.find(u8, w.buffered(), try std.mem.print(&line_buf, "option name SyzygyProbeLimit type spin default {d} ", .{syzygy.probe_limit})) != null);
+    try expect(std.mem.find(u8, w.buffered(), try std.mem.print(&line_buf, "option name Syzygy50MoveRule type check default {}", .{syzygy.use_rule50})) != null);
+}
+
 test "options: EvalFile keeps the network on bad files and loads valid ones" {
     var f: Fixture = undefined;
     try f.init();
@@ -105,7 +161,7 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     const embedded_eval = support.network_output(f.pos);
 
     try f.set("name EvalFile value /nonexistent/avalanche.nnue");
-    try expect(std.mem.indexOf(u8, f.output(), "failed to load") != null);
+    try expect(std.mem.find(u8, f.output(), "failed to load") != null);
     try expectEqual(embedded_eval, support.network_output(f.pos));
 
     var tmp = std.testing.tmpDir(.{});
@@ -114,11 +170,10 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const short_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "short.nnue", &path_buf)];
     var args_buf: [std.fs.max_path_bytes + 32]u8 = undefined;
-    try f.set(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{short_path}));
-    try expect(std.mem.indexOf(u8, f.output(), if (weights.HEAD == .single) "WrongSize" else "NotANetwork") != null);
+    try f.set(try std.mem.print(&args_buf, "name EvalFile value {s}", .{short_path}));
+    try expect(std.mem.find(u8, f.output(), if (weights.HEAD == .single) "WrongSize" else "NotANetwork") != null);
     try expectEqual(embedded_eval, support.network_output(f.pos));
 
-    // A valid network with shifted output biases must change the evaluation.
     const altered = try std.testing.allocator.dupe(u8, std.mem.asBytes(weights.MODEL));
     defer std.testing.allocator.free(altered);
     const head_offset = @offsetOf(weights.NNUEWeights, "head");
@@ -136,25 +191,24 @@ test "options: EvalFile keeps the network on bad files and loads valid ones" {
     std.mem.writeInt(i16, first_feature_bias, std.mem.readInt(i16, first_feature_bias, .little) +% 7, .little);
     try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "altered.nnue", .data = altered });
     const altered_path = path_buf[0..try tmp.dir.realPathFile(std.testing.io, "altered.nnue", &path_buf)];
-    const kept = try support.new_position();
-    defer support.destroy_position(kept);
-    kept.set_fen(types.KIWIPETE_FEN);
-    const kept_embedded_eval = hce.evaluate_nnue(kept);
+    const outlives_the_change = try support.new_position();
+    defer support.destroy_position(outlives_the_change);
+    outlives_the_change.set_fen(types.KIWIPETE_FEN);
+    const its_embedded_eval = hce.evaluate_nnue(outlives_the_change);
 
-    try f.set(try std.fmt.bufPrint(&args_buf, "name EvalFile value {s}", .{altered_path}));
-    try expect(std.mem.indexOf(u8, f.output(), "using altered.nnue") != null);
+    defer f.set("name EvalFile value " ++ weights.EMBEDDED_NAME) catch {};
+    try f.set(try std.mem.print(&args_buf, "name EvalFile value {s}", .{altered_path}));
+    try expect(std.mem.find(u8, f.output(), "using altered.nnue") != null);
     try std.testing.expectEqualStrings("altered.nnue", weights.active_network());
     try expect(hce.evaluate_nnue(f.pos) != embedded_eval);
 
-    // A position that outlives the change, as a helper thread's does, follows the
-    // new network when its evaluation is rebuilt.
-    kept.rebuild_evaluation();
-    try expect(hce.evaluate_nnue(kept) != kept_embedded_eval);
+    outlives_the_change.rebuild_evaluation();
+    try expect(hce.evaluate_nnue(outlives_the_change) != its_embedded_eval);
     const fresh = try support.new_position();
     defer support.destroy_position(fresh);
     fresh.set_fen(types.KIWIPETE_FEN);
-    try expectEqual(support.network_output(fresh), support.network_output(kept));
-    try expectEqual(support.network_output(fresh), hce.evaluate_nnue(kept));
+    try expectEqual(support.network_output(fresh), support.network_output(outlives_the_change));
+    try expectEqual(support.network_output(fresh), hce.evaluate_nnue(outlives_the_change));
 
     try f.set("name EvalFile value " ++ weights.EMBEDDED_NAME);
     try expectEqual(embedded_eval, support.network_output(f.pos));
@@ -167,20 +221,22 @@ test "options: EvalScale parses, clamps to its bounds and is advertised" {
     defer f.deinit();
     defer hce.eval_scale = hce.DEFAULT_EVAL_SCALE;
 
-    try expectEqual(@as(i32, 1000), hce.eval_scale);
-    try f.set("name EvalScale value 1234");
-    try expectEqual(@as(i32, 1234), hce.eval_scale);
-    try f.set("name evalscale value 100");
-    try expectEqual(@as(i32, 500), hce.eval_scale);
-    try f.set("name EvalScale value 99999");
-    try expectEqual(@as(i32, 2000), hce.eval_scale);
+    const within_bounds = hce.MIN_EVAL_SCALE + 1;
+    try expectEqual(hce.DEFAULT_EVAL_SCALE, hce.eval_scale);
+    try f.set(comptimePrint("name EvalScale value {d}", .{within_bounds}));
+    try expectEqual(within_bounds, hce.eval_scale);
+    try f.set(comptimePrint("name evalscale value {d}", .{hce.MIN_EVAL_SCALE - 1}));
+    try expectEqual(hce.MIN_EVAL_SCALE, hce.eval_scale);
+    try f.set(comptimePrint("name EvalScale value {d}", .{hce.MAX_EVAL_SCALE + 1}));
+    try expectEqual(hce.MAX_EVAL_SCALE, hce.eval_scale);
     try std.testing.expectError(options.SetOptionError.InvalidValue, f.set("name EvalScale value loud"));
-    try expectEqual(@as(i32, 2000), hce.eval_scale);
+    try expectEqual(hce.MAX_EVAL_SCALE, hce.eval_scale);
 
     var listing: [16 * 1024]u8 = undefined;
     var w = std.Io.Writer.fixed(&listing);
     try options.print_all(&w);
-    try expect(std.mem.indexOf(u8, w.buffered(), "option name EvalScale type spin default 1000 min 500 max 2000") != null);
+    const advertised = comptimePrint("option name EvalScale type spin default {d} min {d} max {d}", .{ hce.DEFAULT_EVAL_SCALE, hce.MIN_EVAL_SCALE, hce.MAX_EVAL_SCALE });
+    try expect(std.mem.find(u8, w.buffered(), advertised) != null);
 }
 
 const EVAL_SCALE_FENS = [_][]const u8{
@@ -196,7 +252,9 @@ fn static_eval(pos: *position.Position) i32 {
     return if (pos.turn == types.Color.White) hce.evaluate_comptime(pos, types.Color.White) else hce.evaluate_comptime(pos, types.Color.Black);
 }
 
-test "options: EvalScale 1000 leaves every evaluation unchanged" {
+const DEFAULT_EVAL_SCALE_REQUEST = comptimePrint("name EvalScale value {d}", .{hce.DEFAULT_EVAL_SCALE});
+
+test "options: the default EvalScale leaves every evaluation unchanged" {
     var f: Fixture = undefined;
     try f.init();
     defer f.deinit();
@@ -207,14 +265,14 @@ test "options: EvalScale 1000 leaves every evaluation unchanged" {
         const raw = hce.evaluate_nnue(f.pos);
         const before = static_eval(f.pos);
         try f.set("name EvalScale value 700");
-        try f.set("name EvalScale value 1000");
+        try f.set(DEFAULT_EVAL_SCALE_REQUEST);
         try expectEqual(raw, hce.scale_network_output(raw));
         try expectEqual(raw, support.network_output(f.pos));
         try expectEqual(before, static_eval(f.pos));
     }
 }
 
-test "options: EvalScale 800 scales the network output to exactly raw * 800 / 1000" {
+test "options: EvalScale 800 scales the network output to exactly raw * 800 / the default scale" {
     var f: Fixture = undefined;
     try f.init();
     defer f.deinit();
@@ -228,15 +286,15 @@ test "options: EvalScale 800 scales the network output to exactly raw * 800 / 10
         negative += @intFromBool(raw < 0);
 
         try f.set("name EvalScale value 800");
-        try expectEqual(@divTrunc(raw * 800, 1000), hce.scale_network_output(raw));
+        try expectEqual(@divTrunc(raw * 800, hce.DEFAULT_EVAL_SCALE), hce.scale_network_output(raw));
         try expectEqual(raw, support.network_output(f.pos));
-        // The rest of the static evaluation is applied to the scaled output.
         const scaled = static_eval(f.pos);
         try expect(@abs(scaled) <= @abs(unscaled));
         if (@abs(unscaled) >= 100) {
-            try std.testing.expectApproxEqRel(@as(f64, @floatFromInt(unscaled)) * 0.8, @as(f64, @floatFromInt(scaled)), 0.02);
+            const ratio = 800.0 / @as(f64, @floatFromInt(hce.DEFAULT_EVAL_SCALE));
+            try std.testing.expectApproxEqRel(@as(f64, @floatFromInt(unscaled)) * ratio, @as(f64, @floatFromInt(scaled)), 0.02);
         }
-        try f.set("name EvalScale value 1000");
+        try f.set(DEFAULT_EVAL_SCALE_REQUEST);
     }
     try expect(negative > 0);
 
