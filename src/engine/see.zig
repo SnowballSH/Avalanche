@@ -1,9 +1,6 @@
-const std = @import("std");
 const types = @import("../chess/types.zig");
 const tables = @import("../chess/tables.zig");
 const position = @import("../chess/position.zig");
-const hce = @import("hce.zig");
-const movepick = @import("movepick.zig");
 
 pub const SeeWeight = [_]i32{ 93, 308, 346, 521, 994, 20000 };
 
@@ -52,7 +49,6 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     return gains[0];
 }
 
-// Logic https://github.com/TerjeKir/weiss
 fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
     const king_piece = types.Piece.new_comptime(color, types.PieceType.King);
@@ -173,8 +169,7 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
 
         occ ^= types.SquareIndexBB[@as(usize, @intCast(types.lsb(my_attackers & (pos.piece_bitboards[pt] | pos.piece_bitboards[pt + 8]))))];
 
-        // Independent ifs (not else-if): a captured queen (pt == 4) must reveal
-        // BOTH diagonal and orthogonal x-ray attackers, matching the Weiss source.
+        // Not else-if: a queen (pt == 4) leaving the exchange uncovers x-ray attackers on both kinds of line.
         if (pt == 0 or pt == 2 or pt == 4) {
             attackers |= tables.get_bishop_attacks(@as(types.Square, @fromBackingInt(@intCast(to))), occ) & bishops;
         }

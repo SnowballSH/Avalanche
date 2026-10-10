@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const utils = @import("../chess/utils.zig");
+const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const support = @import("support.zig");
 const expect = std.testing.expect;
@@ -44,8 +45,7 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
     var castles: usize = 0;
 
     for (WALK_FENS) |fen| {
-        var walk: usize = 0;
-        while (walk < WALKS_PER_FEN) : (walk += 1) {
+        for (0..WALKS_PER_FEN) |_| {
             pos.set_fen(fen);
             const root_pawn_hash = pos.pawn_hash;
             const root_nonpawn_hash = pos.nonpawn_hash;
@@ -140,23 +140,20 @@ test "non-pawn key: tracks only its own color's pieces" {
 
 test "correction history: gravity keeps entries within the limit" {
     var entry: i16 = 0;
-    var i: usize = 0;
-    while (i < 1000) : (i += 1) {
-        search.update_correction(&entry, 888888, -888888, 255);
+    for (0..1000) |_| {
+        search.update_correction(&entry, hce.MateScore, -hce.MateScore, 255);
         try expect(entry <= search.CORRHIST_LIMIT);
     }
     try expectEqual(@as(i16, search.CORRHIST_LIMIT), entry);
 
-    i = 0;
-    while (i < 1000) : (i += 1) {
-        search.update_correction(&entry, -888888, 888888, 255);
+    for (0..1000) |_| {
+        search.update_correction(&entry, -hce.MateScore, hce.MateScore, 255);
         try expect(entry >= -search.CORRHIST_LIMIT);
     }
     try expectEqual(@as(i16, -search.CORRHIST_LIMIT), entry);
 
     var prng = utils.PRNG.new(0xC0_44_EC_71_0B);
-    i = 0;
-    while (i < 100000) : (i += 1) {
+    for (0..100000) |_| {
         const r = prng.rand64();
         const diff: i32 = @as(i32, @intCast(r % 4001)) - 2000;
         const depth: usize = @intCast((r >> 32) % 64 + 1);
@@ -171,8 +168,7 @@ test "correction history: a consistent error converges instead of saturating" {
     var nonpawn_black: i16 = 0;
     const raw_eval: i32 = 40;
     const true_value: i32 = 50;
-    var i: usize = 0;
-    while (i < 1000) : (i += 1) {
+    for (0..1000) |_| {
         const corrected = raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black);
         search.update_correction(&pawn, true_value, corrected, 8);
         search.update_correction(&nonpawn_white, true_value, corrected, 8);
