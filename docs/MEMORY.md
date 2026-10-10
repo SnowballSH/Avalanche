@@ -112,7 +112,7 @@ treats as unreachable.
 - **Transposition table** (`tt.zig`): `alloc_populated` on `Hash`, `zero` on `ucinewgame` and
   `Clear Hash`. Label `hash`.
 - **Network weights** (`weights.zig`): `weights.MODEL` points at the embedded network, aligned in
-  the executable, until `do_nnue` has copied it into one block. The embedded network is declared
+  the executable, until `use_embedded` has copied it into one block. The embedded network is declared
   as the embedded file itself (`@embedFile(...).*` with an alignment, its type left to be
   inferred) and viewed through a typed pointer: declaring it as a compile-time copy of a slice of
   the file made the compiler run for minutes and crash on a 64-core machine, while 4- and 8-core

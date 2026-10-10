@@ -66,7 +66,7 @@ const BenchJob = struct {
     depth: u8,
 };
 
-fn runBenchSearch(job: BenchJob) void {
+fn run_bench_search(job: BenchJob) void {
     if (job.pos.turn == types.Color.White) {
         _ = job.searcher.iterative_deepening(job.pos, types.Color.White, job.depth);
     } else {
@@ -109,10 +109,10 @@ pub fn count_nodes(depth: u8) u64 {
         searcher.hash_history.append(pos.hash) catch unreachable;
         const job = BenchJob{ .searcher = searcher, .pos = pos, .depth = depth };
         if (comptime platform.has_threads) {
-            const thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, runBenchSearch, .{job}) catch @panic("cannot start the bench search thread");
+            const thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, run_bench_search, .{job}) catch @panic("cannot start the bench search thread");
             thread.join();
         } else {
-            runBenchSearch(job);
+            run_bench_search(job);
         }
         nodes += searcher.shared.nodes;
     }

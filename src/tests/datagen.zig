@@ -155,7 +155,7 @@ test "datagen: a book whose every opening is rejected fails the run instead of r
         gen.openings = &.{opening};
 
         try testing.expectError(error.WorkerFailed, gen.generate(1, run.path));
-        try testing.expectEqual(@as(?anyerror, error.NoUsableOpening), gen.datagens.items[0].failure);
+        try testing.expectEqual(@as(?anyerror, error.NoUsableOpening), gen.workers.items[0].failure);
         try testing.expectEqual(@as(u64, 20), gen.summary().discarded_games);
         try testing.expectEqual(@as(u64, 0), gen.summary().games);
         const bytes = try run.read();
@@ -195,7 +195,7 @@ test "datagen: a node budget that cannot finish depth 1 fails the run instead of
     var gen = datagen.Datagen.new(.{ .soft_nodes = 1, .hard_node_multiplier = 1, .positions_target = 10 }, 1);
     defer gen.deinit();
     try testing.expectError(error.WorkerFailed, gen.generate(1, run.path));
-    try testing.expectEqual(@as(?anyerror, error.NodeBudgetBelowDepthOne), gen.datagens.items[0].failure);
+    try testing.expectEqual(@as(?anyerror, error.NodeBudgetBelowDepthOne), gen.workers.items[0].failure);
     try testing.expect(datagen.explain(error.NodeBudgetBelowDepthOne).len > 0);
     const bytes = try run.read();
     defer testing.allocator.free(bytes);

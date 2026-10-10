@@ -221,7 +221,7 @@ comptime {
     }
 }
 
-pub fn do_nnue() void {
+pub fn use_embedded() void {
     validate(embedded_bytes) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
     if (platform.is_wasm) prepare() else adopt(embedded_bytes);
 }

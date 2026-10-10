@@ -87,7 +87,7 @@ const Worker = struct {
     err: []const u8 = "",
 };
 
-pub fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?SideResult {
+pub fn expected_result(w: syzygy.WdlResult, mode: Rule50Mode) ?SideResult {
     switch (w) {
         .win => return .win,
         .loss => return .loss,
@@ -107,7 +107,7 @@ pub fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?SideResult {
 
 /// A record is stored from the side to move's point of view (`white` here), flipped vertically when that side is
 /// Black, so the pawns of a possible en-passant capture stand side by side on rank 5 whichever colour is to move.
-fn enPassantPossible(white: u64, black: u64, pawns: u64) bool {
+fn en_passant_possible(white: u64, black: u64, pawns: u64) bool {
     const RANK5: u64 = 0x0000_00FF_0000_0000;
     const FILE_A: u64 = 0x0101_0101_0101_0101;
     const FILE_H: u64 = 0x8080_8080_8080_8080;
@@ -172,7 +172,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
         return true;
     }
 
-    if (enPassantPossible(white, black, pawns)) {
+    if (en_passant_possible(white, black, pawns)) {
         st.ep_skipped += 1;
         return true;
     }
@@ -187,7 +187,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
         return true;
     };
 
-    const expected = expectedResult(wdl, mode) orelse {
+    const expected = expected_result(wdl, mode) orelse {
         st.ambiguous += 1;
         return true;
     };
@@ -202,7 +202,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
     return false;
 }
 
-fn workerRun(w: *Worker) void {
+fn run_worker(w: *Worker) void {
     const io = platform.io;
 
     const in_file = std.Io.Dir.cwd().openFile(io, w.input, .{}) catch {
@@ -283,7 +283,7 @@ fn workerRun(w: *Worker) void {
     w.bytes_written = woff;
 }
 
-fn copyPart(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 {
+fn copy_part(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 {
     const io = platform.io;
     const pf = try std.Io.Dir.cwd().openFile(io, part, .{});
     defer pf.close(io);
@@ -300,7 +300,7 @@ fn copyPart(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 
     return off;
 }
 
-fn concatParts(output: []const u8, parts: []const []const u8) !u64 {
+fn concat_parts(output: []const u8, parts: []const []const u8) !u64 {
     const io = platform.io;
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{ .read = true });
     defer out_file.close(io);
@@ -310,7 +310,7 @@ fn concatParts(output: []const u8, parts: []const []const u8) !u64 {
 
     var woff: u64 = 0;
     for (parts) |part| {
-        woff += try copyPart(out_file, part, buf, woff);
+        woff += try copy_part(out_file, part, buf, woff);
         std.Io.Dir.cwd().deleteFile(io, part) catch {};
     }
     return woff;
@@ -573,14 +573,14 @@ pub fn run(args: []const []const u8) u8 {
         return 1;
     };
     for (1..threads) |t| {
-        const h = std.Thread.spawn(.{ .stack_size = WORKER_STACK_SIZE }, workerRun, .{&workers[t]}) catch {
+        const h = std.Thread.spawn(.{ .stack_size = WORKER_STACK_SIZE }, run_worker, .{&workers[t]}) catch {
             std.debug.print("tbfilter: could not spawn worker {}; running it inline\n", .{t});
-            workerRun(&workers[t]);
+            run_worker(&workers[t]);
             continue;
         };
         handles.appendAssumeCapacity(h);
     }
-    workerRun(&workers[0]);
+    run_worker(&workers[0]);
     for (handles.items) |h| h.join();
 
     const elapsed_ns = timer.read();
@@ -607,7 +607,7 @@ pub fn run(args: []const []const u8) u8 {
     }
 
     var out_bytes: u64 = 0;
-    out_bytes = concatParts(cfg.output, part_paths.items) catch |e| {
+    out_bytes = concat_parts(cfg.output, part_paths.items) catch |e| {
         std.debug.print("tbfilter: concatenation failed: {} -- output deleted\n", .{e});
         std.Io.Dir.cwd().deleteFile(io, cfg.output) catch {};
         for (part_paths.items) |p| std.Io.Dir.cwd().deleteFile(io, p) catch {};

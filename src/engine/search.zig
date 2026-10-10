@@ -17,7 +17,7 @@ const parameters = @import("parameters.zig");
 const strength_model = @import("strength.zig");
 const thread_pool = @import("thread_pool.zig");
 
-pub const line_ending = if (@import("builtin").os.tag == .windows) "\r\n" else "\n";
+pub const LINE_ENDING = if (@import("builtin").os.tag == .windows) "\r\n" else "\n";
 
 pub var QuietLMR: [64][64]i32 = undefined;
 
@@ -152,7 +152,7 @@ fn print_line(w: *std.Io.Writer, pos: *const position.Position, line: *const Roo
         w.writeByte(' ') catch {};
         move.uci_print(w, pos.chess960_notation());
     }
-    w.writeAll(line_ending) catch {};
+    w.writeAll(LINE_ENDING) catch {};
     w.flush() catch {};
 }
 
@@ -223,14 +223,14 @@ comptime {
 }
 
 pub const MAX_SEARCH_THREADS: usize = if (platform.has_threads) MAX_THREADS else 1;
-pub var NUM_THREADS: usize = 0;
-pub var THREADS_CONFIGURED: bool = false;
+pub var active_helpers: usize = 0;
+pub var threads_configured: bool = false;
 
 pub const DEFAULT_MOVE_OVERHEAD: u64 = 25;
 pub const MAX_MOVE_OVERHEAD: u64 = 5000;
-pub var MOVE_OVERHEAD: u64 = DEFAULT_MOVE_OVERHEAD;
+pub var move_overhead: u64 = DEFAULT_MOVE_OVERHEAD;
 
-pub var CONTEMPT: i32 = 0;
+pub var contempt: i32 = 0;
 pub const MAX_CONTEMPT: i32 = 100;
 
 pub var helper_pool: thread_pool.ThreadPool = .{};
@@ -246,7 +246,7 @@ inline fn helper(index: usize) *Searcher {
 pub fn set_helper_count(n: usize) void {
     std.debug.assert(!helpers_are_live());
     helper_pool.resize(n);
-    NUM_THREADS = helper_pool.count();
+    active_helpers = helper_pool.count();
 }
 
 pub fn helper_count() usize {
@@ -254,7 +254,7 @@ pub fn helper_count() usize {
 }
 
 pub fn thread_count() usize {
-    return NUM_THREADS + 1;
+    return active_helpers + 1;
 }
 
 pub fn reset_helper_heuristics() void {
@@ -440,7 +440,7 @@ pub const Searcher = struct {
             stored -= @as(i32, @intCast(self.ply));
         }
         self.ttable.set(pos.hash, tt.Item{
-            .eval = stored,
+            .score = stored,
             .static_eval = pack_static_eval(static_eval_val),
             .bestmove = move,
             .flag = flag,
@@ -476,7 +476,7 @@ pub const Searcher = struct {
 
     inline fn stop_requested(self: *Searcher) bool {
         if (@atomicLoad(bool, &self.shared.stop, .monotonic)) return true;
-        if (platform.hostStopRequested()) {
+        if (platform.host_stop_requested()) {
             @atomicStore(bool, &self.shared.stop, true, .monotonic);
             return true;
         }
@@ -490,13 +490,13 @@ pub const Searcher = struct {
     }
 
     inline fn record_node(self: *Searcher) void {
-        platform.atomicStore(u64, &self.shared.nodes, self.shared.nodes + 1, .monotonic);
+        platform.atomic_store(u64, &self.shared.nodes, self.shared.nodes + 1, .monotonic);
     }
 
     pub inline fn total_nodes(self: *const Searcher) u64 {
         var total = self.shared.nodes;
         if (self.thread_id == 0) {
-            for (0..NUM_THREADS) |i| total += platform.atomicLoad(u64, &helper(i).shared.nodes, .monotonic);
+            for (0..active_helpers) |i| total += platform.atomic_load(u64, &helper(i).shared.nodes, .monotonic);
         }
         return total;
     }
@@ -519,18 +519,18 @@ pub const Searcher = struct {
     }
 
     inline fn contempt_score(self: *Searcher) i32 {
-        return if (self.ply % 2 == 0) -CONTEMPT else CONTEMPT;
+        return if (self.ply % 2 == 0) -contempt else contempt;
     }
 
     inline fn tt_score(self: *Searcher, eval: i32, flag: tt.Bound) i32 {
-        if (CONTEMPT != 0 and flag == tt.Bound.Exact and eval == STORED_DRAW_SCORE) {
+        if (contempt != 0 and flag == tt.Bound.Exact and eval == STORED_DRAW_SCORE) {
             return self.contempt_score();
         }
         return eval;
     }
 
     inline fn tt_store_is_ambiguous(self: *Searcher, score: i32, flag: tt.Bound) bool {
-        return CONTEMPT != 0 and
+        return contempt != 0 and
             (score == self.contempt_score() or (flag == tt.Bound.Exact and score == STORED_DRAW_SCORE));
     }
 
@@ -559,8 +559,8 @@ pub const Searcher = struct {
     pub fn iterative_deepening_mode(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, max_depth: ?u8) i32 {
         var out_buf: [4096]u8 = undefined;
         var out_file = platform.Stdout.init(&out_buf);
-        const outW = out_file.writer();
-        self.info_out = outW;
+        const out = out_file.writer();
+        self.info_out = out;
         defer self.info_out = null;
         @atomicStore(bool, &self.shared.is_searching, true, .release);
         self.root_history_len = self.hash_history.items.len;
@@ -592,28 +592,28 @@ pub const Searcher = struct {
             else
                 self.contempt_score();
             if (!self.silent_output) {
-                outW.print("info depth 0 score ", .{}) catch {};
+                out.print("info depth 0 score ", .{}) catch {};
                 if (in_check) {
-                    outW.writeAll("mate 0") catch {};
+                    out.writeAll("mate 0") catch {};
                 } else {
-                    outW.print("cp {}", .{wdl_model.normalized(terminal)}) catch {};
+                    out.print("cp {}", .{wdl_model.normalized(terminal)}) catch {};
                 }
                 if (wdl_model.show_wdl) {
                     const p = if (in_check)
                         wdl_model.decisive(terminal)
                     else
                         wdl_model.Prediction{ .win = 0, .draw = 1000, .loss = 0 };
-                    outW.print(" wdl {} {} {}", .{ p.win, p.draw, p.loss }) catch {};
+                    out.print(" wdl {} {} {}", .{ p.win, p.draw, p.loss }) catch {};
                 }
-                outW.writeAll(line_ending) catch {};
-                outW.flush() catch {};
+                out.writeAll(LINE_ENDING) catch {};
+                out.flush() catch {};
             }
             self.wait_for_release();
             self.ttable.do_age();
             @atomicStore(bool, &self.shared.is_searching, false, .release);
             if (!self.silent_output) {
-                outW.writeAll("bestmove 0000" ++ line_ending) catch {};
-                outW.flush() catch {};
+                out.writeAll("bestmove 0000" ++ LINE_ENDING) catch {};
+                out.flush() catch {};
             }
             return terminal;
         }
@@ -628,8 +628,8 @@ pub const Searcher = struct {
         var previous_iteration_nodes: u64 = 0;
         var previous_iteration_node_cost: u64 = 0;
 
-        std.debug.assert(NUM_THREADS <= helper_pool.count());
-        for (0..NUM_THREADS) |i| {
+        std.debug.assert(active_helpers <= helper_pool.count());
+        for (0..active_helpers) |i| {
             const h = helper(i);
             h.shared.nodes = 0;
             h.shared.tbhits = 0;
@@ -684,7 +684,7 @@ pub const Searcher = struct {
             }
 
             if (!self.silent_output) {
-                self.report_iteration(outW, pos, self.collect_stats());
+                self.report_iteration(out, pos, self.collect_stats());
             }
 
             if (interrupted) break;
@@ -768,14 +768,14 @@ pub const Searcher = struct {
         @atomicStore(bool, &self.shared.is_searching, false, .release);
 
         if (!self.silent_output) {
-            outW.writeAll("bestmove ") catch {};
-            bm.uci_print(outW, pos.chess960_notation());
+            out.writeAll("bestmove ") catch {};
+            bm.uci_print(out, pos.chess960_notation());
             if (self.ponder_move.to_u16() != 0) {
-                outW.writeAll(" ponder ") catch {};
-                self.ponder_move.uci_print(outW, pos.chess960_notation());
+                out.writeAll(" ponder ") catch {};
+                self.ponder_move.uci_print(out, pos.chess960_notation());
             }
-            outW.writeAll(line_ending) catch {};
-            outW.flush() catch {};
+            out.writeAll(LINE_ENDING) catch {};
+            out.flush() catch {};
         }
 
         return score;
@@ -865,7 +865,7 @@ pub const Searcher = struct {
     fn collect_stats(self: *Searcher) InfoStats {
         const nodes = self.total_nodes();
         var tbhits: u64 = self.shared.tbhits;
-        for (0..NUM_THREADS) |i| tbhits += platform.atomicLoad(u64, &helper(i).shared.tbhits, .monotonic);
+        for (0..active_helpers) |i| tbhits += platform.atomic_load(u64, &helper(i).shared.tbhits, .monotonic);
         const elapsed_ms = self.timer.read() / std.time.ns_per_ms;
         return .{
             .nodes = nodes,
@@ -899,7 +899,7 @@ pub const Searcher = struct {
         const w = self.info_out orelse return;
         w.print("info depth {} currmove ", .{depth}) catch {};
         move.uci_print(w, pos.chess960_notation());
-        w.print(" currmovenumber {}" ++ line_ending, .{number + self.root_excluded_count}) catch {};
+        w.print(" currmovenumber {}" ++ LINE_ENDING, .{number + self.root_excluded_count}) catch {};
         w.flush() catch {};
     }
 
@@ -938,12 +938,12 @@ pub const Searcher = struct {
 
     fn wait_for_release(self: *Searcher) void {
         while (!self.stop_requested() and (self.infinite or self.is_pondering())) {
-            platform.sleepMs(1);
+            platform.sleep_ms(1);
         }
     }
 
     pub inline fn is_pondering(self: *Searcher) bool {
-        if (platform.hostPonderhitRequested()) self.ponderhit();
+        if (platform.host_ponderhit_requested()) self.ponderhit();
         return @atomicLoad(bool, &self.shared.pondering, .acquire);
     }
 
@@ -1088,8 +1088,8 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
-        for (0..NUM_THREADS) |i| {
+    pub fn helpers(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth: usize, alpha: i32, beta: i32) void {
+        for (0..active_helpers) |i| {
             const h = helper(i);
             h.copy_root_exclusions(self);
             std.debug.assert(h.root_board.hash == pos.hash and h.hash_history.items.len == self.hash_history.items.len);
@@ -1097,9 +1097,9 @@ pub const Searcher = struct {
             helper_pool.start_search(i, .{
                 .color = color,
                 .mode = mode,
-                .depth = if (h.thread_id % 2 == 1) depth_ + 1 else depth_,
-                .alpha = alpha_,
-                .beta = beta_,
+                .depth = if (h.thread_id % 2 == 1) depth + 1 else depth,
+                .alpha = alpha,
+                .beta = beta,
             });
         }
     }
@@ -1121,7 +1121,7 @@ pub const Searcher = struct {
         @memcpy(self.root_excluded[0..main.root_excluded_count], main.root_excluded[0..main.root_excluded_count]);
     }
 
-    pub fn start_helper(self: *Searcher, color: types.Color, mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32) void {
+    pub fn start_helper(self: *Searcher, color: types.Color, mode: hce.EvalMode, depth: usize, alpha: i32, beta: i32) void {
         self.has_searched = true;
         if (self.age_pending) {
             self.age_pending = false;
@@ -1140,20 +1140,20 @@ pub const Searcher = struct {
 
         switch (color) {
             inline else => |c| switch (mode) {
-                inline else => |m| _ = self.negamax(self.root_board, c, m, depth_, alpha_, beta_, false, NodeType.Root, false),
+                inline else => |m| _ = self.negamax(self.root_board, c, m, depth, alpha, beta, false, NodeType.Root, false),
             },
         }
     }
 
     pub fn stop_helpers(_: *Searcher) void {
-        for (0..NUM_THREADS) |i| @atomicStore(bool, &helper(i).shared.stop, true, .monotonic);
-        for (0..NUM_THREADS) |i| helper_pool.worker(i).wait_idle();
+        for (0..active_helpers) |i| @atomicStore(bool, &helper(i).shared.stop, true, .monotonic);
+        for (0..active_helpers) |i| helper_pool.worker(i).wait_idle();
     }
 
-    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, depth_: usize, alpha_: i32, beta_: i32, is_null_or_singular: bool, comptime node: NodeType, cutnode: bool) i32 {
-        var alpha = alpha_;
-        var beta = beta_;
-        var depth = depth_;
+    pub fn negamax(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, initial_depth: usize, initial_alpha: i32, initial_beta: i32, is_null_or_singular: bool, comptime node: NodeType, cutnode: bool) i32 {
+        var alpha = initial_alpha;
+        var beta = initial_beta;
+        var depth = initial_depth;
         const opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
         self.pv_size[self.ply] = 0;
@@ -1217,7 +1217,7 @@ pub const Searcher = struct {
 
         if (entry != null) {
             tthit = true;
-            tt_eval = entry.?.eval;
+            tt_eval = entry.?.score;
             if (tt_eval > SCORE_PLY_ADJ and tt_eval <= hce.MateScore) {
                 tt_eval -= @as(i32, @intCast(self.ply));
             } else if (tt_eval < -SCORE_PLY_ADJ and tt_eval >= -hce.MateScore) {
@@ -1251,7 +1251,7 @@ pub const Searcher = struct {
             syzygy.piece_count(pos) <= syzygy.max_pieces())
         {
             if (syzygy.probe_wdl(pos)) |wdl| {
-                platform.atomicStore(u64, &self.shared.tbhits, self.shared.tbhits + 1, .monotonic);
+                platform.atomic_store(u64, &self.shared.tbhits, self.shared.tbhits + 1, .monotonic);
                 const tb_flag: tt.Bound, const tb_score: i32 = switch (wdl) {
                     .win => .{ tt.Bound.Lower, TB_WIN_SCORE - @as(i32, @intCast(self.ply)) },
                     .loss => .{ tt.Bound.Upper, @as(i32, @intCast(self.ply)) - TB_WIN_SCORE },
@@ -1271,7 +1271,7 @@ pub const Searcher = struct {
                         stored_tb -= @as(i32, @intCast(self.ply));
                     }
                     self.ttable.set(pos.hash, tt.Item{
-                        .eval = stored_tb,
+                        .score = stored_tb,
                         .static_eval = tt.EVAL_NONE,
                         .bestmove = types.Move.empty(),
                         .flag = tb_flag,
@@ -1429,7 +1429,7 @@ pub const Searcher = struct {
                                     stored -= @as(i32, @intCast(self.ply));
                                 }
                                 self.ttable.set(pos.hash, tt.Item{
-                                    .eval = stored,
+                                    .score = stored,
                                     .static_eval = pack_static_eval(raw_eval),
                                     .bestmove = move,
                                     .flag = tt.Bound.Lower,
@@ -1750,9 +1750,9 @@ pub const Searcher = struct {
         if (self.exclude_move[self.ply].to_u16() == 0 and !(is_root and self.root_excluded_count > 0)) {
             if (!in_check and
                 !(is_root and self.root_restricted) and
-                !(best_score > alpha_ and (best_move.is_capture() or best_move.is_promotion())) and
-                !(best_score >= beta_ and best_score <= static_eval) and
-                !(best_score <= alpha_ and best_score >= static_eval))
+                !(best_score > initial_alpha and (best_move.is_capture() or best_move.is_promotion())) and
+                !(best_score >= initial_beta and best_score <= static_eval) and
+                !(best_score <= initial_alpha and best_score >= static_eval))
             {
                 update_correction(self.pawn_correction_entry(pos, color), best_score, static_eval, depth);
                 update_correction(self.nonpawn_correction_entry(pos, color, .White), best_score, static_eval, depth);
@@ -1763,9 +1763,9 @@ pub const Searcher = struct {
                 tt.Bound.Lower
             else if (tb_max != hce.MateScore and best_score == tb_max)
                 tt.Bound.Upper
-            else if (best_score >= beta_)
+            else if (best_score >= initial_beta)
                 tt.Bound.Lower
-            else if (best_score <= alpha_)
+            else if (best_score <= initial_alpha)
                 tt.Bound.Upper
             else
                 tt.Bound.Exact;
@@ -1782,7 +1782,7 @@ pub const Searcher = struct {
             }
 
             self.ttable.set(pos.hash, tt.Item{
-                .eval = stored_eval,
+                .score = stored_eval,
                 .static_eval = pack_static_eval(raw_eval),
                 .bestmove = best_move,
                 .flag = tt_flag,
@@ -1796,9 +1796,8 @@ pub const Searcher = struct {
         return best_score;
     }
 
-    pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, alpha_: i32, beta_: i32) i32 {
-        var alpha = alpha_;
-        const beta = beta_;
+    pub fn quiescence_search(self: *Searcher, pos: *position.Position, comptime color: types.Color, comptime mode: hce.EvalMode, initial_alpha: i32, beta: i32) i32 {
+        var alpha = initial_alpha;
         const opp_color = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
         if (self.must_unwind()) {
@@ -1821,7 +1820,7 @@ pub const Searcher = struct {
         self.record_node();
 
         var movelist: types.MoveList = .{};
-        if (CONTEMPT != 0) {
+        if (contempt != 0) {
             if (in_check) {
                 pos.generate_legal_moves(color, &movelist);
                 if (movelist.len == 0) {
@@ -1859,7 +1858,7 @@ pub const Searcher = struct {
 
         if (entry != null) {
             hashmove = entry.?.bestmove;
-            var tt_eval = entry.?.eval;
+            var tt_eval = entry.?.score;
             if (tt_eval > SCORE_PLY_ADJ and tt_eval <= hce.MateScore) {
                 tt_eval -= @as(i32, @intCast(self.ply));
             } else if (tt_eval < -SCORE_PLY_ADJ and tt_eval >= -hce.MateScore) {
@@ -1875,7 +1874,7 @@ pub const Searcher = struct {
             }
         }
 
-        if (CONTEMPT == 0) {
+        if (contempt == 0) {
             if (in_check) {
                 pos.generate_legal_moves(color, &movelist);
                 if (movelist.len == 0) {
@@ -1946,16 +1945,16 @@ pub const Searcher = struct {
 };
 
 test "contempt only reinterprets exact TT zero" {
-    const old_contempt = CONTEMPT;
-    defer CONTEMPT = old_contempt;
+    const old_contempt = contempt;
+    defer contempt = old_contempt;
 
     var s: Searcher = undefined;
     s.ply = 0;
 
-    CONTEMPT = 0;
+    contempt = 0;
     try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Exact));
 
-    CONTEMPT = 100;
+    contempt = 100;
     try std.testing.expectEqual(@as(i32, -100), s.tt_score(0, tt.Bound.Exact));
     try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Lower));
     try std.testing.expectEqual(@as(i32, 0), s.tt_score(0, tt.Bound.Upper));
@@ -1966,17 +1965,17 @@ test "contempt only reinterprets exact TT zero" {
 }
 
 test "contempt skips numerically ambiguous generic TT stores" {
-    const old_contempt = CONTEMPT;
-    defer CONTEMPT = old_contempt;
+    const old_contempt = contempt;
+    defer contempt = old_contempt;
 
     var s: Searcher = undefined;
     s.ply = 0;
 
-    CONTEMPT = 0;
+    contempt = 0;
     try std.testing.expect(!s.tt_store_is_ambiguous(-100, tt.Bound.Exact));
     try std.testing.expect(!s.tt_store_is_ambiguous(0, tt.Bound.Exact));
 
-    CONTEMPT = 100;
+    contempt = 100;
     try std.testing.expect(s.tt_store_is_ambiguous(-100, tt.Bound.Exact));
     try std.testing.expect(s.tt_store_is_ambiguous(-100, tt.Bound.Lower));
     try std.testing.expect(s.tt_store_is_ambiguous(0, tt.Bound.Exact));
@@ -1989,7 +1988,7 @@ const InfoLineCase = struct {
     line: RootLine,
 
     const stats = InfoStats{ .nodes = 10, .nps = 20, .hashfull = 3, .tbhits = 0, .time_ms = 500 };
-    const stats_and_pv = " nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ line_ending;
+    const stats_and_pv = " nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ LINE_ENDING;
 
     fn init(self: *InfoLineCase, score: i32) void {
         self.pos.uci_chess960 = false;
@@ -2092,7 +2091,7 @@ test "info lines: candidates searched beyond MultiPV for a limited strength are 
     var buf: [2048]u8 = undefined;
     var w = std.Io.Writer.fixed(&buf);
     s.report_iteration(&w, &case.pos, InfoLineCase.stats);
-    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, w.buffered(), line_ending));
+    try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, w.buffered(), LINE_ENDING));
     try std.testing.expect(std.mem.find(u8, w.buffered(), "multipv 2 ") != null);
     try std.testing.expect(std.mem.find(u8, w.buffered(), "multipv 3 ") == null);
 }

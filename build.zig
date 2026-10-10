@@ -4,7 +4,7 @@ const Translator = @import("translate_c").Translator;
 
 const default_net = "nets/dianguang-5.nnue";
 
-fn buildTimestamp(b: *std.Build) []const u8 {
+fn build_timestamp(b: *std.Build) []const u8 {
     const now: std.time.epoch.EpochSeconds = .{ .secs = @intCast(std.Io.Clock.real.now(b.graph.io).toSeconds()) };
     const year_day = now.getEpochDay().calculateYearDay();
     const month_day = year_day.calculateMonthDay();
@@ -36,7 +36,7 @@ const Pyrrhic = struct {
         };
     }
 
-    fn addTo(pyrrhic: Pyrrhic, module: *std.Build.Module) void {
+    fn add_to(pyrrhic: Pyrrhic, module: *std.Build.Module) void {
         module.addImport("pyrrhic", pyrrhic.bindings);
         module.addIncludePath(pyrrhic.include_path);
         module.addCSourceFile(.{ .file = pyrrhic.source, .flags = &.{ "-O3", "-std=gnu11" } });
@@ -47,7 +47,7 @@ const Configuration = struct {
     options: *std.Build.Step.Options,
     net: std.Build.LazyPath,
 
-    fn addTo(configuration: Configuration, module: *std.Build.Module) void {
+    fn add_to(configuration: Configuration, module: *std.Build.Module) void {
         module.addOptions("build_options", configuration.options);
         module.addAnonymousImport("nnue", .{ .root_source_file = configuration.net });
     }
@@ -60,7 +60,7 @@ const Native = struct {
     configuration: Configuration,
     pyrrhic: Pyrrhic,
 
-    fn createModule(native: Native, b: *std.Build, root_source_file: []const u8) *std.Build.Module {
+    fn create_module(native: Native, b: *std.Build, root_source_file: []const u8) *std.Build.Module {
         const module = b.createModule(.{
             .root_source_file = b.path(root_source_file),
             .target = native.target,
@@ -68,8 +68,8 @@ const Native = struct {
             .link_libc = true,
             .strip = native.strip,
         });
-        native.configuration.addTo(module);
-        native.pyrrhic.addTo(module);
+        native.configuration.add_to(module);
+        native.pyrrhic.add_to(module);
         return module;
     }
 };
@@ -95,7 +95,7 @@ pub fn build(b: *std.Build) void {
     const build_options = b.addOptions();
     const version = b.option([]const u8, "version", "Release version reported by `uci` (default: build timestamp)") orelse version: {
         b.graph.poisonCache();
-        break :version buildTimestamp(b);
+        break :version build_timestamp(b);
     };
     build_options.addOption([]const u8, "version", version);
     build_options.addOption(usize, "input_buckets", input_buckets);
@@ -113,7 +113,7 @@ pub fn build(b: *std.Build) void {
 
     const exe = b.addExecutable(.{
         .name = target_name,
-        .root_module = native.createModule(b, "src/main.zig"),
+        .root_module = native.create_module(b, "src/main.zig"),
     });
 
     b.installArtifact(exe);
@@ -128,7 +128,7 @@ pub fn build(b: *std.Build) void {
     const test_filter = b.option([]const u8, "test-filter", "Run only the unit tests whose name contains this text");
     const exe_tests = b.addTest(.{
         .filters = if (test_filter) |filter| b.dupeStrings(&.{filter}) else &.{},
-        .root_module = native.createModule(b, "src/tests.zig"),
+        .root_module = native.create_module(b, "src/tests.zig"),
     });
 
     const wasm = b.addExecutable(.{
@@ -149,7 +149,7 @@ pub fn build(b: *std.Build) void {
     wasm.entry = .disabled;
     wasm.rdynamic = true;
     wasm.stack_size = 16 * 1024 * 1024;
-    configuration.addTo(wasm.root_module);
+    configuration.add_to(wasm.root_module);
 
     const install_wasm = b.addInstallArtifact(wasm, .{ .dest_dir = .{ .override = .{ .custom = "web" } } });
     const wasm_step = b.step("wasm", "Build the WebAssembly engine into zig-out/web");

@@ -21,20 +21,20 @@ const host = if (is_wasm) struct {
     extern "env" fn avalanche_ponderhit_requested() bool;
 } else struct {};
 
-pub fn nowNs() i96 {
+pub fn now_ns() i96 {
     if (is_wasm) return @intFromFloat(host.avalanche_now_ms() * std.time.ns_per_ms);
     return std.Io.Clock.awake.now(io).nanoseconds;
 }
 
-pub inline fn hostStopRequested() bool {
+pub inline fn host_stop_requested() bool {
     return is_wasm and host.avalanche_stop_requested();
 }
 
-pub inline fn hostPonderhitRequested() bool {
+pub inline fn host_ponderhit_requested() bool {
     return is_wasm and host.avalanche_ponderhit_requested();
 }
 
-pub fn sleepMs(ms: i64) void {
+pub fn sleep_ms(ms: i64) void {
     if (is_wasm) return;
     io.sleep(std.Io.Duration.fromMilliseconds(ms), .awake) catch {};
 }
@@ -98,24 +98,24 @@ pub fn fatal(message: []const u8) noreturn {
     @panic(message);
 }
 
-pub inline fn atomicLoad(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {
+pub inline fn atomic_load(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicLoad(T, ptr, order);
     return ptr.*;
 }
 
-pub inline fn atomicStore(comptime T: type, ptr: *T, value: T, comptime order: std.lang.AtomicOrder) void {
+pub inline fn atomic_store(comptime T: type, ptr: *T, value: T, comptime order: std.lang.AtomicOrder) void {
     if (comptime has_threads) return @atomicStore(T, ptr, value, order);
     ptr.* = value;
 }
 
-pub inline fn atomicRmw(comptime T: type, ptr: *T, comptime op: std.lang.AtomicRmwOp, operand: T, comptime order: std.lang.AtomicOrder) T {
+pub inline fn atomic_rmw(comptime T: type, ptr: *T, comptime op: std.lang.AtomicRmwOp, operand: T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicRmw(T, ptr, op, operand, order);
     const old = ptr.*;
-    ptr.* = applyRmw(T, op, old, operand);
+    ptr.* = apply_rmw(T, op, old, operand);
     return old;
 }
 
-fn applyRmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operand: T) T {
+fn apply_rmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operand: T) T {
     return switch (op) {
         .Xchg => operand,
         .Add => old +% operand,
@@ -133,14 +133,14 @@ test {
     _ = affinity;
 }
 
-test "applyRmw matches @atomicRmw for every operation" {
+test "apply_rmw matches @atomicRmw for every operation" {
     const cases = [_][2]i64{ .{ 0, 0 }, .{ 5, -3 }, .{ std.math.maxInt(i64), 1 }, .{ std.math.minInt(i64), -1 }, .{ -7, 7 } };
     inline for (comptime std.enums.values(std.lang.AtomicRmwOp)) |op| {
         for (cases) |case| {
             var cell = case[0];
             const previous = @atomicRmw(i64, &cell, op, case[1], .monotonic);
             try std.testing.expectEqual(case[0], previous);
-            try std.testing.expectEqual(cell, applyRmw(i64, op, case[0], case[1]));
+            try std.testing.expectEqual(cell, apply_rmw(i64, op, case[0], case[1]));
         }
     }
 }

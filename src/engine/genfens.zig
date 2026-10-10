@@ -60,7 +60,7 @@ pub fn parse(args: []const []const u8, offending: *[]const u8) ParseError!Option
     return options;
 }
 
-fn playRandomMoves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) void {
+fn play_random_moves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) void {
     for (0..n_plies) |_| {
         const movelist = pos.legal_moves();
         if (movelist.len == 0) return;
@@ -77,7 +77,7 @@ fn random_start(prng: *utils.PRNG) u16 {
     return @intCast(prng.rand64() % frc.N_POSITIONS);
 }
 
-fn positionIsUsable(pos: *position.Position) bool {
+fn position_is_usable(pos: *position.Position) bool {
     const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
     if (in_check) return false;
     return pos.legal_moves().len > 0;
@@ -97,7 +97,7 @@ pub fn generate(options: Options, book_lines: []const []const u8, out: *std.Io.W
         if (book_lines.len > 0) {
             const line = book_lines[prng.rand64() % book_lines.len];
             pos.set_fen(line);
-            playRandomMoves(&pos, &prng, PLIES_AFTER_BOOK.pick(&prng));
+            play_random_moves(&pos, &prng, PLIES_AFTER_BOOK.pick(&prng));
         } else {
             var fen_buf: [frc.FEN_CAPACITY]u8 = undefined;
             pos.set_fen(switch (options.variant) {
@@ -105,10 +105,10 @@ pub fn generate(options: Options, book_lines: []const []const u8, out: *std.Io.W
                 .frc => frc.frc_fen(random_start(&prng), &fen_buf),
                 .dfrc => frc.dfrc_fen(random_start(&prng), random_start(&prng), &fen_buf),
             });
-            playRandomMoves(&pos, &prng, PLIES_WITHOUT_BOOK.pick(&prng));
+            play_random_moves(&pos, &prng, PLIES_WITHOUT_BOOK.pick(&prng));
         }
 
-        if (!positionIsUsable(&pos)) {
+        if (!position_is_usable(&pos)) {
             consecutive_unusable += 1;
             if (consecutive_unusable == MAX_CONSECUTIVE_UNUSABLE_OPENINGS) return error.NoUsableOpening;
             continue;

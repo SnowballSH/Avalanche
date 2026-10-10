@@ -6,11 +6,11 @@ pub const Timer = struct {
     start_ns: i96,
 
     pub fn start() Timer {
-        return Timer{ .start_ns = platform.nowNs() };
+        return Timer{ .start_ns = platform.now_ns() };
     }
 
     pub fn read(self: Timer) u64 {
-        const now_ns = platform.nowNs();
+        const now_ns = platform.now_ns();
         return @as(u64, @intCast(now_ns - self.start_ns));
     }
 };

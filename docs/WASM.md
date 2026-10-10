@@ -137,9 +137,9 @@ error ends the process rather than leaving a dead engine behind a GUI.
 `src/platform.zig` is the only place that knows which target it is running on:
 
 - `allocator`: libc `malloc` natively, `std.heap.wasm_allocator` (a `memory.grow` bump/size-class allocator) on wasm.
-- `nowNs`, `Stdout`, `print`: `std.Io` natively, host imports on wasm. `print` backs the debug commands (`d`, `perft`,
+- `now_ns`, `Stdout`, `print`: `std.Io` natively, host imports on wasm. `print` backs the debug commands (`d`, `perft`,
   `perftdiv`): natively it writes to stderr, on wasm it shares the single UCI output channel.
-- `atomicLoad`/`atomicStore`/`atomicRmw`: real atomics natively. On wasm they are plain memory
+- `atomic_load`/`atomic_store`/`atomic_rmw`: real atomics natively. On wasm they are plain memory
   operations, because the build is single-threaded and Zig caps wasm32 atomic operands at 32 bits, which
   would reject the transposition table's 64-bit lock words.
 - `has_threads`: comptime-false on wasm. Thread spawns (search helpers, TT clearing, bench) run inline instead, and

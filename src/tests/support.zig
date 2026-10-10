@@ -13,7 +13,7 @@ const options = @import("../engine/uci/options.zig");
 pub fn init_tables() void {
     tables.init_all();
     zobrist.init_zobrist();
-    weights.do_nnue();
+    weights.use_embedded();
 }
 
 pub fn init_search() void {

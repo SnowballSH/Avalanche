@@ -179,9 +179,9 @@ const WHITE_KING_E1 = 4;
 
 fn set_piece_kind(header: *align(1) PackedBoard, piece_index: usize, kind: u8) void {
     const shift: u3 = @intCast(4 * (piece_index & 1));
-    const colour_bit = header.pcs[piece_index / 2] & (@as(u8, 0x8) << shift);
+    const color_bit = header.pcs[piece_index / 2] & (@as(u8, 0x8) << shift);
     header.pcs[piece_index / 2] &= ~(@as(u8, 0xF) << shift);
-    header.pcs[piece_index / 2] |= colour_bit | (kind << shift);
+    header.pcs[piece_index / 2] |= color_bit | (kind << shift);
 }
 
 test "viriformat: a truncated game is an error" {

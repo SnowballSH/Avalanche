@@ -20,7 +20,7 @@ pub const EVAL_NONE: i16 = -32768;
 
 pub const Item = packed struct {
     key: u32,
-    eval: i32,
+    score: i32,
     static_eval: i16,
     bestmove: types.Move,
     flag: Bound,
@@ -49,7 +49,7 @@ pub const Sharing = enum {
 
 fn backing_thread_count() usize {
     if (comptime !platform.has_threads) return 1;
-    return if (search.THREADS_CONFIGURED) search.thread_count() else std.Thread.getCpuCount() catch 1;
+    return if (search.threads_configured) search.thread_count() else std.Thread.getCpuCount() catch 1;
 }
 
 fn place_like_search_thread(part: usize, parts: usize) void {
@@ -134,11 +134,11 @@ pub const TranspositionTable = struct {
     const REPLACEMENT_DEPTH_MARGIN: u16 = 4;
 
     inline fn load_snapshot(p: *i128) ?Item {
-        const w1_before = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        const w1_before = platform.atomic_load(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
         if (w1_before & LOCK_BIT != 0) return null;
 
-        const w0 = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
-        const w1_after = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        const w0 = platform.atomic_load(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
+        const w1_after = platform.atomic_load(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
         if (w1_before != w1_after or w1_after & LOCK_BIT != 0) return null;
 
         const combined: i128 = @as(i128, @bitCast([2]i64{ w0, w1_after }));
@@ -151,11 +151,11 @@ pub const TranspositionTable = struct {
         const p = &self.data[idx];
 
         const w1_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p) + 8));
-        const old_w1 = platform.atomicRmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
+        const old_w1 = platform.atomic_rmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
         if (old_w1 & LOCK_BIT != 0) return;
 
         const w0_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p)));
-        const old_w0 = platform.atomicLoad(i64, w0_ptr, .acquire);
+        const old_w0 = platform.atomic_load(i64, w0_ptr, .acquire);
         const existing_combined: i128 = @as(i128, @bitCast([2]i64{ old_w0, old_w1 }));
         const previous: Item = @as(Item, @bitCast(existing_combined));
 
@@ -165,10 +165,10 @@ pub const TranspositionTable = struct {
             stored_entry.locked = false;
             const entry_as_i128: i128 = @as(i128, @bitCast(stored_entry));
             const words: [2]i64 = @as([2]i64, @bitCast(entry_as_i128));
-            platform.atomicStore(i64, w0_ptr, words[0], .monotonic);
-            platform.atomicStore(i64, w1_ptr, words[1], .release);
+            platform.atomic_store(i64, w0_ptr, words[0], .monotonic);
+            platform.atomic_store(i64, w1_ptr, words[1], .release);
         } else {
-            platform.atomicStore(i64, w1_ptr, old_w1, .release);
+            platform.atomic_store(i64, w1_ptr, old_w1, .release);
         }
     }
 
@@ -211,7 +211,7 @@ const testing = std.testing;
 fn test_item(hash: u64, age: u5) Item {
     return .{
         .key = @truncate(hash),
-        .eval = 17,
+        .score = 17,
         .static_eval = 3,
         .bestmove = types.Move.empty(),
         .flag = .Exact,
@@ -247,7 +247,7 @@ test "tt: a table shrinks and grows to the size asked for and frees the one it r
     try testing.expectEqual(8 * MB / @sizeOf(Item), table.size);
     try expect_only_table_live(&table, live_before);
     table.set(TEST_HASHES[3], test_item(TEST_HASHES[3], table.age));
-    try testing.expectEqual(@as(i32, 17), table.get(TEST_HASHES[3]).?.eval);
+    try testing.expectEqual(@as(i32, 17), table.get(TEST_HASHES[3]).?.score);
 
     table.deinit();
     try testing.expectEqual(@as(usize, 0), table.size);
@@ -283,14 +283,14 @@ test "tt: clear empties the table" {
 test "tt: the search threads' table is backed and cleared in one part per thread" {
     if (comptime !platform.has_threads) return error.SkipZigTest;
     platform.io = testing.io;
-    const configured = search.THREADS_CONFIGURED;
-    const helpers = search.NUM_THREADS;
+    const configured = search.threads_configured;
+    const helpers = search.active_helpers;
     defer {
-        search.THREADS_CONFIGURED = configured;
-        search.NUM_THREADS = helpers;
+        search.threads_configured = configured;
+        search.active_helpers = helpers;
     }
-    search.THREADS_CONFIGURED = true;
-    search.NUM_THREADS = 1;
+    search.threads_configured = true;
+    search.active_helpers = 1;
 
     var table: TranspositionTable = .{ .sharing = .search_threads };
     defer table.deinit();

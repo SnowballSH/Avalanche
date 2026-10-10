@@ -96,7 +96,7 @@ in `Searcher.shared` (`CrossThreadState`).
 | `shared.is_searching` | UCI thread before the search, main thread after it | UCI thread | per UCI command |
 | `Worker` events and job | controller and worker | controller and worker | per job |
 | Standard output | main thread (`info`, `bestmove`), UCI thread (`readyok`, refusals) | | whole lines through two buffered writers |
-| Network weights, attack tables, `CONTEMPT`, options | nobody during a search | every thread, every node | read-only |
+| Network weights, attack tables, `contempt`, options | nobody during a search | every thread, every node | read-only |
 
 Between jobs, while a helper is parked, the main thread also writes that
 helper's root (game state, hash history, root moves once per search, excluded
@@ -235,7 +235,7 @@ not its concurrency scheme.
   as it is until the deepest stack of a Debug build has been measured.
 - `helpers_are_live` asks the pool whether a worker is busy. There is no flag
   for it: a global written twice per job would share a cache line with globals
-  that every thread reads on every node (`CONTEMPT`, the Syzygy switch,
+  that every thread reads on every node (`contempt`, the Syzygy switch,
   `platform.io`).
 
 ## NUMA placement (`src/engine/numa.zig`)

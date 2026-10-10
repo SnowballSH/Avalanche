@@ -49,7 +49,7 @@ pub fn see_score(pos: *position.Position, move: types.Move) i32 {
     return gains[0];
 }
 
-fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
+fn pinned_pieces(pos: *position.Position, comptime color: types.Color, occ: types.Bitboard) types.Bitboard {
     const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
     const king_piece = types.Piece.new_comptime(color, types.PieceType.King);
     const king_bb = pos.piece_bitboards[king_piece.index()] & occ;
@@ -73,11 +73,11 @@ fn pinnedPieces(pos: *position.Position, comptime color: types.Color, occ: types
     return pinned;
 }
 
-fn legalAttackers(pos: *position.Position, comptime color: types.Color, target: types.Square, occ: types.Bitboard, attackers: types.Bitboard) types.Bitboard {
+fn legal_attackers(pos: *position.Position, comptime color: types.Color, target: types.Square, occ: types.Bitboard, attackers: types.Bitboard) types.Bitboard {
     if (attackers == 0) return 0;
 
     var legal = attackers;
-    var pinned = pinnedPieces(pos, color, occ) & attackers;
+    var pinned = pinned_pieces(pos, color, occ) & attackers;
     if (pinned == 0) return legal;
 
     const king_piece = types.Piece.new_comptime(color, types.PieceType.King);
@@ -140,9 +140,9 @@ pub fn see_threshold(pos: *position.Position, move: types.Move, threshold: i32) 
         attackers &= occ;
         const pseudo_attackers = attackers & (if (stm == types.Color.White) white_pieces else black_pieces);
         const my_attackers = if (stm == types.Color.White)
-            legalAttackers(pos, types.Color.White, @as(types.Square, @fromBackingInt(@intCast(to))), occ, pseudo_attackers)
+            legal_attackers(pos, types.Color.White, @as(types.Square, @fromBackingInt(@intCast(to))), occ, pseudo_attackers)
         else
-            legalAttackers(pos, types.Color.Black, @as(types.Square, @fromBackingInt(@intCast(to))), occ, pseudo_attackers);
+            legal_attackers(pos, types.Color.Black, @as(types.Square, @fromBackingInt(@intCast(to))), occ, pseudo_attackers);
         if (my_attackers == 0) {
             break;
         }

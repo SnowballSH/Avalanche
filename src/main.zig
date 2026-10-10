@@ -88,7 +88,7 @@ pub fn main(init: std.process.Init) anyerror!void {
     cuckoo.init();
     tt.GlobalTT.reset(uci_options.DEFAULT_HASH_MB);
     defer tt.GlobalTT.deinit();
-    weights.do_nnue();
+    weights.use_embedded();
     search.init_lmr();
 
     // toSlice works on all targets (Args.Iterator.init is a Windows compile error).

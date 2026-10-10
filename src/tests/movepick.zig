@@ -28,7 +28,7 @@ const Script = struct {
     fn eager_score(self: *const Script, id: usize) i32 {
         const scored = self.scored[id];
         const lost = scored.kind == .assumes_winning_exchange and !self.exchange_wins[id];
-        return if (lost) scored.score - movepick.SortWinningCapture else scored.score;
+        return if (lost) scored.score - movepick.SORT_WINNING_CAPTURE else scored.score;
     }
 
     fn list(self: *const Script, len: usize) types.MoveList {
@@ -85,7 +85,7 @@ const ReferenceOrder = struct {
     }
 
     fn is_winning_capture(self: *const ReferenceOrder, step: usize) bool {
-        return self.scores[step] >= movepick.SortWinningCaptureFloor;
+        return self.scores[step] >= movepick.SORT_WINNING_CAPTURE_FLOOR;
     }
 };
 
@@ -133,13 +133,13 @@ fn random_flags(random: std.Random, capture: bool, promotion: bool) u4 {
 fn random_palette(random: std.Random, palette: []i32) void {
     const anchors = [_]i32{
         0,
-        movepick.SortKiller1,
-        movepick.SortKiller2,
-        movepick.SortCounterMove,
-        movepick.SortWinningCaptureFloor,
-        movepick.SortWinningCapture,
-        movepick.SortWinningCapture + movepick.SortWinningCaptureFloor,
-        2 * movepick.SortWinningCapture,
+        movepick.SORT_KILLER_1,
+        movepick.SORT_KILLER_2,
+        movepick.SORT_COUNTER_MOVE,
+        movepick.SORT_WINNING_CAPTURE_FLOOR,
+        movepick.SORT_WINNING_CAPTURE,
+        movepick.SORT_WINNING_CAPTURE + movepick.SORT_WINNING_CAPTURE_FLOOR,
+        2 * movepick.SORT_WINNING_CAPTURE,
     };
     for (palette) |*value| {
         const anchor = anchors[random.uintLessThan(usize, anchors.len)];
@@ -172,9 +172,9 @@ fn random_script(random: std.Random, script: *Script, len: usize) void {
         script.exchange_queries[id] = 0;
     }
     if (len > 0 and random.boolean()) {
-        const promotion_bonus = [_]i32{ 0, movepick.SortKnightPromotion, movepick.SortQueenPromotion };
+        const promotion_bonus = [_]i32{ 0, movepick.SORT_KNIGHT_PROMOTION, movepick.SORT_QUEEN_PROMOTION };
         script.scored[random.uintLessThan(usize, len)] = .{
-            .score = movepick.SortHash + promotion_bonus[random.uintLessThan(usize, promotion_bonus.len)],
+            .score = movepick.SORT_HASH + promotion_bonus[random.uintLessThan(usize, promotion_bonus.len)],
             .kind = .hash_move,
         };
     }
@@ -306,10 +306,10 @@ test "move picker: a hash move that is the only pick costs no exchange evaluatio
     const len = 9;
     for (0..len) |id| {
         script.moves[id] = Script.move_of(id, @backingInt(types.MoveFlags.CAPTURE));
-        script.scored[id] = .{ .score = movepick.SortWinningCapture + @as(i32, @intCast(id)), .kind = .assumes_winning_exchange };
+        script.scored[id] = .{ .score = movepick.SORT_WINNING_CAPTURE + @as(i32, @intCast(id)), .kind = .assumes_winning_exchange };
         script.exchange_wins[id] = id % 2 == 0;
     }
-    script.scored[5] = .{ .score = movepick.SortHash, .kind = .hash_move };
+    script.scored[5] = .{ .score = movepick.SORT_HASH, .kind = .hash_move };
 
     var list = script.list(len);
     var picker: ScriptedPicker(4) = undefined;

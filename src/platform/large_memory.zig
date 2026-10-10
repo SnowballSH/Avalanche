@@ -72,7 +72,7 @@ pub fn huge_page_bytes(bytes: []const u8) u64 {
 }
 
 pub fn live_bytes() usize {
-    return platform.atomicLoad(usize, &live, .monotonic);
+    return platform.atomic_load(usize, &live, .monotonic);
 }
 
 const PR_SET_VMA = 0x53564d41;
@@ -100,12 +100,12 @@ fn map(len: usize) Error![]align(ALIGNMENT) u8 {
         const ptr = std.heap.PageAllocator.map(mapped_len(len), .fromByteUnits(ALIGNMENT)) orelse return Error.OutOfMemory;
         break :mapped @as([*]align(ALIGNMENT) u8, @alignCast(ptr))[0..mapped_len(len)];
     };
-    if (counts_live_bytes) _ = platform.atomicRmw(usize, &live, .Add, block.len, .monotonic);
+    if (counts_live_bytes) _ = platform.atomic_rmw(usize, &live, .Add, block.len, .monotonic);
     return block;
 }
 
 fn unmap(block: []align(ALIGNMENT) u8) void {
-    if (counts_live_bytes) _ = platform.atomicRmw(usize, &live, .Sub, block.len, .monotonic);
+    if (counts_live_bytes) _ = platform.atomic_rmw(usize, &live, .Sub, block.len, .monotonic);
     if (platform.is_wasm) return platform.allocator.free(block);
     std.heap.PageAllocator.unmap(block);
 }

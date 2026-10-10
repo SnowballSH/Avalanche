@@ -102,7 +102,7 @@ pub const TunableParams = [_]Tunable{
     .{ .name = "ContHistWeight4", .value = 128, .min_value = 32, .max_value = 256, .c_end = 11, .worth_tuning = true },
 };
 
-fn intDefault(comptime name: []const u8) comptime_int {
+fn int_default(comptime name: []const u8) comptime_int {
     @setEvalBranchQuota(1 << 20);
     for (TunableParams) |t| {
         if (std.mem.eql(u8, t.name, name)) return t.value;
@@ -110,98 +110,98 @@ fn intDefault(comptime name: []const u8) comptime_int {
     @compileError("no tunable named " ++ name);
 }
 
-fn floatDefault(comptime name: []const u8) f64 {
-    return @as(f64, intDefault(name)) / 1000.0;
+fn float_default(comptime name: []const u8) f64 {
+    return @as(f64, int_default(name)) / 1000.0;
 }
 
-pub var AspirationWindow: i32 = intDefault("AspirationWindow");
-pub var AspirationDepth: i32 = intDefault("AspirationDepth");
-pub var AspirationDeltaPercent: i32 = intDefault("AspirationDeltaPercent");
+pub var AspirationWindow: i32 = int_default("AspirationWindow");
+pub var AspirationDepth: i32 = int_default("AspirationDepth");
+pub var AspirationDeltaPercent: i32 = int_default("AspirationDeltaPercent");
 
-pub var TmSoftFactor: u64 = intDefault("TmSoftFactor");
-pub var TmHardFactor: u64 = intDefault("TmHardFactor");
-pub var TmStabilityBase: i32 = intDefault("TmStabilityBase");
-pub var TmStabilityMultiplier: i32 = intDefault("TmStabilityMultiplier");
-pub var TmStabilityMin: i32 = intDefault("TmStabilityMin");
-pub var TmScoreJumpMultiplier: i32 = intDefault("TmScoreJumpMultiplier");
-pub var TmScoreJumpThreshold: i32 = intDefault("TmScoreJumpThreshold");
-pub var NodeTmDepth: usize = intDefault("NodeTmDepth");
-pub var NodeTmBase: i32 = intDefault("NodeTmBase");
-pub var NodeTmMultiplier: i32 = intDefault("NodeTmMultiplier");
-pub var NodeTmMin: i32 = intDefault("NodeTmMin");
-pub var NodeTmMax: i32 = intDefault("NodeTmMax");
+pub var TmSoftFactor: u64 = int_default("TmSoftFactor");
+pub var TmHardFactor: u64 = int_default("TmHardFactor");
+pub var TmStabilityBase: i32 = int_default("TmStabilityBase");
+pub var TmStabilityMultiplier: i32 = int_default("TmStabilityMultiplier");
+pub var TmStabilityMin: i32 = int_default("TmStabilityMin");
+pub var TmScoreJumpMultiplier: i32 = int_default("TmScoreJumpMultiplier");
+pub var TmScoreJumpThreshold: i32 = int_default("TmScoreJumpThreshold");
+pub var NodeTmDepth: usize = int_default("NodeTmDepth");
+pub var NodeTmBase: i32 = int_default("NodeTmBase");
+pub var NodeTmMultiplier: i32 = int_default("NodeTmMultiplier");
+pub var NodeTmMin: i32 = int_default("NodeTmMin");
+pub var NodeTmMax: i32 = int_default("NodeTmMax");
 
-pub var RFPDepth: i32 = intDefault("RFPDepth");
-pub var RFPMultiplier: i32 = intDefault("RFPMultiplier");
-pub var RFPImprovingDeduction: i32 = intDefault("RFPImprovingDeduction");
+pub var RFPDepth: i32 = int_default("RFPDepth");
+pub var RFPMultiplier: i32 = int_default("RFPMultiplier");
+pub var RFPImprovingDeduction: i32 = int_default("RFPImprovingDeduction");
 
-pub var NMPDepth: i32 = intDefault("NMPDepth");
-pub var NMPBase: usize = intDefault("NMPBase");
-pub var NMPDepthFactor: usize = intDefault("NMPDepthFactor");
-pub var NMPImprovingMargin: i32 = intDefault("NMPImprovingMargin");
-pub var NMPBetaDivisor: i32 = intDefault("NMPBetaDivisor");
-pub var NMPBetaMax: i32 = intDefault("NMPBetaMax");
-pub var NMPVerifyDepth: i32 = intDefault("NMPVerifyDepth");
-pub var NMPVerifyPlyFactor: usize = intDefault("NMPVerifyPlyFactor");
+pub var NMPDepth: i32 = int_default("NMPDepth");
+pub var NMPBase: usize = int_default("NMPBase");
+pub var NMPDepthFactor: usize = int_default("NMPDepthFactor");
+pub var NMPImprovingMargin: i32 = int_default("NMPImprovingMargin");
+pub var NMPBetaDivisor: i32 = int_default("NMPBetaDivisor");
+pub var NMPBetaMax: i32 = int_default("NMPBetaMax");
+pub var NMPVerifyDepth: i32 = int_default("NMPVerifyDepth");
+pub var NMPVerifyPlyFactor: usize = int_default("NMPVerifyPlyFactor");
 
-pub var RazoringDepth: i32 = intDefault("RazoringDepth");
-pub var RazoringBase: i32 = intDefault("RazoringBase");
-pub var RazoringMargin: i32 = intDefault("RazoringMargin");
+pub var RazoringDepth: i32 = int_default("RazoringDepth");
+pub var RazoringBase: i32 = int_default("RazoringBase");
+pub var RazoringMargin: i32 = int_default("RazoringMargin");
 
-pub var ProbCutDepth: usize = intDefault("ProbCutDepth");
-pub var ProbCutReduction: usize = intDefault("ProbCutReduction");
-pub var ProbCutTTDepthMargin: usize = intDefault("ProbCutTTDepthMargin");
-pub var ProbCutMargin: i32 = intDefault("ProbCutMargin");
+pub var ProbCutDepth: usize = int_default("ProbCutDepth");
+pub var ProbCutReduction: usize = int_default("ProbCutReduction");
+pub var ProbCutTTDepthMargin: usize = int_default("ProbCutTTDepthMargin");
+pub var ProbCutMargin: i32 = int_default("ProbCutMargin");
 
-pub var IIRDepth: i32 = intDefault("IIRDepth");
+pub var IIRDepth: i32 = int_default("IIRDepth");
 
-pub var LMPDepth: i32 = intDefault("LMPDepth");
-pub var LMPBase: usize = intDefault("LMPBase");
-pub var LMPMultiplier: usize = intDefault("LMPMultiplier");
-pub var LMPImprovingBase: usize = intDefault("LMPImprovingBase");
-pub var LMPImprovingPercent: usize = intDefault("LMPImprovingPercent");
+pub var LMPDepth: i32 = int_default("LMPDepth");
+pub var LMPBase: usize = int_default("LMPBase");
+pub var LMPMultiplier: usize = int_default("LMPMultiplier");
+pub var LMPImprovingBase: usize = int_default("LMPImprovingBase");
+pub var LMPImprovingPercent: usize = int_default("LMPImprovingPercent");
 
-pub var HistPruningDepth: i32 = intDefault("HistPruningDepth");
-pub var HistPruningMargin: i32 = intDefault("HistPruningMargin");
+pub var HistPruningDepth: i32 = int_default("HistPruningDepth");
+pub var HistPruningMargin: i32 = int_default("HistPruningMargin");
 
-pub var FPDepth: i32 = intDefault("FPDepth");
-pub var FPBase: i32 = intDefault("FPBase");
-pub var FPMargin: i32 = intDefault("FPMargin");
+pub var FPDepth: i32 = int_default("FPDepth");
+pub var FPBase: i32 = int_default("FPBase");
+pub var FPMargin: i32 = int_default("FPMargin");
 
-pub var SEEPruningDepth: i32 = intDefault("SEEPruningDepth");
-pub var SEEQuietMargin: i32 = intDefault("SEEQuietMargin");
-pub var SEENoisyMargin: i32 = intDefault("SEENoisyMargin");
+pub var SEEPruningDepth: i32 = int_default("SEEPruningDepth");
+pub var SEEQuietMargin: i32 = int_default("SEEQuietMargin");
+pub var SEENoisyMargin: i32 = int_default("SEENoisyMargin");
 
-pub var SEDepth: i32 = intDefault("SEDepth");
-pub var SETTDepthMargin: usize = intDefault("SETTDepthMargin");
-pub var SEBetaMultiplier: usize = intDefault("SEBetaMultiplier");
-pub var SEDoubleMargin: i32 = intDefault("SEDoubleMargin");
-pub var SETripleMargin: i32 = intDefault("SETripleMargin");
-pub var SEFailHighReduction: i32 = intDefault("SEFailHighReduction");
-pub var SECutnodeReduction: i32 = intDefault("SECutnodeReduction");
+pub var SEDepth: i32 = int_default("SEDepth");
+pub var SETTDepthMargin: usize = int_default("SETTDepthMargin");
+pub var SEBetaMultiplier: usize = int_default("SEBetaMultiplier");
+pub var SEDoubleMargin: i32 = int_default("SEDoubleMargin");
+pub var SETripleMargin: i32 = int_default("SETripleMargin");
+pub var SEFailHighReduction: i32 = int_default("SEFailHighReduction");
+pub var SECutnodeReduction: i32 = int_default("SECutnodeReduction");
 
-pub var LMRWeight: f64 = floatDefault("LMRWeight");
-pub var LMRBias: f64 = floatDefault("LMRBias");
-pub var LMRDepth: i32 = intDefault("LMRDepth");
-pub var LMRMinMovePV: usize = intDefault("LMRMinMovePV");
-pub var LMRMinMoveNonPV: usize = intDefault("LMRMinMoveNonPV");
-pub var LMRCutnode: i32 = intDefault("LMRCutnode");
-pub var LMRImproving: i32 = intDefault("LMRImproving");
-pub var LMRNonPV: i32 = intDefault("LMRNonPV");
-pub var LMRTTDepth: i32 = intDefault("LMRTTDepth");
-pub var LMRCheck: i32 = intDefault("LMRCheck");
-pub var LMRHistoryDivisor: i32 = intDefault("LMRHistoryDivisor");
+pub var LMRWeight: f64 = float_default("LMRWeight");
+pub var LMRBias: f64 = float_default("LMRBias");
+pub var LMRDepth: i32 = int_default("LMRDepth");
+pub var LMRMinMovePV: usize = int_default("LMRMinMovePV");
+pub var LMRMinMoveNonPV: usize = int_default("LMRMinMoveNonPV");
+pub var LMRCutnode: i32 = int_default("LMRCutnode");
+pub var LMRImproving: i32 = int_default("LMRImproving");
+pub var LMRNonPV: i32 = int_default("LMRNonPV");
+pub var LMRTTDepth: i32 = int_default("LMRTTDepth");
+pub var LMRCheck: i32 = int_default("LMRCheck");
+pub var LMRHistoryDivisor: i32 = int_default("LMRHistoryDivisor");
 
-pub var HistoryBonusMultiplier: i32 = intDefault("HistoryBonusMultiplier");
-pub var HistoryBonusOffset: i32 = intDefault("HistoryBonusOffset");
-pub var HistoryBonusMax: i32 = intDefault("HistoryBonusMax");
-pub var HistoryGravityMax: i32 = intDefault("HistoryGravityMax");
+pub var HistoryBonusMultiplier: i32 = int_default("HistoryBonusMultiplier");
+pub var HistoryBonusOffset: i32 = int_default("HistoryBonusOffset");
+pub var HistoryBonusMax: i32 = int_default("HistoryBonusMax");
+pub var HistoryGravityMax: i32 = int_default("HistoryGravityMax");
 
-pub var MovepickSEEMargin: i32 = intDefault("MovepickSEEMargin");
-pub var QSSEEMargin: i32 = intDefault("QSSEEMargin");
-pub var ContHistWeight1: i32 = intDefault("ContHistWeight1");
-pub var ContHistWeight2: i32 = intDefault("ContHistWeight2");
-pub var ContHistWeight4: i32 = intDefault("ContHistWeight4");
+pub var MovepickSEEMargin: i32 = int_default("MovepickSEEMargin");
+pub var QSSEEMargin: i32 = int_default("QSSEEMargin");
+pub var ContHistWeight1: i32 = int_default("ContHistWeight1");
+pub var ContHistWeight2: i32 = int_default("ContHistWeight2");
+pub var ContHistWeight4: i32 = int_default("ContHistWeight4");
 
 pub fn set(name: []const u8, raw: i64) ?Tunable {
     @setEvalBranchQuota(1 << 20);

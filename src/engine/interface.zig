@@ -17,7 +17,7 @@ const options = @import("uci/options.zig");
 const go = @import("uci/go.zig");
 const numa = @import("numa.zig");
 
-const nl = search.line_ending;
+const nl = search.LINE_ENDING;
 
 const Tokens = std.mem.TokenIterator(u8, .scalar);
 
@@ -228,8 +228,8 @@ pub const UciInterface = struct {
 
     fn start_search(self: *UciInterface, tokens: *Tokens, out: *std.Io.Writer) !void {
         const cmd = go.GoCommand.parse(tokens, &self.position);
-        const helper_overhead = @min(@as(u64, search.NUM_THREADS) * OVERHEAD_PER_HELPER_MS, MAX_HELPER_OVERHEAD_MS);
-        const budget = go.allocate_time(&cmd, self.position.turn, search.MOVE_OVERHEAD + helper_overhead);
+        const helper_overhead = @min(@as(u64, search.active_helpers) * OVERHEAD_PER_HELPER_MS, MAX_HELPER_OVERHEAD_MS);
+        const budget = go.allocate_time(&cmd, self.position.turn, search.move_overhead + helper_overhead);
 
         try print_network(out);
         try out.flush();

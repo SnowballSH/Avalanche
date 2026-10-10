@@ -631,7 +631,7 @@ test "see: pawn captures undefended pawn is winning" {
 }
 
 test "eval: nnue weights load and dimensions" {
-    weights.do_nnue();
+    weights.use_embedded();
     try expect(weights.HIDDEN_SIZE == 1024);
     try expect(weights.OUTPUT_SIZE == 8);
     try expect(weights.INPUT_SIZE == 768 * weights.NUM_INPUT_BUCKETS);
@@ -1079,9 +1079,9 @@ test "search: maximum-mobility position exceeds 128 quiet moves safely" {
 }
 
 test "qsearch: checkmate takes precedence over fifty-move draw" {
-    const old_contempt = search.CONTEMPT;
-    defer search.CONTEMPT = old_contempt;
-    search.CONTEMPT = 100;
+    const old_contempt = search.contempt;
+    defer search.contempt = old_contempt;
+    search.contempt = 100;
 
     var f = try support.SearchFixture.init("7k/6Q1/6K1/8/8/8/8/8 b - - 100 1");
     defer f.deinit();
@@ -1091,15 +1091,15 @@ test "qsearch: checkmate takes precedence over fifty-move draw" {
 }
 
 test "qsearch: stalemate precedes stand-pat and TT cutoffs" {
-    const old_contempt = search.CONTEMPT;
-    defer search.CONTEMPT = old_contempt;
-    search.CONTEMPT = 100;
+    const old_contempt = search.contempt;
+    defer search.contempt = old_contempt;
+    search.contempt = 100;
 
     var f = try support.SearchFixture.init("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
     defer f.deinit();
 
     tt.GlobalTT.set(f.pos.hash, tt.Item{
-        .eval = 37,
+        .score = 37,
         .static_eval = 0,
         .bestmove = types.Move.empty(),
         .flag = tt.Bound.Exact,
@@ -1110,22 +1110,22 @@ test "qsearch: stalemate precedes stand-pat and TT cutoffs" {
     });
 
     const tt_score = f.quiescence(-hce.MateScore, hce.MateScore);
-    try expect(tt_score == -search.CONTEMPT);
+    try expect(tt_score == -search.contempt);
 
     tt.GlobalTT.clear();
     const stand_pat_score = f.quiescence(-hce.MateScore, -hce.MateScore + 1);
-    try expect(stand_pat_score == -search.CONTEMPT);
+    try expect(stand_pat_score == -search.contempt);
 }
 
 test "qsearch: contempt draw keeps fail-soft provenance" {
-    const old_contempt = search.CONTEMPT;
-    defer search.CONTEMPT = old_contempt;
-    search.CONTEMPT = -100;
+    const old_contempt = search.contempt;
+    defer search.contempt = old_contempt;
+    search.contempt = -100;
 
     var f = try support.SearchFixture.init("4k3/8/2n5/1B6/8/8/8/4K3 w - - 0 1");
     defer f.deinit();
 
-    const draw_score = -search.CONTEMPT;
+    const draw_score = -search.contempt;
     const static_eval = hce.evaluate_comptime(f.pos, types.Color.White);
     try expect(static_eval < draw_score);
     const beta = @divTrunc(static_eval + draw_score, 2);
@@ -1178,7 +1178,7 @@ test "uci: startup commands run in order and nothing runs after quit" {
 
     var out = std.Io.Writer.fixed(&buf);
     try expect(try ui.run_commands(&.{ "position startpos moves e2e4", "isready" }, &out));
-    try std.testing.expectEqualStrings("readyok" ++ search.line_ending, out.buffered());
+    try std.testing.expectEqualStrings("readyok" ++ search.LINE_ENDING, out.buffered());
     try std.testing.expectEqual(@as(usize, 2), ui.searcher.hash_history.items.len);
 
     out = std.Io.Writer.fixed(&buf);

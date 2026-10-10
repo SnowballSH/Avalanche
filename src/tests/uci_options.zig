@@ -105,13 +105,13 @@ test "options: Move Overhead accepts its legacy name" {
     var f: Fixture = undefined;
     try f.init();
     defer f.deinit();
-    const saved = search.MOVE_OVERHEAD;
-    defer search.MOVE_OVERHEAD = saved;
+    const saved = search.move_overhead;
+    defer search.move_overhead = saved;
 
     try f.set("name Move Overhead value 120");
-    try expectEqual(@as(u64, 120), search.MOVE_OVERHEAD);
+    try expectEqual(@as(u64, 120), search.move_overhead);
     try f.set("name MoveOverhead value 40");
-    try expectEqual(@as(u64, 40), search.MOVE_OVERHEAD);
+    try expectEqual(@as(u64, 40), search.move_overhead);
 
     var listing: [16 * 1024]u8 = undefined;
     var w = std.Io.Writer.fixed(&listing);

@@ -53,7 +53,7 @@ fn clean(bytes: []u8, prober: viri_clean.Prober, max_men: u32, mode: viri_clean.
     return cleaner.stats;
 }
 
-test "tbclean: a contradicted position's eval is masked and nothing else changes" {
+test "tbfilter viri: a contradicted position's eval is masked and nothing else changes" {
     support.init_search();
     const bytes = try build_game(testing.allocator, START, &MOVES, 2);
     defer testing.allocator.free(bytes);
@@ -70,7 +70,7 @@ test "tbclean: a contradicted position's eval is masked and nothing else changes
     try testing.expect(differing <= 2);
 }
 
-test "tbclean: cursed wins are kept under rule50=keep and draws follow the tables" {
+test "tbfilter viri: cursed wins are kept under rule50=keep and draws follow the tables" {
     support.init_search();
     const bytes = try build_game(testing.allocator, START, &MOVES, 1);
     defer testing.allocator.free(bytes);
@@ -79,7 +79,7 @@ test "tbclean: cursed wins are kept under rule50=keep and draws follow the table
     try testing.expectEqual(@as(u64, 3), stats.ambiguous);
 }
 
-test "tbclean: positions with too many men, castling rights or failed probes are kept" {
+test "tbfilter viri: positions with too many men, castling rights or failed probes are kept" {
     support.init_search();
     const many = try build_game(testing.allocator, START, &MOVES, 0);
     defer testing.allocator.free(many);
@@ -96,7 +96,7 @@ test "tbclean: positions with too many men, castling rights or failed probes are
     try testing.expectEqual([3]i16{ 100, 101, 102 }, try scores(failed));
 }
 
-test "tbclean: a game whose header cannot be a position is reported, not replayed" {
+test "tbfilter viri: a game whose header cannot be a position is reported, not replayed" {
     support.init_search();
     const pos = try support.new_position();
     defer support.destroy_position(pos);
@@ -229,7 +229,7 @@ test "tbfilter: a bulletformat input must be whole 32-byte records" {
     try testing.expectError(error.PartialRecord, tbfilter.whole_records(36));
 }
 
-test "tbclean: the output file is created exclusively and never clobbers an existing one" {
+test "tbfilter viri: the output file is created exclusively and never clobbers an existing one" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
     try viri_clean.write_new_file(testing.io, tmp.dir, "out.vf", "cleaned");

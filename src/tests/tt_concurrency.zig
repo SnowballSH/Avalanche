@@ -33,7 +33,7 @@ fn entry_of(table: *const tt.TranspositionTable, hash: u64, variant: u8) tt.Item
     const mixed = (hash ^ variant) *% 0xD6E8_FEB8_6659_FD93;
     return .{
         .key = key,
-        .eval = @bitCast(@as(u32, @truncate(mixed >> 32))),
+        .score = @bitCast(@as(u32, @truncate(mixed >> 32))),
         .static_eval = @bitCast(@as(u16, @truncate(mixed >> 16))),
         .bestmove = @bitCast(@as(u16, @truncate(mixed))),
         .flag = bound_of(variant),

@@ -69,7 +69,7 @@ pub const Cleaner = struct {
             self.stats.failed += 1;
             return false;
         };
-        const expected = tbfilter.expectedResult(wdl, self.mode) orelse {
+        const expected = tbfilter.expected_result(wdl, self.mode) orelse {
             self.stats.ambiguous += 1;
             return false;
         };

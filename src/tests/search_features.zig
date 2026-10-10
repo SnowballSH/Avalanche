@@ -21,7 +21,7 @@ const Fixture = struct {
         platform.io = self.io_threaded.io();
         support.init_search();
         tt.GlobalTT.reset(16);
-        search.NUM_THREADS = 0;
+        search.active_helpers = 0;
 
         self.pos = try support.new_position();
         self.pos.set_fen(fen);
@@ -244,19 +244,19 @@ fn scores_of_drawn_position(fen: []const u8) !DrawnScores {
 }
 
 test "search: after a hundred plies without progress a side in check is mated if it has no move and drawn if it has one" {
-    const old_contempt = search.CONTEMPT;
-    defer search.CONTEMPT = old_contempt;
-    search.CONTEMPT = 100;
+    const old_contempt = search.contempt;
+    defer search.contempt = old_contempt;
+    search.contempt = 100;
 
     const mated = try scores_of_drawn_position("7k/6Q1/6K1/8/8/8/8/8 b - - 100 1");
     try expectEqual(-hce.MateScore, mated.quiescence);
     try expectEqual(-hce.MateScore, mated.negamax);
 
     const drawn_in_check = try scores_of_drawn_position("7k/8/6K1/8/8/8/8/7R b - - 100 1");
-    try expectEqual(-search.CONTEMPT, drawn_in_check.quiescence);
-    try expectEqual(-search.CONTEMPT, drawn_in_check.negamax);
+    try expectEqual(-search.contempt, drawn_in_check.quiescence);
+    try expectEqual(-search.contempt, drawn_in_check.negamax);
 
     const drawn = try scores_of_drawn_position("7k/8/6K1/8/8/8/8/6R1 b - - 100 1");
-    try expectEqual(-search.CONTEMPT, drawn.quiescence);
-    try expectEqual(-search.CONTEMPT, drawn.negamax);
+    try expectEqual(-search.contempt, drawn.quiescence);
+    try expectEqual(-search.contempt, drawn.negamax);
 }

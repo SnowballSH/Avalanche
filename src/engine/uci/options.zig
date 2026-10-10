@@ -108,10 +108,10 @@ pub fn print_all(out: *std.Io.Writer) !void {
             .string => |default| try out.print("string default {s}", .{default}),
             .button => try out.writeAll("button"),
         }
-        try out.writeAll(search.line_ending);
+        try out.writeAll(search.LINE_ENDING);
     }
     for (parameters.TunableParams) |tunable| {
-        try out.print("option name {s} type spin default {d} min {d} max {d}" ++ search.line_ending, .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
+        try out.print("option name {s} type spin default {d} min {d} max {d}" ++ search.LINE_ENDING, .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
     }
 }
 
@@ -180,17 +180,17 @@ fn set_hash(ctx: Context, value: Value) !void {
     tt.GlobalTT.reset(requested);
     const installed_mb = tt.GlobalTT.size * @sizeOf(tt.Item) / tt.MB;
     if (installed_mb < requested) {
-        try ctx.out.print("info string Hash: failed to allocate {} MB, still using {} MB" ++ search.line_ending, .{ requested, installed_mb });
+        try ctx.out.print("info string Hash: failed to allocate {} MB, still using {} MB" ++ search.LINE_ENDING, .{ requested, installed_mb });
     }
-    try ctx.out.print("info string Hash: {} MB, {} MB on huge pages" ++ search.line_ending, .{ installed_mb, tt.GlobalTT.huge_page_bytes() / tt.MB });
+    try ctx.out.print("info string Hash: {} MB, {} MB on huge pages" ++ search.LINE_ENDING, .{ installed_mb, tt.GlobalTT.huge_page_bytes() / tt.MB });
 }
 
 fn set_threads(ctx: Context, value: Value) !void {
     const total: usize = @intCast(value.spin);
-    search.THREADS_CONFIGURED = true;
+    search.threads_configured = true;
     search.set_helper_count(total - 1);
     if (search.helper_count() < total - 1) {
-        try ctx.out.print("info string Threads: failed to allocate {} helpers, using {}" ++ search.line_ending, .{ total - 1, search.helper_count() + 1 });
+        try ctx.out.print("info string Threads: failed to allocate {} helpers, using {}" ++ search.LINE_ENDING, .{ total - 1, search.helper_count() + 1 });
     }
 }
 
@@ -209,7 +209,7 @@ fn restart_helpers() void {
 }
 
 fn set_move_overhead(_: Context, value: Value) !void {
-    search.MOVE_OVERHEAD = @intCast(value.spin);
+    search.move_overhead = @intCast(value.spin);
 }
 
 fn set_multi_pv(ctx: Context, value: Value) !void {
@@ -247,9 +247,9 @@ fn set_syzygy_path(ctx: Context, value: Value) !void {
     const cpath = try platform.allocator.dupeSentinel(u8, path, 0);
     defer platform.allocator.free(cpath);
     if (syzygy.init(cpath.ptr)) {
-        try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.line_ending, .{ syzygy.max_pieces(), path });
+        try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.LINE_ENDING, .{ syzygy.max_pieces(), path });
     } else {
-        try ctx.out.print("info string Syzygy: failed to load tablebases from '{s}'" ++ search.line_ending, .{path});
+        try ctx.out.print("info string Syzygy: failed to load tablebases from '{s}'" ++ search.LINE_ENDING, .{path});
     }
 }
 
@@ -268,12 +268,12 @@ fn set_syzygy_rule50(_: Context, value: Value) !void {
 fn set_eval_file(ctx: Context, value: Value) !void {
     const path = if (value.string.len == 0) weights.EMBEDDED_NAME else value.string;
     weights.load(path) catch |err| {
-        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}: {s}), keeping the current network" ++ search.line_ending, .{ path, @errorName(err), weights.explain(err) });
+        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}: {s}), keeping the current network" ++ search.LINE_ENDING, .{ path, @errorName(err), weights.explain(err) });
         return;
     };
     ctx.position.refresh_evaluation();
     tt.GlobalTT.clear();
-    try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{weights.active_network()});
+    try ctx.out.print("info string EvalFile: using {s}" ++ search.LINE_ENDING, .{weights.active_network()});
 }
 
 fn set_eval_scale(_: Context, value: Value) !void {
@@ -290,8 +290,8 @@ fn set_show_wdl(_: Context, value: Value) !void {
 
 fn set_contempt(_: Context, value: Value) !void {
     const contempt: i32 = @intCast(value.spin);
-    if (contempt != search.CONTEMPT) {
-        search.CONTEMPT = contempt;
+    if (contempt != search.contempt) {
+        search.contempt = contempt;
         tt.GlobalTT.clear();
     }
 }
