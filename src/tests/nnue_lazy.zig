@@ -17,6 +17,12 @@ const FENS = [_][]const u8{
     "bnrqkrnb/pppppppp/8/8/8/8/PPPPPPPP/BNRQKRNB w FCfc - 0 1",
 };
 
+fn frame_is_computed(pos: *const position.Position) bool {
+    const evaluator = &pos.evaluator.nnue_evaluator;
+    const computed = evaluator.storage.?.states[evaluator.depth].computed;
+    return computed[0] and computed[1];
+}
+
 fn expect_matches_rebuild(pos: *position.Position, reference: *position.Position) !void {
     try support.expect_nnue_matches_rebuild(pos, reference);
 
@@ -66,15 +72,21 @@ const Line = struct {
     moves: []const []const u8,
 };
 
-const LINES = [_]Line{
-    .{ .fen = types.DEFAULT_FEN, .moves = &.{ "e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "e1g1", "f6e4" } },
-    // Both kings leave their buckets in the middle of the line.
-    .{ .fen = "4k3/8/8/8/8/8/3p3P/4K3 w - - 0 1", .moves = &.{ "e1d2", "e8d7", "h2h4", "d7c6", "d2c3", "c6b5", "h4h5" } },
-    .{ .fen = "4k3/1P4P1/8/3pP3/8/8/1p4p1/4K3 w - d6 0 1", .moves = &.{ "e5d6", "b2b1q", "e1e2", "g2g1n", "e2d2", "e8d7", "g7g8q" } },
+const CASTLING_AND_A_CAPTURE: Line = .{
+    .fen = types.DEFAULT_FEN,
+    .moves = &.{ "e2e4", "e7e5", "g1f3", "b8c6", "f1c4", "g8f6", "e1g1", "f6e4" },
 };
+const KINGS_LEAVING_THEIR_BUCKETS: Line = .{
+    .fen = "4k3/8/8/8/8/8/3p3P/4K3 w - - 0 1",
+    .moves = &.{ "e1d2", "e8d7", "h2h4", "d7c6", "d2c3", "c6b5", "h4h5" },
+};
+const EN_PASSANT_AND_PROMOTIONS: Line = .{
+    .fen = "4k3/1P4P1/8/3pP3/8/8/1p4p1/4K3 w - d6 0 1",
+    .moves = &.{ "e5d6", "b2b1q", "e1e2", "g2g1n", "e2d2", "e8d7", "g7g8q" },
+};
+const LINES = [_]Line{ CASTLING_AND_A_CAPTURE, KINGS_LEAVING_THEIR_BUCKETS, EN_PASSANT_AND_PROMOTIONS };
 
-/// Plays `moves` with every position evaluated, so that the cache knows them, and takes them back.
-fn rehearse(pos: *position.Position, moves: []const []const u8) !void {
+fn evaluate_line_into_cache(pos: *position.Position, moves: []const []const u8) !void {
     var played: [16]types.Move = undefined;
     for (moves, 0..) |text, ply| {
         played[ply] = try support.play_uci(pos, text);
@@ -94,15 +106,15 @@ test "lazy accumulators: a replayed line stays a record until it is needed, then
     for (LINES) |line| {
         for (1..line.moves.len + 1) |walk_length| {
             pos.set_fen(line.fen);
-            try rehearse(pos, line.moves);
+            try evaluate_line_into_cache(pos, line.moves);
 
             var played: [16]types.Move = undefined;
             for (line.moves[0..walk_length], 0..) |text, ply| {
                 played[ply] = try support.play_uci(pos, text);
-                try std.testing.expect(!pos.evaluator.nnue_evaluator.frame_is_computed());
+                try std.testing.expect(!frame_is_computed(pos));
             }
             try expect_matches_rebuild(pos, reference);
-            try std.testing.expect(pos.evaluator.nnue_evaluator.frame_is_computed());
+            try std.testing.expect(frame_is_computed(pos));
 
             var ply = walk_length;
             while (ply > 0) : (ply -= 1) {
@@ -120,11 +132,11 @@ test "lazy accumulators: a null move on a frame that is still a record is evalua
     const reference = try support.new_position();
     defer support.destroy_position(reference);
 
-    const line = LINES[0];
+    const line = CASTLING_AND_A_CAPTURE;
     pos.set_fen(line.fen);
-    try rehearse(pos, line.moves);
+    try evaluate_line_into_cache(pos, line.moves);
     for (line.moves[0..5]) |text| _ = try support.play_uci(pos, text);
-    try std.testing.expect(!pos.evaluator.nnue_evaluator.frame_is_computed());
+    try std.testing.expect(!frame_is_computed(pos));
 
     pos.play_null_move();
     try expect_matches_rebuild(pos, reference);
@@ -141,12 +153,12 @@ test "lazy accumulators: frames that are still records survive the stack running
 
     const shuffle = [_][]const u8{ "g1f3", "g8f6", "f3g1", "f6g8" };
     pos.set_fen(types.DEFAULT_FEN);
-    try rehearse(pos, &shuffle);
+    try evaluate_line_into_cache(pos, &shuffle);
 
     var records: usize = 0;
     for (0..2 * nnue.STACK_CAP + 3) |ply| {
         _ = try support.play_uci(pos, shuffle[ply % shuffle.len]);
-        records += @intFromBool(!pos.evaluator.nnue_evaluator.frame_is_computed());
+        records += @intFromBool(!frame_is_computed(pos));
     }
     try std.testing.expect(records > 2 * nnue.STACK_CAP);
     try expect_matches_rebuild(pos, reference);
