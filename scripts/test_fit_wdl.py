@@ -47,6 +47,10 @@ class MoveCommentTest(unittest.TestCase):
     def test_a_zero_score_without_a_sign_is_a_score(self) -> None:
         self.assertEqual(fit_wdl.mover_score("0.00/21 0.84s", score_scale=1.0), 0)
 
+    def test_a_score_without_a_sign_is_positive(self) -> None:
+        self.assertEqual(fit_wdl.mover_score("0.35/18 1.2s", score_scale=1.0), 35)
+        self.assertEqual(fit_wdl.mover_score("M3/12 0.01s", score_scale=1.0), SCORE_LIMIT)
+
     def test_a_mate_score_counts_as_the_score_limit(self) -> None:
         self.assertEqual(fit_wdl.mover_score("+M3/12 0.01s", score_scale=1.0), SCORE_LIMIT)
         self.assertEqual(fit_wdl.mover_score("-M3/11 0.01s", score_scale=1.0), -SCORE_LIMIT)
