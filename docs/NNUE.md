@@ -24,6 +24,7 @@ architecture is still recognised and named as such; a file larger than both is n
 (`StreamTooLong`).
 
 Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
+`src/engine/nnue/arch.zig` (what the accumulators and both heads share),
 `src/engine/nnue/head_single.zig`, `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig`
 (file layouts, loading),
 `training/src/main.rs` and `training/src/multilayer.rs` (trainer).
@@ -40,7 +41,7 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
   i16, `i < 1024`. Quantised by `QA = 255`: 255 is 1.0. The engine keeps every accumulator
   aligned to 64 bytes, and a head receives it through a pointer type that carries the alignment
   (`arch.AccumulatorPtr`), so the heads' vector loads are aligned loads at every vector width.
-- **Output bucket.** `b = min((piece_count - 2) / 4, 7)`.
+- **Output bucket.** `b = min((piece_count - 2) / 4, 7)` (`arch.output_bucket`).
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
@@ -123,7 +124,7 @@ update come from all over a 25 MiB table, and in `play_move` that memory traffic
 transposition-table probe of the new node, which is fetched at the same time. Deferred to the
 evaluation, the same work runs after the probe and on the critical path of the head. And without
 the cache there is little to skip: 13.10M of the 13.84M frames of a `bench` run (95%) are
-evaluated or lie below an evaluated one. EPYC 9R14 (Zen 4, 512-bit build), single thread,
+evaluated or lie below an evaluated one. A Zen 4 server CPU (512-bit build), single thread,
 alternating runs, against the eager updates this replaced; `bench`, and four positions searched
 for 3 s with a 256 MiB hash:
 
@@ -131,7 +132,7 @@ for 3 s with a 256 MiB hash:
 |---|---|---|
 | deferred to the evaluation, no cache | -4.9% | -5.6% |
 | eager as before, with the cache (2^16 entries of 16 bytes) | +0.6% | -1.2% |
-| deferred to the evaluation, with that cache (EPYC 9R45) | +2.8% | -2.6% |
+| deferred to the evaluation, with that cache (a Zen 5 server CPU) | +2.8% | -2.6% |
 | eager on a cache miss, with that cache | +4.7% | +0.3% |
 | eager on a cache miss, 2^16 entries of 8 bytes | +5.1% | +1.7% |
 | eager on a cache miss, 2^17 entries of 8 bytes (what the engine does) | +5.3% | +1.1% |
@@ -146,9 +147,10 @@ changes (castling, en passant, promotion) is one pass per perspective where it u
 change; such moves are 0.7% of the frames.
 
 Tried and left out: prefetching the cache slot when the search prefetches the transposition-table
-entry, before the move is played (EPYC 9R45: `bench` +0.5%, the 3 s searches -0.3%, within the
-noise of that measurement), and 16-byte entries with the whole key (the fourth row of the table
-against the fifth: the smaller table stays in the caches better). The measurements were taken
+entry, before the move is played (a Zen 5 server CPU: `bench` +0.5%, the 3 s searches -0.3%,
+within the noise of that measurement), and 16-byte entries with the whole key (the fourth row of
+the table against the fifth: the smaller table stays in the caches better). The measurements were
+taken
 with 24 output bits and 40 hash bits in an entry.
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
@@ -191,7 +193,10 @@ out = trunc((trunc(s / 255) + bias[b]) * 400 / (255 * 64))
 
 Total 25200704 bytes, no header. Invariant the loader checks: every output weight is in
 [-128, 127]. The SIMD path multiplies `activation * weight` in i16, and 255 * 127 is the largest
-product that fits.
+product that fits. It then multiplies by the activation again and adds neighbours into i32 with
+`pmaddwd` on x86 and `i32x4.dot_i16x8_s` on wasm simd128, the instruction of the multi-layer
+head's `pairs` L2, selected for both heads by `arch.pair_products_intrinsic`. Other targets and
+Debug builds compile the same sum from `@Vector` code.
 
 `s` is kept in an i32 and added with wrapping arithmetic. For a trained network it is far inside
 the i32, and a sum that fits is exact in whatever order the vector lanes are added. The weight
@@ -324,6 +329,9 @@ Header: the 8 bytes `AVALNNUE`, then fourteen u32:
 | `SCALE` | 400 |
 | L1 shift `e` | 0..7, chosen by the trainer for this network |
 | reserved | 0 |
+
+`HeaderField` in `src/engine/weights.zig` is this table: the engine writes and reads every field
+at the offset that follows from the order of its tags.
 
 Version 1 had no L1 shift (it was version 2 with `e = 0` and a reserved field in its place); no
 network of it was ever used.
@@ -470,7 +478,7 @@ after.
 | default (dense) | 233.5 of 256 | 410.6 ns | 238.4 ns | 1.19-1.20M -> 1.77-1.81M nps |
 | `full` (dense) | 233.5 of 256 | 413.6 ns | 237.2 ns | |
 
-AMD EPYC 9R14 (Zen 4; 512-bit `mulhrs` and `dpbusd`), trained nets, single thread: `nnue-speed`
+A Zen 4 server CPU (512-bit `mulhrs` and `dpbusd`), trained nets, single thread: `nnue-speed`
 226.5 -> 146.8 ns and `bench` 1.22M -> 1.53M nps (+26%) for the net trained with the sparsity
 penalty, 310.6 -> 171.5 ns and 1.10M -> 1.46M nps (+32%) for the one without; checksums and node
 counts unchanged. The single-layer net of that comparison ran at 1.79M nps.
@@ -491,8 +499,8 @@ dense network timed the way the first line is, before and after:
 
 A later change (the `pairs` L2 and the wasm paths) left the M4 where it was, since AArch64 keeps
 the `wide` L2: 150 ns per evaluation on the default net (84.6 of 256 blocks non-zero; pairwise
-33 ns, L1 63 ns of which the search 17 ns, L2 and L3 29 ns). It is for x86 and wasm. AMD EPYC 9R14
-(Zen 4), default net (Dianguang-3), three alternating runs, node counts and checksums equal:
+33 ns, L1 63 ns of which the search 17 ns, L2 and L3 29 ns). It is for x86 and wasm. A Zen 4
+server CPU, default net (Dianguang-3), three alternating runs, node counts and checksums equal:
 
 | Build | `nnue-speed` | L2 and L3 | `bench` |
 |---|---|---|---|
@@ -504,11 +512,11 @@ which the search 20 and 25 ns. Zen 4 runs a 512-bit operation as two of 256, whi
 pairwise step gains nothing from the wider vectors there. Wasm under Node 26 on the M4: `bench`
 1.00M -> 1.47M nps (+47%).
 
-Then the non-zero search with `vpcompressb` and the single load of a round's indices. EPYC 9R14,
-native: search 19.8 -> 7.0 ns, L1 68.6 -> 55.5 ns, `nnue-speed` 128.1 -> 116.9 ns, `bench`
-1.584M -> 1.634M nps (+3.2%, of which the indices +0.5%). The 256-bit AVX2 build has neither
-(no `vpcompressb`, one chain). Apple M4, from the indices alone: L1 63.2 -> 58.0 ns, `bench`
-2.193M -> 2.215M nps (+1.0%).
+Then the non-zero search with `vpcompressb` and the single load of a round's indices. A Zen 4
+server CPU, native: search 19.8 -> 7.0 ns, L1 68.6 -> 55.5 ns, `nnue-speed` 128.1 -> 116.9 ns,
+`bench` 1.584M -> 1.634M nps (+3.2%, of which the indices +0.5%). The 256-bit AVX2 build has
+neither (no `vpcompressb`, one chain). Apple M4, from the indices alone: L1 63.2 -> 58.0 ns,
+`bench` 2.193M -> 2.215M nps (+1.0%).
 
 Together with the accumulator changes ("Accumulator updates" above), from the commit that made
 Dianguang-3 the default net (3fa9ddf) to commit 19b56d7, same node counts. Each row is one
@@ -517,16 +525,16 @@ taken in other sessions and on other machines of the same model:
 
 | Machine, build | `nnue-speed` | `bench` |
 |---|---|---|
-| EPYC 9R14 (Zen 4), native, 512 bits | 144.3 -> 115.6 ns | 1.510M -> 1.627M nps (+7.8%) |
-| EPYC 9R14, `-Dcpu=haswell`, 256 bits | 166.4 -> 145.2 ns | 1.410M -> 1.525M nps (+8.2%) |
+| a Zen 4 server CPU, native, 512 bits | 144.3 -> 115.6 ns | 1.510M -> 1.627M nps (+7.8%) |
+| the same Zen 4 server CPU, `-Dcpu=haswell`, 256 bits | 166.4 -> 145.2 ns | 1.410M -> 1.525M nps (+8.2%) |
 | Apple M4 | 147 -> 145 ns | 2.121M -> 2.192M nps (+3.3%) |
 | wasm, Node 26 on the M4 | not measured | 1.00M -> 1.47M nps (+47%) |
 
-An EPYC 9R45 (Zen 5) runs the native build's `bench` at 2.38M nps.
+A Zen 5 server CPU runs the native build's `bench` at 2.38M nps.
 
 At that commit, by sampling the search thread, a `bench` run spends 20% of its time in
 accumulator updates, 5% in Finny rebuilds and 21% in the head on the M4; 20%, 6% and 18% on the
-EPYC 9R14.
+Zen 4 server CPU.
 
 What limits each part now:
 
@@ -555,7 +563,7 @@ the measurement that decided it:
 - **Prefetching the weight rows of an accumulator update.** At the start of the update, all rows:
   `bench` changed by -1.5% on the M4; the rows of a move are read sequentially already. When the
   move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
-  -3.5% on an EPYC 9R45, and by -0.2% to -11% on the M4.
+  -3.5% on a Zen 5 server CPU, and by -0.2% to -11% on the M4.
 - **Reordering the feature-transformer outputs so that active ones share blocks.** It changes no
   evaluation: output `i` and its partner `i + 512` move together in the feature weights and
   biases, and the L1 inputs `i` (own) and `512 + i` (opponent) follow in every bucket. Measured
@@ -566,16 +574,16 @@ the measurement that decided it:
   above, 1 to 1.3% in nodes per second, for a second version of every network file. It belongs
   in the step that writes a network, not in the engine.
 - **A search step of 16 blocks** (one mask, two table lookups; one `vptestmd` with AVX-512, one
-  `bitmask` on wasm after narrowing). The search alone was 4 ns slower on an EPYC 9R14 at 256 and
-  at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing in the
-  whole L1 under wasm.
+  `bitmask` on wasm after narrowing). The search alone was 4 ns slower on a Zen 4 server CPU at
+  256 and at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing
+  in the whole L1 under wasm.
 
 - **A last L1 round without a branch.** The blocks left when fewer than a round of chains remain
-  were added with zeroed inputs instead of a branch per chain: +0.1% in `bench` on the EPYC 9R14
-  (range 0.0 to 0.2%, seven runs), nothing on the M4.
+  were added with zeroed inputs instead of a branch per chain: +0.1% in `bench` on the Zen 4
+  server CPU (range 0.0 to 0.2%, seven runs), nothing on the M4.
 
-- **Partial sums in the `pairs` L2**, four of them: 18.4 to 18.7 ns on the EPYC 9R14 at 512 bits
-  (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
+- **Partial sums in the `pairs` L2**, four of them: 18.4 to 18.7 ns on the Zen 4 server CPU at
+  512 bits (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
 - **16-bit L2 weights on AArch64** (`smlal`, half the weight loads): 28.3 ns against 29.2, and no
   more nodes per second. L2 there is limited by the multiplier, not by loads.
 
@@ -649,17 +657,17 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 | Apple Silicon | `umull` | `sdot` | `wide` | yes, natively |
 | AArch64 without dotprod (`-Dcpu=generic`, `-Dcpu=apple_m4-dotprod`) | `umull` | `extadd` | `wide` | yes, natively |
 | AArch64 with SVE (`-Dcpu=neoverse_v1`) | `umull` | `sdot` | `wide` | in CI only, by the native build of the job `tiers` when its AArch64 runner has SVE: the same NEON code as on Apple Silicon. No development machine has SVE |
-| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on an EPYC 9R14 (Zen 4) |
-| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
-| x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
+| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on a Zen 4 server CPU |
+| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on a Zen 4 server CPU |
+| x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on a Zen 4 server CPU |
 | Debug | `portable` | `portable` | `wide` | yes |
-| x86 AVX-512BW without VNNI (`-Dcpu=znver4-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | `pairs`, 512 bits | yes, on an EPYC 9R14 |
-| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | `pairs`, 512 bits | yes, natively on an EPYC 9R14 |
-| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`, `x86_64_v4`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | `pairs`, 256 bits | yes, on an EPYC 9R14 |
-| x86 at 256 bits with AVX-VNNI (`x86_64_v3+avxvnni`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | yes, on an EPYC 9R45 (Zen 5) |
+| x86 AVX-512BW without VNNI (`-Dcpu=znver4-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | `pairs`, 512 bits | yes, on a Zen 4 server CPU |
+| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | `pairs`, 512 bits | yes, natively on a Zen 4 server CPU |
+| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`, `x86_64_v4`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | `pairs`, 256 bits | yes, on a Zen 4 server CPU |
+| x86 at 256 bits with AVX-VNNI (`x86_64_v3+avxvnni`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | yes, on a Zen 5 server CPU |
 | wasm simd128 | `mulhrs` | `extadd` | `pairs` | yes, by the `web/` tests (`bench` equal to native) |
 
-The EPYC 9R14 runs were repeated when the `pairs` L2 and when the `vpcompressb` search were added,
+The Zen 4 runs were repeated when the `pairs` L2 and when the `vpcompressb` search were added,
 with random weights and the default net embedded. The search with `vpcompressb` is what `znver4`
 and `znver4-avx512vnni` (512 bits) and `icelake_server` (256 bits) compile; `x86_64_v4` and the
 builds without AVX-512 compile the table.
@@ -667,8 +675,8 @@ builds without AVX-512 compile the table.
 **The VEX-encoded `vpdpbusd` of AVX-VNNI** is what a 256-bit build without AVX-512 uses: Alder
 Lake and later Intel desktop CPUs with `-Dcpu=native`, and the `avxvnni` release binaries
 (`-Dcpu=x86_64_v3+avxvnni`, docs/BUILD.md). Zen 4 has no AVX-VNNI and Rosetta has none either;
-Zen 5 has it, and an EPYC 9R45 ran that build: `bench` and the `nnue-speed` checksum equal to
-every other path's. It differs from the EVEX path only in the encoding of that one instruction.
+Zen 5 has it, and a Zen 5 server CPU ran that build: `bench` and the `nnue-speed` checksum equal
+to every other path's. It differs from the EVEX path only in the encoding of that one instruction.
 The comparisons with the scalar path, on such a machine:
 
 ```
