@@ -1,26 +1,30 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
 const datagen = @import("../engine/datagen.zig");
-const viriformat = @import("../engine/datagen/viriformat.zig");
+const arguments = @import("../engine/datagen/arguments.zig");
+const book = @import("../engine/datagen/book.zig");
+const Format = @import("../engine/datagen/format.zig").Format;
+const genfens = @import("../engine/genfens.zig");
 const types = @import("../chess/types.zig");
 const hce = @import("../engine/hce.zig");
-const position = @import("../chess/position.zig");
 const support = @import("support.zig");
 const testing = std.testing;
 
 const GameCount = struct { games: u64, positions: u64 };
 
-// Walks a viriformat file: 32-byte header, 4-byte (move, score) pairs, 4 zero bytes per game.
+const HEADER_BYTES = 32;
+const PAIR_BYTES = 4;
+
 fn count_viri(bytes: []const u8) !GameCount {
     var at: usize = 0;
     var count: GameCount = .{ .games = 0, .positions = 0 };
     while (at < bytes.len) {
-        if (bytes.len - at < 32) return error.Truncated;
-        at += 32;
+        if (bytes.len - at < HEADER_BYTES) return error.Truncated;
+        at += HEADER_BYTES;
         while (true) {
-            if (bytes.len - at < 4) return error.Truncated;
-            const pair = bytes[at..][0..4];
-            at += 4;
+            if (bytes.len - at < PAIR_BYTES) return error.Truncated;
+            const pair = bytes[at..][0..PAIR_BYTES];
+            at += PAIR_BYTES;
             if (std.mem.allEqual(u8, pair, 0)) break;
             count.positions += 1;
         }
@@ -40,7 +44,7 @@ const Run = struct {
         self.name = name;
         var dir_buf: [std.fs.max_path_bytes]u8 = undefined;
         const dir = dir_buf[0..try self.tmp.dir.realPath(std.testing.io, &dir_buf)];
-        self.path = try std.fmt.bufPrint(&self.path_buf, "{s}/{s}", .{ dir, name });
+        self.path = try std.mem.print(&self.path_buf, "{s}/{s}", .{ dir, name });
     }
 
     fn read(self: *Run) ![]u8 {
@@ -49,7 +53,7 @@ const Run = struct {
 };
 
 fn quick_config(target: u64) datagen.DatagenConfig {
-    return .{ .soft_nodes = 200, .hard_node_multiplier = 4, .positions_target = target };
+    return .{ .soft_nodes = 200, .hard_node_multiplier = 64, .positions_target = target };
 }
 
 test "datagen: positions target ends on a game boundary and the summary matches the file" {
@@ -125,119 +129,257 @@ test "datagen: never overwrites an existing output file" {
 }
 
 test "datagen: default output path is portable and seed-derived" {
-    var buf: [64]u8 = undefined;
+    var buf: [datagen.DEFAULT_OUTPUT_PATH_CAPACITY]u8 = undefined;
     try testing.expectEqualStrings("data_000000000000002a.viribin", datagen.default_output_path(&buf, 42, .viri));
     try testing.expectEqualStrings("data_000000000000002a.bin", datagen.default_output_path(&buf, 42, .bullet));
+    try testing.expectEqualStrings("data_ffffffffffffffff.viribin", datagen.default_output_path(&buf, std.math.maxInt(u64), .viri));
+}
+
+const DECISIVE_OPENING = "4k3/8/8/8/8/8/8/4KQ2 w - - 0 1";
+const STALEMATE_OPENING = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
+
+test "datagen: a book whose every opening is rejected fails the run instead of running forever" {
+    platform.io = std.testing.io;
+    support.init_search();
+
+    inline for (.{ DECISIVE_OPENING, STALEMATE_OPENING }, .{ .viri, .bullet }) |opening, format| {
+        var run: Run = undefined;
+        try run.init("rejected.out");
+        defer run.tmp.cleanup();
+
+        var config = quick_config(100);
+        config.format = format;
+        config.max_consecutive_discards = 20;
+        var gen = datagen.Datagen.new(config, 1);
+        defer gen.deinit();
+        gen.openings = &.{opening};
+
+        try testing.expectError(error.WorkerFailed, gen.generate(1, run.path));
+        try testing.expectEqual(@as(?anyerror, error.NoUsableOpening), gen.datagens.items[0].failure);
+        try testing.expectEqual(@as(u64, 20), gen.summary().discarded_games);
+        try testing.expectEqual(@as(u64, 0), gen.summary().games);
+        const bytes = try run.read();
+        defer testing.allocator.free(bytes);
+        try testing.expectEqual(@as(usize, 0), bytes.len);
+    }
+}
+
+test "datagen: discarded games are counted in the summary and leave no trace in the file" {
+    platform.io = std.testing.io;
+    support.init_search();
+    var run: Run = undefined;
+    try run.init("mixed.viribin");
+    defer run.tmp.cleanup();
+
+    var gen = datagen.Datagen.new(quick_config(300), 5);
+    defer gen.deinit();
+    gen.openings = &.{ types.DEFAULT_FEN, DECISIVE_OPENING, STALEMATE_OPENING };
+    try gen.start(1, run.path);
+
+    const summary = gen.summary();
+    try testing.expect(summary.discarded_games > 0);
+    const bytes = try run.read();
+    defer testing.allocator.free(bytes);
+    const counted = try count_viri(bytes);
+    try testing.expectEqual(summary.games, counted.games);
+    try testing.expectEqual(summary.positions, counted.positions);
+}
+
+test "datagen: a node budget that cannot finish depth 1 fails the run instead of recording a mate score" {
+    platform.io = std.testing.io;
+    support.init_search();
+    var run: Run = undefined;
+    try run.init("starved.viribin");
+    defer run.tmp.cleanup();
+
+    var gen = datagen.Datagen.new(.{ .soft_nodes = 1, .hard_node_multiplier = 1, .positions_target = 10 }, 1);
+    defer gen.deinit();
+    try testing.expectError(error.WorkerFailed, gen.generate(1, run.path));
+    try testing.expectEqual(@as(?anyerror, error.NodeBudgetBelowDepthOne), gen.datagens.items[0].failure);
+    try testing.expect(datagen.explain(error.NodeBudgetBelowDepthOne).len > 0);
+    const bytes = try run.read();
+    defer testing.allocator.free(bytes);
+    try testing.expectEqual(@as(usize, 0), bytes.len);
+}
+
+const LoadedBook = struct {
+    tmp: std.testing.TmpDir,
+    path_buf: [std.fs.max_path_bytes]u8 = undefined,
+    path: []const u8 = "",
+
+    fn write(self: *LoadedBook, text: []const u8) !void {
+        platform.io = std.testing.io;
+        support.init_search();
+        self.tmp = std.testing.tmpDir(.{});
+        try self.tmp.dir.writeFile(std.testing.io, .{ .sub_path = "book.epd", .data = text });
+        self.path = self.path_buf[0..try self.tmp.dir.realPathFile(std.testing.io, "book.epd", &self.path_buf)];
+    }
+
+    fn load(self: *LoadedBook, diag: *book.Diagnostic) !book.Book {
+        return book.Book.load(testing.allocator, self.path, diag);
+    }
+};
+
+fn expect_rejected_line(text: []const u8, line: usize, reason: []const u8) !void {
+    var file: LoadedBook = undefined;
+    try file.write(text);
+    defer file.tmp.cleanup();
+    var diag: book.Diagnostic = .{};
+    try testing.expectError(error.InvalidBookLine, file.load(&diag));
+    try testing.expectEqual(line, diag.line);
+    try testing.expectEqualStrings(reason, diag.reason);
 }
 
 test "datagen: EPD lines with opcodes, 4-field FENs and Shredder castling all load and play" {
-    platform.io = std.testing.io;
-    support.init_search();
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const book =
+    var file: LoadedBook = undefined;
+    try file.write(
         \\rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - bm e5; id "x";
         \\rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq -
         \\bqnb1rkr/pp3ppp/3ppn2/2p5/5P2/P2P4/NPP1P1PP/BQ1BNRKR w HFhf - 2 9
         \\
-    ;
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "b.epd", .data = book });
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "b.epd", &buf)];
+    );
+    defer file.tmp.cleanup();
 
-    var diag: datagen.BookDiagnostic = .{};
-    const lines = try datagen.loadEpdFile(path, &diag);
-    try testing.expectEqual(@as(usize, 3), lines.len);
+    var diag: book.Diagnostic = .{};
+    var openings = try file.load(&diag);
+    defer openings.deinit();
+    try testing.expectEqual(@as(usize, 3), openings.lines.len);
 
     var out_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const out = try std.fmt.bufPrint(&out_buf, "{s}.viribin", .{path});
-    var gen = datagen.Datagen.new(.{ .soft_nodes = 200, .hard_node_multiplier = 4, .positions_target = 600 }, 5);
+    const out = try std.mem.print(&out_buf, "{s}.viribin", .{file.path});
+    var gen = datagen.Datagen.new(quick_config(600), 5);
     defer gen.deinit();
-    gen.openings = lines;
+    gen.openings = openings.lines;
     try gen.start(1, out);
     try testing.expect(gen.summary().games > 0);
 }
 
 test "datagen: a missing book is an error, not a panic" {
     platform.io = std.testing.io;
-    var diag: datagen.BookDiagnostic = .{};
+    var diag: book.Diagnostic = .{};
+    try testing.expectError(error.FileNotFound, book.Book.load(testing.allocator, "/nonexistent/book.epd", &diag));
     try testing.expectError(error.FileNotFound, datagen.loadEpdFile("/nonexistent/book.epd", &diag));
 }
 
-fn load_book_text(text: []const u8, diag: *datagen.BookDiagnostic) ![]const []const u8 {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "book.epd", .data = text });
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "book.epd", &buf)];
-    return datagen.loadEpdFile(path, diag);
-}
-
 test "datagen: a malformed book line is rejected with its line number and reason" {
-    platform.io = std.testing.io;
-    support.init_search();
-    var diag: datagen.BookDiagnostic = .{};
-    const book =
+    try expect_rejected_line(
         \\rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1
         \\
         \\rnbq1bnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w - - 0 1
         \\
-    ;
-    try testing.expectError(error.InvalidBookLine, load_book_text(book, &diag));
-    try testing.expectEqual(@as(usize, 3), diag.line);
-    try testing.expectEqualStrings("BadKingCount", diag.reason);
+    , 3, "BadKingCount");
+    try expect_rejected_line("# openings\n" ++ types.DEFAULT_FEN ++ "\n", 1, "UnknownPiece");
 }
 
 test "datagen: a book line whose side not to move is in check is rejected" {
-    platform.io = std.testing.io;
-    support.init_search();
-    var diag: datagen.BookDiagnostic = .{};
-    try testing.expectError(error.InvalidBookLine, load_book_text("4k3/8/8/8/8/8/8/4K2r w - - 0 1\n4k3/4R3/8/8/8/8/8/4K3 w - - 0 1\n", &diag));
-    try testing.expectEqual(@as(usize, 2), diag.line);
-    try testing.expectEqualStrings("OpponentInCheck", diag.reason);
+    try expect_rejected_line("4k3/8/8/8/8/8/8/4K2r w - - 0 1\n4k3/4R3/8/8/8/8/8/4K3 w - - 0 1\n", 2, "OpponentInCheck");
+}
+
+test "datagen: a book line with more pieces or a later move number than a game record holds is rejected" {
+    try expect_rejected_line("rnbqkbnr/pppppppp/pppppppp/8/8/PPPPPPPP/PPPPPPPP/RNBQKBNR w - - 0 1\n", 1, "TooManyPieces");
+    try expect_rejected_line(types.DEFAULT_FEN ++ "\n4k3/8/8/8/8/8/4P3/4K3 w - - 0 65536\n", 2, "MoveNumberTooLarge");
+    inline for (.{ "4294967295", "3_000_000_000", "6_5536", "99999999999999999999999999" }) |move_number| {
+        try expect_rejected_line("4k3/8/8/8/8/8/4P3/4K3 w - - 0 " ++ move_number ++ "\n", 1, "MoveNumberTooLarge");
+    }
+
+    try book.validate_line("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 99 65535");
+    try book.validate_line("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 99 6_5535");
+    try book.validate_line("4k3/8/8/8/8/8/4P3/4K3 w - - bm e4; id \"12345678\";");
+    try book.validate_line("4k3/8/8/8/8/8/4P3/4K3 w - - acn 12345678901;");
 }
 
 test "datagen: an empty book is an error" {
-    platform.io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "empty.epd", .data = "\n  \n" });
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = buf[0..try tmp.dir.realPathFile(std.testing.io, "empty.epd", &buf)];
-    var diag: datagen.BookDiagnostic = .{};
-    try testing.expectError(error.EmptyBook, datagen.loadEpdFile(path, &diag));
+    var file: LoadedBook = undefined;
+    try file.write("\n  \n");
+    defer file.tmp.cleanup();
+    var diag: book.Diagnostic = .{};
+    try testing.expectError(error.EmptyBook, file.load(&diag));
 }
 
-test "viriformat: FRC castling encodes king-to-rook-square with the castle type" {
-    support.init_tables();
-    const pos = try support.new_position();
-    defer support.destroy_position(pos);
-    pos.set_fen("4k3/8/8/8/8/8/8/1R3K2 w B - 0 1");
-
-    var moves: types.MoveList = .{};
-    pos.generate_legal_moves(types.Color.White, &moves);
-    var castle: ?types.Move = null;
-    for (moves.items()) |m| {
-        if (m.is_castle()) castle = m;
-    }
-    const encoded = viriformat.encode_move(castle.?);
-    try testing.expectEqual(@as(u16, 2), encoded >> 14);
-    try testing.expectEqual(@as(u16, @backingInt(types.Square.b1)), (encoded >> 6) & 63);
-    try testing.expectEqual(@as(u16, @backingInt(types.Square.f1)), encoded & 63);
+fn genfens_lines(options: genfens.Options, book_lines: []const []const u8, buffer: []u8) ![]const u8 {
+    support.init_search();
+    var out = std.Io.Writer.fixed(buffer);
+    try genfens.generate(options, book_lines, &out);
+    return out.buffered();
 }
 
-test "viriformat: FRC unmoved castling rooks are marked as type 6" {
-    support.init_tables();
-    const pos = try support.new_position();
-    defer support.destroy_position(pos);
-    pos.set_fen("nrkbbqrn/pppppppp/8/8/8/8/PPPPPPPP/NRKBBQRN w GBgb - 0 1");
-    const board = viriformat.pack_board(pos, 0);
-    var unmoved: usize = 0;
-    for (board.pcs) |byte| {
-        if (byte & 0x7 == 6) unmoved += 1;
-        if ((byte >> 4) & 0x7 == 6) unmoved += 1;
+test "genfens: prints the requested number of openings, the same ones for the same seed" {
+    var first_buf: [4096]u8 = undefined;
+    var second_buf: [4096]u8 = undefined;
+    var other_buf: [4096]u8 = undefined;
+    inline for (.{ genfens.Variant.standard, genfens.Variant.frc, genfens.Variant.dfrc }) |variant| {
+        const first = try genfens_lines(.{ .count = 5, .seed = 3, .variant = variant }, &.{}, &first_buf);
+        try testing.expectEqual(@as(usize, 5), std.mem.count(u8, first, "info string genfens "));
+        try testing.expectEqual(@as(usize, 5), std.mem.count(u8, first, "\n"));
+        try testing.expectEqualStrings(first, try genfens_lines(.{ .count = 5, .seed = 3, .variant = variant }, &.{}, &second_buf));
+        try testing.expect(!std.mem.eql(u8, first, try genfens_lines(.{ .count = 5, .seed = 4, .variant = variant }, &.{}, &other_buf)));
     }
-    try testing.expectEqual(@as(usize, 4), unmoved);
+}
+
+test "genfens: every opening is a position a datagen book accepts" {
+    var buf: [8192]u8 = undefined;
+    const output = try genfens_lines(.{ .count = 20, .seed = 9 }, &.{ types.DEFAULT_FEN, "bqnb1rkr/pp3ppp/3ppn2/2p5/5P2/P2P4/NPP1P1PP/BQ1BNRKR w HFhf - 2 9" }, &buf);
+    var lines = std.mem.tokenizeScalar(u8, output, '\n');
+    var count: usize = 0;
+    while (lines.next()) |line| : (count += 1) {
+        try book.validate_line(line["info string genfens ".len..]);
+    }
+    try testing.expectEqual(@as(usize, 20), count);
+}
+
+test "genfens: a book without a usable opening is an error instead of an endless loop" {
+    var buf: [256]u8 = undefined;
+    try testing.expectError(error.NoUsableOpening, genfens_lines(.{ .count = 1 }, &.{STALEMATE_OPENING}, &buf));
+}
+
+test "genfens: arguments are a count, then seed, book and variant in any order" {
+    var offending: []const u8 = "";
+    const defaults = try genfens.parse(&.{}, &offending);
+    try testing.expectEqual(@as(u64, 1), defaults.count);
+    try testing.expectEqual(@as(?[]const u8, null), defaults.book_path);
+
+    const all = try genfens.parse(&.{ "64", "seed", "7", "book", "books/x.epd", "dfrc" }, &offending);
+    try testing.expectEqual(@as(u64, 64), all.count);
+    try testing.expectEqual(@as(u64, 7), all.seed);
+    try testing.expectEqualStrings("books/x.epd", all.book_path.?);
+    try testing.expectEqual(genfens.Variant.dfrc, all.variant);
+
+    const no_book = try genfens.parse(&.{ "8", "frc", "book", "None", "seed", "1" }, &offending);
+    try testing.expectEqual(@as(?[]const u8, null), no_book.book_path);
+    try testing.expectEqual(genfens.Variant.frc, no_book.variant);
+}
+
+test "genfens: malformed, unknown and incomplete arguments are errors naming the argument" {
+    var offending: []const u8 = "";
+    try testing.expectError(error.InvalidValue, genfens.parse(&.{"many"}, &offending));
+    try testing.expectEqualStrings("many", offending);
+    try testing.expectError(error.InvalidValue, genfens.parse(&.{ "8", "seed", "-1" }, &offending));
+    try testing.expectError(error.UnknownArgument, genfens.parse(&.{ "8", "DFRC" }, &offending));
+    try testing.expectEqualStrings("DFRC", offending);
+    try testing.expectError(error.MissingValue, genfens.parse(&.{ "8", "seed", "1", "book" }, &offending));
+    try testing.expectEqualStrings("book", offending);
+}
+
+test "genfens: a bad argument or book is reported and prints no opening" {
+    var file: LoadedBook = undefined;
+    try file.write("# openings\n" ++ types.DEFAULT_FEN ++ "\n");
+    defer file.tmp.cleanup();
+
+    const Case = struct { args: []const []const u8, failure: anyerror, report: []const u8 };
+    const cases = [_]Case{
+        .{ .args = &.{ "3", "seed", "1", "book", file.path }, .failure = error.InvalidBookLine, .report = "line 1: UnknownPiece\n" },
+        .{ .args = &.{ "3", "seed", "1", "book", "/nonexistent/book.epd" }, .failure = error.FileNotFound, .report = "cannot load book '/nonexistent/book.epd': FileNotFound\n" },
+        .{ .args = &.{ "3", "seed", "x" }, .failure = error.InvalidValue, .report = "genfens: InvalidValue at 'x'\n" },
+    };
+    for (cases) |case| {
+        var out_buf: [256]u8 = undefined;
+        var err_buf: [512]u8 = undefined;
+        var out = std.Io.Writer.fixed(&out_buf);
+        var err = std.Io.Writer.fixed(&err_buf);
+        try testing.expectError(case.failure, genfens.write_openings(case.args, &out, &err));
+        try testing.expectEqualStrings("", out.buffered());
+        try testing.expect(std.mem.endsWith(u8, err.buffered(), case.report));
+    }
 }
 
 test "datagen: thread seeds are non-zero, distinct per thread, and stable" {
@@ -250,28 +392,17 @@ test "datagen: thread seeds are non-zero, distinct per thread, and stable" {
     try testing.expect(datagen.thread_seed(0, 0) != datagen.thread_seed(1, 0));
 }
 
-// The scaled evaluation of a network position, rebuilt from the network output.
-fn scaled_from_network(pos: *position.Position, network: i32) i32 {
-    var result = network;
-    if (pos.phase() <= 5 and @abs(result) >= 16 and hce.is_material_drawish(pos)) result = @divTrunc(result, 8);
-    const fifty: i32 = @intCast(pos.history[pos.game_ply].fifty);
-    return @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - fifty * 5), 1024);
-}
-
-test "datagen: raw eval is the network output, scaled eval is unchanged" {
+test "datagen: raw eval is the network output and differs from the scaled eval" {
     support.init_tables();
     const pos = try support.new_position();
     defer support.destroy_position(pos);
 
     const network_positions = [_][]const u8{
         "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 0 9",
-        // High fifty-move counter.
         "r1bq1rk1/pp2bppp/2n1pn2/3p4/2PP4/2N1PN2/PP2BPPP/R1BQ1RK1 w - - 90 60",
         "2r3k1/5ppp/8/8/8/8/5PPP/2RQ2K1 b - - 70 80",
-        // Pawn endings.
         "8/5pk1/6p1/8/8/6P1/4PPK1/8 w - - 0 40",
         "8/8/3k4/8/3PK3/8/8/8 b - - 12 60",
-        // Drawish material that still uses the network: KBN vs KB.
         "8/8/3k4/3b4/8/2NBK3/8/8 w - - 0 70",
         "8/8/3k4/3b4/8/2NBK3/8/8 b - - 40 90",
     };
@@ -280,20 +411,18 @@ test "datagen: raw eval is the network output, scaled eval is unchanged" {
         pos.set_fen(line);
         inline for (.{ types.Color.White, types.Color.Black }) |color| {
             const network = hce.evaluate_nnue_comptime(pos, color);
-            const scaled = hce.evaluate_comptime(pos, color);
             try testing.expectEqual(network, hce.evaluate_mode(pos, color, .raw));
-            try testing.expectEqual(scaled, hce.evaluate_mode(pos, color, .scaled));
-            try testing.expectEqual(scaled_from_network(pos, network), scaled);
-            if (network != scaled) differing += 1;
+            if (network != hce.evaluate_mode(pos, color, .scaled)) differing += 1;
         }
     }
     try testing.expect(differing >= network_positions.len);
 
-    // No pawns and phase below 3: the hand-crafted fallback is the same in both modes.
-    for ([_][]const u8{ "8/8/3k4/8/8/4K3/8/R7 w - - 0 1", "8/8/3k4/8/8/4K3/8/1NN5 b - - 30 1" }) |line| {
+    const hand_crafted_positions = [_][]const u8{ "8/8/3k4/8/8/4K3/8/R7 w - - 0 1", "8/8/3k4/8/8/4K3/8/1NN5 b - - 30 1" };
+    for (hand_crafted_positions) |line| {
         pos.set_fen(line);
+        try testing.expect(!hce.network_evaluates(pos));
         inline for (.{ types.Color.White, types.Color.Black }) |color| {
-            try testing.expectEqual(hce.evaluate_comptime(pos, color), hce.evaluate_mode(pos, color, .raw));
+            try testing.expectEqual(hce.evaluate_mode(pos, color, .scaled), hce.evaluate_mode(pos, color, .raw));
         }
     }
 }
@@ -328,10 +457,74 @@ test "datagen: raweval changes the recorded data and is reported in the summary"
     try testing.expect(!std.mem.eql(u8, raw, scaled));
 }
 
-test "datagen: the summary line always carries raw_eval" {
+test "datagen: the summary line carries the discarded games and ends with raw_eval" {
     var buf: [256]u8 = undefined;
     inline for (.{ .{ false, "\"raw_eval\":false}" }, .{ true, "\"raw_eval\":true}" } }) |case| {
-        const line = try std.fmt.bufPrint(&buf, "{f}", .{std.json.fmt(datagen.Summary{ .raw_eval = case[0] }, .{})});
+        const line = try std.mem.print(&buf, "{f}", .{std.json.fmt(datagen.Summary{ .discarded_games = 3, .raw_eval = case[0] }, .{})});
         try testing.expect(std.mem.endsWith(u8, line, case[1]));
+        try testing.expect(std.mem.find(u8, line, "\"discarded_games\":3,") != null);
+    }
+}
+
+const Fruit = enum { apple, pear };
+
+test "arguments: a key=value argument splits at the first equals sign" {
+    var diag: arguments.Diagnostic = .{};
+    var options: arguments.KeyValues(Fruit) = .{};
+    const entry = try options.next("apple=a=b", null, &diag);
+    try testing.expectEqual(Fruit.apple, entry.key);
+    try testing.expectEqualStrings("a=b", entry.value);
+    try testing.expect(options.given(.apple));
+    try testing.expect(!options.given(.pear));
+}
+
+test "arguments: a bare argument is the value of the bare key, or a key without a value" {
+    var diag: arguments.Diagnostic = .{};
+    var with_bare_key: arguments.KeyValues(Fruit) = .{};
+    const entry = try with_bare_key.next("conference", .pear, &diag);
+    try testing.expectEqual(Fruit.pear, entry.key);
+    try testing.expectEqualStrings("conference", entry.value);
+
+    var without: arguments.KeyValues(Fruit) = .{};
+    try testing.expectEqualStrings("", (try without.next("pear", null, &diag)).value);
+    try testing.expectError(error.UnknownKey, without.next("conference", null, &diag));
+    try testing.expectEqualStrings("conference", diag.key);
+}
+
+test "arguments: unknown and repeated keys are errors naming the key and value" {
+    var diag: arguments.Diagnostic = .{};
+    var options: arguments.KeyValues(Fruit) = .{};
+    try testing.expectError(error.UnknownKey, options.next("plum=1", null, &diag));
+    try testing.expectEqualStrings("plum", diag.key);
+    _ = try options.next("apple=1", null, &diag);
+    try testing.expectError(error.DuplicateKey, options.next("apple=2", null, &diag));
+    try testing.expectEqualStrings("apple", diag.key);
+    try testing.expectEqualStrings("2", diag.value);
+}
+
+test "arguments: values outside their range or their set of choices are invalid" {
+    try testing.expectEqual(@as(u32, 7), try arguments.integer(u32, "7", 2, 7));
+    for ([_][]const u8{ "1", "8", "", "7,", "-3", "seven", "99999999999999999999" }) |text| {
+        try testing.expectError(error.InvalidValue, arguments.integer(u32, text, 2, 7));
+    }
+    try testing.expectEqual(Fruit.pear, try arguments.choice(Fruit, "pear"));
+    try testing.expectError(error.InvalidValue, arguments.choice(Fruit, "Pear"));
+    try testing.expectError(error.InvalidValue, arguments.non_empty(""));
+    try testing.expect(try arguments.boolean("true"));
+    try testing.expect(!try arguments.boolean("false"));
+    try testing.expectError(error.InvalidValue, arguments.boolean("1"));
+}
+
+test "format: each format is recognised by the extension datagen gives its files" {
+    try testing.expectEqual(@as(?Format, .viri), Format.of_path("data/chunk-0001.viribin"));
+    try testing.expectEqual(@as(?Format, .bullet), Format.of_path("shuffled.bin"));
+    inline for (comptime std.enums.values(Format)) |format| {
+        try testing.expectEqual(@as(?Format, format), Format.of_path("x" ++ comptime format.extension()));
+    }
+}
+
+test "format: any other extension decides nothing" {
+    for ([_][]const u8{ "chunk", "chunk.viribin.tmp", "chunk.vf", "chunk.BIN", ".bin", "bin" }) |path| {
+        try testing.expectEqual(@as(?Format, null), Format.of_path(path));
     }
 }

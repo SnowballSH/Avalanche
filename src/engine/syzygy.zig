@@ -1,14 +1,4 @@
-// Syzygy endgame tablebase probing for Avalanche.
-//
-// Thin Zig wrapper around the vendored Pyrrhic C library (Andrew Grant's
-// maintained fork of Ronald de Man's Fathom / `tbprobe`). Pyrrhic is compiled
-// into the binary by build.zig (`src/pyrrhic/tbprobe.c`); the attack / popcount
-// primitives it needs are exported with C ABI at the bottom of this file and
-// routed through Avalanche's own tables, so there is no duplicated movegen.
-//
-// Everything here is a no-op until `init()` succeeds with a non-empty
-// `SyzygyPath`. With probing disabled, `enabled == false`, every probe gate in
-// the search short-circuits, and the `bench` node count is unchanged.
+//! Syzygy probing through the vendored Pyrrhic library; see docs/BUILD.md and src/pyrrhic/tbconfig.h.
 
 const std = @import("std");
 const platform = @import("../platform.zig");
@@ -20,7 +10,11 @@ pub const supported = !platform.is_wasm;
 
 const c = if (supported) @import("pyrrhic") else struct {};
 
-pub const MAX_TB_MOVES: usize = 256; // == Pyrrhic TB_MAX_MOVES
+pub const MAX_TB_MOVES: usize = 256;
+
+comptime {
+    if (supported) std.debug.assert(MAX_TB_MOVES == c.TB_MAX_MOVES);
+}
 
 pub var enabled: bool = false;
 pub var probe_depth: i32 = 1;
@@ -57,9 +51,6 @@ pub fn deinit() void {
 
 pub const Wdl = enum { win, draw, loss };
 
-/// Full 5-valued WDL outcome, preserving the 50-move-rule-dependent
-/// `cursed_win` / `blessed_loss` distinctions that `probe_wdl` collapses via
-/// `use_rule50`.
 pub const WdlResult = enum { loss, blessed_loss, draw, cursed_win, win };
 
 pub const PromoKind = enum(u8) { none = 0, knight, bishop, rook, queen };
@@ -76,9 +67,6 @@ pub const RootResult = struct {
     moves: [MAX_TB_MOVES]RootMove = undefined,
 };
 
-// ---------------------------------------------------------------------------
-// Position -> Pyrrhic argument decomposition.
-// ---------------------------------------------------------------------------
 const Probe = struct {
     white: u64,
     black: u64,
@@ -124,9 +112,8 @@ pub inline fn no_castling_rights(pos: *const position.Position) bool {
     return pos.castling_rights() == 0;
 }
 
-/// WDL probe for interior search nodes. The caller must ensure: not the root,
-/// 50-move counter == 0, no castling rights, and `piece_count <= max_pieces()`.
-/// Returns null on probe failure.
+/// The tables hold positions with a zero fifty-move counter and no castling rights, of at most `max_pieces()`
+/// pieces; the caller probes no other.
 pub fn probe_wdl(pos: *const position.Position) ?Wdl {
     if (!enabled) return null;
     const p = decompose(pos);
@@ -148,17 +135,12 @@ pub fn probe_wdl(pos: *const position.Position) ?Wdl {
         c.TB_DRAW => Wdl.draw,
         c.TB_CURSED_WIN => if (use_rule50) Wdl.draw else Wdl.win,
         c.TB_BLESSED_LOSS => if (use_rule50) Wdl.draw else Wdl.loss,
-        else => null, // TB_RESULT_FAILED
+        else => null,
     };
 }
 
-/// Raw 5-valued WDL probe taking the Pyrrhic bitboard arguments directly,
-/// bypassing `Position`. `white`/`black` are the occupancy of White/Black and
-/// `turn` is true when White is to move; the piece-type bitboards are
-/// colour-agnostic. `ep` is the en-passant square, or 0 when there is none.
-/// Returns null on probe failure or a missing table. The WDL tables are
-/// independent of the 50-move counter, so the caller interprets `cursed_win` /
-/// `blessed_loss` itself.
+/// The piece bitboards hold both colours, `turn` is true when White is to move, and `ep` is 0 without an
+/// en-passant square.
 pub fn probe_wdl_bb(
     white: u64,
     black: u64,
@@ -179,22 +161,18 @@ pub fn probe_wdl_bb(
         c.TB_DRAW => WdlResult.draw,
         c.TB_BLESSED_LOSS => WdlResult.blessed_loss,
         c.TB_LOSS => WdlResult.loss,
-        else => null, // TB_RESULT_FAILED
+        else => null,
     };
 }
 
-/// Raw 5-valued WDL probe of `pos`; castling rights must be absent.
+/// Castling rights must be absent.
 pub fn probe_wdl_position(pos: *const position.Position) ?WdlResult {
     const p = decompose(pos);
     return probe_wdl_bb(p.white, p.black, p.kings, p.queens, p.rooks, p.bishops, p.knights, p.pawns, p.ep, p.turn);
 }
 
-/// Root DTZ probe. Ranks every legal root move by distance-to-zero and returns
-/// the WDL plus the set of moves sharing the best rank (the DTZ-optimal set).
-/// The caller restricts the root move list to this set so the search only
-/// explores tablebase-optimal moves. Returns null on probe failure.
-///
-/// The caller must ensure no castling rights and `piece_count <= max_pieces()`.
+/// Returns the root moves that share the best DTZ rank. The caller ensures no castling rights and at most
+/// `max_pieces()` pieces.
 pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult {
     if (!enabled) return null;
     const p = decompose(pos);
@@ -236,9 +214,7 @@ pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult
         if (wdl_ret == 0 or size == 0) return null;
     }
 
-    // tbRank: positive for wins (larger = closer to a guaranteed win), 0 for
-    // draws, negative for losses. The DTZ-optimal moves are those with the
-    // maximal rank.
+    // Pyrrhic ranks a winning move above 0 (higher wins sooner), a drawing move at 0 and a losing move below.
     var best_rank: i32 = std.math.minInt(i32);
     {
         var i: usize = 0;
@@ -271,12 +247,7 @@ pub fn probe_root(pos: *const position.Position, has_repeated: bool) ?RootResult
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// C-ABI callbacks required by Pyrrhic (declared `extern` in tbconfig.h).
-// Routed through Avalanche's attack tables. Pyrrhic uses White=1/Black=0; the
-// pawn-attack colour is inverted in tbconfig.h, so `col` here is Avalanche's
-// convention (0 = white, 1 = black).
-// ---------------------------------------------------------------------------
+// tbconfig.h declares these callbacks and inverts Pyrrhic's colour for `pawnAttacks`, so `col` is 0 for White.
 comptime {
     if (supported) {
         for (.{ "popcount", "getlsb", "poplsb", "pawnAttacks", "knightAttacks", "kingAttacks", "bishopAttacks", "rookAttacks", "queenAttacks" }) |name| {

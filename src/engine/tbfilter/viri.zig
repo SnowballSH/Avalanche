@@ -1,16 +1,21 @@
+//! See "Tablebase cleaning" in docs/DATAGEN.md.
+
 const std = @import("std");
 const types = @import("../../chess/types.zig");
 const position = @import("../../chess/position.zig");
 const syzygy = @import("../syzygy.zig");
+const adjudicator = @import("../datagen/adjudicator.zig");
 const viriformat = @import("../datagen/viriformat.zig");
 const tbfilter = @import("../tbfilter.zig");
 const platform = @import("../../platform.zig");
 
 pub const Rule50Mode = tbfilter.Rule50Mode;
 
-/// Stored in place of a contradicted position's eval. Datagen clamps evals to ±32000, and the trainer's filter drops
-/// every position whose |eval| reaches its `max_eval`.
 pub const MASKED_EVAL: i16 = std.math.maxInt(i16);
+
+comptime {
+    std.debug.assert(MASKED_EVAL > viriformat.MAX_EVAL);
+}
 
 pub const Prober = *const fn (pos: *const position.Position) ?syzygy.WdlResult;
 
@@ -25,8 +30,6 @@ pub const Stats = struct {
     masked: u64 = 0,
 };
 
-/// Replays viriformat games and masks every position of at most `max_men` whose tablebase result contradicts the
-/// game result. Masking edits only the eval of that position, so the output replays exactly like the input.
 pub const Cleaner = struct {
     probe: Prober,
     max_men: u32,
@@ -39,12 +42,11 @@ pub const Cleaner = struct {
     }
 
     pub fn clean_game(self: *Cleaner, pos: *position.Position, game: viriformat.Game) !void {
-        viriformat.set_position(pos, game.header.*);
-        const white_result = game.header.wdl;
+        game.header.set_position(pos);
+        const outcome = game.header.outcome();
         for (game.pairs) |*pair| {
             self.stats.positions += 1;
-            const mover_result = if (pos.turn == types.Color.White) white_result else 2 - white_result;
-            if (self.contradicts(pos, mover_result)) {
+            if (self.contradicts(pos, outcome.relative_to(pos.turn))) {
                 pair.score = MASKED_EVAL;
                 self.stats.masked += 1;
             }
@@ -54,7 +56,7 @@ pub const Cleaner = struct {
         self.stats.games += 1;
     }
 
-    fn contradicts(self: *Cleaner, pos: *const position.Position, mover_result: u8) bool {
+    fn contradicts(self: *Cleaner, pos: *const position.Position, mover_result: adjudicator.SideResult) bool {
         if (@popCount(pos.all_all_pieces()) > self.max_men) {
             self.stats.over_men += 1;
             return false;
@@ -79,7 +81,6 @@ pub const Cleaner = struct {
     }
 };
 
-/// `tbfilter format=viri`: cleans one viriformat file into a new file and prints the statistics as one JSON line.
 pub fn run_file(cfg: tbfilter.Config) u8 {
     const tb_max = tbfilter.load_tablebases(cfg.tb_path) orelse return 1;
     defer syzygy.deinit();
@@ -113,7 +114,6 @@ pub fn run_file(cfg: tbfilter.Config) u8 {
     return 0;
 }
 
-/// Creates `path`, which must not exist yet, holding exactly `bytes`; a failed write leaves no file behind.
 pub fn write_new_file(io: std.Io, dir: std.Io.Dir, path: []const u8, bytes: []const u8) !void {
     const out = try dir.createFile(io, path, .{ .exclusive = true });
     errdefer dir.deleteFile(io, path) catch {};

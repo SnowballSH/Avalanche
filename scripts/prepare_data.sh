@@ -1,20 +1,5 @@
 #!/bin/bash
-# prepare_data.sh — Convert viriformat datagen output to shuffled bulletformat for training.
-#
-# Pipeline: splat (viri→bullet with filter) → interleave → shuffle → good_data/
-#
-# Usage:
-#   scripts/prepare_data.sh [output_name]
-#
-#   output_name: Name for the final training file (default: training.bin)
-#
-# Expects:
-#   - Raw .viribin files in data/ (from datagen)
-#   - bullet-utils built
-#
-# Produces:
-#   - data/good_data/<output_name>  (final shuffled+interleaved bulletformat)
-#   - Moves raw .viribin and intermediate files to data/old_data/
+# See "Scripts" in docs/DATAGEN.md.
 
 set -euo pipefail
 
@@ -25,7 +10,6 @@ GOOD_DATA_DIR="$DATA_DIR/good_data"
 OLD_DATA_DIR="$DATA_DIR/old_data"
 FILTER_CFG="$ROOT_DIR/training/filter.toml"
 
-# Try multiple possible paths for bullet-utils
 BULLET_UTILS=""
 for candidate in \
     "$ROOT_DIR/bullet/target/release/bullet-utils" \
@@ -37,13 +21,9 @@ for candidate in \
 done
 
 OUTPUT_NAME="${1:-training.bin}"
-# Ensure .bin extension
 [[ "$OUTPUT_NAME" == *.bin ]] || OUTPUT_NAME="${OUTPUT_NAME}.bin"
 
-# Memory for shuffle (MB)
-MEM_MB="${SHUFFLE_MEM_MB:-16384}"
-
-# ============================================================================
+SHUFFLE_MEM_MB="${SHUFFLE_MEM_MB:-16384}"
 
 mkdir -p "$GOOD_DATA_DIR" "$OLD_DATA_DIR"
 
@@ -59,7 +39,6 @@ if [ ! -f "$FILTER_CFG" ]; then
     exit 1
 fi
 
-# Find all .viribin files in data/
 shopt -s nullglob
 VIRI_FILES=( "$DATA_DIR"/*.viribin )
 shopt -u nullglob
@@ -74,11 +53,10 @@ echo "=== Avalanche Data Preparation ==="
 echo "Input:      ${#VIRI_FILES[@]} viribin file(s)"
 echo "Filter:     $FILTER_CFG"
 echo "Output:     $GOOD_DATA_DIR/$OUTPUT_NAME"
-echo "Shuffle MB: $MEM_MB"
+echo "Shuffle MB: $SHUFFLE_MEM_MB"
 echo "==================================="
 echo ""
 
-# Step 1: Splat each viribin file to bulletformat (with filtering)
 echo "[1/3] Converting viriformat → bulletformat (with filter)..."
 SPLATTED_FILES=()
 for f in "${VIRI_FILES[@]}"; do
@@ -90,7 +68,6 @@ for f in "${VIRI_FILES[@]}"; do
 done
 echo ""
 
-# Step 2: Interleave all splatted files into one
 echo "[2/3] Interleaving ${#SPLATTED_FILES[@]} file(s)..."
 INTERLEAVED="$DATA_DIR/_interleaved_tmp.bin"
 if [ ${#SPLATTED_FILES[@]} -eq 1 ]; then
@@ -104,21 +81,17 @@ INTER_SIZE=$(stat -c '%s' "$INTERLEAVED")
 echo "  Interleaved: $((INTER_SIZE / 32)) positions ($(numfmt --to=iec "$INTER_SIZE" 2>/dev/null || echo "$((INTER_SIZE/1048576))MB"))"
 echo ""
 
-# Step 3: Shuffle
 echo "[3/3] Shuffling..."
-"$BULLET_UTILS" shuffle --input "$INTERLEAVED" --output "$GOOD_DATA_DIR/$OUTPUT_NAME" --mem-used-mb "$MEM_MB"
+"$BULLET_UTILS" shuffle --input "$INTERLEAVED" --output "$GOOD_DATA_DIR/$OUTPUT_NAME" --mem-used-mb "$SHUFFLE_MEM_MB"
 rm -f "$INTERLEAVED"
 echo ""
 
-# Move raw viribin files to old_data/
 echo "Archiving raw .viribin files to old_data/..."
 for f in "${VIRI_FILES[@]}"; do
     mv "$f" "$OLD_DATA_DIR/"
 done
-# Clean any remaining splatted intermediates
 rm -f "$DATA_DIR"/*_splatted.bin
 
-# Summary
 FINAL_SIZE=$(stat -c '%s' "$GOOD_DATA_DIR/$OUTPUT_NAME")
 POSITIONS=$((FINAL_SIZE / 32))
 echo ""
