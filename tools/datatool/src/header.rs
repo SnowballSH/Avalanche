@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+pub const BYTES: usize = 32;
 pub const OCCUPANCY: Range<usize> = 0..8;
 pub const PIECES: Range<usize> = 8..24;
 pub const SIDE_TO_MOVE_AND_EN_PASSANT: usize = 24;
@@ -8,7 +9,7 @@ pub const FULLMOVE_NUMBER: Range<usize> = 26..28;
 pub const GAME_RESULT: usize = 30;
 
 /// Checks the packed header before unpacking it: viriformat panics on headers it cannot decode.
-pub fn check(packed: &[u8; 32]) -> Result<(), String> {
+pub fn check(packed: &[u8; BYTES]) -> Result<(), String> {
     const MAX_PIECES: u32 = 32;
     const UNMOVED_ROOK: u8 = 6;
     const KING: u8 = 5;

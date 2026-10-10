@@ -49,7 +49,7 @@ pub fn dupes(files: &[PathBuf], sample_per_mille: u64) -> anyhow::Result<DupesRe
     })
 }
 
-fn identity_hash(packed: &[u8; 32]) -> u64 {
+fn identity_hash(packed: &[u8; header::BYTES]) -> u64 {
     let mut hasher = DefaultHasher::new();
     packed[..=header::SIDE_TO_MOVE_AND_EN_PASSANT].hash(&mut hasher);
     hasher.finish()

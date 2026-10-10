@@ -1,5 +1,5 @@
 use datatool::dupes::dupes;
-use datatool::header::FULLMOVE_NUMBER;
+use datatool::header::{BYTES as HEADER_BYTES, FULLMOVE_NUMBER, OCCUPANCY};
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -41,14 +41,14 @@ fn dupes_error_after(name: &str, edit: impl FnOnce(&mut [u8])) -> String {
 #[test]
 fn a_malformed_header_is_an_error_not_a_panic() {
     let error = dupes_error_after("header", |bytes| {
-        bytes[..8].copy_from_slice(&u64::MAX.to_le_bytes())
+        bytes[OCCUPANCY].copy_from_slice(&u64::MAX.to_le_bytes())
     });
     assert!(error.contains("pieces"), "{error}");
 }
 
 #[test]
 fn a_quiet_move_flagged_as_a_castle_is_an_error_not_a_panic() {
-    const FIRST_MOVE_HIGH_BYTE: usize = 33;
+    const FIRST_MOVE_HIGH_BYTE: usize = HEADER_BYTES + 1;
     const CASTLE_FLAG: u8 = 0x80;
     let error = dupes_error_after("castle", |bytes| bytes[FIRST_MOVE_HIGH_BYTE] |= CASTLE_FLAG);
     assert!(error.contains("illegal move"), "{error}");

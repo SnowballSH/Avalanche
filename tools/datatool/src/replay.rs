@@ -1,4 +1,5 @@
 use crate::header;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::Ordering;
 use viriformat::chess::CHESS960;
 use viriformat::chess::board::Board;
@@ -7,7 +8,7 @@ use viriformat::chess::piece::{Colour, Piece, PieceType};
 use viriformat::chess::types::Rank;
 use viriformat::dataformat::Game;
 
-fn generate_castles_from_any_file() {
+fn enable_chess960_castling() {
     CHESS960.store(true, Ordering::Relaxed);
 }
 
@@ -57,17 +58,33 @@ fn check_counters_fit_the_packed_format(board: &Board) -> Result<(), String> {
     Ok(())
 }
 
+fn legal_moves(board: &mut Board) -> Result<Vec<Move>, String> {
+    // viriformat panics when a position has more moves than its list holds, which only generating
+    // them tells.
+    panic::catch_unwind(AssertUnwindSafe(|| board.legal_moves())).map_err(|payload| {
+        payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("panic without a message")
+            .to_owned()
+    })
+}
+
 pub fn visit_positions(
     game: &Game,
     mut visit: impl FnMut(&Board, Move, i32),
 ) -> Result<(), String> {
     let mut board =
         start_position(game).map_err(|problem| format!("invalid start position: {problem}"))?;
-    generate_castles_from_any_file();
+    enable_chess960_castling();
     for (ply, (mv, eval)) in game.moves.iter().enumerate() {
         check_counters_fit_the_packed_format(&board)
             .map_err(|problem| format!("{problem} at ply {ply}"))?;
-        if !board.legal_moves().contains(mv) {
+        let legal = legal_moves(&mut board).map_err(|problem| {
+            format!("viriformat cannot list the moves at ply {ply}: {problem}")
+        })?;
+        if !legal.contains(mv) {
             return Err(format!("illegal move {mv:?} at ply {ply}"));
         }
         visit(&board, *mv, i32::from(eval.get()));
