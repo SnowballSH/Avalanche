@@ -17,7 +17,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=24"
+    "node": ">=26"
   },
   "scripts": {
     "build:wasm": "cd .. && zig build wasm --release=fast",
@@ -32,8 +32,8 @@
     "demo": "npm run build:wasm && npm run build && node demo/serve.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.14",
-    "@types/node": "^26.6.3",
+    "@biomejs/biome": "2.5.15",
+    "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
   }
 }
