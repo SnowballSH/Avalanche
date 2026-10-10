@@ -1,16 +1,12 @@
 //! NUMA topology and search-thread placement. See docs/THREADS.md.
-//!
-//! Topology comes from Linux sysfs and binding uses sched_setaffinity; on any
-//! other target the machine is a single node and binding is a no-op.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const platform = @import("../platform.zig");
+const affinity = platform.affinity;
+
+const CpuSet = affinity.CpuSet;
 
 pub const MAX_NODES = 64;
-pub const MAX_CPUS = 1024;
-
-pub const CpuSet = std.bit_set.Static(MAX_CPUS);
 
 const SMALL_NODE_PERCENT = 60;
 const THREADS_PER_NODE_WORTH_BINDING = 4;
@@ -18,8 +14,6 @@ const THREADS_PER_NODE_WORTH_BINDING = 4;
 pub const Policy = enum { auto, none };
 
 pub var policy: Policy = .auto;
-
-const supported = builtin.target.os.tag == .linux and !platform.is_wasm;
 
 pub const ParseError = error{ InvalidCpuList, TooManyCpus, TooManyNodes };
 
@@ -80,7 +74,6 @@ pub const Topology = struct {
     }
 };
 
-/// Parses the kernel cpulist format, e.g. "0-3,8-11\n".
 pub fn parse_cpulist(text: []const u8) ParseError!CpuSet {
     var set = CpuSet.empty;
     var ranges = std.mem.tokenizeAny(u8, text, ", \t\r\n");
@@ -89,7 +82,7 @@ pub fn parse_cpulist(text: []const u8) ParseError!CpuSet {
         const first = std.fmt.parseUnsigned(usize, bounds.first(), 10) catch return ParseError.InvalidCpuList;
         const last = if (bounds.next()) |hi| std.fmt.parseUnsigned(usize, hi, 10) catch return ParseError.InvalidCpuList else first;
         if (bounds.next() != null or last < first) return ParseError.InvalidCpuList;
-        if (last >= MAX_CPUS) return ParseError.TooManyCpus;
+        if (last >= affinity.MAX_CPUS) return ParseError.TooManyCpus;
         set.setRangeValue(.{ .start = first, .end = last + 1 }, true);
     }
     return set;
@@ -99,13 +92,11 @@ var detected: ?Topology = null;
 
 const SYSFS_NODES = "/sys/devices/system/node";
 
-/// Detects the topology once. Must run before any search thread is placed and
-/// on a thread that still has the process's CPU mask (the UCI thread), since
-/// placement stays within the CPUs the process was started with.
+/// Must run on a thread that still has the CPU mask the process was started with.
 pub fn init() void {
     if (detected != null) return;
-    detected = if (supported)
-        detect(SYSFS_NODES, allowed_cpus()) catch Topology.single_node()
+    detected = if (affinity.supported)
+        detect(SYSFS_NODES, affinity.current()) catch Topology.single_node()
     else
         Topology.single_node();
 }
@@ -115,34 +106,17 @@ pub fn topology() *const Topology {
     return &detected.?;
 }
 
-/// CPUs the calling thread may run on, e.g. as restricted by taskset or a cpuset.
-fn allowed_cpus() CpuSet {
-    if (!supported) return CpuSet.full;
-    var mask: std.os.linux.cpu_set_t = undefined;
-    if (std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &mask)) != .SUCCESS) {
-        return CpuSet.full;
-    }
-    var set = CpuSet.empty;
-    for (mask, 0..) |word, i| {
-        var bits = word;
-        while (bits != 0) : (bits &= bits - 1) set.set(i * @bitSizeOf(usize) + @ctz(bits));
-    }
-    return set;
-}
-
-/// Reads `<root>/online` and each online node's `<root>/node<N>/cpulist`,
-/// keeping only `allowed` CPUs and dropping nodes left without any.
 pub fn detect(root: []const u8, allowed: CpuSet) !Topology {
     var buf: [4096]u8 = undefined;
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const dir = std.Io.Dir.cwd();
-    const online_path = try std.fmt.bufPrint(&path_buf, "{s}/online", .{root});
+    const online_path = try std.mem.print(&path_buf, "{s}/online", .{root});
     const online_nodes = try parse_cpulist(try dir.readFile(platform.io, online_path, &buf));
 
     var result = Topology{};
     var nodes = online_nodes.iterator(.{});
     while (nodes.next()) |node| {
-        const path = try std.fmt.bufPrint(&path_buf, "{s}/node{}/cpulist", .{ root, node });
+        const path = try std.mem.print(&path_buf, "{s}/node{}/cpulist", .{ root, node });
         var cpus = try parse_cpulist(try dir.readFile(platform.io, path, &buf));
         cpus.setIntersection(allowed);
         if (cpus.count() > 0) try result.add_cpus(cpus);
@@ -159,22 +133,11 @@ pub fn binds_threads(thread_count: usize) bool {
 }
 
 fn binds_on(topo: *const Topology, thread_count: usize) bool {
-    return supported and policy != .none and topo.needs_binding(thread_count);
+    return affinity.supported and policy != .none and topo.needs_binding(thread_count);
 }
 
 fn place_on(topo: *const Topology, thread_index: usize, thread_count: usize) void {
-    if (binds_on(topo, thread_count)) bind_current_thread(&topo.node_cpus[topo.node_for_thread(thread_index)]);
-}
-
-fn bind_current_thread(cpus: *const CpuSet) void {
-    if (!supported) return;
-    var mask: std.os.linux.cpu_set_t = @splat(0);
-    var it = cpus.iterator(.{});
-    while (it.next()) |cpu| {
-        if (cpu >= @sizeOf(std.os.linux.cpu_set_t) * 8) break;
-        mask[cpu / @bitSizeOf(usize)] |= @as(usize, 1) << @intCast(cpu % @bitSizeOf(usize));
-    }
-    std.os.linux.sched_setaffinity(0, &mask) catch {};
+    if (binds_on(topo, thread_count)) affinity.bind(&topo.node_cpus[topo.node_for_thread(thread_index)]);
 }
 
 test "numa: cpulist parsing" {
@@ -221,87 +184,86 @@ test "numa: only thread counts that one node cannot hold comfortably are bound" 
     try std.testing.expect(!large_and_small.needs_binding(3));
     try std.testing.expect(large_and_small.needs_binding(4));
 
-    try std.testing.expect(!Topology.single_node().needs_binding(MAX_CPUS));
+    try std.testing.expect(!Topology.single_node().needs_binding(affinity.MAX_CPUS));
 }
 
-test "numa: binding really restricts the thread's CPUs on Linux" {
-    if (!supported) return error.SkipZigTest;
-    platform.io = std.testing.io;
-    init();
-    const topo = topology();
-    try std.testing.expect(topo.node_count >= 1);
-    try std.testing.expect(topo.node_cpus[0].count() >= 1);
+const SysfsNodes = struct {
+    tmp: std.testing.TmpDir,
+    root_buf: [std.fs.max_path_bytes]u8 = undefined,
+    root_len: usize = 0,
 
-    var original: std.os.linux.cpu_set_t = undefined;
-    try std.testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &original)));
-    defer std.os.linux.sched_setaffinity(0, &original) catch {};
+    fn two_nodes_of_eight_cpus() !SysfsNodes {
+        platform.io = std.testing.io;
+        var sysfs: SysfsNodes = .{ .tmp = std.testing.tmpDir(.{}) };
+        errdefer sysfs.tmp.cleanup();
+        const dir = sysfs.tmp.dir;
+        try dir.writeFile(platform.io, .{ .sub_path = "online", .data = "0-1\n" });
+        try dir.createDirPath(platform.io, "node0");
+        try dir.createDirPath(platform.io, "node1");
+        try dir.writeFile(platform.io, .{ .sub_path = "node0/cpulist", .data = "0-3,8-11\n" });
+        try dir.writeFile(platform.io, .{ .sub_path = "node1/cpulist", .data = "4-7,12-15\n" });
+        sysfs.root_len = try dir.realPath(platform.io, &sysfs.root_buf);
+        return sysfs;
+    }
 
-    var single = CpuSet.empty;
-    single.set(topo.node_cpus[0].findFirstSet().?);
-    bind_current_thread(&single);
+    fn detect_allowing(self: *const SysfsNodes, allowed: CpuSet) !Topology {
+        return detect(self.root_buf[0..self.root_len], allowed);
+    }
 
-    var now: std.os.linux.cpu_set_t = undefined;
-    try std.testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &now)));
-    var bound: usize = 0;
-    for (now) |word| bound += @popCount(word);
-    try std.testing.expectEqual(@as(usize, 1), bound);
-}
+    fn cleanup(self: *SysfsNodes) void {
+        self.tmp.cleanup();
+    }
+};
 
 test "numa: detection reads the sysfs node layout" {
-    platform.io = std.testing.io;
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-    const io = std.testing.io;
-    try tmp.dir.writeFile(io, .{ .sub_path = "online", .data = "0-1\n" });
-    try tmp.dir.createDirPath(io, "node0");
-    try tmp.dir.createDirPath(io, "node1");
-    try tmp.dir.writeFile(io, .{ .sub_path = "node0/cpulist", .data = "0-3,8-11\n" });
-    try tmp.dir.writeFile(io, .{ .sub_path = "node1/cpulist", .data = "4-7,12-15\n" });
-
-    var root_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const root = root_buf[0..try tmp.dir.realPath(io, &root_buf)];
-    const topo = try detect(root, CpuSet.full);
+    var sysfs = try SysfsNodes.two_nodes_of_eight_cpus();
+    defer sysfs.cleanup();
+    const topo = try sysfs.detect_allowing(.full);
     try std.testing.expectEqual(@as(usize, 2), topo.node_count);
-    try std.testing.expect(topo.node_cpus[0].isSet(9) and !topo.node_cpus[0].isSet(4));
-    try std.testing.expect(topo.node_cpus[1].isSet(12));
+    try std.testing.expect(topo.node_cpus[0].eql(try parse_cpulist("0-3,8-11")));
+    try std.testing.expect(topo.node_cpus[1].eql(try parse_cpulist("4-7,12-15")));
     try std.testing.expectEqual(@as(usize, 1), topo.node_for_thread(1));
+}
 
-    // A process restricted to CPUs 2-5 (taskset/cpuset) never leaves them.
-    const restricted = try detect(root, try parse_cpulist("2-5"));
+test "numa: a node keeps only the CPUs the process may run on" {
+    var sysfs = try SysfsNodes.two_nodes_of_eight_cpus();
+    defer sysfs.cleanup();
+    const restricted = try sysfs.detect_allowing(try parse_cpulist("2-5"));
     try std.testing.expectEqual(@as(usize, 2), restricted.node_count);
-    try std.testing.expectEqual(@as(usize, 2), restricted.node_cpus[0].count());
-    try std.testing.expect(restricted.node_cpus[0].isSet(2) and restricted.node_cpus[0].isSet(3));
-    try std.testing.expect(restricted.node_cpus[1].isSet(4) and restricted.node_cpus[1].isSet(5));
+    try std.testing.expect(restricted.node_cpus[0].eql(try parse_cpulist("2-3")));
+    try std.testing.expect(restricted.node_cpus[1].eql(try parse_cpulist("4-5")));
+}
 
-    // Restricted to one node: nothing left to spread across.
-    try std.testing.expect(!(try detect(root, try parse_cpulist("8-11"))).is_numa());
+test "numa: a process restricted to the CPUs of one node sees a single node" {
+    var sysfs = try SysfsNodes.two_nodes_of_eight_cpus();
+    defer sysfs.cleanup();
+    try std.testing.expect(!(try sysfs.detect_allowing(try parse_cpulist("8-11"))).is_numa());
+}
+
+test "numa: the topology of this machine has a node with a CPU" {
+    platform.io = std.testing.io;
+    init();
+    try std.testing.expect(topology().node_count >= 1);
+    try std.testing.expect(topology().node_cpus[0].count() >= 1);
 }
 
 test "numa: placement binds each thread to its node's CPUs on Linux" {
-    if (!supported) return error.SkipZigTest;
-    var original: std.os.linux.cpu_set_t = undefined;
-    try std.testing.expectEqual(std.os.linux.E.SUCCESS, std.os.linux.errno(std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &original)));
-    defer std.os.linux.sched_setaffinity(0, &original) catch {};
-    var available: usize = 0;
-    for (original) |word| available += @popCount(word);
-    if (available < 2) return error.SkipZigTest;
+    if (!affinity.supported) return error.SkipZigTest;
+    const original = affinity.current();
+    defer affinity.bind(&original);
+    if (original.count() < 2) return error.SkipZigTest;
 
-    // Two single-CPU "nodes" on the first two CPUs this process may use.
     var topo = Topology{};
-    var cpus = std.bit_set.Integer(@bitSizeOf(usize)).empty;
-    cpus.mask = original[0];
-    var it = cpus.iterator(.{});
+    var allowed = original.iterator(.{});
     for (0..2) |_| {
-        var list_buf: [8]u8 = undefined;
-        try topo.add_node(try std.fmt.bufPrint(&list_buf, "{}", .{it.next().?}));
+        var single_cpu_node: CpuSet = .empty;
+        single_cpu_node.set(allowed.next().?);
+        try topo.add_cpus(single_cpu_node);
     }
 
     const thread_count = THREADS_PER_NODE_WORTH_BINDING * topo.node_count;
     for ([_]usize{ 0, 1 }) |thread| {
         place_on(&topo, thread, thread_count);
-        var now: std.os.linux.cpu_set_t = undefined;
-        _ = std.os.linux.sched_getaffinity(0, @sizeOf(std.os.linux.cpu_set_t), &now);
-        const expected_cpu = topo.node_cpus[topo.node_for_thread(thread)].findFirstSet().?;
-        try std.testing.expectEqual(@as(usize, 1) << @intCast(expected_cpu), now[0]);
+        try std.testing.expect(affinity.current().eql(topo.node_cpus[topo.node_for_thread(thread)]));
     }
 }

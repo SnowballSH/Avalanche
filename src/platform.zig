@@ -1,10 +1,10 @@
-//! OS services the engine depends on, backed by std.Io/libc natively and by
-//! host imports on wasm32-freestanding. See docs/WASM.md.
+//! OS services the engine depends on. See docs/WASM.md.
 
 const std = @import("std");
 const builtin = @import("builtin");
 
 pub const is_wasm = builtin.target.cpu.arch.isWasm();
+pub const is_linux = builtin.target.os.tag == .linux and !is_wasm;
 pub const has_threads = !builtin.single_threaded;
 
 pub var io: std.Io = undefined;
@@ -12,6 +12,7 @@ pub var io: std.Io = undefined;
 pub const allocator: std.mem.Allocator = if (is_wasm) std.heap.wasm_allocator else std.heap.c_allocator;
 
 pub const large_memory = @import("platform/large_memory.zig");
+pub const affinity = @import("platform/affinity.zig");
 
 const host = if (is_wasm) struct {
     extern "env" fn avalanche_write(ptr: [*]const u8, len: usize) void;
@@ -29,14 +30,10 @@ pub inline fn hostStopRequested() bool {
     return is_wasm and host.avalanche_stop_requested();
 }
 
-/// On wasm a search runs synchronously, so `ponderhit` arrives through the host
-/// like `stop` does; natively it is delivered as a UCI command instead.
 pub inline fn hostPonderhitRequested() bool {
     return is_wasm and host.avalanche_ponderhit_requested();
 }
 
-/// Yields while waiting on another thread or the host. Wasm has no sleep, so
-/// callers there busy-poll the host signals.
 pub fn sleepMs(ms: i64) void {
     if (is_wasm) return;
     io.sleep(std.Io.Duration.fromMilliseconds(ms), .awake) catch {};
@@ -87,8 +84,6 @@ const HostStdout = struct {
     }
 };
 
-/// std.debug.print has no sink on freestanding wasm, so user-facing debug
-/// output goes through here instead.
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (!is_wasm) return std.debug.print(fmt, args);
     var buf: [1024]u8 = undefined;
@@ -98,8 +93,10 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     w.flush() catch {};
 }
 
-// wasm32 caps atomic operands at 32 bits; single-threaded builds need no
-// atomicity, so these lower to plain memory operations there.
+pub fn fatal(message: []const u8) noreturn {
+    @branchHint(.cold);
+    @panic(message);
+}
 
 pub inline fn atomicLoad(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicLoad(T, ptr, order);
