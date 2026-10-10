@@ -1,30 +1,29 @@
-const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const nnue = @import("nnue.zig");
 
 pub const MateScore: i32 = 888888;
+pub const MaxMate: i32 = 400;
 
-pub const UseNNUE = true;
+pub inline fn is_near_mate(score: i32) bool {
+    return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;
+}
 
 pub const DEFAULT_EVAL_SCALE: i32 = 1000;
 pub const MIN_EVAL_SCALE: i32 = 500;
 pub const MAX_EVAL_SCALE: i32 = 2000;
 
-/// Permille multiplier on the network output (UCI `EvalScale`), which brings a
-/// network onto the eval scale the search margins are tuned to.
 pub var eval_scale: i32 = DEFAULT_EVAL_SCALE;
 
 pub inline fn scale_network_output(raw: i32) i32 {
     return @divTrunc(raw * eval_scale, DEFAULT_EVAL_SCALE);
 }
 
-/// Whether the network, rather than the classical endgame evaluation, scores `pos`.
 pub inline fn network_evaluates(pos: *const position.Position) bool {
-    return UseNNUE and (pos.phase() >= 3 or pos.has_pawns());
+    return pos.phase() >= 3 or pos.has_pawns();
 }
 
-pub const Mateiral: [6][2]i32 = .{
+pub const Material: [6][2]i32 = .{
     .{ 82, 94 },
     .{ 337, 281 },
     .{ 365, 297 },
@@ -33,7 +32,6 @@ pub const Mateiral: [6][2]i32 = .{
     .{ 0, 0 },
 };
 
-// PeSTO PSQT for testing purposes
 pub const PSQT: [6][2][64]i32 = .{
     .{
         .{
@@ -188,20 +186,18 @@ pub const DynamicEvaluator = struct {
     need_hce: bool = false,
 
     pub inline fn add_piece(self: *DynamicEvaluator, pc: types.Piece, sq: types.Square, _: *position.Position) void {
-        if (UseNNUE) {
-            self.nnue_evaluator.toggle(true, pc, sq);
-        }
+        self.nnue_evaluator.toggle(true, pc, sq);
         if (self.need_hce) {
             const i = pc.piece_type().index();
             if (pc.color() == types.Color.White) {
-                self.score_mg += Mateiral[i][0];
+                self.score_mg += Material[i][0];
                 self.score_mg += PSQT[i][0][sq.index() ^ 56];
-                self.score_eg_material += Mateiral[i][1];
+                self.score_eg_material += Material[i][1];
                 self.score_eg_non_mat += PSQT[i][1][sq.index() ^ 56];
             } else {
-                self.score_mg -= Mateiral[i][0];
+                self.score_mg -= Material[i][0];
                 self.score_mg -= PSQT[i][0][sq.index()];
-                self.score_eg_material -= Mateiral[i][1];
+                self.score_eg_material -= Material[i][1];
                 self.score_eg_non_mat -= PSQT[i][1][sq.index()];
             }
         }
@@ -211,50 +207,39 @@ pub const DynamicEvaluator = struct {
         const pc = pos.mailbox[sq.index()];
 
         if (pc != types.Piece.NO_PIECE) {
-            if (UseNNUE) {
-                self.nnue_evaluator.toggle(false, pc, sq);
-            }
+            self.nnue_evaluator.toggle(false, pc, sq);
             if (self.need_hce) {
                 const i = pc.piece_type().index();
                 if (pc.color() == types.Color.White) {
-                    self.score_mg -= Mateiral[i][0];
+                    self.score_mg -= Material[i][0];
                     self.score_mg -= PSQT[i][0][sq.index() ^ 56];
-                    self.score_eg_material -= Mateiral[i][1];
+                    self.score_eg_material -= Material[i][1];
                     self.score_eg_non_mat -= PSQT[i][1][sq.index() ^ 56];
                 } else {
-                    self.score_mg += Mateiral[i][0];
+                    self.score_mg += Material[i][0];
                     self.score_mg += PSQT[i][0][sq.index()];
-                    self.score_eg_material += Mateiral[i][1];
+                    self.score_eg_material += Material[i][1];
                     self.score_eg_non_mat += PSQT[i][1][sq.index()];
                 }
             }
         }
     }
 
-    pub inline fn move_piece(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
-        self.remove_piece(to, pos);
-        self.move_piece_quiet(from, to, pos);
-    }
-
     pub inline fn capture_piece(self: *DynamicEvaluator, captured: types.Piece, moving: types.Piece, from: types.Square, to: types.Square) void {
-        if (UseNNUE) {
-            self.nnue_evaluator.capture(captured, moving, from, to);
-        }
+        self.nnue_evaluator.capture(captured, moving, from, to);
         if (self.need_hce) {
-            // Remove captured piece at to
             const ci = captured.piece_type().index();
             if (captured.color() == types.Color.White) {
-                self.score_mg -= Mateiral[ci][0];
+                self.score_mg -= Material[ci][0];
                 self.score_mg -= PSQT[ci][0][to.index() ^ 56];
-                self.score_eg_material -= Mateiral[ci][1];
+                self.score_eg_material -= Material[ci][1];
                 self.score_eg_non_mat -= PSQT[ci][1][to.index() ^ 56];
             } else {
-                self.score_mg += Mateiral[ci][0];
+                self.score_mg += Material[ci][0];
                 self.score_mg += PSQT[ci][0][to.index()];
-                self.score_eg_material += Mateiral[ci][1];
+                self.score_eg_material += Material[ci][1];
                 self.score_eg_non_mat += PSQT[ci][1][to.index()];
             }
-            // Move piece from -> to
             const mi = moving.piece_type().index();
             if (moving.color() == types.Color.White) {
                 self.score_mg -= PSQT[mi][0][from.index() ^ 56];
@@ -273,9 +258,7 @@ pub const DynamicEvaluator = struct {
     pub inline fn move_piece_quiet(self: *DynamicEvaluator, from: types.Square, to: types.Square, pos: *position.Position) void {
         const pc = pos.mailbox[from.index()];
         if (pc != types.Piece.NO_PIECE) {
-            if (UseNNUE) {
-                self.nnue_evaluator.move(pc, from, to);
-            }
+            self.nnue_evaluator.move(pc, from, to);
             if (self.need_hce) {
                 const i = pc.piece_type().index();
                 if (pc.color() == types.Color.White) {
@@ -294,9 +277,7 @@ pub const DynamicEvaluator = struct {
     }
 
     pub fn full_refresh(self: *DynamicEvaluator, pos: *position.Position) void {
-        if (UseNNUE) {
-            self.nnue_evaluator.refresh_accumulator(pos);
-        }
+        self.nnue_evaluator.refresh_accumulator(pos);
         self.refresh_hce(pos);
     }
 
@@ -310,14 +291,14 @@ pub const DynamicEvaluator = struct {
             }
             const i = piece.piece_type().index();
             if (piece.color() == types.Color.White) {
-                mg += Mateiral[i][0];
+                mg += Material[i][0];
                 mg += PSQT[i][0][index ^ 56];
-                eg_material += Mateiral[i][1];
+                eg_material += Material[i][1];
                 eg_non_mat += PSQT[i][1][index ^ 56];
             } else {
-                mg -= Mateiral[i][0];
+                mg -= Material[i][0];
                 mg -= PSQT[i][0][index];
-                eg_material -= Mateiral[i][1];
+                eg_material -= Material[i][1];
                 eg_non_mat -= PSQT[i][1][index];
             }
         }
@@ -351,8 +332,6 @@ pub inline fn distance_eval(pos: *position.Position, comptime white_winning: boo
     return score;
 }
 
-/// `.raw` returns the network output untouched, for self-play data generation. Positions the network is not used
-/// for keep the full `.scaled` evaluation in both modes.
 pub const EvalMode = enum { scaled, raw };
 
 pub inline fn evaluate_comptime(pos: *position.Position, comptime color: types.Color) i32 {
@@ -371,8 +350,6 @@ pub fn evaluate_mode(pos: *position.Position, comptime color: types.Color, compt
             pos.evaluator.need_hce = true;
             pos.evaluator.refresh_hce(pos);
         }
-        // Tapered eval
-
         var mg_phase: i32 = 0;
         var eg_phase: i32 = 0;
         var mg_score: i32 = 0;
@@ -388,16 +365,13 @@ pub fn evaluate_mode(pos: *position.Position, comptime color: types.Color, compt
         eg_score = pos.evaluator.score_eg_material;
 
         while (true) {
-            // Late endgame with one side winning
             if (phase <= 4 and phase >= 1 and !pos.has_pawns()) {
                 if (pos.piece_bitboards[types.Piece.BLACK_KING.index()] == pos.all_pieces(types.Color.Black)) {
-                    // White is winning
                     eg_score += distance_eval(pos, true);
                     eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
                     eg_score = @max(100, eg_score - @as(i32, @intCast(pos.history[pos.game_ply].fifty)));
                     break;
                 } else if (pos.piece_bitboards[types.Piece.WHITE_KING.index()] == pos.all_pieces(types.Color.White)) {
-                    // Black is winning
                     eg_score += distance_eval(pos, false);
                     eg_score += @divTrunc(pos.evaluator.score_eg_non_mat, 2);
                     eg_score = @min(-100, eg_score + @as(i32, @intCast(pos.history[pos.game_ply].fifty)));
@@ -423,13 +397,11 @@ pub fn evaluate_mode(pos: *position.Position, comptime color: types.Color, compt
         result = @divTrunc(result, drawish_factor);
     }
 
-    // Scaling idea from Clover
     result = @divTrunc(result * (700 + @divTrunc(pos.phase_material(), 32) - @as(i32, @intCast(pos.history[pos.game_ply].fifty)) * 5), 1024);
 
     return result;
 }
 
-/// The network's output for the side to move, without `eval_scale`.
 pub inline fn evaluate_nnue(pos: *position.Position) i32 {
     return pos.evaluator.nnue_evaluator.evaluate(pos.turn, pos);
 }
@@ -438,7 +410,6 @@ pub inline fn evaluate_nnue_comptime(pos: *position.Position, comptime color: ty
     return pos.evaluator.nnue_evaluator.evaluate_comptime(color, pos);
 }
 
-/// Bare kings, or a single knight or bishop besides them.
 pub inline fn is_material_draw(pos: *const position.Position) bool {
     const bb = &pos.piece_bitboards;
     const pawns_and_majors = bb[types.Piece.WHITE_PAWN.index()] | bb[types.Piece.BLACK_PAWN.index()] |
@@ -467,7 +438,6 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
     const wnc = types.popcount(wn);
     const bnc = types.popcount(bn);
 
-    // KN vs K or KNN vs K
     if (wnc <= 2 and wn | kings == all) {
         return true;
     }
@@ -476,17 +446,14 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
         return true;
     }
 
-    // KN vs KN
     if (wnc == 1 and bnc == 1 and wn | bn | kings == all) {
         return true;
     }
 
-    // KB vs KB
     if (wbc == 1 and bbc == 1 and wb | bb | kings == all) {
         return true;
     }
 
-    // KB vs KN
     if (wbc == 1 and bnc == 1 and wb | bn | kings == all) {
         return true;
     }
@@ -495,7 +462,6 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
         return true;
     }
 
-    // KNN vs KB
     if (wnc == 2 and bbc == 1 and wn | bb | kings == all) {
         return true;
     }
@@ -504,7 +470,6 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
         return true;
     }
 
-    // KBN vs KB
     if (wbc == 1 and wnc == 1 and bbc == 1 and wb | wn | bb | kings == all) {
         return true;
     }
@@ -514,11 +479,4 @@ pub inline fn is_material_drawish(pos: *position.Position) bool {
     }
 
     return false;
-}
-
-// Must satisfy MaxMate >= 2 * search.MAX_PLY
-pub const MaxMate: i32 = 400;
-
-pub inline fn is_near_mate(score: i32) bool {
-    return score >= MateScore - MaxMate or score <= -MateScore + MaxMate;
 }

@@ -3,9 +3,9 @@ const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const search = @import("search.zig");
+const tt = @import("tt.zig");
 
 // zig fmt: off
-// FENs from Stormphrax who got them from Alexandria who got them from Bit-Genie
 pub const FENS = [_][:0]const u8{
     "r3k2r/2pb1ppp/2pp1q2/p7/1nP1B3/1P2P3/P2N1PPP/R2QK2R w KQkq a6 0 14",
     "4rrk1/2p1b1p1/p1p3q1/4p3/2P2n1p/1P1NR2P/PB3PP1/3R1QK1 b - - 2 24",
@@ -74,24 +74,27 @@ fn runBenchSearch(job: BenchJob) void {
     }
 }
 
-pub fn bench() !void {
-    var out_buf: [256]u8 = undefined;
-    var stdout_file = platform.Stdout.init(&out_buf);
-    const stdout = stdout_file.writer();
+const DEPTH: u8 = 14;
+const HASH_MB = 16;
 
-    const depth: u8 = 14;
+pub fn count_nodes(depth: u8) u64 {
+    var table = tt.TranspositionTable.new();
+    defer table.deinit();
+    table.reset(HASH_MB);
+    if (table.size == 0) @panic("out of memory for the bench hash table");
+
     var nodes: u64 = 0;
-    const timer = types.Timer.start();
-    const searcher = platform.allocator.create(search.Searcher) catch unreachable;
+    const searcher = platform.allocator.create(search.Searcher) catch @panic("out of memory for the bench searcher");
     defer {
         searcher.deinit();
         platform.allocator.destroy(searcher);
     }
     searcher.init();
+    searcher.ttable = &table;
     searcher.force_thinking = true;
     searcher.silent_output = true;
 
-    const pos = platform.allocator.create(position.Position) catch unreachable;
+    const pos = platform.allocator.create(position.Position) catch @panic("out of memory for the bench position");
     defer {
         pos.deinit();
         platform.allocator.destroy(pos);
@@ -106,14 +109,23 @@ pub fn bench() !void {
         searcher.hash_history.append(pos.hash) catch unreachable;
         const job = BenchJob{ .searcher = searcher, .pos = pos, .depth = depth };
         if (comptime platform.has_threads) {
-            const thread = std.Thread.spawn(.{ .stack_size = 256 * 1024 * 1024 }, runBenchSearch, .{job}) catch unreachable;
+            const thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, runBenchSearch, .{job}) catch @panic("cannot start the bench search thread");
             thread.join();
         } else {
             runBenchSearch(job);
         }
         nodes += searcher.shared.nodes;
     }
+    return nodes;
+}
 
+pub fn bench() !void {
+    var out_buf: [256]u8 = undefined;
+    var stdout_file = platform.Stdout.init(&out_buf);
+    const stdout = stdout_file.writer();
+
+    const timer = types.Timer.start();
+    const nodes = count_nodes(DEPTH);
     try stdout.print("{} nodes {} nps\n", .{ nodes, nodes * std.time.ns_per_s / timer.read() });
     try stdout.flush();
 }
