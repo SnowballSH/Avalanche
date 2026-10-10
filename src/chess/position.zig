@@ -4,6 +4,7 @@ const platform = @import("../platform.zig");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
 const castling = @import("castling.zig");
+const fen = @import("fen.zig");
 const zobrist = @import("zobrist.zig");
 const utils = @import("utils.zig");
 const hce = @import("../engine/hce.zig");
@@ -187,10 +188,10 @@ pub const Position = struct {
         platform.print("Hash: 0x{x}\n", .{self.hash});
     }
 
-    pub fn set_fen(self: *Position, fen: []const u8) void {
+    pub fn set_fen(self: *Position, text: []const u8) void {
         self.reset();
         var sq: i32 = @as(i32, @intCast(@backingInt(types.Square.a8)));
-        var tokens = std.mem.tokenizeScalar(u8, fen, ' ');
+        var tokens = std.mem.tokenizeScalar(u8, text, ' ');
         const bd = tokens.next() orelse return;
         for (bd) |ch| {
             if (std.ascii.isDigit(ch)) {
@@ -213,27 +214,9 @@ pub const Position = struct {
 
         self.parse_castling(tokens.next() orelse "-");
 
-        const ep = tokens.next() orelse "-";
-        if (ep.len == 2) {
-            for (types.SquareToString, 0..) |sq_str, i| {
-                if (std.mem.eql(u8, ep, sq_str)) {
-                    // Same "phantom EP" guard as play_move: only record the square
-                    // when a pawn of the side to move can actually capture en
-                    // passant, so an idle EP square in the FEN does not give this
-                    // position a hash that differs from the same position with the
-                    // EP right expired (see play_move's DOUBLE_PUSH branch).
-                    const ep_target = @as(types.Square, @fromBackingInt(@intCast(i)));
-                    const can_capture = if (self.turn == types.Color.White)
-                        (tables.get_pawn_attacks(types.Color.Black, ep_target) & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]) != 0
-                    else
-                        (tables.get_pawn_attacks(types.Color.White, ep_target) & self.piece_bitboards[types.Piece.BLACK_PAWN.index()]) != 0;
-                    if (can_capture) {
-                        self.history[self.game_ply].ep_sq = ep_target;
-                        self.hash ^= zobrist.EnPassantHash[types.file_plain(i)];
-                    }
-                    break;
-                }
-            }
+        if (self.capturable_en_passant_square(tokens.next() orelse "-")) |ep_sq| {
+            self.history[self.game_ply].ep_sq = ep_sq;
+            self.hash ^= zobrist.EnPassantHash[ep_sq.file().index()];
         }
 
         if (tokens.next()) |fifty_tok| {
@@ -255,6 +238,15 @@ pub const Position = struct {
         };
 
         self.evaluator.full_refresh(self);
+    }
+
+    fn capturable_en_passant_square(self: *const Position, field: []const u8) ?types.Square {
+        const opponent = self.turn.invert();
+        const their_pawns = self.piece_bitboards[types.Piece.new(opponent, .Pawn).index()];
+        const our_pawns = self.piece_bitboards[types.Piece.new(self.turn, .Pawn).index()];
+        const square = (fen.en_passant_square(field, self.turn, their_pawns, self.all_all_pieces()) catch null) orelse return null;
+        const capturers = tables.PawnAttacks[@backingInt(opponent)][square.index()] & our_pawns;
+        return if (capturers != 0) square else null;
     }
 
     pub fn compute_pawn_hash(self: *const Position) u64 {

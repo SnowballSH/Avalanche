@@ -421,6 +421,56 @@ test "fen: write_fen reproduces the FEN a position was set from" {
     }
 }
 
+fn has_en_passant_capture(moves: []const types.Move) bool {
+    for (moves) |move| {
+        if (move.get_flags() == .EN_PASSANT) return true;
+    }
+    return false;
+}
+
+test "fen: set_fen keeps an en-passant square that a pawn of the side to move can capture on" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    const cases = [_]struct { fen: []const u8, square: types.Square }{
+        .{ .fen = "4k3/8/8/3Pp3/8/8/8/4K3 w - e6 0 1", .square = .e6 },
+        .{ .fen = "4k3/8/8/8/3pP3/8/8/4K3 b - e3 0 1", .square = .e3 },
+    };
+    for (cases) |case| {
+        const moves = set_up(pos, case.fen);
+        try expectEqual(case.square, pos.history[pos.game_ply].ep_sq);
+        try expect(has_en_passant_capture(moves.items()));
+    }
+}
+
+test "fen: set_fen drops an en-passant square that no double push can have left" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    const without_square = try support.new_position();
+    defer support.destroy_position(without_square);
+
+    const cases = [_]struct { placement: []const u8, square: []const u8 }{
+        .{ .placement = "8/8/8/3Pk3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/8/3P4/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/8/3PP3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/4n3/3Pp3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/4p3/8/3Pp3/8/8/8/4K3 w -", .square = "e6" },
+        .{ .placement = "4k3/8/8/8/8/3Pp3/8/4K3 w -", .square = "e4" },
+        .{ .placement = "4k3/8/8/8/3pp3/8/8/4K3 b -", .square = "e3" },
+    };
+    var buf: [position.FEN_CAPACITY]u8 = undefined;
+    for (cases) |case| {
+        const moves = set_up(pos, try std.mem.print(&buf, "{s} {s} 0 1", .{ case.placement, case.square }));
+        try expectEqual(types.Square.NO_SQUARE, pos.history[pos.game_ply].ep_sq);
+        try expect(!has_en_passant_capture(moves.items()));
+
+        without_square.set_fen(try std.mem.print(&buf, "{s} - 0 1", .{case.placement}));
+        try expectEqual(without_square.keys(), pos.keys());
+    }
+}
+
 test "make/unmake: castling in which king and rook swap squares" {
     support.init_tables();
     const pos = try support.new_position();

@@ -39,6 +39,19 @@ zero key. No caller does it; `move_piece` and `move_piece_quiet` are private to 
 
 ## FEN
 
+`history[game_ply].ep_sq` holds an en-passant square only while a pawn of the side to move
+attacks it, after a double push (`play_move`) as well as from a FEN (`set_fen`), and only then is
+the en-passant key part of `hash`. A square that nobody can capture on would give the position
+another key than the same position has without the square, and the repetition rule counts the
+two as one.
+
+`set_fen` also drops a square that no double push can have left: `fen.en_passant_square` asks
+for the right rank, for the square and the origin square of the push to be empty, and for a pawn
+of the side that just moved on the square the push ends on. Without the test the capture would
+remove whatever stands there, the king included. `fen.validate`, which checks a line without
+building a position (datagen runs it over its books, docs/DATAGEN.md), calls the same function
+and rejects such a line, where `set_fen` plays on without the square.
+
 `write_fen` writes into a buffer of `FEN_CAPACITY` bytes, the length of the longest text it can
 produce, so it needs no allocator and cannot fail. docs/CHESS960.md describes the castling field.
 
