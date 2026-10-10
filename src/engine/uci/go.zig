@@ -1,10 +1,11 @@
+//! See docs/UCI.md.
+
 const std = @import("std");
 const types = @import("../../chess/types.zig");
 const position = @import("../../chess/position.zig");
 const search = @import("../search.zig");
 const parameters = @import("../parameters.zig");
 
-/// Arguments of a UCI `go` command. Every limit is optional and they combine.
 pub const GoCommand = struct {
     time: [types.N_COLORS]?u64 = .{ null, null },
     increment: [types.N_COLORS]?u64 = .{ null, null },
@@ -51,7 +52,6 @@ pub const GoCommand = struct {
         return cmd;
     }
 
-    // `searchmoves` consumes tokens until one is not a legal move.
     fn parse_search_moves(self: *GoCommand, tokens: *std.mem.TokenIterator(u8, .scalar), pos: *position.Position) void {
         while (tokens.peek()) |token| {
             const move = types.Move.new_from_string(pos, token);
@@ -68,12 +68,13 @@ pub const GoCommand = struct {
 pub const TimeBudget = struct {
     ideal_ms: u64,
     maximum_ms: u64,
-    // False when no clock or movetime applies; the search then ignores time.
     managed: bool,
 };
 
+const UNLIMITED_MS: u64 = 1 << 60;
+
 pub fn allocate_time(cmd: *const GoCommand, turn: types.Color, overhead_ms: u64) TimeBudget {
-    var budget = TimeBudget{ .ideal_ms = 1 << 60, .maximum_ms = 1 << 60, .managed = false };
+    var budget = TimeBudget{ .ideal_ms = UNLIMITED_MS, .maximum_ms = UNLIMITED_MS, .managed = false };
 
     if (cmd.time[@backingInt(turn)]) |remaining| {
         const clock = clock_budget(remaining, cmd.increment[@backingInt(turn)] orelse 0, cmd.moves_to_go, overhead_ms);
@@ -92,19 +93,19 @@ fn clock_budget(remaining: u64, increment: u64, moves_to_go: ?u64, overhead: u64
         return .{ .ideal_ms = panic_budget, .maximum_ms = panic_budget, .managed = true };
     }
 
+    const usable = remaining - overhead;
     var ideal: u64 = undefined;
     var maximum: u64 = undefined;
     if (moves_to_go) |mtg| {
-        ideal = increment + (2 * (remaining - overhead)) / (2 * mtg + 1);
-        maximum = @min(2 * ideal, remaining - @min(remaining - overhead, overhead * @min(mtg, 5)));
+        ideal = increment +| (2 *| usable) / (2 *| mtg +| 1);
+        maximum = @min(2 *| ideal, remaining - @min(usable, overhead *| @min(mtg, 5)));
     } else {
-        const usable = remaining - overhead;
-        ideal = increment + ((usable * parameters.TmSoftFactor) >> 10);
-        maximum = 2 * increment + ((usable * parameters.TmHardFactor) >> 10);
+        ideal = increment +| ((usable *| parameters.TmSoftFactor) >> 10);
+        maximum = 2 *| increment +| ((usable *| parameters.TmHardFactor) >> 10);
     }
     return .{
-        .ideal_ms = @min(ideal, remaining - overhead),
-        .maximum_ms = @min(maximum, remaining - overhead),
+        .ideal_ms = @min(ideal, usable, UNLIMITED_MS),
+        .maximum_ms = @min(maximum, usable, UNLIMITED_MS),
         .managed = true,
     };
 }
@@ -117,15 +118,12 @@ fn parse_number(comptime T: type, token: ?[]const u8) ?T {
     return std.fmt.parseInt(T, token orelse return null, 10) catch null;
 }
 
-// A search limit that is present but malformed or non-positive becomes the
-// smallest meaningful limit, so it can never turn into an unbounded search.
 fn parse_limit(comptime T: type, token: ?[]const u8) ?T {
     const raw = token orelse return null;
     const value = std.fmt.parseInt(i64, raw, 10) catch return 1;
     return @intCast(std.math.clamp(value, 1, std.math.maxInt(T)));
 }
 
-// Clocks can go non-positive under lag; treat that as 1 ms left.
 fn parse_clock(token: ?[]const u8) ?u64 {
     const ms = parse_number(i64, token) orelse return null;
     return @intCast(@max(ms, 1));
@@ -175,4 +173,24 @@ test "go: time allocation" {
 
     clock.move_time = 200;
     try std.testing.expectEqual(@as(u64, 200), allocate_time(&clock, .White, 25).maximum_ms);
+}
+
+test "go: clocks, increments and movestogo at the integer limits give a budget no larger than an unlimited search" {
+    var pos: position.Position = undefined;
+    const lines = [_][]const u8{
+        "wtime 9000000000000000000 btime 9223372036854775807 winc 18446744073709551615 binc 18446744073709551615",
+        "wtime 9000000000000000000 btime 9223372036854775807 winc 18446744073709551615 binc 18446744073709551615 movestogo 1",
+        "wtime 9000000000000000000 btime 9223372036854775807 winc 18446744073709551615 binc 18446744073709551615 movestogo 18446744073709551615",
+    };
+    for (lines) |line| {
+        var tokens = std.mem.tokenizeScalar(u8, line, ' ');
+        const cmd = GoCommand.parse(&tokens, &pos);
+        for ([_]types.Color{ .White, .Black }) |turn| {
+            const budget = allocate_time(&cmd, turn, search.MAX_MOVE_OVERHEAD);
+            const unlimited = allocate_time(&GoCommand{}, turn, search.MAX_MOVE_OVERHEAD);
+            try std.testing.expect(budget.managed);
+            try std.testing.expect(budget.ideal_ms >= 1 and budget.ideal_ms <= unlimited.ideal_ms);
+            try std.testing.expect(budget.maximum_ms >= 1 and budget.maximum_ms <= unlimited.maximum_ms);
+        }
+    }
 }
