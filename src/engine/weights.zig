@@ -21,38 +21,71 @@ pub const MAGIC = "AVALNNUE";
 pub const HEADER_SIZE = 64;
 pub const FORMAT_VERSION = 2;
 
-pub const L1_SHIFT_OFFSET = MAGIC.len + 12 * 4;
+const HeaderField = enum {
+    format_version,
+    head,
+    input_buckets,
+    accumulator_width,
+    output_buckets,
+    l1_outputs,
+    l2_outputs,
+    qa,
+    ft_shift,
+    act_bits,
+    weight_bits,
+    scale,
+    l1_shift,
+    reserved,
+};
+
+const HeaderFields = std.enums.EnumArray(HeaderField, u32);
+
+comptime {
+    std.debug.assert(MAGIC.len + HeaderFields.len * @sizeOf(u32) == HEADER_SIZE);
+}
+
+fn header_offset(field: HeaderField) usize {
+    return MAGIC.len + HeaderFields.Indexer.indexOf(field) * @sizeOf(u32);
+}
+
+pub const L1_SHIFT_OFFSET = header_offset(.l1_shift);
 
 pub fn multi_header(shift: head_multi.L1Shift) [HEADER_SIZE]u8 {
-    const fields = [_]u32{
-        FORMAT_VERSION,
-        @backingInt(Head.multi),
-        NUM_INPUT_BUCKETS,
-        HIDDEN_SIZE,
-        OUTPUT_SIZE,
-        head_multi.L1_SIZE,
-        head_multi.L2_SIZE,
-        arch.QA,
-        head_multi.FT_SHIFT,
-        head_multi.ACT_BITS,
-        head_multi.WEIGHT_BITS,
-        arch.SCALE,
-        shift,
-    };
-    var header: [HEADER_SIZE]u8 = @splat(0);
+    var fields: HeaderFields = .init(.{
+        .format_version = FORMAT_VERSION,
+        .head = @backingInt(Head.multi),
+        .input_buckets = NUM_INPUT_BUCKETS,
+        .accumulator_width = HIDDEN_SIZE,
+        .output_buckets = OUTPUT_SIZE,
+        .l1_outputs = head_multi.L1_SIZE,
+        .l2_outputs = head_multi.L2_SIZE,
+        .qa = arch.QA,
+        .ft_shift = head_multi.FT_SHIFT,
+        .act_bits = head_multi.ACT_BITS,
+        .weight_bits = head_multi.WEIGHT_BITS,
+        .scale = arch.SCALE,
+        .l1_shift = shift,
+        .reserved = 0,
+    });
+    var header: [HEADER_SIZE]u8 = undefined;
     @memcpy(header[0..MAGIC.len], MAGIC);
-    for (fields, 0..) |field, i| {
-        std.mem.writeInt(u32, header[MAGIC.len + i * 4 ..][0..4], field, .little);
+    var stored = fields.iterator();
+    while (stored.next()) |field| {
+        std.mem.writeInt(u32, header[header_offset(field.key)..][0..@sizeOf(u32)], field.value.*, .little);
     }
     return header;
 }
 
+fn stored_l1_shift(header: *const [HEADER_SIZE]u8) u32 {
+    return std.mem.readInt(u32, header[L1_SHIFT_OFFSET..][0..@sizeOf(u32)], .little);
+}
+
 pub inline fn l1_shift(header: *const [HEADER_SIZE]u8) head_multi.L1Shift {
-    return @truncate(header[L1_SHIFT_OFFSET]);
+    return @intCast(stored_l1_shift(header));
 }
 
 fn header_supported(header: *const [HEADER_SIZE]u8) bool {
-    const shift = std.mem.readInt(u32, header[L1_SHIFT_OFFSET..][0..4], .little);
+    const shift = stored_l1_shift(header);
     if (shift > head_multi.L1_SHIFT_MAX) return false;
     return std.mem.eql(u8, header, &multi_header(@intCast(shift)));
 }
@@ -121,7 +154,7 @@ pub const EMBEDDED_NAME = "<embedded>";
 
 pub const ARCHITECTURE = std.fmt.comptimePrint("{d}x{d}->{d}->{s}", .{ arch.FEATURES_PER_BUCKET, NUM_INPUT_BUCKETS, HIDDEN_SIZE, head.DESCRIPTION });
 
-var active_name_buf: [std.fs.max_name_bytes]u8 = undefined;
+var active_name_buf: [std.Io.Dir.max_name_bytes]u8 = undefined;
 var active_name: []const u8 = build_options.net_name;
 
 pub fn active_network() []const u8 {
@@ -215,7 +248,7 @@ pub fn load(path: []const u8) !void {
     defer platform.allocator.free(bytes);
     try install(bytes);
 
-    const file_name = std.fs.path.basename(path);
+    const file_name = std.Io.Dir.path.basename(path);
     @memcpy(active_name_buf[0..file_name.len], file_name);
     active_name = active_name_buf[0..file_name.len];
 }
