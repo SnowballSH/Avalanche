@@ -1,12 +1,6 @@
 #!/usr/bin/env bash
-# Builds the release binaries of docs/BUILD.md ("Release matrix") into artifacts/ and verifies each.
-#   bash build_all_v3.sh              every binary, the wasm module and artifacts/build.zip
-#   bash build_all_v3.sh <name>...    only the named binaries (e.g. x86_64-linux-v2), no packaging
-# VERSION=4.1.0 makes a release; without it the binaries report their build time.
-# VERIFY_INSTRUCTIONS=0 skips the disassembly on a machine without llvm-objdump 15 or later.
-# REQUIRE_RUN=1 fails when this machine cannot execute one of the binaries it built.
 set -euo pipefail
-cd "$(dirname "${BASH_SOURCE[0]}")"
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 VERSION="${VERSION:-dev}"
 VERSION="${VERSION#v}"
@@ -55,7 +49,6 @@ fail() {
     exit 1
 }
 
-# Prints the row of a table whose first field is the key.
 lookup() {
     local table="$1" key="$2" row
     while IFS= read -r row; do
@@ -67,23 +60,21 @@ lookup() {
     return 1
 }
 
-# Older versions do not decode every AArch64 extension, so an absent `sdot` would prove nothing.
 find_objdump() {
-    local candidate path version
-    local -a candidates=(llvm-objdump)
-    for version in {22..15}; do
-        candidates+=("llvm-objdump-$version")
-    done
-    for candidate in "${candidates[@]}"; do
-        path="$(command -v "$candidate" || true)"
-        if [ -z "$path" ] && [ "$candidate" = llvm-objdump ] && command -v xcrun > /dev/null; then
-            path="$(xcrun -f llvm-objdump 2> /dev/null || true)"
-        fi
-        [ -n "$path" ] || continue
-        version="$("$path" --version | grep -o -E 'LLVM version [0-9]+' | grep -o -E '[0-9]+$' || true)"
+    local candidate version
+    local -a candidates=()
+    while IFS= read -r candidate; do
+        candidates+=("$candidate")
+    done < <(compgen -c llvm-objdump | sort -u -V -r || true)
+    if command -v xcrun > /dev/null; then
+        candidate="$(xcrun -f llvm-objdump 2> /dev/null || true)"
+        [ -z "$candidate" ] || candidates+=("$candidate")
+    fi
+    for candidate in ${candidates[@]+"${candidates[@]}"}; do
+        version="$("$candidate" --version 2> /dev/null | grep -o -E 'LLVM version [0-9]+' | grep -o -E '[0-9]+$' || true)"
         version="${version%%$'\n'*}"
         if [ -n "$version" ] && [ "$version" -ge "$MIN_OBJDUMP_VERSION" ]; then
-            printf '%s\n' "$path"
+            command -v "$candidate"
             return 0
         fi
     done
@@ -98,14 +89,14 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf -- "$WORK"' EXIT
 
-# A token is a mnemonic (a regular expression for the whole word; Mach-O listings append the
-# arrangement, as in sdot.4s) or, with a leading %, a register class. Succeeds when the listing
-# has it, returns 1 when it has not; a grep that cannot answer ends the script.
 contains_instruction() {
     local listing="$1" token="$2" pattern status=0
+    local register_of_class="${token}[0-9]"
+    # Mach-O listings append the arrangement to the mnemonic, as in sdot.4s.
+    local whole_mnemonic="[[:space:]](${token})([[:space:].]|\$)"
     case "$token" in
-        %*) pattern="${token}[0-9]" ;;
-        *) pattern="[[:space:]](${token})([[:space:].]|\$)" ;;
+        %*) pattern="$register_of_class" ;;
+        *) pattern="$whole_mnemonic" ;;
     esac
     grep -q -E -- "$pattern" "$listing" || status=$?
     [ "$status" -le 1 ] || fail "grep could not search $listing for '$pattern'"
@@ -130,8 +121,7 @@ verify_instructions() {
     done
 }
 
-# Why this machine cannot execute a binary of the target with the tier's CPU flags; nothing when it can.
-cannot_run() {
+reason_it_cannot_run() {
     local target="$1" flag missing=""
     local -a flags
     read -r -a flags <<< "$2"
@@ -145,6 +135,12 @@ cannot_run() {
         Darwin/arm64/aarch64-macos) ;;
         *) echo "host is $(uname -s) $(uname -m)" ;;
     esac
+}
+
+check_reported_version() {
+    local bin="$1" reported
+    reported="$(printf 'uci\nquit\n' | "$bin" | sed -n 's/^id name //p')" || fail "$bin did not answer uci"
+    [ "$reported" = "Avalanche $VERSION" ] || fail "$bin reports '$reported', not 'Avalanche $VERSION'"
 }
 
 RAN=()
@@ -168,10 +164,14 @@ build() {
         verify_instructions "$bin" "$required" "$excluded"
         echo "    instructions: has ${required:-nothing required}; lacks ${excluded:-nothing excluded}"
     fi
-    reason="$(cannot_run "$target" "$flags")"
+    reason="$(reason_it_cannot_run "$target" "$flags")"
     if [ -z "$reason" ]; then
-        result="$(bash scripts/verify_binary.sh "$bin" "$paths")"
+        result="$(scripts/verify_binary.sh "$bin" "$paths")"
         echo "    $result"
+        if [ "$VERSION" != "dev" ]; then
+            check_reported_version "$bin"
+            echo "    reports version $VERSION"
+        fi
         RAN+=("$suffix")
     else
         echo "    not run: $reason"
@@ -199,13 +199,12 @@ if [ "${REQUIRE_RUN:-0}" = "1" ] && [ "${#NOT_RUN[@]}" -gt 0 ]; then
 fi
 [ "$#" -eq 0 ] || exit 0
 
-# WebAssembly (browsers, Node, Bun; see docs/WASM.md)
 echo "==> Avalanche-${VERSION}-wasm"
 zig build wasm --release=fast --prefix "$OUT" ${VERSION_FLAG[@]+"${VERSION_FLAG[@]}"}
 cp "$OUT/web/avalanche.wasm" "$OUT/bin/Avalanche-${VERSION}-wasm.wasm"
 
-cp README.md "$OUT/bin/"
-cp LICENSE   "$OUT/bin/"
+cp README.md LICENSE "$OUT/bin/"
+cp src/pyrrhic/LICENSE "$OUT/bin/LICENSE-pyrrhic"
 cd "$OUT/bin"
 zip -9 -r build.zip ./*
 mv build.zip ../

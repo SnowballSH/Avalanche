@@ -159,11 +159,11 @@ jobs:
         run: grep -m1 -E '^(flags|Features)' /proc/cpuinfo
 
       - name: Binaries every runner of this architecture can run
-        run: REQUIRE_RUN=1 bash build_all_v3.sh ${{ matrix.must_run }}
+        run: REQUIRE_RUN=1 scripts/build_release.sh ${{ matrix.must_run }}
 
       - name: Binaries that run where the CPU allows
         if: matrix.may_run != ''
-        run: bash build_all_v3.sh ${{ matrix.may_run }}
+        run: scripts/build_release.sh ${{ matrix.may_run }}
 
       # No development machine has SVE, so an SVE-enabled build is executed here or nowhere.
       - name: Native build on an SVE CPU
@@ -306,7 +306,7 @@ jobs:
         env:
           # Tag builds report the tag's version (v4.1.0 -> 4.1.0); manual runs are dev builds.
           VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
-        run: bash build_all_v3.sh
+        run: scripts/build_release.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
