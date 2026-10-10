@@ -237,12 +237,6 @@ pub const NNUE = struct {
         return &self.storage.?.states[self.depth];
     }
 
-    /// Whether the current frame holds both accumulators, not only the record of its move.
-    pub fn frame_is_computed(self: *const NNUE) bool {
-        const computed = self.frame_state().computed;
-        return computed[0] and computed[1];
-    }
-
     pub fn accumulator(self: *NNUE, pos: *const position.Position) *const Accumulator {
         self.materialize(pos);
         return self.current();
