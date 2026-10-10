@@ -232,6 +232,55 @@ jobs:
       - name: UCI protocol tests on wasm
         run: python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalanche.wasm
 
+  tcec:
+    name: tcec install script
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Lint
+        run: shellcheck -x tcec/update.sh tcec/install.sh
+
+      - name: Zig toolchain of an earlier run
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/tcec/Avalanche/zig-*-linux-*
+          key: tcec-zig-${{ hashFiles('build.zig.zon') }}
+
+      # install.sh builds origin's master: here origin is this checkout and master is the commit under test.
+      - name: Install from this commit
+        run: |
+          git update-ref refs/heads/master HEAD
+          mkdir -p "$RUNNER_TEMP/tcec" && cd "$RUNNER_TEMP/tcec"
+          git init --quiet Avalanche
+          git -C Avalanche remote add origin "file://$GITHUB_WORKSPACE"
+          source "$GITHUB_WORKSPACE/tcec/install.sh"
+          case $GITHUB_REF in
+            refs/tags/v*) expected=${GITHUB_REF_NAME#v} ;;
+            *) expected=$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' "$GITHUB_WORKSPACE/build.zig.zon")-dev-${GITHUB_SHA:0:8} ;;
+          esac
+          printf 'uci\nquit\n' | "$EXE" | grep -F -x "id name Avalanche $expected"
+
+      - name: A failed update leaves EXE unset
+        run: |
+          cd "$(mktemp -d)"
+          git init --quiet Avalanche
+          git -C Avalanche remote add origin file:///nonexistent
+          EXE=stale
+          set +e
+          source "$GITHUB_WORKSPACE/tcec/update.sh"
+          set -e
+          [ -z "${EXE+set}" ]
+
+      - name: Update from master as TCEC does
+        if: github.ref == 'refs/heads/master' && github.event_name != 'push'
+        run: |
+          cd "$(mktemp -d)"
+          source "$GITHUB_WORKSPACE/tcec/update.sh"
+          printf 'uci\nquit\n' | "$EXE" | grep -E -x "id name Avalanche [0-9]+\.[0-9]+\.[0-9]+(-dev-[0-9a-f]{8})?"
+
   # Cross-compile release binaries (native + wasm) and upload them. This is the
   # slowest job, so it runs only for version tags (v*) and manual dispatch, never
   # per commit or on pull requests (so forks cannot trigger artifact builds).

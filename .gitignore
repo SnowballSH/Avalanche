@@ -28,6 +28,7 @@ cutechess-cli
 !web/tsconfig.json
 !web/tsconfig.build.json
 !web/biome.json
+!tcec/engine.json
 
 .zig-cache
 **/zig-**
