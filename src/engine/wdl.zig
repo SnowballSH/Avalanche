@@ -1,16 +1,25 @@
+//! See docs/UCI.md.
+
 const std = @import("std");
 
 pub var show_wdl: bool = false;
 
-// m = min(240, ply) / 64
 const AS: [4]f64 = .{ -1.94427095, 17.60229338, -16.25767549, 139.03011346 };
 const BS: [4]f64 = .{ -3.49822308, 24.88336871, -50.05295749, 63.04117979 };
 
 const SCORE_CLAMP: f64 = 2000.0;
 const MAX_PLY: usize = 240;
+const UNIT_SCORE_PLY: usize = 64;
 
-/// a(1), the unit of UCI scores: `cp 100` is a 50% win chance.
-pub const PAWN_VALUE: i32 = @intFromFloat(@round(AS[0] + AS[1] + AS[2] + AS[3]));
+pub const PAWN_VALUE: i32 = @intFromFloat(@round(cubic(AS, phase(UNIT_SCORE_PLY))));
+
+fn phase(ply: usize) f64 {
+    return @as(f64, @floatFromInt(@min(ply, MAX_PLY))) / @as(f64, @floatFromInt(UNIT_SCORE_PLY));
+}
+
+fn cubic(coefficients: [4]f64, m: f64) f64 {
+    return ((coefficients[0] * m + coefficients[1]) * m + coefficients[2]) * m + coefficients[3];
+}
 
 pub fn normalized(score: i32) i32 {
     const half = @divTrunc(PAWN_VALUE, 2);
@@ -23,12 +32,10 @@ pub const Prediction = struct {
     loss: i32,
 };
 
-/// Permille WDL from the side to move. Use `decisive` for mate/TB scores.
 pub fn predict(score: i32, ply: usize) Prediction {
-    const m = @as(f64, @floatFromInt(@min(ply, MAX_PLY))) / 64.0;
-
-    const a = ((AS[0] * m + AS[1]) * m + AS[2]) * m + AS[3];
-    const b = @max(1.0, ((BS[0] * m + BS[1]) * m + BS[2]) * m + BS[3]);
+    const m = phase(ply);
+    const a = cubic(AS, m);
+    const b = @max(1.0, cubic(BS, m));
 
     const x = std.math.clamp(@as(f64, @floatFromInt(score)), -SCORE_CLAMP, SCORE_CLAMP);
 
@@ -86,6 +93,6 @@ test "normalized scores put a 50% win chance at 100 cp and round to nearest" {
         try std.testing.expectEqual(@as(i32, @intFromFloat(@round(exact))), normalized(score));
         try std.testing.expectEqual(normalized(score), -normalized(-score));
     }
-    const p = predict(PAWN_VALUE, 64);
+    const p = predict(PAWN_VALUE, UNIT_SCORE_PLY);
     try std.testing.expect(p.win >= 490 and p.win <= 510);
 }
