@@ -1,3 +1,4 @@
+//! Move ordering of the search. See docs/SEARCH.md ("Move picking").
 const std = @import("std");
 const builtin = @import("builtin");
 const types = @import("../chess/types.zig");
@@ -11,12 +12,19 @@ pub const MVV_LVA = [6][6]i32{ .{ 205, 204, 203, 202, 201, 200 }, .{ 305, 304, 3
 pub const SortHash: i32 = 6_000_000;
 pub const SortWinningCapture: i32 = 1_000_000;
 pub const SortLosingCapture: i32 = 0;
-pub const SortWinningCaptureFloor: i32 = SortWinningCapture - 32768;
+pub const SortWinningCaptureFloor: i32 = SortWinningCapture + std.math.minInt(CaptureHistoryEntry);
 pub const CaptureVictimScale: i32 = 32;
 pub const SortQuiet: i32 = 0;
 pub const SortKiller1: i32 = 900_000;
 pub const SortKiller2: i32 = 800_000;
 pub const SortCounterMove: i32 = 600_000;
+pub const SortQueenPromotion: i32 = 1_000_000;
+pub const SortKnightPromotion: i32 = 650_000;
+const ContHistWeightScale: i32 = 128;
+
+pub const continuation_plies_ago = [_]usize{ 0, 1, 3 };
+
+const CaptureHistoryEntry = std.meta.Child(@typeInfo(@TypeOf(search.Searcher.capture_history_entry)).@"fn".return_type.?);
 
 pub const ScoreKind = enum {
     exact,
@@ -37,10 +45,6 @@ comptime {
     std.debug.assert(types.MoveList.capacity % slot_word_bits == 0);
 }
 
-// Hands out the moves of a list in the order specified in docs/SEARCH.md ("Move picking").
-// `Context` scores a move (`score`) and decides a capture's exchange on demand (`exchange_wins`).
-// A `.hash_move` score must exceed every other score of the list. `block_len` scores are compared
-// at a time while exchanges are undecided.
 pub fn PickerOver(comptime Context: type, comptime block_len: usize) type {
     comptime std.debug.assert(block_len >= 1 and block_len <= max_block_len);
 
@@ -103,7 +107,7 @@ pub fn PickerOver(comptime Context: type, comptime block_len: usize) type {
             return self.scores[slot] >= SortWinningCaptureFloor;
         }
 
-        // The moves `next` has yet to return. Like `current_is_winning_capture`, ask before playing the picked move.
+        // Ask before playing the picked move: the deferred scan of pick 0 may evaluate exchanges on the board.
         pub inline fn unpicked(self: *Self) []const types.Move {
             if (self.deferred_hash_slot) |hash_slot| {
                 if (self.picked != 0) self.replay_hash_step(hash_slot);
@@ -196,14 +200,14 @@ pub const MovePicker = PickerOver(SearchContext, native_block_len);
 
 const SearchContext = struct {
     const Self = @This();
-    const continuation_plies_ago = [_]usize{ 0, 1, 3 };
-    const ContinuationTable = [64][64]i16;
+    const ContinuationEntry = i16;
+    const ContinuationTable = [64][64]ContinuationEntry;
+    const continuation_weight_names = [continuation_plies_ago.len][]const u8{ "ContHistWeight1", "ContHistWeight2", "ContHistWeight4" };
 
     searcher: *search.Searcher,
     pos: *position.Position,
     hashmove: types.Move,
     killers: [2]types.Move,
-    // Empty when there is none: no legal move encodes as 0.
     counter_move: types.Move,
     history: *const [64][64]i32,
     continuations: [continuation_plies_ago.len]?*const ContinuationTable,
@@ -242,9 +246,9 @@ const SearchContext = struct {
         var bonus: i32 = 0;
         if (move.is_promotion()) {
             if (move.get_flags().promote_type() == types.PieceType.Queen) {
-                bonus = 1_000_000;
+                bonus = SortQueenPromotion;
             } else if (move.get_flags().promote_type() == types.PieceType.Knight) {
-                bonus = 650_000;
+                bonus = SortKnightPromotion;
             }
         }
         if (self.hashmove.to_u16() == move.to_u16()) {
@@ -275,8 +279,49 @@ const SearchContext = struct {
         var quiet_score = bonus + SortQuiet + self.history[move.from][move.to];
         for (self.continuations, self.continuation_weights) |continuation, weight| {
             const table = continuation orelse continue;
-            quiet_score += @divTrunc(@as(i32, table[move.from][move.to]) * weight, 128);
+            quiet_score += @divTrunc(@as(i32, table[move.from][move.to]) * weight, ContHistWeightScale);
         }
         return .{ .score = quiet_score };
+    }
+
+    fn greatest_setting(comptime tunable_name: []const u8) i32 {
+        @setEvalBranchQuota(1 << 20);
+        for (parameters.TunableParams) |tunable| {
+            if (std.mem.eql(u8, tunable.name, tunable_name)) return tunable.max_value;
+        }
+        @compileError("no tunable named " ++ tunable_name);
+    }
+
+    comptime {
+        const least_bonus = @min(0, SortKnightPromotion, SortQueenPromotion);
+        const greatest_bonus = @max(0, SortKnightPromotion, SortQueenPromotion);
+        const greatest_bonus_short_of_queen = @max(0, SortKnightPromotion);
+
+        var least_victim_attacker: i32 = std.math.maxInt(i32);
+        var greatest_victim_attacker: i32 = std.math.minInt(i32);
+        for (MVV_LVA) |by_attacker| {
+            least_victim_attacker = @min(least_victim_attacker, std.mem.min(i32, &by_attacker));
+            greatest_victim_attacker = @max(greatest_victim_attacker, std.mem.max(i32, &by_attacker));
+        }
+        const least_capture = least_victim_attacker * CaptureVictimScale + std.math.minInt(CaptureHistoryEntry);
+        const greatest_capture = greatest_victim_attacker * CaptureVictimScale + std.math.maxInt(CaptureHistoryEntry);
+
+        if (least_bonus + SortWinningCapture + least_capture < SortWinningCaptureFloor) {
+            @compileError("a capture whose exchange wins can score below SortWinningCaptureFloor");
+        }
+        if (greatest_bonus_short_of_queen + SortLosingCapture + greatest_capture >= SortWinningCaptureFloor) {
+            @compileError("a capture whose exchange loses can reach SortWinningCaptureFloor without promoting to a queen");
+        }
+
+        const greatest_history = greatest_setting("HistoryGravityMax");
+        var greatest_continuation: i32 = 0;
+        for (continuation_weight_names) |weight_name| {
+            greatest_continuation += @divTrunc(-std.math.minInt(ContinuationEntry) * greatest_setting(weight_name), ContHistWeightScale);
+        }
+        const greatest_quiet = SortQuiet + greatest_history + greatest_continuation;
+        const greatest_before_bonus = @max(SortWinningCapture + greatest_capture, SortKiller1, SortKiller2, SortCounterMove, greatest_quiet);
+        if (least_bonus + SortHash <= greatest_bonus + greatest_before_bonus) {
+            @compileError("a move can score as high as the hash move, which the picker returns first without comparing scores");
+        }
     }
 };
