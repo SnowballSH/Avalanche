@@ -5,7 +5,6 @@ const arguments = @import("../engine/datagen/arguments.zig");
 const book = @import("../engine/datagen/book.zig");
 const Format = @import("../engine/datagen/format.zig").Format;
 const genfens = @import("../engine/genfens.zig");
-const viriformat = @import("../engine/datagen/viriformat.zig");
 const types = @import("../chess/types.zig");
 const hce = @import("../engine/hce.zig");
 const support = @import("support.zig");
@@ -279,10 +278,14 @@ test "datagen: a book line whose side not to move is in check is rejected" {
 test "datagen: a book line with more pieces or a later move number than a game record holds is rejected" {
     try expect_rejected_line("rnbqkbnr/pppppppp/pppppppp/8/8/PPPPPPPP/PPPPPPPP/RNBQKBNR w - - 0 1\n", 1, "TooManyPieces");
     try expect_rejected_line(types.DEFAULT_FEN ++ "\n4k3/8/8/8/8/8/4P3/4K3 w - - 0 65536\n", 2, "MoveNumberTooLarge");
-    try expect_rejected_line("4k3/8/8/8/8/8/4P3/4K3 w - - 0 4294967295\n", 1, "MoveNumberTooLarge");
+    inline for (.{ "4294967295", "3_000_000_000", "6_5536", "99999999999999999999999999" }) |move_number| {
+        try expect_rejected_line("4k3/8/8/8/8/8/4P3/4K3 w - - 0 " ++ move_number ++ "\n", 1, "MoveNumberTooLarge");
+    }
 
     try book.validate_line("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 99 65535");
+    try book.validate_line("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 99 6_5535");
     try book.validate_line("4k3/8/8/8/8/8/4P3/4K3 w - - bm e4; id \"12345678\";");
+    try book.validate_line("4k3/8/8/8/8/8/4P3/4K3 w - - acn 12345678901;");
 }
 
 test "datagen: an empty book is an error" {

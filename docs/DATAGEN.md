@@ -115,10 +115,11 @@ positions would otherwise keep the run busy forever without writing anything.
 
 Every book line is validated before datagen starts: eight ranks of eight squares, known pieces, one king per side,
 no pawns on the back ranks, a side to move, well-formed castling and en-passant fields, the side not to move not in
-check, and no more than a game record can hold, which is 32 pieces and a fullmove number of 65535. EPD opcodes after
-the FEN fields are ignored. The whole book is refused at its first bad line, because the position code trusts its
-input: a bad line would be played as a broken board or read out of bounds. `netscale` and `genfens` load their
-position files through the same loader (`src/engine/datagen/book.zig`).
+check, and no more than a game record can hold, which is 32 pieces and a fullmove number of 65535. The fullmove
+field is read by the number parser the position code uses, so the two agree on what a number is (`65_536` is one,
+and is refused). EPD opcodes after the FEN fields are ignored. The whole book is refused at its first bad line,
+because the position code trusts its input: a bad line would be played as a broken board or read out of bounds.
+`netscale` and `genfens` load their position files through the same loader (`src/engine/datagen/book.zig`).
 
 ## Raw evaluation
 

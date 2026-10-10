@@ -54,21 +54,15 @@ pub fn validate_line(line: []const u8) LineError!void {
 
     const FIELDS_BETWEEN_BOARD_AND_MOVE_NUMBER = 4;
     for (0..FIELDS_BETWEEN_BOARD_AND_MOVE_NUMBER) |_| _ = fields.next() orelse return;
-    const move_number = fields.next() orelse return;
-    if (is_number(move_number)) {
-        _ = std.fmt.parseUnsigned(viriformat.MoveNumber, move_number, 10) catch return error.MoveNumberTooLarge;
-    }
+    const move_number = std.fmt.parseUnsigned(u64, fields.next() orelse return, 10) catch |failure| switch (failure) {
+        error.Overflow => return error.MoveNumberTooLarge,
+        error.InvalidCharacter => return,
+    };
+    if (move_number > std.math.maxInt(viriformat.MoveNumber)) return error.MoveNumberTooLarge;
 }
 
 fn piece_count(board_field: []const u8) usize {
     var count: usize = 0;
     for (board_field) |char| count += @intFromBool(std.ascii.isAlphabetic(char));
     return count;
-}
-
-fn is_number(text: []const u8) bool {
-    for (text) |char| {
-        if (!std.ascii.isDigit(char)) return false;
-    }
-    return true;
 }
