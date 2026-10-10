@@ -1,10 +1,4 @@
-//! Parity checks for multi-layer networks: evaluates positions from a network
-//! file with the engine's integer head and with a floating-point forward pass
-//! reconstructed from the same file, and reports the difference.
-//!
-//! It works in every build: accumulators are rebuilt here from the file, with
-//! the feature indexing of bullet's `ChessBucketsMirrored`, rather than taken
-//! from the engine's incremental ones. docs/NNUE.md describes the commands.
+//! See "Parity" in docs/NNUE.md.
 
 const std = @import("std");
 const platform = @import("../../platform.zig");
@@ -18,8 +12,9 @@ const head_multi = @import("head_multi.zig");
 
 pub const Net = weights.Network(.multi);
 
-/// The trainer's `BUCKET_LAYOUT_16`: king bucket by rank and by file a..d.
-const KING_BUCKETS: [32]usize = .{
+const FeatureWeights = [weights.INPUT_SIZE * arch.HIDDEN_SIZE]i16;
+
+const BUCKET_LAYOUT_16: [32]usize = .{
     0,  1,  2,  3,
     4,  5,  6,  7,
     8,  8,  9,  9,
@@ -30,9 +25,7 @@ const KING_BUCKETS: [32]usize = .{
     14, 14, 15, 15,
 };
 
-/// One perspective's accumulator, summed feature by feature. `net` is any
-/// network with `layer_1` and `layer_1_bias`.
-pub fn accumulate(net: anytype, pos: *const position.Position, perspective: types.Color, out: *arch.Accumulator) void {
+pub fn accumulate(layer_1: *const FeatureWeights, layer_1_bias: *const arch.Accumulator, pos: *const position.Position, perspective: types.Color, out: *arch.Accumulator) void {
     const rank_flip: usize = if (perspective == types.Color.White) 0 else 56;
     var king: usize = 0;
     for (pos.mailbox, 0..) |piece, sq| {
@@ -40,41 +33,92 @@ pub fn accumulate(net: anytype, pos: *const position.Position, perspective: type
     }
     const bucketed = weights.NUM_INPUT_BUCKETS > 1;
     const mirrored = bucketed and king % 8 > 3;
-    const bucket = if (bucketed) KING_BUCKETS[(king / 8) * 4 + (if (mirrored) 7 - king % 8 else king % 8)] else 0;
+    const bucket = if (bucketed) BUCKET_LAYOUT_16[(king / 8) * 4 + (if (mirrored) 7 - king % 8 else king % 8)] else 0;
 
-    out.* = net.layer_1_bias;
+    out.* = layer_1_bias.*;
     for (pos.mailbox, 0..) |piece, sq| {
         if (piece == types.Piece.NO_PIECE) continue;
-        const side: usize = if (piece.color() == perspective) 0 else 384;
+        const side: usize = if (piece.color() == perspective) 0 else arch.FEATURES_PER_COLOR;
         const oriented = sq ^ rank_flip ^ @as(usize, if (mirrored) 7 else 0);
-        const feature = bucket * 768 + side + 64 * @as(usize, piece.piece_type().index()) + oriented;
-        for (out, net.layer_1[feature * arch.HIDDEN_SIZE ..][0..arch.HIDDEN_SIZE]) |*sum, weight| sum.* +%= weight;
+        const feature = bucket * arch.FEATURES_PER_BUCKET + side + arch.FEATURES_PER_PIECE * @as(usize, piece.piece_type().index()) + oriented;
+        for (out, layer_1[feature * arch.HIDDEN_SIZE ..][0..arch.HIDDEN_SIZE]) |*sum, weight| sum.* +%= weight;
     }
 }
 
+pub fn output_bucket(pos: *const position.Position) usize {
+    return arch.output_bucket(@popCount(pos.all_all_pieces()));
+}
+
+pub const FloatMode = enum { exact_pairwise, quantised_pairwise };
+
+pub fn evaluate_float(head: *const head_multi.Weights, l1_shift: head_multi.L1Shift, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize, mode: FloatMode) f64 {
+    const shifted: f64 = @floatFromInt(@as(u32, 1) << l1_shift);
+    const one: f64 = @as(f64, @floatFromInt(head_multi.ONE)) * shifted;
+    const l1_weight_one = head_multi.L1_WEIGHT_SCALE * shifted;
+    const qa: f64 = @floatFromInt(arch.QA);
+
+    var z1: [head_multi.L1_SIZE]f64 = undefined;
+    for (&z1, head.l1_bias[bucket]) |*sum, bias| sum.* = @as(f64, @floatFromInt(bias)) / one;
+    for ([_]arch.AccumulatorPtr{ own, opp }, 0..) |acc, side| {
+        for (0..head_multi.PAIRS) |i| {
+            const activation: f64 = switch (mode) {
+                .exact_pairwise => blk: {
+                    const a: f64 = @floatFromInt(std.math.clamp(acc[i], 0, arch.QA));
+                    const b: f64 = @floatFromInt(std.math.clamp(acc[i + head_multi.PAIRS], 0, arch.QA));
+                    break :blk (a / qa) * (b / qa);
+                },
+                .quantised_pairwise => @as(f64, @floatFromInt(head_multi.pairwise(acc[i], acc[i + head_multi.PAIRS]))) / head_multi.PAIRWISE_ONE,
+            };
+            const input = side * head_multi.PAIRS + i;
+            for (&z1, &head.l1_weights[bucket][input / 4]) |*sum, *block_weights| {
+                sum.* += activation * @as(f64, @floatFromInt(block_weights[input % 4])) / l1_weight_one;
+            }
+        }
+    }
+    return evaluate_float_from_l1(head, bucket, z1);
+}
+
+pub fn evaluate_float_from_l1(head: *const head_multi.Weights, bucket: usize, z1: [head_multi.L1_SIZE]f64) f64 {
+    const weight_one: f64 = @floatFromInt(1 << head_multi.WEIGHT_BITS);
+    const sum_one: f64 = @floatFromInt(1 << head_multi.SUM_BITS);
+
+    var hidden: [head_multi.L2_INPUTS]f64 = undefined;
+    for (z1, 0..) |sum, j| {
+        const clipped = std.math.clamp(sum, 0.0, 1.0);
+        hidden[j] = clipped;
+        hidden[head_multi.L1_SIZE + j] = clipped * clipped;
+    }
+
+    var output: f64 = @as(f64, @floatFromInt(head.l3_bias[bucket])) / sum_one;
+    for (0..head_multi.L2_SIZE) |o| {
+        var sum: f64 = @as(f64, @floatFromInt(head.l2_bias[bucket][o])) / sum_one;
+        for (hidden, &head.l2_weights[bucket]) |input, *column| {
+            sum += input * @as(f64, @floatFromInt(column[o])) / weight_one;
+        }
+        output += std.math.clamp(sum, 0.0, 1.0) * @as(f64, @floatFromInt(head.l3_weights[bucket][o])) / weight_one;
+    }
+    return output * @as(f64, @floatFromInt(arch.SCALE));
+}
+
 pub const Evaluation = struct {
-    /// The engine's integer head, in centipawns for the side to move.
-    engine: i32,
-    /// The trainer's forward pass in floating point, from the same quantised weights.
-    trainer: f64,
-    /// As `trainer`, but from the pairwise products the engine computes.
-    quantised: f64,
+    integer: i32,
+    float: f64,
+    float_quantised_pairwise: f64,
 };
 
 pub fn evaluate(net: *const Net, pos: *const position.Position) Evaluation {
     var white: arch.Accumulator align(64) = undefined;
     var black: arch.Accumulator align(64) = undefined;
-    accumulate(net, pos, types.Color.White, &white);
-    accumulate(net, pos, types.Color.Black, &black);
+    accumulate(&net.layer_1, &net.layer_1_bias, pos, types.Color.White, &white);
+    accumulate(&net.layer_1, &net.layer_1_bias, pos, types.Color.Black, &black);
     const own = if (pos.turn == types.Color.White) &white else &black;
     const opp = if (pos.turn == types.Color.White) &black else &white;
-    const pieces = types.popcount_usize(pos.all_all_pieces());
-    const bucket = @min((pieces -| 2) / 4, arch.OUTPUT_SIZE - 1);
+    const bucket = output_bucket(pos);
     const shift = weights.l1_shift(&net.header);
     return .{
-        .engine = head_multi.evaluate(&net.head, &.init(&net.head, shift), own, opp, bucket),
-        .trainer = head_multi.evaluate_float(&net.head, shift, own, opp, bucket, .trainer),
-        .quantised = head_multi.evaluate_float(&net.head, shift, own, opp, bucket, .quantised_pairwise),
+        .integer = head_multi.evaluate(&net.head, &.init(&net.head, shift), own, opp, bucket),
+        .float = evaluate_float(&net.head, shift, own, opp, bucket, .exact_pairwise),
+        .float_quantised_pairwise = evaluate_float(&net.head, shift, own, opp, bucket, .quantised_pairwise),
     };
 }
 
@@ -95,21 +139,47 @@ pub const Difference = struct {
     }
 };
 
-/// How feature-transformer weights are drawn by `fill_random`: small enough
-/// that 32 pieces cannot overflow an i16 accumulator.
+pub const RandomRange = struct {
+    l1_weight: i8,
+    l1_shift: head_multi.L1Shift,
+    weight: i32,
+    unshifted_l1_bias: i32,
+    bias: i32,
+
+    pub const full: RandomRange = .{
+        .l1_weight = 127,
+        .l1_shift = 0,
+        .weight = head_multi.WEIGHT_LIMIT,
+        .unshifted_l1_bias = head_multi.ONE,
+        .bias = 1 << head_multi.SUM_BITS,
+    };
+
+    pub const trained_magnitude: RandomRange = .{
+        .l1_weight = 96,
+        .l1_shift = 3,
+        .weight = 400,
+        .unshifted_l1_bias = head_multi.ONE / 2,
+        .bias = 1 << (head_multi.SUM_BITS - 2),
+    };
+};
+
+pub fn fill_random_head(head: *head_multi.Weights, random: std.Random, range: RandomRange) void {
+    for (std.mem.asBytes(&head.l1_weights)) |*byte| {
+        byte.* = @bitCast(random.intRangeAtMost(i8, -range.l1_weight, range.l1_weight));
+    }
+    inline for (.{ "l2_weights", "l3_weights", "l1_bias", "l2_bias", "l3_bias" }, .{ range.weight, range.weight, range.unshifted_l1_bias << range.l1_shift, range.bias, range.bias }) |field, limit| {
+        const values: *[@sizeOf(@FieldType(head_multi.Weights, field)) / 4]i32 = @ptrCast(&@field(head, field));
+        for (values) |*value| value.* = random.intRangeAtMost(i32, -limit, limit);
+    }
+}
+
 const RANDOM_FT_WEIGHT = 48;
 
-/// How many pairwise activations of a random network are non-zero, which is
-/// what the cost of the sparse L1 depends on.
 pub const Activity = enum {
-    /// About nine L1 blocks in ten are non-zero on the bench positions.
     dense,
-    /// About one in four, as a sparsity penalty in training aims for.
     sparse,
 
-    /// Range of the feature-transformer biases: the lower they are, the fewer
-    /// accumulator values are positive.
-    fn bias_range(self: Activity) [2]i16 {
+    fn feature_bias_range(self: Activity) [2]i16 {
         return switch (self) {
             .dense => .{ 0, 128 },
             .sparse => .{ -144, -16 },
@@ -117,28 +187,14 @@ pub const Activity = enum {
     }
 };
 
-/// A random network with a valid header. `range` bounds the head's weights.
-pub fn fill_random(net: *Net, random: std.Random, range: head_multi.RandomRange, activity: Activity) void {
+pub fn fill_random(net: *Net, random: std.Random, range: RandomRange, activity: Activity) void {
     @memset(std.mem.asBytes(net), 0);
     net.header = weights.multi_header(range.l1_shift);
     for (&net.layer_1) |*weight| weight.* = random.intRangeAtMost(i16, -RANDOM_FT_WEIGHT, RANDOM_FT_WEIGHT);
-    const bias_range = activity.bias_range();
+    const bias_range = activity.feature_bias_range();
     for (&net.layer_1_bias) |*bias| bias.* = random.intRangeAtMost(i16, bias_range[0], bias_range[1]);
-    head_multi.fill_random(&net.head, random, range);
+    fill_random_head(&net.head, random, range);
 }
-
-/// Head weights of the magnitude a trained network has, where the comparison
-/// with the float forward pass is meaningful: with weights spread over the
-/// whole integer range the rounding of 1024 activations is amplified to
-/// hundreds of centipawns in both directions.
-pub const REALISTIC_RANGE: head_multi.RandomRange = .{
-    // As the trainer saves such a net: |w| <= 0.19, stored with three extra bits.
-    .l1_weight = 96,
-    .l1_shift = 3,
-    .weight = 400,
-    .l1_bias = head_multi.ONE / 2,
-    .bias = 1 << (head_multi.SUM_BITS - 2),
-};
 
 fn load(path: []const u8) !*Net {
     const bytes = try std.Io.Dir.cwd().readFileAlloc(platform.io, path, platform.allocator, .limited(@sizeOf(Net) + 1));
@@ -175,70 +231,74 @@ fn parse_line(raw: []const u8) ?Line {
     return .{ .fen = fen, .expected = expected };
 }
 
+const Positions = struct {
+    lines: std.ArrayList(Line) = .empty,
+    file: ?[]u8 = null,
+
+    const BENCH = "bench";
+    const MAX_FILE_BYTES = 1 << 30;
+
+    fn read(source: []const u8) !Positions {
+        var self: Positions = .{};
+        errdefer self.deinit();
+        if (std.mem.eql(u8, source, BENCH)) {
+            for (bench.FENS) |fen| try self.lines.append(platform.allocator, .{ .fen = fen, .expected = null });
+            return self;
+        }
+        const file = try std.Io.Dir.cwd().readFileAlloc(platform.io, source, platform.allocator, .limited(MAX_FILE_BYTES));
+        self.file = file;
+        var raw_lines = std.mem.splitScalar(u8, file, '\n');
+        while (raw_lines.next()) |raw| {
+            if (parse_line(raw)) |line| try self.lines.append(platform.allocator, line);
+        }
+        return self;
+    }
+
+    fn deinit(self: *Positions) void {
+        self.lines.deinit(platform.allocator);
+        if (self.file) |file| platform.allocator.free(file);
+    }
+};
+
+const Measurement = struct {
+    float: Difference = .{},
+    float_quantised_pairwise: Difference = .{},
+    trainer_evaluations: Difference = .{},
+    magnitude: Difference = .{},
+    incremental_mismatches: usize = 0,
+};
+
+fn measure(net: *const Net, lines: []const Line, compare_incremental: bool, verbose: ?*std.Io.Writer) !Measurement {
+    const pos = try platform.allocator.create(position.Position);
+    defer platform.allocator.destroy(pos);
+    pos.init();
+    defer pos.deinit();
+
+    var measured: Measurement = .{};
+    for (lines) |line| {
+        pos.set_fen(line.fen);
+        const result = evaluate(net, pos);
+        const integer: f64 = @floatFromInt(result.integer);
+        measured.float.add(integer, result.float);
+        measured.float_quantised_pairwise.add(integer, result.float_quantised_pairwise);
+        measured.magnitude.add(integer, 0);
+        if (line.expected) |value| measured.trainer_evaluations.add(integer, value);
+        if (verbose) |out| try out.print("{s} | {d} | {d:.3} | {d:.3}\n", .{ line.fen, result.integer, result.float, result.float_quantised_pairwise });
+        if (compare_incremental and hce.evaluate_nnue(pos) != result.integer) measured.incremental_mismatches += 1;
+    }
+    return measured;
+}
+
 fn max_abs(values: []const i32) u32 {
     var result: u32 = 0;
     for (values) |value| result = @max(result, @abs(value));
     return result;
 }
 
-fn run_parity(args: []const []const u8, out: *std.Io.Writer) !u8 {
-    if (args.len < 1) {
-        try out.writeAll(USAGE);
-        return 1;
-    }
-    const net = load(args[0]) catch |err| {
-        try out.print("nnue-parity: cannot use '{s}' ({s}): docs/NNUE.md specifies the multi-layer file\n", .{ args[0], @errorName(err) });
-        return 1;
-    };
-    defer platform.allocator.destroy(net);
-
-    var lines: std.ArrayList(Line) = .empty;
-    defer lines.deinit(platform.allocator);
-    var file_bytes: ?[]u8 = null;
-    defer if (file_bytes) |bytes| platform.allocator.free(bytes);
-    if (args.len >= 2 and !std.mem.eql(u8, args[1], "bench")) {
-        file_bytes = std.Io.Dir.cwd().readFileAlloc(platform.io, args[1], platform.allocator, .limited(1 << 30)) catch |err| {
-            try out.print("nnue-parity: cannot read '{s}' ({s})\n", .{ args[1], @errorName(err) });
-            return 1;
-        };
-        var it = std.mem.splitScalar(u8, file_bytes.?, '\n');
-        while (it.next()) |raw| {
-            if (parse_line(raw)) |line| try lines.append(platform.allocator, line);
-        }
-    } else {
-        for (bench.FENS) |fen| try lines.append(platform.allocator, .{ .fen = fen, .expected = null });
-    }
-
-    // In a multi-layer build, also check the engine's incremental evaluation.
-    const check_engine = weights.HEAD == .multi and weights.supports_eval_file;
-    if (check_engine) try weights.load(args[0]);
-
-    const pos = try platform.allocator.create(position.Position);
-    defer platform.allocator.destroy(pos);
-    pos.init();
-    defer pos.deinit();
-
-    const verbose = args.len >= 3 and std.mem.eql(u8, args[2], "verbose");
-    var trainer: Difference = .{};
-    var quantised: Difference = .{};
-    var expected: Difference = .{};
-    var magnitude: Difference = .{};
-    var engine_mismatches: usize = 0;
-    for (lines.items) |line| {
-        pos.set_fen(line.fen);
-        const result = evaluate(net, pos);
-        const engine: f64 = @floatFromInt(result.engine);
-        trainer.add(engine, result.trainer);
-        quantised.add(engine, result.quantised);
-        magnitude.add(engine, 0);
-        if (line.expected) |value| expected.add(engine, value);
-        if (verbose) try out.print("{s} | {d} | {d:.3} | {d:.3}\n", .{ line.fen, result.engine, result.trainer, result.quantised });
-        if (check_engine and hce.evaluate_nnue(pos) != result.engine) engine_mismatches += 1;
-    }
-
-    try out.print("nnue-parity: {s}, {d} positions, mean |eval| {d:.1} cp, max |eval| {d:.1} cp\n", .{ args[0], lines.items.len, magnitude.mean(), magnitude.max });
-    try out.print("  integer vs float forward pass:        max {d:.3} cp, mean {d:.3} cp\n", .{ trainer.max, trainer.mean() });
-    try out.print("  integer vs float, quantised pairwise: max {d:.3} cp, mean {d:.3} cp\n", .{ quantised.max, quantised.mean() });
+fn report_parity(path: []const u8, net: *const Net, measured: *const Measurement, compare_incremental: bool, out: *std.Io.Writer) !void {
+    try out.print("nnue-parity: {s}, {d} positions, mean |eval| {d:.1} cp, max |eval| {d:.1} cp\n", .{ path, measured.magnitude.count, measured.magnitude.mean(), measured.magnitude.max });
+    try out.print("  integer vs float forward pass:        max {d:.3} cp, mean {d:.3} cp\n", .{ measured.float.max, measured.float.mean() });
+    try out.print("  integer vs float, quantised pairwise: max {d:.3} cp, mean {d:.3} cp\n", .{ measured.float_quantised_pairwise.max, measured.float_quantised_pairwise.mean() });
     var l1_max: u32 = 0;
     for (std.mem.asBytes(&net.head.l1_weights)) |byte| l1_max = @max(l1_max, @abs(@as(i32, @as(i8, @bitCast(byte)))));
     try out.print("  L1 shift {d}; largest stored weight:    l1 {d}/127, l2 {d}/{d}, l3 {d}/{d}\n", .{
@@ -249,13 +309,40 @@ fn run_parity(args: []const []const u8, out: *std.Io.Writer) !u8 {
         max_abs(std.mem.bytesAsSlice(i32, std.mem.asBytes(&net.head.l3_weights))),
         head_multi.WEIGHT_LIMIT,
     });
-    if (expected.count > 0) {
-        try out.print("  integer vs trainer evaluations:       max {d:.3} cp, mean {d:.3} cp ({d} positions)\n", .{ expected.max, expected.mean(), expected.count });
+    if (measured.trainer_evaluations.count > 0) {
+        try out.print("  integer vs trainer evaluations:       max {d:.3} cp, mean {d:.3} cp ({d} positions)\n", .{ measured.trainer_evaluations.max, measured.trainer_evaluations.mean(), measured.trainer_evaluations.count });
     }
-    if (check_engine) {
-        try out.print("  engine incremental evaluation:        {d} mismatches\n", .{engine_mismatches});
+    if (compare_incremental) {
+        try out.print("  engine incremental evaluation:        {d} mismatches\n", .{measured.incremental_mismatches});
     }
-    return if (engine_mismatches == 0) 0 else 1;
+}
+
+fn run_parity(args: []const []const u8, out: *std.Io.Writer) !u8 {
+    if (args.len < 1) {
+        try out.writeAll(USAGE);
+        return 1;
+    }
+    const path = args[0];
+    const net = load(path) catch |err| {
+        try out.print("nnue-parity: cannot use '{s}' ({s}): docs/NNUE.md specifies the multi-layer file\n", .{ path, @errorName(err) });
+        return 1;
+    };
+    defer platform.allocator.destroy(net);
+
+    const source = if (args.len >= 2) args[1] else Positions.BENCH;
+    var positions = Positions.read(source) catch |err| {
+        try out.print("nnue-parity: cannot read '{s}' ({s})\n", .{ source, @errorName(err) });
+        return 1;
+    };
+    defer positions.deinit();
+
+    const compare_incremental = weights.HEAD == .multi and weights.supports_eval_file;
+    if (compare_incremental) try weights.load(path);
+
+    const verbose = args.len >= 3 and std.mem.eql(u8, args[2], "verbose");
+    const measured = try measure(net, positions.lines.items, compare_incremental, if (verbose) out else null);
+    try report_parity(path, net, &measured, compare_incremental, out);
+    return if (measured.incremental_mismatches == 0) 0 else 1;
 }
 
 fn run_random(args: []const []const u8, out: *std.Io.Writer) !u8 {
@@ -264,11 +351,11 @@ fn run_random(args: []const []const u8, out: *std.Io.Writer) !u8 {
         return 1;
     }
     var seed: u64 = 1;
-    var full = false;
+    var range: RandomRange = .trained_magnitude;
     var activity: Activity = .dense;
     for (args[1..], 1..) |arg, index| {
         if (std.mem.eql(u8, arg, "full")) {
-            full = true;
+            range = .full;
         } else if (std.mem.eql(u8, arg, "sparse")) {
             activity = .sparse;
         } else if (index == 1) {
@@ -284,18 +371,15 @@ fn run_random(args: []const []const u8, out: *std.Io.Writer) !u8 {
     const net = try platform.allocator.create(Net);
     defer platform.allocator.destroy(net);
     var prng = std.Random.DefaultPrng.init(seed);
-    fill_random(net, prng.random(), if (full) .{} else REALISTIC_RANGE, activity);
+    fill_random(net, prng.random(), range, activity);
     try std.Io.Dir.cwd().writeFile(platform.io, .{ .sub_path = args[0], .data = std.mem.asBytes(net) });
     try out.print("nnue-random: wrote {s} ({d} bytes, seed {d})\n", .{ args[0], @sizeOf(Net), seed });
     return 0;
 }
 
 const SPEED_ROUNDS = 40_000;
-/// Samples per batch of a stage timing: about 6 KiB each.
 const STAGE_BATCH = 4;
 
-/// The accumulators of one bench position, and for the multi-layer head what
-/// each of its stages produces from them, so that a stage can be timed alone.
 const SpeedSample = struct {
     white: arch.Accumulator align(64),
     black: arch.Accumulator align(64),
@@ -305,8 +389,6 @@ const SpeedSample = struct {
     sums: head_multi.L1Vector = undefined,
 };
 
-/// The stages of `head_multi.evaluate_simd`, each from the stored output of
-/// the one before it.
 const MultiStage = enum {
     pairwise,
     nonzero_search,
@@ -329,8 +411,6 @@ const MultiStage = enum {
         }
     }
 
-    /// Per call, with the samples taken a few at a time so that a stage finds
-    /// its input in the first-level cache, as it does in the search.
     fn nanoseconds(comptime self: MultiStage, samples: []SpeedSample) f64 {
         const timer = types.Timer.start();
         var first: usize = 0;
@@ -344,9 +424,8 @@ const MultiStage = enum {
     }
 };
 
-/// Where the time of the multi-layer head goes. The stages are timed in
-/// order, so each one finds the output of the one before it in the samples.
 fn report_multi_stages(samples: []SpeedSample, out: *std.Io.Writer) !void {
+    // In this order: a stage reads what the one before it left in the samples.
     const pairwise = MultiStage.pairwise.nanoseconds(samples);
     const nonzero_search = MultiStage.nonzero_search.nanoseconds(samples);
     const l1 = MultiStage.l1.nanoseconds(samples);
@@ -362,7 +441,10 @@ fn report_multi_stages(samples: []SpeedSample, out: *std.Io.Writer) !void {
     try out.print("nnue-speed: stages, inputs in cache: pairwise {d:.1} ns, L1 {d:.1} ns (of which the non-zero search {d:.1} ns), L2 and L3 {d:.1} ns\n", .{ pairwise, l1, nonzero_search, l2_l3 });
 }
 
-/// Times the active build's head on the accumulators of the bench positions.
+pub fn add_to_checksum(checksum: u64, evaluation: i32) u64 {
+    return checksum +% @as(u64, @bitCast(@as(i64, evaluation)));
+}
+
 fn run_speed(out: *std.Io.Writer) !u8 {
     const samples = try platform.allocator.alloc(SpeedSample, bench.FENS.len);
     defer platform.allocator.free(samples);
@@ -373,20 +455,16 @@ fn run_speed(out: *std.Io.Writer) !u8 {
     defer pos.deinit();
     for (bench.FENS, samples) |fen, *sample| {
         pos.set_fen(fen);
-        sample.* = .{
-            .white = undefined,
-            .black = undefined,
-            .bucket = @min((types.popcount_usize(pos.all_all_pieces()) -| 2) / 4, arch.OUTPUT_SIZE - 1),
-        };
-        accumulate(weights.MODEL, pos, types.Color.White, &sample.white);
-        accumulate(weights.MODEL, pos, types.Color.Black, &sample.black);
+        sample.* = .{ .white = undefined, .black = undefined, .bucket = output_bucket(pos) };
+        accumulate(&weights.MODEL.layer_1, &weights.MODEL.layer_1_bias, pos, types.Color.White, &sample.white);
+        accumulate(&weights.MODEL.layer_1, &weights.MODEL.layer_1_bias, pos, types.Color.Black, &sample.black);
     }
 
-    var checksum: i64 = 0;
+    var checksum: u64 = 0;
     const timer = types.Timer.start();
     for (0..SPEED_ROUNDS) |_| {
         for (samples) |*sample| {
-            checksum += weights.evaluate(&sample.white, &sample.black, sample.bucket);
+            checksum = add_to_checksum(checksum, weights.evaluate(&sample.white, &sample.black, sample.bucket));
         }
     }
     const elapsed = timer.read();
@@ -402,21 +480,35 @@ fn run_speed(out: *std.Io.Writer) !u8 {
     return 0;
 }
 
-/// Entry point of the `nnue-parity`, `nnue-random` and `nnue-speed` commands.
-pub fn run(command: []const u8, args: []const []const u8) u8 {
+const COMMAND_PREFIX = "nnue-";
+const Command = enum { parity, random, speed };
+
+fn parse_command(name: []const u8) ?Command {
+    if (!std.mem.startsWith(u8, name, COMMAND_PREFIX)) return null;
+    return std.meta.stringToEnum(Command, name[COMMAND_PREFIX.len..]);
+}
+
+pub fn execute(name: []const u8, args: []const []const u8, out: *std.Io.Writer) u8 {
+    const command = parse_command(name) orelse {
+        out.print("{s}: unknown command\n{s}", .{ name, USAGE }) catch {};
+        return 1;
+    };
+    const result = switch (command) {
+        .parity => run_parity(args, out),
+        .random => run_random(args, out),
+        .speed => run_speed(out),
+    };
+    return result catch |err| {
+        out.print("{s}: {s}\n", .{ name, @errorName(err) }) catch {};
+        return 2;
+    };
+}
+
+pub fn run(name: []const u8, args: []const []const u8) u8 {
     var buffer: [1024]u8 = undefined;
     var stdout = platform.Stdout.init(&buffer);
     const out = stdout.writer();
-    const result = if (std.mem.eql(u8, command, "nnue-parity"))
-        run_parity(args, out)
-    else if (std.mem.eql(u8, command, "nnue-random"))
-        run_random(args, out)
-    else
-        run_speed(out);
-    const code = result catch |err| blk: {
-        out.print("{s}: {s}\n", .{ command, @errorName(err) }) catch {};
-        break :blk 2;
-    };
+    const code = execute(name, args, out);
     out.flush() catch {};
     return code;
 }
