@@ -1,9 +1,4 @@
-//! `TRAIN_INIT_NET`: start a single-layer run from the weights of a quantised net file instead of a
-//! random initialisation, for fine-tuning a net whose float checkpoint no longer exists.
-//!
-//! The file is the one the single-layer save format writes (docs/NNUE.md): `l0w`, `l0b`, `l1w`, `l1b` as
-//! little-endian i16, then padding to a multiple of 64 bytes. Reading it back inverts that format, and
-//! saving the result without a training step reproduces the file byte for byte.
+//! See "Fine-tuning from a shipped net" in docs/NNUE.md.
 
 use bullet::nn::{ExecutionContext, Shape, optimiser::AdamWParams};
 use bullet_compiler::tensor::TValue;
@@ -17,20 +12,15 @@ use crate::{QA, QB, multilayer};
 const FEATURE_WEIGHTS: &str = "l0w";
 const FACTORISER: &str = "l0f";
 const STORED_BYTES: usize = size_of::<i16>();
-/// bullet pads a quantised file to a multiple of this many bytes.
 const FILE_ALIGNMENT: usize = 64;
 
-/// One weight of the graph as the single-layer save format stores it.
 struct Section {
     id: &'static str,
-    /// The file holds `round(weight * quantum)`.
     quantum: i16,
-    /// The file is row-major where bullet's weights are column-major.
     transposed: bool,
 }
 
-/// In file order; `run_buckets16` and `run_chess768` in main.rs write exactly these.
-const SECTIONS: [Section; 4] = [
+const SECTIONS_IN_FILE_ORDER: [Section; 4] = [
     Section {
         id: FEATURE_WEIGHTS,
         quantum: QA,
@@ -53,13 +43,10 @@ const SECTIONS: [Section; 4] = [
     },
 ];
 
-/// A float whose `round(weight * quantum)`, the save format's quantisation, is `stored` again: an f32
-/// quotient is off by a relative 2^-24, far less than half a quantum for any i16.
 fn dequantise(stored: i16, quantum: i16) -> f32 {
     f32::from(stored) / f32::from(quantum)
 }
 
-/// Inverse of bullet's `SavedFormat::transpose`.
 fn column_major(row_major: &[f32], shape: Shape) -> Vec<f32> {
     let (rows, cols) = (shape.rows(), shape.cols());
     let mut values = vec![0.0; row_major.len()];
@@ -94,7 +81,7 @@ fn validate(weights: &ModelWeights, net: &[u8]) -> Result<(), String> {
              a run",
         ));
     }
-    let payload: usize = SECTIONS
+    let payload: usize = SECTIONS_IN_FILE_ORDER
         .iter()
         .map(|section| weights.get(section.id).values.size() * STORED_BYTES)
         .sum();
@@ -108,13 +95,11 @@ fn validate(weights: &ModelWeights, net: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// Replaces the weights of a single-layer graph by those of the quantised file `net`. A factoriser
-/// becomes zero: the file's feature weights already contain it.
 pub fn load_into(weights: &mut ModelWeights, net: &[u8]) -> Result<(), String> {
     validate(weights, net)?;
 
     let mut offset = 0;
-    for section in &SECTIONS {
+    for section in &SECTIONS_IN_FILE_ORDER {
         let (size, shape) = {
             let current = weights.get(section.id);
             (current.values.size(), current.shape)
@@ -132,7 +117,6 @@ pub fn load_into(weights: &mut ModelWeights, net: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
-/// How many values the optimiser's clipping to `±clip` would move to a different stored integer.
 fn changed_by_clip(values: &[f32], quantum: i16, clip: f32) -> usize {
     let stored = |weight: f32| (f64::from(weight) * f64::from(quantum)).round();
     values
@@ -141,11 +125,9 @@ fn changed_by_clip(values: &[f32], quantum: i16, clip: f32) -> usize {
         .count()
 }
 
-/// The optimiser clips every weight on each step, so a loaded weight outside the clip would jump on
-/// the first one. `feature_weight_clip` is the clip of `l0w`; the rest have bullet's default.
 pub fn check_clips(weights: &ModelWeights, feature_weight_clip: f32) -> Result<(), String> {
     let default_clip = AdamWParams::default().max_weight;
-    for section in &SECTIONS {
+    for section in &SECTIONS_IN_FILE_ORDER {
         let clip = if section.id == FEATURE_WEIGHTS {
             feature_weight_clip
         } else {
@@ -169,7 +151,6 @@ pub fn check_clips(weights: &ModelWeights, feature_weight_clip: f32) -> Result<(
     Ok(())
 }
 
-/// Loads the net file at `path` into the optimiser's weights; the optimiser state stays fresh.
 pub fn init_optimiser<Opt>(
     optimiser: &mut Optimiser<ExecutionContext, Opt>,
     path: &str,
@@ -207,7 +188,6 @@ mod tests {
     const NEZHA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../nets/nezha.nnue");
     const NEZHA_HIDDEN: usize = 1024;
 
-    /// The weights `run_buckets16` trains, built without a device.
     fn buckets16_weights(hidden_size: usize, use_factoriser: bool) -> ModelWeights {
         let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
         let builder = ModelBuilder::default();
@@ -224,7 +204,6 @@ mod tests {
         ModelWeights::new(&definition, 1)
     }
 
-    /// What bullet's `save_quantised` writes for these weights.
     fn saved(weights: &ModelWeights, use_factoriser: bool) -> Vec<u8> {
         weights
             .to_quantised_buffer(&buckets16_save_format(use_factoriser), true)
@@ -254,7 +233,7 @@ mod tests {
 
     #[test]
     fn every_stored_value_survives_the_save_quantisation() {
-        for section in &SECTIONS {
+        for section in &SECTIONS_IN_FILE_ORDER {
             let stored: Vec<i16> = (i16::MIN..=i16::MAX).collect();
             let floats: Vec<f32> = stored
                 .iter()
