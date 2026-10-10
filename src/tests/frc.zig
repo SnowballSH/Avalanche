@@ -255,14 +255,9 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
 }
 
 test "frc: search returns a legal move from a double fischer random position" {
-    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer io_threaded.deinit();
-    platform.io = io_threaded.io();
-
-    init_tables();
-    search.init_lmr();
+    platform.io = std.testing.io;
+    support.init_search();
     tt.GlobalTT.reset(16);
-    search.NUM_THREADS = 0;
 
     const pos = try new_position();
     defer destroy_position(pos);

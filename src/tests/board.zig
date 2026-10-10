@@ -153,7 +153,24 @@ const reference_see = struct {
     }
 };
 
-const SEE_THRESHOLDS = [_]i32{ -2000, -995, -994, -700, -522, -521, -347, -346, -309, -308, -215, -94, -93, -1, 0, 1, 93, 94, 215, 308, 346, 428, 521, 648, 994, 1300 };
+fn weight(piece_type: types.PieceType) i32 {
+    return see.SeeWeight[piece_type.index()];
+}
+
+const SEE_THRESHOLDS = blk: {
+    const exchanged = [_]types.PieceType{ .Pawn, .Knight, .Bishop, .Rook, .Queen };
+    const beyond_any_exchange = 2 * weight(.Queen) + 1;
+    var bounds: []const i32 = &.{ -beyond_any_exchange, -1, 0, 1, beyond_any_exchange };
+    for (exchanged, 0..) |piece_type, lighter_count| {
+        const whole = weight(piece_type);
+        bounds = bounds ++ [_]i32{ -whole - 1, -whole, whole, whole + 1 };
+        for (exchanged[0..lighter_count]) |lighter| {
+            const difference = whole - weight(lighter);
+            bounds = bounds ++ [_]i32{ -difference, difference };
+        }
+    }
+    break :blk bounds[0..bounds.len].*;
+};
 
 fn expect_see_matches_reference(prng: *utils.PRNG, pos: *position.Position, moves: []const types.Move) !void {
     for (moves) |move| {
@@ -345,18 +362,18 @@ const SeeCase = struct {
 const SEE_CASES = [_]SeeCase{
     // The bishop is pinned by the queen and takes on the line of the pin; the rook behind it
     // then makes the queen's recapture a loss.
-    .{ .fen = "3r3k/6b1/8/8/8/5N2/8/Q6K w - - 0 1", .move = "f3d4", .value = -308 },
+    .{ .fen = "3r3k/6b1/8/8/8/5N2/8/Q6K w - - 0 1", .move = "f3d4", .value = -weight(.Knight) },
     // The pawn's recapture leaves the rook alone between its king and the bishop, so the
     // rook is pinned for the rest of the exchange.
-    .{ .fen = "7k/6r1/5p2/6n1/8/5N2/8/BK4R1 w - - 0 1", .move = "f3g5", .value = 93 },
+    .{ .fen = "7k/6r1/5p2/6n1/8/5N2/8/BK4R1 w - - 0 1", .move = "f3g5", .value = weight(.Pawn) },
     // En passant: the bishop behind the capturing pawn joins the exchange.
-    .{ .fen = "4k3/3p4/8/2pP4/8/8/6B1/4K3 w - c6 0 2", .move = "d5c6", .value = 93 },
+    .{ .fen = "4k3/3p4/8/2pP4/8/8/6B1/4K3 w - c6 0 2", .move = "d5c6", .value = weight(.Pawn) },
     // The king is the last attacker of an undefended rook, ...
-    .{ .fen = "4k3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = 93 - 521 },
+    .{ .fen = "4k3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = weight(.Pawn) - weight(.Rook) },
     // ... of a rook defended through the square it came from, ...
-    .{ .fen = "3rk3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = 93 },
+    .{ .fen = "3rk3/8/8/8/8/3r4/3PK3/8 b - - 0 1", .move = "d3d2", .value = weight(.Pawn) },
     // ... and of a rook that the other king defends.
-    .{ .fen = "8/8/8/8/8/2k5/3pK3/3R4 w - - 0 1", .move = "d1d2", .value = 93 },
+    .{ .fen = "8/8/8/8/8/2k5/3pK3/3R4 w - - 0 1", .move = "d1d2", .value = weight(.Pawn) },
 };
 
 test "see: pins on the capture line, pins that appear during the exchange, en passant and king recaptures" {

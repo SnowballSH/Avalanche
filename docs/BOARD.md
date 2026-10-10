@@ -97,8 +97,9 @@ valuable one, with the occupancy of the exchange so far.
   by the many calls that never took a second step.
 
 `src/tests/board.zig` keeps the previous implementation and compares the two on every legal move
-of random games, over fixed and random thresholds, and on positions built for a pin along the
-capture line, a pin that appears during the exchange, en passant and king recaptures.
+of random games, at every piece weight and difference of two weights, their neighbours and random
+thresholds, and on positions built for a pin along the capture line, a pin that appears during
+the exchange, en passant and king recaptures.
 
 ## Draw detection
 
