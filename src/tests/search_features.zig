@@ -3,6 +3,7 @@ const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const support = @import("support.zig");
+const bench = @import("../engine/bench.zig");
 const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const strength = @import("../engine/strength.zig");
@@ -18,8 +19,7 @@ const Fixture = struct {
     fn init(self: *Fixture, fen: []const u8) !void {
         self.io_threaded = .init(std.heap.page_allocator, .{});
         platform.io = self.io_threaded.io();
-        support.init_tables();
-        search.init_lmr();
+        support.init_search();
         tt.GlobalTT.reset(16);
         search.NUM_THREADS = 0;
 
@@ -147,13 +147,81 @@ test "strength: a limited engine searches shallowly but plays a legal candidate"
     f.searcher.strength = strength.Strength.from_skill_level(3);
     f.run(30);
 
-    try expectEqual(@as(usize, 4), f.searcher.lines[0].depth);
+    try expectEqual(f.searcher.strength.max_depth(), f.searcher.lines[0].depth);
     try expectEqual(f.searcher.strength.candidate_count(), f.searcher.line_count);
     var found = false;
     for (f.searcher.lines[0..f.searcher.line_count]) |line| {
         found = found or line.pv[0].to_u16() == f.searcher.best_move.to_u16();
     }
     try expect(found);
+}
+
+test "bench: the node count is the same after a search has filled the engine's hash table" {
+    var f: Fixture = undefined;
+    try f.init(types.DEFAULT_FEN);
+    defer f.deinit();
+
+    const depth = 4;
+    const fresh = bench.count_nodes(depth);
+    f.run(depth + 2);
+    try expectEqual(fresh, bench.count_nodes(depth));
+}
+
+test "helpers: a helper's job leaves is_searching to the UCI thread and the main searcher" {
+    var f: Fixture = undefined;
+    try f.init(types.DEFAULT_FEN);
+    defer f.deinit();
+    f.run(1);
+
+    const helper = try std.testing.allocator.create(search.Searcher);
+    defer std.testing.allocator.destroy(helper);
+    helper.init();
+    defer helper.deinit();
+    helper.thread_id = 1;
+    helper.adopt_root(f.searcher, f.pos);
+
+    helper.shared.is_searching = true;
+    helper.start_helper(f.pos.turn, .scaled, 2, -hce.MateScore, hce.MateScore);
+    try expect(helper.shared.is_searching);
+}
+
+test "reset_heuristics: ageing halves the histories towards zero, keeps the corrections and clears every per-ply row" {
+    var f: Fixture = undefined;
+    try f.init(types.DEFAULT_FEN);
+    defer f.deinit();
+
+    const s = f.searcher;
+    const move = f.move("e2e4");
+    const last_ply = search.MAX_PLY;
+    const last_key = search.CORRHIST_SIZE - 1;
+    s.killer[last_ply] = .{ move, move };
+    s.pv[last_ply][search.MAX_PLY - 1] = move;
+    s.pv_size[last_ply] = 1;
+    s.counter_moves[1][63][63] = move;
+    s.history[1][63][63] = -7;
+    s.continuation[11][63][63][63] = 9;
+    s.capture_history[11][63][5] = -5;
+    s.pawn_correction[1][last_key] = 33;
+    s.nonpawn_correction[1][1][last_key] = -33;
+
+    s.reset_heuristics(false);
+    try expectEqual(types.Move.empty().to_u16(), s.killer[last_ply][0].to_u16());
+    try expectEqual(types.Move.empty().to_u16(), s.killer[last_ply][1].to_u16());
+    try expectEqual(types.Move.empty().to_u16(), s.pv[last_ply][search.MAX_PLY - 1].to_u16());
+    try expectEqual(@as(usize, 0), s.pv_size[last_ply]);
+    try expectEqual(types.Move.empty().to_u16(), s.counter_moves[1][63][63].to_u16());
+    try expectEqual(@as(i32, @divTrunc(-7, 2)), s.history[1][63][63]);
+    try expectEqual(@as(i16, @divTrunc(9, 2)), s.continuation[11][63][63][63]);
+    try expectEqual(@as(i16, @divTrunc(-5, 2)), s.capture_history[11][63][5]);
+    try expectEqual(@as(i16, 33), s.pawn_correction[1][last_key]);
+    try expectEqual(@as(i16, -33), s.nonpawn_correction[1][1][last_key]);
+
+    s.reset_heuristics(true);
+    try expectEqual(@as(i32, 0), s.history[1][63][63]);
+    try expectEqual(@as(i16, 0), s.continuation[11][63][63][63]);
+    try expectEqual(@as(i16, 0), s.capture_history[11][63][5]);
+    try expectEqual(@as(i16, 0), s.pawn_correction[1][last_key]);
+    try expectEqual(@as(i16, 0), s.nonpawn_correction[1][1][last_key]);
 }
 
 const DrawnScores = struct { quiescence: i32, negamax: i32 };
