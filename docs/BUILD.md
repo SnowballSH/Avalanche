@@ -19,18 +19,29 @@ zig build --release=fast      # zig-out/bin/Avalanche, for the CPU of this machi
 zig build                     # Debug
 zig build test                # unit tests, Debug
 zig build test -Doptimize=fast
+zig build test-exe            # zig-out/bin/avalanche-tests, the unit tests as a binary
 zig build wasm --release=fast # zig-out/web/avalanche.wasm (docs/WASM.md)
 make EXE=name [EVALFILE=net]  # what OpenBench runs, see below
 ```
 
+`test-exe` is for a machine other than the one that builds: with `-Dtarget=aarch64-linux-gnu`, say,
+the binary is copied there and run.
+
 | Option | Meaning |
 |---|---|
 | `-Dtarget=`, `-Dcpu=` | Target triple and CPU. Without `-Dtarget` the build is for this machine and its exact CPU; with `-Dtarget` and no `-Dcpu` it is for the target's baseline CPU (see "CPU baselines") |
-| `-Dnet=<path>` | Network to embed (default `nets/dianguang-5.nnue`); `-Dhead` and `-Dbuckets` describe it when the file cannot (docs/NNUE.md) |
+| `-Dnet=<path>` | Network to embed (default `nets/dianguang-5.nnue`), relative to the repository root or absolute |
+| `-Dhead=<head>` | The layers after the feature transformer: `single`, `multi`, or `auto` (the default), which reads them off the `-Dnet` file (docs/NNUE.md) |
+| `-Dbuckets=<n>` | King input buckets of the feature transformer: 16 (the default), mirrored king buckets, as in every network under `nets/`, or 1, no king buckets. A `-Dnet` file of the other kind is a compile error |
 | `-Dversion=<x.y.z>` | Version reported by `uci`. Without it a build reports its build time, which is why the configuration is never cached (`b.graph.poisonCache()`) |
 | `-Dstrip=true` | No debug information in the binary. The release script passes it |
 | `-Dtarget-name=<name>` | File name of the binary |
 | `-Dtest-filter=<text>` | Only the unit tests whose name contains the text |
+
+The default network is named in one place, the `default_net` line of `build.zig`.
+`scripts/install_net.sh <checkpoint directory>` copies the checkpoint's `quantised.bin` to
+`nets/<checkpoint name>.nnue`, rewrites that line and runs `scripts/update_bench.sh`;
+`scripts/openbench_build_check.sh` reads it.
 
 ## What a release build is compiled with
 
@@ -97,8 +108,23 @@ easy to get wrong:
 
 ## Release matrix
 
-`build_all_v3.sh` builds one binary per row, named `Avalanche-<version>-<binary>`, and the wasm
-module. Linux binaries are static (musl).
+`scripts/build_release.sh` builds one binary per row into `artifacts/bin`, named
+`Avalanche-<version>-<binary>`, and the wasm module. Linux binaries are static (musl).
+
+```sh
+scripts/build_release.sh                  # every binary, the wasm module and artifacts/build.zip
+scripts/build_release.sh x86_64-linux-v2  # only the binaries named, no wasm module and no packaging
+```
+
+| Variable | Effect |
+|---|---|
+| `VERSION=<x.y.z>` | The version the binaries report and carry in their names. Without it they are named `dev` and report their build time |
+| `VERIFY_INSTRUCTIONS=0` | No disassembly, for a machine without `llvm-objdump` 15 or later |
+| `REQUIRE_RUN=1` | A binary that this machine cannot execute is a failure |
+
+A full run adds `README.md`, `LICENSE` and `LICENSE-pyrrhic` to `artifacts/bin` and zips the
+directory. `LICENSE-pyrrhic` is `src/pyrrhic/LICENSE`: every native binary contains the Syzygy
+probing code, whose licence asks for its text in every copy.
 
 | Binary | `-Dcpu` | NNUE paths | For |
 |---|---|---|---|
@@ -124,16 +150,16 @@ Why these rows:
   later), so the row asks for that level, which gives `vpdpbusd` and the `vpcompressb` search.
   Skylake-X and Cascade Lake, which have AVX-512 without VBMI2 and lower their clock for 512-bit
   work, use `v3`.
-- **512 bits in `avx512`.** With `prefer_256_bit` removed the head uses 512-bit vectors. On an EPYC
-  9R45 (Zen 5) that is 5% faster in `bench` than the 256-bit form of the same instructions, and
-  within 0.3% of a build for the exact CPU ("Measurements" below); on an EPYC 9R14 (Zen 4) the
+- **512 bits in `avx512`.** With `prefer_256_bit` removed the head uses 512-bit vectors. On a Zen 5
+  server CPU that is 5% faster in `bench` than the 256-bit form of the same instructions, and
+  within 0.3% of a build for the exact CPU ("Measurements" below); on a Zen 4 server CPU the
   512-bit native build is 6.7% faster than the AVX2 build (docs/NNUE.md, "Performance"). On Intel
   nothing has been timed, and 512 bits is the opposite of what LLVM prefers for every Intel
   model: the README tells Intel users to compare the binary with `v3`. The width is one token of
-  the `-Dcpu` string in `build_all_v3.sh`.
+  the `-Dcpu` string in `scripts/build_release.sh`.
 - **`avxvnni`.** Intel's CPUs since Alder Lake have no AVX-512 but have the VEX-encoded
-  `vpdpbusd`. No development machine has the instruction; the binary was first run on an EPYC
-  9R45 (Zen 5), which has it next to AVX-512, with the node count and checksum of every other
+  `vpdpbusd`. No development machine has the instruction; the binary was first run on a Zen 5
+  server CPU, which has it next to AVX-512, with the node count and checksum of every other
   path. There it is 0.8% faster than `v3`. On the Intel CPUs it is meant for it has not been
   timed.
 - **Two AArch64 levels.** Zig's baseline for Linux and Windows is ARMv8.0, which a Raspberry Pi 4
@@ -170,19 +196,28 @@ pairwise product (a build that fell back to the portable one has none), `sadalp`
 `ldseta` the transposition table's lock with LSE. Mnemonics that also have a scalar form
 (`umull`, `smull`) or sit in every libc (`ldaxr`) would show nothing and are not used. The
 disassembler is `llvm-objdump` 15 or later: older ones do not decode every AArch64 extension,
-and an instruction that is not decoded cannot be found missing.
+and an instruction that is not decoded cannot be found missing. The script takes the newest
+`llvm-objdump*` command on `PATH`, since some distributions install only versioned names
+(`llvm-objdump-19`), and failing that the one of Xcode.
 
 A binary this machine can execute (same OS and architecture, and `/proc/cpuinfo` lists the row's
 flags) goes through `scripts/verify_binary.sh`: `bench` must print the node count in
 `bench.nodes` and `nnue-speed` the checksum in `nnue-speed.checksum`, so binaries verified on
-different machines are held to one value (`scripts/update_bench.sh` refreshes both files). For
-every other binary the script prints why it did not run (`not run: host CPU lacks avx_vnni`), and
-it ends with the list of what ran and what was only inspected. `REQUIRE_RUN=1` makes a binary
-that could not run a failure.
+different machines are held to one value. Both values change only with the network or the search;
+a change that means to alter them runs `scripts/update_bench.sh`, which rebuilds and rewrites the
+two files, and commits them. Built with a `VERSION`, the binary must also answer `uci` with
+`id name Avalanche <version>`. For every other binary the script prints why it did not run
+(`not run: host CPU lacks avx_vnni`), and it ends with the list of what ran and what was only
+inspected. `REQUIRE_RUN=1` makes a binary that could not run a failure.
 
-In CI, the job `build` puts its native binary through `scripts/verify_binary.sh` on Linux, macOS
-and Windows, and the job `tiers` runs the release script on every pull request, with
-`-Dversion=ci` so that unchanged sources are cache hits:
+## CI
+
+The job `build` puts its native binary through `scripts/verify_binary.sh` on Linux, macOS and
+Windows. On Linux it also compiles the engine in Debug mode: the unit tests do not include the UCI
+frontend, so no other step would compile that without optimisation.
+
+The job `tiers` runs the release script on every pull request, with `VERSION=ci`: a fixed version
+lets unchanged sources be cache hits, and the binaries a runner executes must report it.
 
 | Runner | Built per pull request | Run there |
 |---|---|---|
@@ -194,16 +229,31 @@ and Windows, and the job `tiers` runs the release script on every pull request, 
 `v1`, `v3`, `avxvnni` and the Windows and macOS binaries are built by the `artifacts` job only,
 for version tags and manual runs, which builds the whole matrix. A path that stops compiling or
 stops being selected therefore fails in a pull request when it is one of the four above, and at
-the next tag otherwise.
+the next tag otherwise. `artifacts` runs for nothing else because it is the slowest job and because
+a pull request from a fork must not be able to start a build of downloadable binaries. The
+binaries take their version from the tag alone, so for a tag the job first requires the tag,
+`version` in `build.zig.zon` and `version` in `web/package.json` to be one version. It uploads
+`artifacts/bin` without the `.pdb` files of the Windows builds.
+
+The job `wasm` runs the checks of the `web/` package on Node 24, the oldest version
+`web/package.json` accepts, and on Node 26, the version its type definitions describe.
+
+The actions that are not GitHub's own, `mlugg/setup-zig` (it installs the compiler that builds the
+release binaries) and `dtolnay/rust-toolchain`, are referenced by commit, with the tag the commit
+was taken from in a trailing comment: a tag can be moved to other code, a commit cannot.
 
 ## Measurements
+
+Both tables were measured while Dianguang-3 was the default network. Every build in them printed
+the same `bench` node count and `nnue-speed` checksum, those of that tree and not the ones
+`bench.nodes` and `nnue-speed.checksum` hold now.
 
 **ARM levels on one core.** Apple M4, native macOS builds that differ only in `-Dcpu`, so the
 core is the same and the instructions it may use are not. `bench` instructions are the median of
 two runs, the `nnue-speed` figures the median of three (whole program: two million evaluations
-and the stage loops); all print 15472869 nodes and checksum 360840000. The builds are commit
-870eeab with only the build changes this document describes: the absolute counts are not those of
-a build that also has the other changes of pull requests #104 to #111.
+and the stage loops). The builds are commit 870eeab with only the build changes this document
+describes: the absolute counts are not those of a build that also has the other changes of pull
+requests #104 to #111.
 
 | `-Dcpu` | L1 | Atomics | `bench` instructions | `nnue-speed` cycles | `nnue-speed` user time |
 |---|---|---|---|---|---|
@@ -223,9 +273,9 @@ portable L1, 729 and 664 with `extadd`, 531 and 643 for `dotprod`, 528 and 693 f
 The load-exclusive loop was not timed apart from the L1: it is three more instructions on a
 transposition table store, at most 0.05% of the instructions of `bench`.
 
-**x86 levels on one core.** EPYC 9R45 (Zen 5), idle, one thread, builds that differ only in
+**x86 levels on one core.** A Zen 5 server CPU, idle, one thread, builds that differ only in
 `-Dcpu`. Speed relative to the build for the exact CPU, in `bench` (five alternating rounds) and
-in searches of three seconds; every build printed 15472869 nodes and checksum 360840000.
+in searches of three seconds.
 
 | Build | NNUE paths | `bench` | 3 s searches | `nnue-speed` |
 |---|---|---|---|---|
@@ -261,10 +311,15 @@ universally available is missing. What is left out needs a decision at run time:
 
 OpenBench builds with `make EXE=<path> [EVALFILE=<net>] [CC=<compiler>]` in the repository root and
 runs `<path> bench`. The `Makefile` is that contract and nothing else: a native `--release=fast`
-build with the network embedded, installed under the requested name. `CC` is ignored, Zig brings
-its compiler. `scripts/openbench_build_check.sh` builds this way into a temporary directory,
-checks that the network given as `EVALFILE` is the one embedded, and parses the `bench` output
-with OpenBench's regular expressions; CI runs it on Linux.
+build with the network embedded, installed under the requested name, whatever the name (without
+`EXE` the binary stays where the build installs it, `bin/Avalanche`). `CC` is ignored, Zig brings
+its compiler. `scripts/openbench_build_check.sh` holds the `Makefile` to this; CI runs it on
+Linux. With a stand-in for the compiler it checks that the binary ends up at `EXE` for
+`Avalanche` and `bin/Avalanche`, the name and the path of the file the build installs, and for a
+name of the form OpenBench passes, and that an `EVALFILE` path with a space in it reaches the
+build whole. Then it builds for real into a temporary directory with a copy of the default
+network as `EVALFILE`, checks that the copy is the network embedded, and parses the `bench`
+output with OpenBench's regular expressions: the count must be the one in `bench.nodes`.
 
 A worker therefore runs the paths of its own CPU. The build must not depend on anything a worker
 lacks: no option of `build.zig` is required, and nothing is downloaded, since the `translate_c`
