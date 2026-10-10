@@ -81,10 +81,10 @@ pub fn count_nodes(depth: u8) u64 {
     var table = tt.TranspositionTable.new();
     defer table.deinit();
     table.reset(HASH_MB);
-    if (table.size == 0) @panic("out of memory for the bench hash table");
+    if (table.size == 0) platform.fatal("out of memory: bench hash table", .{});
 
     var nodes: u64 = 0;
-    const searcher = platform.allocator.create(search.Searcher) catch @panic("out of memory for the bench searcher");
+    const searcher = platform.allocator.create(search.Searcher) catch platform.fatal("out of memory: bench searcher", .{});
     defer {
         searcher.deinit();
         platform.allocator.destroy(searcher);
@@ -94,7 +94,7 @@ pub fn count_nodes(depth: u8) u64 {
     searcher.force_thinking = true;
     searcher.silent_output = true;
 
-    const pos = platform.allocator.create(position.Position) catch @panic("out of memory for the bench position");
+    const pos = platform.allocator.create(position.Position) catch platform.fatal("out of memory: bench position", .{});
     defer {
         pos.deinit();
         platform.allocator.destroy(pos);
@@ -109,7 +109,7 @@ pub fn count_nodes(depth: u8) u64 {
         searcher.hash_history.append(pos.hash) catch unreachable;
         const job = BenchJob{ .searcher = searcher, .pos = pos, .depth = depth };
         if (comptime platform.has_threads) {
-            const thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, run_bench_search, .{job}) catch @panic("cannot start the bench search thread");
+            const thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, run_bench_search, .{job}) catch |err| platform.fatal("cannot start the bench search thread: {s}", .{@errorName(err)});
             thread.join();
         } else {
             run_bench_search(job);

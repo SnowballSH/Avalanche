@@ -22,8 +22,6 @@ pub const SORT_QUEEN_PROMOTION: i32 = 1_000_000;
 pub const SORT_KNIGHT_PROMOTION: i32 = 650_000;
 const CONT_HIST_WEIGHT_SCALE: i32 = 128;
 
-pub const continuation_plies_ago = [_]usize{ 0, 1, 3 };
-
 const CaptureHistoryEntry = std.meta.Child(@typeInfo(@TypeOf(search.Searcher.capture_history_entry)).@"fn".return_type.?);
 
 pub const ScoreKind = enum {
@@ -202,7 +200,7 @@ const SearchContext = struct {
     const Self = @This();
     const ContinuationEntry = i16;
     const ContinuationTable = [64][64]ContinuationEntry;
-    const CONTINUATION_WEIGHT_NAMES = [continuation_plies_ago.len][]const u8{ "ContHistWeight1", "ContHistWeight2", "ContHistWeight4" };
+    const CONTINUATION_WEIGHT_NAMES = [search.CONTINUATION_PLIES_AGO.len][]const u8{ "ContHistWeight1", "ContHistWeight2", "ContHistWeight4" };
 
     searcher: *search.Searcher,
     pos: *position.Position,
@@ -210,14 +208,14 @@ const SearchContext = struct {
     killers: [2]types.Move,
     counter_move: types.Move,
     history: *const [64][64]i32,
-    continuations: [continuation_plies_ago.len]?*const ContinuationTable,
-    continuation_weights: [continuation_plies_ago.len]i32,
+    continuations: [search.CONTINUATION_PLIES_AGO.len]?*const ContinuationTable,
+    continuation_weights: [search.CONTINUATION_PLIES_AGO.len]i32,
 
     pub fn at(searcher: *search.Searcher, pos: *position.Position, hashmove: types.Move, without_continuation_history: bool) Self {
         const ply = searcher.ply;
-        var continuations: [continuation_plies_ago.len]?*const ContinuationTable = @splat(null);
+        var continuations: [search.CONTINUATION_PLIES_AGO.len]?*const ContinuationTable = @splat(null);
         if (!without_continuation_history) {
-            for (continuation_plies_ago, &continuations) |plies_ago, *table| {
+            for (search.CONTINUATION_PLIES_AGO, &continuations) |plies_ago, *table| {
                 if (ply < plies_ago + 1) continue;
                 const prev = searcher.move_history[ply - plies_ago - 1];
                 if (prev.to_u16() == 0) continue;

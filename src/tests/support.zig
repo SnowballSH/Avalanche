@@ -8,7 +8,6 @@ const weights = @import("../engine/weights.zig");
 const cuckoo = @import("../chess/cuckoo.zig");
 const search = @import("../engine/search.zig");
 const tt = @import("../engine/tt.zig");
-const options = @import("../engine/uci/options.zig");
 
 pub fn init_tables() void {
     tables.init_all();
@@ -25,7 +24,7 @@ pub fn init_search() void {
 pub fn init_engine() void {
     platform.io = std.testing.io;
     init_search();
-    tt.GlobalTT.reset(options.DEFAULT_HASH_MB);
+    tt.GlobalTT.reset(tt.DEFAULT_HASH_MB);
     search.set_helper_count(0);
 }
 

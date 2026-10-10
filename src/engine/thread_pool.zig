@@ -5,9 +5,8 @@ const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const numa = @import("numa.zig");
 const hce = @import("hce.zig");
-const Searcher = @import("search.zig").Searcher;
-
-pub const SEARCH_STACK_SIZE = 64 * 1024 * 1024;
+const search = @import("search.zig");
+const Searcher = search.Searcher;
 
 pub const SearchJob = struct {
     color: types.Color,
@@ -55,7 +54,7 @@ pub const Worker = struct {
 
     fn main(self: *Worker) void {
         numa.place_current_thread(self.helper_index + 1, self.search_thread_count);
-        self.searcher = platform.allocator.create(Searcher) catch platform.fatal("out of memory: helper searcher");
+        self.searcher = platform.allocator.create(Searcher) catch platform.fatal("out of memory: helper searcher", .{});
         self.searcher.init();
         self.searcher.thread_id = self.helper_index + 1;
         self.idle.set(platform.io);
@@ -103,7 +102,7 @@ pub const ThreadPool = struct {
         while (self.workers.items.len < target) {
             const w = platform.allocator.create(Worker) catch break;
             w.* = .{ .helper_index = self.workers.items.len, .search_thread_count = target + 1 };
-            w.thread = std.Thread.spawn(.{ .stack_size = SEARCH_STACK_SIZE }, Worker.main, .{w}) catch {
+            w.thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, Worker.main, .{w}) catch {
                 platform.allocator.destroy(w);
                 break;
             };

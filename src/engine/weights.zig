@@ -131,7 +131,7 @@ pub var MODEL: *const NNUEWeights = @ptrCast(embedded_bytes);
 var model_block: ?*align(large_memory.ALIGNMENT) NNUEWeights = null;
 
 fn adopt(bytes: *const [@sizeOf(NNUEWeights)]u8) void {
-    const block = model_block orelse large_memory.create(NNUEWeights, "network") catch @panic("out of memory for the network");
+    const block = model_block orelse large_memory.create(NNUEWeights, "network") catch platform.fatal("out of memory: network", .{});
     model_block = block;
     @memcpy(std.mem.asBytes(block), bytes);
     MODEL = block;
@@ -222,7 +222,7 @@ comptime {
 }
 
 pub fn use_embedded() void {
-    validate(embedded_bytes) catch |err| std.debug.panic("Embedded network is unusable: {s}", .{@errorName(err)});
+    validate(embedded_bytes) catch |err| platform.fatal("embedded network is unusable: {s}", .{@errorName(err)});
     if (platform.is_wasm) prepare() else adopt(embedded_bytes);
 }
 

@@ -15,8 +15,6 @@ const viriformat = @import("datagen/viriformat.zig");
 
 pub const Format = options.Format;
 
-const SEARCH_THREAD_STACK_SIZE = 64 * 1024 * 1024;
-
 pub const Summary = struct {
     positions: u64 = 0,
     games: u64 = 0,
@@ -720,7 +718,7 @@ pub const Datagen = struct {
         defer for (threads.items) |thread| thread.join();
         errdefer self.output.stop.store(true, .release);
         for (self.workers.items) |*worker| {
-            threads.appendAssumeCapacity(try std.Thread.spawn(.{ .stack_size = SEARCH_THREAD_STACK_SIZE }, Worker.run, .{worker}));
+            threads.appendAssumeCapacity(try std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, Worker.run, .{worker}));
         }
     }
 

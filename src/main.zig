@@ -6,7 +6,6 @@ const cuckoo = @import("chess/cuckoo.zig");
 const search = @import("engine/search.zig");
 const tt = @import("engine/tt.zig");
 const interface = @import("engine/interface.zig");
-const uci_options = @import("engine/uci/options.zig");
 const weights = @import("engine/weights.zig");
 const nnue_parity = @import("engine/nnue/parity.zig");
 const bench = @import("engine/bench.zig");
@@ -86,7 +85,7 @@ pub fn main(init: std.process.Init) anyerror!void {
     tables.init_all();
     zobrist.init_zobrist();
     cuckoo.init();
-    tt.GlobalTT.reset(uci_options.DEFAULT_HASH_MB);
+    tt.GlobalTT.reset(tt.DEFAULT_HASH_MB);
     defer tt.GlobalTT.deinit();
     weights.use_embedded();
     search.init_lmr();

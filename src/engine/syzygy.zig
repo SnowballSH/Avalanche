@@ -16,10 +16,16 @@ comptime {
     if (supported) std.debug.assert(MAX_TB_MOVES == c.TB_MAX_MOVES);
 }
 
+pub const DEFAULT_PROBE_DEPTH: i32 = 1;
+pub const MAX_PROBE_DEPTH: i32 = 100;
+pub const MAX_PROBE_LIMIT: i32 = 7;
+pub const DEFAULT_PROBE_LIMIT: i32 = MAX_PROBE_LIMIT;
+pub const DEFAULT_USE_RULE50 = true;
+
 pub var enabled: bool = false;
-pub var probe_depth: i32 = 1;
-pub var use_rule50: bool = true;
-pub var probe_limit: i32 = 7;
+pub var probe_depth: i32 = DEFAULT_PROBE_DEPTH;
+pub var use_rule50: bool = DEFAULT_USE_RULE50;
+pub var probe_limit: i32 = DEFAULT_PROBE_LIMIT;
 
 pub inline fn active() bool {
     return supported and enabled;

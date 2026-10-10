@@ -373,13 +373,13 @@ pub const Searcher = struct {
     rng_seeded: bool = false,
 
     pub fn init(self: *Searcher) void {
-        const board = platform.allocator.create(position.Position) catch @panic("out of memory for the root position of a searcher");
+        const board = platform.allocator.create(position.Position) catch platform.fatal("out of memory: root position of a searcher", .{});
         board.init();
         self.* = .{
-            .continuation = platform.large_memory.create(ContinuationHistory, "search") catch @panic("out of memory for the continuation history"),
+            .continuation = platform.large_memory.create(ContinuationHistory, "search") catch platform.fatal("out of memory: continuation history", .{}),
             .root_board = board,
         };
-        self.hash_history = KeyHistory.init(platform.allocator, position.HISTORY_CAPACITY) catch @panic("out of memory for the key history of a searcher");
+        self.hash_history = KeyHistory.init(platform.allocator, position.HISTORY_CAPACITY) catch platform.fatal("out of memory: key history of a searcher", .{});
         self.reset_heuristics(true);
     }
 

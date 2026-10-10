@@ -93,9 +93,9 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     w.flush() catch {};
 }
 
-pub fn fatal(message: []const u8) noreturn {
+pub fn fatal(comptime format: []const u8, args: anytype) noreturn {
     @branchHint(.cold);
-    @panic(message);
+    std.debug.panic(format, args);
 }
 
 pub inline fn atomic_load(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {

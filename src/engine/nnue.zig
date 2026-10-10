@@ -201,7 +201,7 @@ pub const NNUE = struct {
     }
 
     pub fn allocate_storage(self: *NNUE) void {
-        const storage = large_memory.create(Storage, "evaluator") catch @panic("out of memory for an evaluator");
+        const storage = large_memory.create(Storage, "evaluator") catch platform.fatal("out of memory: evaluator", .{});
         storage.cache.clear();
         storage.network_generation = weights.generation;
         self.adopt_storage(storage);

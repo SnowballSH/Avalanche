@@ -225,7 +225,7 @@ not its concurrency scheme.
 
 - The time check runs on the main thread only, every 1024 nodes, and costs
   one clock read through the `std.Io` vtable.
-- Helper stacks are 64 MiB each (`thread_pool.SEARCH_STACK_SIZE`), like the
+- Helper stacks are 64 MiB each (`search.SEARCH_STACK_SIZE`), like the
   stack of the main search thread. Only the touched pages are backed by
   memory, and a `negamax` frame of a release build is 3 to 4 KB, so a 200-ply
   line stays under 1 MB. On Linux and macOS the rest is address space. On

@@ -13,8 +13,6 @@ const hce = @import("../hce.zig");
 const position = @import("../../chess/position.zig");
 const numa = @import("../numa.zig");
 
-pub const DEFAULT_HASH_MB: usize = 16;
-
 pub const Settings = struct {
     multi_pv: usize = 1,
     limit_strength: bool = false,
@@ -73,7 +71,7 @@ const Value = union(enum) {
 };
 
 const OPTIONS = [_]Option{
-    .{ .name = "Hash", .kind = .{ .spin = .{ .default = DEFAULT_HASH_MB, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
+    .{ .name = "Hash", .kind = .{ .spin = .{ .default = tt.DEFAULT_HASH_MB, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
     .{ .name = "Threads", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_SEARCH_THREADS } }, .apply = set_threads },
     .{ .name = "Move Overhead", .aliases = &.{"MoveOverhead"}, .kind = .{ .spin = .{ .default = search.DEFAULT_MOVE_OVERHEAD, .min = 0, .max = search.MAX_MOVE_OVERHEAD } }, .apply = set_move_overhead },
     .{ .name = "NumaPolicy", .kind = .{ .combo = .{ .default = @tagName(numa.Policy.auto), .values = @typeInfo(numa.Policy).@"enum".field_names } }, .apply = set_numa_policy, .available = platform.has_threads },
@@ -85,9 +83,9 @@ const OPTIONS = [_]Option{
     .{ .name = "UCI_Elo", .kind = .{ .spin = .{ .default = DEFAULT_SETTINGS.elo, .min = strength.MIN_ELO, .max = strength.MAX_ELO } }, .apply = set_elo },
     .{ .name = "Skill Level", .kind = .{ .spin = .{ .default = DEFAULT_SETTINGS.skill_level, .min = 0, .max = strength.MAX_LEVEL } }, .apply = set_skill_level },
     .{ .name = "SyzygyPath", .kind = .{ .string = "<empty>" }, .apply = set_syzygy_path, .available = syzygy.supported },
-    .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = 100 } }, .apply = set_syzygy_probe_depth, .available = syzygy.supported },
-    .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = 7, .min = 1, .max = 7 } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
-    .{ .name = "Syzygy50MoveRule", .kind = .{ .check = true }, .apply = set_syzygy_rule50, .available = syzygy.supported },
+    .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = syzygy.DEFAULT_PROBE_DEPTH, .min = 1, .max = syzygy.MAX_PROBE_DEPTH } }, .apply = set_syzygy_probe_depth, .available = syzygy.supported },
+    .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = syzygy.DEFAULT_PROBE_LIMIT, .min = 1, .max = syzygy.MAX_PROBE_LIMIT } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
+    .{ .name = "Syzygy50MoveRule", .kind = .{ .check = syzygy.DEFAULT_USE_RULE50 }, .apply = set_syzygy_rule50, .available = syzygy.supported },
     .{ .name = "EvalFile", .kind = .{ .string = weights.EMBEDDED_NAME }, .apply = set_eval_file, .available = weights.supports_eval_file },
     .{ .name = "EvalScale", .kind = .{ .spin = .{ .default = hce.DEFAULT_EVAL_SCALE, .min = hce.MIN_EVAL_SCALE, .max = hce.MAX_EVAL_SCALE } }, .apply = set_eval_scale },
     .{ .name = "UCI_ShowWDL", .kind = .{ .check = false }, .apply = set_show_wdl },

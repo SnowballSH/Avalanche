@@ -6,8 +6,15 @@ const search = @import("search.zig");
 const numa = @import("numa.zig");
 
 pub const MB: usize = 1 << 20;
-pub const MAX_HASH_MB: usize = 1048576;
+const LARGEST_HASH_MB_BELOW_2_GIB: usize = 2 * 1024 - 1;
+pub const MAX_HASH_MB: usize = if (@bitSizeOf(usize) <= 32) LARGEST_HASH_MB_BELOW_2_GIB else 1048576;
 pub const DEFAULT_HASH_MB: usize = 16;
+
+comptime {
+    if (MAX_HASH_MB > std.math.maxInt(usize) / MB) {
+        @compileError("tt.MAX_HASH_MB must be a size whose bytes a usize can count");
+    }
+}
 
 pub const Bound = enum(u2) {
     None,

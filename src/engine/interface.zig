@@ -21,7 +21,6 @@ const nl = search.LINE_ENDING;
 
 const Tokens = std.mem.TokenIterator(u8, .scalar);
 
-const SEARCH_THREAD_STACK_BYTES = 64 * 1024 * 1024;
 const OVERHEAD_PER_HELPER_MS: u64 = 5;
 const MAX_HELPER_OVERHEAD_MS: u64 = 25;
 
@@ -258,10 +257,10 @@ pub const UciInterface = struct {
 
         if (comptime platform.has_threads) {
             self.search_thread = std.Thread.spawn(
-                .{ .stack_size = SEARCH_THREAD_STACK_BYTES },
+                .{ .stack_size = search.SEARCH_STACK_SIZE },
                 run_search,
                 .{ s, &self.position, cmd.depth, instant_single_reply },
-            ) catch |e| std.debug.panic("Could not spawn main thread!\n{}", .{e});
+            ) catch |err| platform.fatal("cannot start the search thread: {s}", .{@errorName(err)});
         } else {
             run_search(s, &self.position, cmd.depth, instant_single_reply);
         }

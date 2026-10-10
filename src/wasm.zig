@@ -33,12 +33,12 @@ export fn avalanche_init() void {
     tables.init_all();
     zobrist.init_zobrist();
     cuckoo.init();
-    tt.GlobalTT.reset(16);
+    tt.GlobalTT.reset(tt.DEFAULT_HASH_MB);
     weights.use_embedded();
     search.init_lmr();
 
     output = platform.Stdout.init(&output_buf);
-    engine = platform.allocator.create(interface.UciInterface) catch @panic("out of memory");
+    engine = platform.allocator.create(interface.UciInterface) catch platform.fatal("out of memory: UCI interface", .{});
     engine.init();
 }
 
