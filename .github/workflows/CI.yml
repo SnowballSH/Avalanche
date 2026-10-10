@@ -269,7 +269,9 @@ jobs:
           git init --quiet Avalanche
           git -C Avalanche remote add origin file:///nonexistent
           EXE=stale
-          source "$GITHUB_WORKSPACE/tcec/update.sh" || true
+          set +e
+          source "$GITHUB_WORKSPACE/tcec/update.sh"
+          set -e
           [ -z "${EXE+set}" ]
 
       - name: Update from master as TCEC does

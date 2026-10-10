@@ -19,12 +19,13 @@ install_avalanche() {
     fi
 
     release=$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)
+    [ -n "$release" ] || return
     commit=$(git rev-parse HEAD)
     release_tag=$(git ls-remote origin "refs/tags/v$release" "refs/tags/v$release^{}") || return
     if [ "$(printf '%s\n' "$release_tag" | tail -n 1 | cut -f 1)" = "$commit" ]; then
         version=$release
     else
-        version=$release-dev-$(git rev-parse --short=8 HEAD)
+        version=$release-dev-$(printf %.8s "$commit")
     fi
 
     "$zig_dir/zig" build --release=fast -Dversion="$version" || return
