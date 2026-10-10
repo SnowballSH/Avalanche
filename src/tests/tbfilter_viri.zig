@@ -5,6 +5,7 @@ const syzygy = @import("../engine/syzygy.zig");
 const viriformat = @import("../engine/datagen/viriformat.zig");
 const viri_clean = @import("../engine/tbfilter/viri.zig");
 const tbfilter = @import("../engine/tbfilter.zig");
+const arguments = @import("../engine/datagen/arguments.zig");
 const support = @import("support.zig");
 const testing = std.testing;
 
@@ -15,18 +16,19 @@ fn build_game(allocator: std.mem.Allocator, fen: []const u8, moves: []const []co
     const pos = try support.new_position();
     defer support.destroy_position(pos);
     pos.set_fen(fen);
-    var bytes = std.array_list.Managed(u8).init(allocator);
-    var header = viriformat.pack_board(pos, 0);
+    var bytes: std.ArrayList(u8) = .empty;
+    errdefer bytes.deinit(allocator);
+    var header = viriformat.PackedBoard.pack(pos, 0);
     header.wdl = white_result;
-    try bytes.appendSlice(std.mem.asBytes(&header));
+    try bytes.appendSlice(allocator, std.mem.asBytes(&header));
     for (moves, 0..) |text, index| {
         const move = types.Move.new_from_string(pos, text);
         const pair = viriformat.MoveScorePair{ .move = viriformat.encode_move(move), .score = @intCast(100 + index) };
-        try bytes.appendSlice(std.mem.asBytes(&pair));
+        try bytes.appendSlice(allocator, std.mem.asBytes(&pair));
         if (pos.turn == types.Color.White) pos.play_move(types.Color.White, move) else pos.play_move(types.Color.Black, move);
     }
-    try bytes.appendSlice(std.mem.asBytes(&viriformat.TERMINATOR));
-    return bytes.toOwnedSlice();
+    try bytes.appendSlice(allocator, std.mem.asBytes(&viriformat.TERMINATOR));
+    return bytes.toOwnedSlice(allocator);
 }
 
 fn always(comptime result: ?syzygy.WdlResult) viri_clean.Prober {
@@ -94,16 +96,100 @@ test "tbclean: positions with too many men, castling rights or failed probes are
     try testing.expectEqual([3]i16{ 100, 101, 102 }, try scores(failed));
 }
 
-test "tbclean: format=viri rejects the bullet-only max= and threads= options" {
-    var offending: []const u8 = "";
-    _ = try tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "rule50=on" }, &offending);
-    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in", "out", "tb=tables", "max=10", "format=viri" }, &offending));
-    try testing.expectEqualStrings("max=10", offending);
-    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "threads=4" }, &offending));
-    try testing.expectEqualStrings("threads=4", offending);
-    const bullet = try tbfilter.parse_config(&.{ "in", "out", "tb=tables", "max=10", "threads=4" }, &offending);
-    try testing.expectEqual(@as(u64, 10), bullet.max_positions);
-    try testing.expectEqual(@as(usize, 4), bullet.threads);
+test "tbclean: a game whose header cannot be a position is reported, not replayed" {
+    support.init_search();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+    var cleaner = viri_clean.Cleaner{ .probe = always(.win), .max_men = 6, .mode = .keep };
+
+    const impossible_result = try build_game(testing.allocator, START, &MOVES, 3);
+    defer testing.allocator.free(impossible_result);
+    try testing.expectError(error.InvalidHeader, cleaner.clean_buffer(pos, impossible_result));
+
+    const crowded = try build_game(testing.allocator, START, &MOVES, 2);
+    defer testing.allocator.free(crowded);
+    @memset(crowded[0..@sizeOf(u64)], 0xFF);
+    try testing.expectError(error.InvalidHeader, cleaner.clean_buffer(pos, crowded));
+
+    try testing.expectEqual(@as(u64, 0), cleaner.stats.positions);
+}
+
+fn parse(args: []const []const u8) tbfilter.ParseError!tbfilter.Config {
+    var diag: arguments.Diagnostic = .{};
+    return tbfilter.parse_config(args, &diag);
+}
+
+test "tbfilter options: the input's extension names the format unless format= does" {
+    try testing.expectEqual(tbfilter.Format.viri, (try parse(&.{ "in.viribin", "out.viribin", "tb=tables" })).format);
+    try testing.expectEqual(tbfilter.Format.bullet, (try parse(&.{ "in.bin", "out.bin", "tb=tables" })).format);
+    try testing.expectEqual(tbfilter.Format.bullet, (try parse(&.{ "in.viribin", "out", "tb=tables", "format=bullet" })).format);
+    try testing.expectEqual(tbfilter.Format.viri, (try parse(&.{ "in.bin", "out", "format=viri", "tb=tables" })).format);
+    try testing.expectEqual(tbfilter.Format.viri, (try parse(&.{ "in", "out", "tb=tables", "format=viri" })).format);
+
+    var diag: arguments.Diagnostic = .{};
+    try testing.expectError(error.UndecidedFormat, tbfilter.parse_config(&.{ "chunk.data", "out.bin", "tb=tables" }, &diag));
+    try testing.expectEqualStrings("chunk.data", diag.value);
+    try testing.expectError(error.UndecidedFormat, tbfilter.parse_config(&.{ "in", "out.viribin", "tb=tables" }, &diag));
+}
+
+test "tbfilter options: viriformat rejects the bulletformat-only max= and threads= options" {
+    var diag: arguments.Diagnostic = .{};
+    _ = try tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "rule50=on" }, &diag);
+    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in", "out", "tb=tables", "max=10", "format=viri" }, &diag));
+    try testing.expectEqualStrings("max", diag.key);
+    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in", "out", "tb=tables", "format=viri", "threads=4" }, &diag));
+    try testing.expectEqualStrings("threads", diag.key);
+    try testing.expectError(error.BulletOnlyOption, tbfilter.parse_config(&.{ "in.viribin", "out.viribin", "tb=tables", "threads=4" }, &diag));
+
+    const bullet = try tbfilter.parse_config(&.{ "in.bin", "out.bin", "tb=tables", "max=10", "threads=4" }, &diag);
+    try testing.expectEqual(@as(?u64, 10), bullet.max_positions);
+    try testing.expectEqual(@as(?usize, 4), bullet.threads);
+}
+
+test "tbfilter options: every key parses and the defaults probe five men under rule50=keep" {
+    const defaults = try parse(&.{ "in.bin", "out.bin", "tb=tables" });
+    try testing.expectEqualStrings("in.bin", defaults.input);
+    try testing.expectEqualStrings("out.bin", defaults.output);
+    try testing.expectEqualStrings("tables", defaults.tb_path);
+    try testing.expectEqual(@as(u32, 5), defaults.max_men);
+    try testing.expectEqual(tbfilter.Rule50Mode.keep, defaults.rule50);
+    try testing.expectEqual(@as(?usize, null), defaults.threads);
+    try testing.expectEqual(@as(?u64, null), defaults.max_positions);
+
+    const all = try parse(&.{ "rule50=off", "in.bin", "men=7", "tb=a:b", "out.bin" });
+    try testing.expectEqualStrings("a:b", all.tb_path);
+    try testing.expectEqual(@as(u32, 7), all.max_men);
+    try testing.expectEqual(tbfilter.Rule50Mode.off, all.rule50);
+}
+
+test "tbfilter options: malformed values are errors naming the option, not silent defaults" {
+    var diag: arguments.Diagnostic = .{};
+    inline for (.{ "men=6,", "men=six", "men=1", "men=8", "rule50=On", "rule50=", "threads=0", "threads=257", "threads=many", "max=0", "max=-1", "format=binpack" }) |arg| {
+        try testing.expectError(error.InvalidValue, tbfilter.parse_config(&.{ "in.bin", "out.bin", "tb=tables", arg }, &diag));
+        try testing.expectEqualStrings(arg[0..comptime std.mem.findScalar(u8, arg, '=').?], diag.key);
+    }
+    try testing.expectError(error.InvalidValue, tbfilter.parse_config(&.{ "in.bin", "out.bin", "tb=" }, &diag));
+    try testing.expectEqualStrings("tb", diag.key);
+}
+
+test "tbfilter options: unknown, repeated, surplus and missing arguments are errors" {
+    var diag: arguments.Diagnostic = .{};
+    try testing.expectError(error.UnknownKey, tbfilter.parse_config(&.{ "in.bin", "out.bin", "tb=tables", "fromat=viri" }, &diag));
+    try testing.expectEqualStrings("fromat", diag.key);
+    try testing.expectError(error.DuplicateKey, tbfilter.parse_config(&.{ "in.bin", "out.bin", "tb=tables", "men=5", "men=6" }, &diag));
+    try testing.expectEqualStrings("men", diag.key);
+    try testing.expectError(error.UnexpectedArgument, tbfilter.parse_config(&.{ "in.bin", "out.bin", "tb=tables", "extra.bin" }, &diag));
+    try testing.expectEqualStrings("extra.bin", diag.value);
+    try testing.expectError(error.MissingArgument, parse(&.{ "in.bin", "tb=tables" }));
+    try testing.expectError(error.MissingArgument, parse(&.{ "in.bin", "out.bin" }));
+    try testing.expectError(error.MissingArgument, parse(&.{}));
+}
+
+test "tbfilter: a bulletformat input must be whole 32-byte records" {
+    try testing.expectEqual(@as(u64, 0), try tbfilter.whole_records(0));
+    try testing.expectEqual(@as(u64, 3), try tbfilter.whole_records(96));
+    try testing.expectError(error.PartialRecord, tbfilter.whole_records(97));
+    try testing.expectError(error.PartialRecord, tbfilter.whole_records(36));
 }
 
 test "tbclean: the output file is created exclusively and never clobbers an existing one" {

@@ -8,7 +8,6 @@ const support = @import("support.zig");
 const testing = std.testing;
 
 const CHECK_FEN = "4k3/8/8/8/8/8/4r3/4K3 w - - 0 1";
-// No pawns and phase 2: scored by the classical endgame evaluation, not the network.
 const CLASSICAL_FEN = "8/8/4k3/8/8/4K3/8/R7 w - - 0 1";
 
 const FENS = [_][]const u8{
@@ -43,8 +42,7 @@ fn scale_cells(comptime Int: type, cells: []u8, factor: f64) void {
     }
 }
 
-/// Multiplies the last layer of the network file `net`, weights and biases, by `factor`, as a stand-in for a network
-/// trained to a different eval scale. Either head's output is linear in that layer.
+/// Stands in for a network trained to a different eval scale: either head's output is linear in its last layer.
 fn scale_output_layer(net: []u8, factor: f64) void {
     const Head = @FieldType(weights.NNUEWeights, "head");
     const head = net[@offsetOf(weights.NNUEWeights, "head")..][0..@sizeOf(Head)];
@@ -61,15 +59,15 @@ test "netscale: positions in check or scored classically are skipped and the lim
     support.init_tables();
     try weights.load(weights.EMBEDDED_NAME);
 
-    const all = try netscale.mean_abs_eval(&FENS, 0);
+    const all = try netscale.mean_abs_eval(&FENS, null);
     try testing.expectEqual(FENS.len - SKIPPED, all.positions);
     try testing.expect(all.abs_eval > 0);
 
     const limited = try netscale.mean_abs_eval(&FENS, 5);
     try testing.expectEqual(@as(usize, 5), limited.positions);
-    try testing.expectEqual((try netscale.mean_abs_eval(FENS[0..3] ++ FENS[4..5] ++ FENS[6..7], 0)).abs_eval, limited.abs_eval);
+    try testing.expectEqual((try netscale.mean_abs_eval(FENS[0..3] ++ FENS[4..5] ++ FENS[6..7], null)).abs_eval, limited.abs_eval);
 
-    try testing.expectError(error.NoPositions, netscale.mean_abs_eval(&.{ CHECK_FEN, CLASSICAL_FEN }, 0));
+    try testing.expectError(error.NoPositions, netscale.mean_abs_eval(&.{ CHECK_FEN, CLASSICAL_FEN }, null));
 }
 
 test "netscale: the statistic is the raw network output, whatever EvalScale is" {
@@ -77,16 +75,16 @@ test "netscale: the statistic is the raw network output, whatever EvalScale is" 
     try weights.load(weights.EMBEDDED_NAME);
     defer hce.eval_scale = hce.DEFAULT_EVAL_SCALE;
 
-    const unscaled = try netscale.mean_abs_eval(&FENS, 0);
+    const unscaled = try netscale.mean_abs_eval(&FENS, null);
     hce.eval_scale = 800;
-    try testing.expectEqual(unscaled.abs_eval, (try netscale.mean_abs_eval(&FENS, 0)).abs_eval);
+    try testing.expectEqual(unscaled.abs_eval, (try netscale.mean_abs_eval(&FENS, null)).abs_eval);
 }
 
 test "netscale: a network measured against itself needs no scaling" {
     const net = try embedded_copy();
     defer testing.allocator.free(net);
 
-    const result = try netscale.measure(net, net, &FENS, 0);
+    const result = try netscale.measure(net, net, &FENS, null);
     try testing.expectEqual(FENS.len - SKIPPED, result.positions);
     try testing.expectEqual(@as(f64, 1.0), result.factor);
     try testing.expectEqual(@as(i64, hce.DEFAULT_EVAL_SCALE), result.eval_scale);
@@ -100,12 +98,11 @@ test "netscale: the reported EvalScale brings a quieter network back to the refe
     defer testing.allocator.free(candidate);
     scale_output_layer(candidate, 0.8);
 
-    const result = try netscale.measure(candidate, reference, &FENS, 0);
+    const result = try netscale.measure(candidate, reference, &FENS, null);
     try testing.expectApproxEqRel(@as(f64, 1.25), result.factor, 0.03);
     try testing.expectEqual(@as(i64, @intFromFloat(@round(result.factor * 1000))), result.eval_scale);
     try testing.expectEqualSlices(u8, reference, std.mem.asBytes(weights.MODEL));
 
-    // The candidate's evals under that EvalScale average to the reference's.
     try weights.install(candidate);
     defer weights.load(weights.EMBEDDED_NAME) catch unreachable;
     hce.eval_scale = @intCast(result.eval_scale);
@@ -130,11 +127,11 @@ test "netscale: measuring restores the active network, on errors too" {
 
     try weights.install(quiet);
     defer weights.load(weights.EMBEDDED_NAME) catch unreachable;
-    _ = try netscale.measure(embedded, embedded, &FENS, 0);
+    _ = try netscale.measure(embedded, embedded, &FENS, null);
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
-    try testing.expectError(error.NoPositions, netscale.measure(embedded, embedded, &.{CHECK_FEN}, 0));
+    try testing.expectError(error.NoPositions, netscale.measure(embedded, embedded, &.{CHECK_FEN}, null));
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
-    try testing.expectError(error.WrongSize, netscale.measure(embedded[0 .. embedded.len - 64], embedded, &FENS, 0));
+    try testing.expectError(error.WrongSize, netscale.measure(embedded[0 .. embedded.len - 64], embedded, &FENS, null));
     try testing.expectEqualSlices(u8, quiet, std.mem.asBytes(weights.MODEL));
 }
 
@@ -156,11 +153,10 @@ const RunFixture = struct {
         try self.tmp.dir.writeFile(std.testing.io, .{ .sub_path = name, .data = data });
     }
 
-    /// Runs `netscale` with each `key=file` argument's file resolved inside the temporary directory.
     fn run(self: *RunFixture, comptime args: []const [2][]const u8, extra: []const []const u8) !struct { code: u8, output: []const u8, errors: []const u8 } {
         var argv: [8][]const u8 = undefined;
         inline for (args, 0..) |arg, i| {
-            argv[i] = try std.fmt.bufPrint(&self.arg_bufs[i], "{s}={s}/{s}", .{ arg[0], self.dir, arg[1] });
+            argv[i] = try std.mem.print(&self.arg_bufs[i], "{s}={s}/{s}", .{ arg[0], self.dir, arg[1] });
         }
         @memcpy(argv[args.len..][0..extra.len], extra);
         var out = std.Io.Writer.fixed(&self.out_buf);
@@ -204,11 +200,10 @@ test "netscale: run reports the result as JSON and failures through its exit cod
     try testing.expectEqual(@as(u8, 0), limited.code);
     try testing.expect(std.mem.startsWith(u8, limited.output, "{\"positions\":2,"));
 
-    // A scale the EvalScale option cannot express is still reported, as a failure.
     const loud = try f.run(&.{ .{ "net", "quiet.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "book.epd" } }, &.{});
     try testing.expectEqual(@as(u8, 1), loud.code);
-    try testing.expect(std.mem.indexOf(u8, loud.output, "\"eval_scale\":") != null);
-    try testing.expect(std.mem.indexOf(u8, loud.errors, "outside the EvalScale range 500-2000") != null);
+    try testing.expect(std.mem.find(u8, loud.output, "\"eval_scale\":") != null);
+    try testing.expect(std.mem.find(u8, loud.errors, "outside the EvalScale range 500-2000") != null);
 
     const unknown = try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "book.epd" } }, &.{"out=x.nnue"});
     try testing.expectEqual(@as(u8, 2), unknown.code);
@@ -230,13 +225,12 @@ test "netscale: run reports the result as JSON and failures through its exit cod
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "missing.epd" } }, &.{})).code);
     try testing.expectEqual(@as(u8, 1), (try f.run(&.{ .{ "net", "net.nnue" }, .{ "ref", "net.nnue" }, .{ "positions", "check.epd" } }, &.{})).code);
 
-    // Both networks run on this build's head, so one of the other architecture is refused as EvalFile refuses it.
     inline for (.{ .{ "other.nnue", "net.nnue" }, .{ "net.nnue", "other.nnue" } }) |nets| {
         const other = try f.run(&.{ .{ "net", nets[0] }, .{ "ref", nets[1] }, .{ "positions", "book.epd" } }, &.{});
         try testing.expectEqual(@as(u8, 1), other.code);
         try testing.expectEqualStrings("", other.output);
-        try testing.expect(std.mem.indexOf(u8, other.errors, "other.nnue' (WrongArchitecture: ") != null);
-        try testing.expect(std.mem.indexOf(u8, other.errors, weights.explain(weights.NetworkError.WrongArchitecture)) != null);
+        try testing.expect(std.mem.find(u8, other.errors, "other.nnue' (WrongArchitecture: ") != null);
+        try testing.expect(std.mem.find(u8, other.errors, weights.explain(weights.NetworkError.WrongArchitecture)) != null);
     }
 
     try testing.expectEqualSlices(u8, embedded, std.mem.asBytes(weights.MODEL));
