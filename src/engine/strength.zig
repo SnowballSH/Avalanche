@@ -1,4 +1,7 @@
+//! See docs/STRENGTH.md.
+
 const std = @import("std");
+const types = @import("../chess/types.zig");
 
 pub const MAX_LEVEL: u8 = 20;
 pub const MIN_ELO: u32 = 1320;
@@ -6,11 +9,12 @@ pub const MAX_ELO: u32 = 3000;
 pub const DEFAULT_ELO: u32 = MAX_ELO;
 
 const DECISIVE_CLAMP: i32 = 2000;
+const MIN_CANDIDATES: usize = 2;
+const MAX_CANDIDATES: usize = types.MoveList.capacity;
+const LEVELS_PER_EXTRA_CANDIDATE: f32 = 3.0;
+const BASE_TEMPERATURE: f32 = 2.0;
+const TEMPERATURE_PER_HANDICAP_SQUARED: f32 = 0.6;
 
-/// Handicapped play for `Skill Level` / `UCI_LimitStrength`. A weakened engine
-/// searches only a shallow MultiPV and samples its move from the candidate
-/// lines, preferring better scores less strongly the lower the level.
-/// See docs/STRENGTH.md for the model and its calibration caveats.
 pub const Strength = struct {
     level: f32 = MAX_LEVEL,
 
@@ -32,36 +36,37 @@ pub const Strength = struct {
         return 1 + @as(usize, @intFromFloat(self.level));
     }
 
+    fn handicap(self: Strength) f32 {
+        return @as(f32, @floatFromInt(MAX_LEVEL)) - self.level;
+    }
+
     pub fn candidate_count(self: Strength) usize {
-        return 2 + @as(usize, @intFromFloat((@as(f32, @floatFromInt(MAX_LEVEL)) - self.level) / 3.0));
+        return MIN_CANDIDATES + @as(usize, @intFromFloat(self.handicap() / LEVELS_PER_EXTRA_CANDIDATE));
     }
 
-    /// Score gap (in centipawns) at which a candidate becomes e times less likely.
-    /// Quadratic so near-full levels rarely concede even small gaps.
     pub fn temperature(self: Strength) f32 {
-        const handicap = @as(f32, @floatFromInt(MAX_LEVEL)) - self.level;
-        return 2.0 + 0.6 * handicap * handicap;
+        return BASE_TEMPERATURE + TEMPERATURE_PER_HANDICAP_SQUARED * self.handicap() * self.handicap();
     }
 
-    /// Samples a candidate index; `scores` must be sorted best first.
-    pub fn pick(self: Strength, scores: []const i32, random: std.Random) usize {
-        std.debug.assert(scores.len > 0);
-        const best = clamp_score(scores[0]);
+    pub fn pick(self: Strength, scores_best_first: []const i32, random: std.Random) usize {
+        const count = scores_best_first.len;
+        std.debug.assert(count > 0 and count <= MAX_CANDIDATES);
+        const best = clamp_score(scores_best_first[0]);
         const temp = self.temperature();
-        var weights: [256]f32 = undefined;
+        var weights: [MAX_CANDIDATES]f32 = undefined;
         var total: f32 = 0;
-        for (scores, weights[0..scores.len]) |score, *weight| {
+        for (scores_best_first, weights[0..count]) |score, *weight| {
             const gap: f32 = @floatFromInt(best - clamp_score(score));
             weight.* = @exp(-@max(gap, 0) / temp);
             total += weight.*;
         }
 
         var target = random.float(f32) * total;
-        for (weights[0..scores.len], 0..) |weight, index| {
+        for (weights[0..count], 0..) |weight, index| {
             if (target < weight) return index;
             target -= weight;
         }
-        return scores.len - 1;
+        return count - 1;
     }
 
     fn clamp_score(score: i32) i32 {
@@ -77,6 +82,19 @@ test "strength: full level is unlimited, lower levels are limited" {
     try std.testing.expect(Strength.from_elo(MAX_ELO - 1).is_limited());
     try std.testing.expectEqual(@as(usize, 1), Strength.from_skill_level(0).max_depth());
     try std.testing.expectEqual(@as(usize, 20), Strength.from_skill_level(19).max_depth());
+}
+
+test "strength: every level considers at least the minimum and at most a full move list of candidates" {
+    try std.testing.expectEqual(MIN_CANDIDATES, Strength.from_skill_level(MAX_LEVEL).candidate_count());
+    var previous = MIN_CANDIDATES;
+    var level: u8 = MAX_LEVEL;
+    while (level > 0) {
+        level -= 1;
+        const count = Strength.from_skill_level(level).candidate_count();
+        try std.testing.expect(count >= previous and count <= MAX_CANDIDATES);
+        previous = count;
+    }
+    try std.testing.expect(previous > MIN_CANDIDATES);
 }
 
 test "strength: elo maps monotonically onto levels" {
