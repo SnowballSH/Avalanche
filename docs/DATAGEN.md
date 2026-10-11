@@ -113,13 +113,15 @@ moves ran into mate, stalemate or a rule draw (or, in bulletformat, because no p
 filters). A worker that discards 10000 games in a row stops with `NoUsableOpening`: a book of decided or finished
 positions would otherwise keep the run busy forever without writing anything.
 
-Every book line is validated before datagen starts: eight ranks of eight squares, known pieces, one king per side,
-no pawns on the back ranks, a side to move, well-formed castling and en-passant fields, the side not to move not in
-check, and no more than a game record can hold, which is 32 pieces and a fullmove number of 65535. The fullmove
-field is read by the number parser the position code uses, so the two agree on what a number is (`65_536` is one,
-and is refused). EPD opcodes after the FEN fields are ignored. The whole book is refused at its first bad line,
-because the position code trusts its input: a bad line would be played as a broken board or read out of bounds.
-`netscale` and `genfens` load their position files through the same loader (`src/engine/datagen/book.zig`).
+Every book line is validated before datagen starts: eight ranks of eight squares, known pieces, one king per side, no
+pawns on the back ranks, a side to move, a well-formed castling field, an en-passant square that a double push can
+have left (the square and the origin square of the push empty, the pushed pawn beyond it; `BadEnPassant` otherwise,
+see "FEN" in [BOARD.md](BOARD.md)), the side not to move not in check, and no more than a game record can hold, which
+is 32 pieces and a fullmove number of 65535. The fullmove field is read by the number parser the position code uses,
+so the two agree on what a number is (`65_536` is one, and is refused). EPD opcodes after the FEN fields are ignored.
+The whole book is refused at its first bad line, because the position code trusts its input: a bad line would be
+played as a broken board or read out of bounds. `netscale` and `genfens` load their position files through the same
+loader (`src/engine/datagen/book.zig`).
 
 ## Raw evaluation
 
@@ -180,8 +182,32 @@ cargo run --release --manifest-path tools/datatool/Cargo.toml -- dupes chunk-*.v
 
 `validate` replays every move with the crate's Chess960-aware move generator and reports counts, results, game
 lengths, an absolute-eval histogram and, with `--filter`, how many positions pass the training filter. It exits
-non-zero for truncated or illegal data, or when fewer than `--expect-positions` positions are present. `dupes`
-estimates the duplicate-position rate from a hash-selected sample.
+non-zero for truncated or malformed data, or when fewer than `--expect-positions` positions are present. The first
+malformed game ends the run, since a viriformat stream cannot be resynchronised after it; the report names it in
+`errors` and counts the games before it.
+
+A game is malformed when
+
+- its header cannot be decoded: more than 32 pieces, an unknown piece code, not exactly one king per side, an unknown
+  result or a fullmove number of 0;
+- its start position cannot be played: the side to move could capture the king, or the en-passant square is occupied
+  or is not directly behind an enemy pawn on the rank a double step passes;
+- a move is not legal in the position it is played from;
+- a position has more moves than the crate's move list holds (218, the most legal moves a position of a real game
+  is known to have);
+- the halfmove clock or the fullmove number would leave the byte or two bytes the format stores it in.
+
+The tool checks all of this itself, because the crate does not: on such data it panics, or reads out of bounds,
+instead of reporting an error. The move list is the one limit it cannot check ahead. Only generating the moves tells
+whether a position has too many: the material does not, since a side that promoted all eight pawns to queens can
+fill the list exactly and one castling right more overflows it. There the tool catches the crate's panic and reports
+it as the game's error; the crate's own panic message still goes to standard error.
+
+`dupes` replays the games through the same checks, stopping with an error at the first malformed game, and estimates
+the duplicate-position rate. A position's identity is its occupancy, its pieces (castling rooks are a piece kind of
+their own), the side to move and the en-passant square. The move counters are left out, so a transposition reached
+at another move number counts as a duplicate. The sample is chosen by the hash of that identity
+(`--sample-per-mille`, 10 by default), so it is the same on every run and a position is always or never in it.
 
 ## Scripts
 
@@ -228,7 +254,8 @@ random legal moves. Positions in check or without a legal move are skipped. The 
 A count or seed that is not a number, an unknown word, a missing value and a book that does not load (see
 [Openings](#openings)) are errors: `genfens` names the fault on stderr and prints no opening, where a silent
 fallback would hand OpenBench openings from the wrong source. It also stops with an error after 10000 consecutive
-skipped positions, which only a book of finished positions produces.
+skipped positions, which only a book of finished positions produces. After any of these errors the engine ends
+with status 1.
 
 ## Tablebase cleaning
 

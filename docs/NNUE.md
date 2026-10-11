@@ -209,10 +209,11 @@ range does not bound it for every file, though: when the positive weights of a b
 more than 33025, activations of 255 on exactly those inputs take `s` past 2³¹, and likewise for
 the negative weights. The loader does not check that total, because the limit would sit too close
 to real networks, which never saturate all of those activations at once: the positive weights of
-a bucket add up to as much as 20366 in `nets/dianguang-1.nnue`. So the evaluation is total
-instead. `s` wraps, which gives a meaningless but defined number, the same on every target and in
-every build mode, and the last step is computed in i64, because `(trunc(s / 255) + bias) * 400`
-leaves an i32 long before `s` does. Whatever a file holds, the output is within ±207212.
+a bucket add up to as much as 18120 in `nets/nezha.nnue`, and to 20366 in Dianguang-1. So the
+evaluation is total instead. `s` wraps, which gives a meaningless but defined number, the same on
+every target and in every build mode, and the last step is computed in i64, because
+`(trunc(s / 255) + bias) * 400` leaves an i32 long before `s` does. Whatever a file holds, the
+output is within ±207212.
 
 ## Multi-layer head
 
@@ -638,11 +639,11 @@ Tried and left out:
   the first-level cache a rebuild took 465 to 513 cycles (three runs) instead of 539 to 592, and
   `bench` retired 2.8 to 3.0% fewer instructions (113.4G to 110.1G for the same nodes; both builds
   are commit 870eeab with only this loop changed, so the absolute counts are not those of a build
-  with the evaluation cache and the other changes of pull requests #104 to #111). That did not
-  become time. Over eleven alternating pairs of `bench` the cycles, counted the same way,
-  were 0.7% higher by the fastest run of each binary (32.30G against 32.52G) and 1.9% higher by
-  the median (33.07G against 33.70G), with single pairs from 10% slower to 10% faster on a
-  machine that was busy throughout: no gain that the measurement can show, and more code. Passes
+  with the evaluation cache and the later changes). That did not become time. Over eleven
+  alternating pairs of `bench` the cycles, counted the same way, were 0.7% higher by the fastest
+  run of each binary (32.30G against 32.52G) and 1.9% higher by the median (33.07G against
+  33.70G), with single pairs from 10% slower to 10% faster on a machine that was busy
+  throughout: no gain that the measurement can show, and more code. Passes
   of up to 8 rows (81 loops; more than four rows of a kind occur in 15% of the rebuilds, more
   than eight in 1%) were 2.2% slower than the old loop by the fastest of four runs. With the rows
   in the first-level cache, passes of up to 2, 3, 6 or 8 rows took 519, 469, 469 and 461 cycles
@@ -702,15 +703,87 @@ reliably have AVX-512, and OpenBench workers built with `-Dcpu=native` use the p
 
 ## Training
 
-`TRAIN_ARCH=single` (default) or `multi`; everything else in `scripts/train.sh` applies to both:
-the same loss, data loader, schedule and held-out validation. `multi` needs `TRAIN_INPUT=buckets16`.
+`scripts/train.sh [data_file ...]` builds the trainer (`training/`, a bullet program) whenever its
+sources are newer than the binary, and runs it from `training/`. The data is the `.viribin` files
+of `TRAIN_DATA_DIR`, or else the bulletformat files given as arguments (`data/training.bin` when
+there are none). Checkpoints go to `training/checkpoints/<TRAIN_NET_ID>-<superbatch>/`, and the
+`quantised.bin` of a checkpoint is the network file:
 
 ```
 TRAIN_ARCH=multi TRAIN_NET_ID=mynet TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
 zig build --release=fast -Dnet=training/checkpoints/mynet-40/quantised.bin
 ```
 
-Two things differ from the single-layer recipe:
+The trainer needs CUDA: bullet at the pinned revision has no CPU backend. `train.sh` takes the
+toolkit from `CUDA_PATH`, or from `/usr/local/cuda` when that directory exists, and stops before
+building when there is neither. The backend is the crate's `cuda` feature, which is on by default,
+so a plain `cargo build --release` gives the CUDA trainer. Without the feature bullet compiles
+against a mock device that cannot run a graph, and the binary says so and exits. That build is for
+the checks that need no device, which therefore run on any machine:
+
+```
+cd training
+cargo fmt --check
+cargo clippy --no-default-features --all-targets -- -D warnings
+cargo test --no-default-features
+```
+
+### Options
+
+A run is configured by environment variables, all optional. The defaults are a short single-layer
+run, not the recipe of the shipped network: that one is multi-layer (`TRAIN_ARCH=multi`) and was
+trained far longer (`TRAIN_SUPERBATCHES`; README.md gives the length for each network). A net
+trained with the defaults is refused by `EvalFile` in a default build.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRAIN_NET_ID` | `net` | name of the run, the prefix of its checkpoints |
+| `TRAIN_INPUT` | `buckets16` | `buckets16`, the inputs of "Shared by both heads", or `chess768`, 768 inputs without king buckets (single-layer only) |
+| `TRAIN_ARCH` | `single` | the head, `single` or `multi`; `multi` needs `TRAIN_INPUT=buckets16`. The engine recognises the head of a saved file by its header |
+| `TRAIN_HIDDEN` | 1024 | accumulator width. The engine's is `HIDDEN_SIZE` in `src/engine/nnue/arch.zig`, fixed at build time, and must be the same; `multi` needs a multiple of 8 |
+| `TRAIN_FACTORISER` | on | `1`, `true`, `yes` or `on` trains a factoriser shared by the king buckets, which is added to the feature weights when a net is saved; anything else is off. `buckets16` only |
+| `TRAIN_L1_SPARSITY` | 0 (off) | `multi` only, see "Multi-layer runs" |
+| `TRAIN_SUPERBATCHES` | 40 | length of the run |
+| `TRAIN_BATCH_SIZE` | 16384 | positions per batch |
+| `TRAIN_BATCHES_PER_SB` | 12208 | batches per superbatch |
+| `TRAIN_WDL` | 0.25 | weight of the game result in the target; the rest is the search score |
+| `TRAIN_WDL_END` | `TRAIN_WDL` | when it differs, the weight moves linearly from `TRAIN_WDL` to this value over the run |
+| `TRAIN_LR_SCHEDULE` | `cosine` | `cosine`, `cosine-legacy` or `constant`, see below |
+| `TRAIN_LR_INITIAL` | 0.001 | learning rate at the start of the schedule, or throughout for `constant` |
+| `TRAIN_LR_FINAL` | 1e-7 | learning rate at the end of a cosine schedule |
+| `TRAIN_WARMUP_SB` | 0 (off) | superbatches of linear warm-up, see below; at most `TRAIN_SUPERBATCHES` |
+| `TRAIN_SAVE_RATE` | 10 | a checkpoint every this many superbatches |
+| `TRAIN_THREADS` | all cores | threads that prepare batches; the `.viribin` loader uses at most 16 of them |
+| `TRAIN_DATA_DIR` | unset | a directory whose `.viribin` files are the dataset, read with the games interleaved across files. Takes precedence over file arguments. An absolute path, because the trainer runs from `training/` |
+| `TRAIN_SHUFFLE_MB` | 128 | shuffle buffer of the `.viribin` loader, 16384 positions per MB; at least 1 |
+| `TRAIN_RESUME_FROM` | unset | a checkpoint directory: the run continues with its weights and optimiser state. A checkpoint of the other `TRAIN_ARCH` is refused, by the header of its `quantised.bin` |
+| `TRAIN_START_SB` | 1 | with `TRAIN_RESUME_FROM`, the superbatch to continue at; the schedules carry on from there |
+| `TRAIN_INIT_NET` | unset | a quantised single-layer net to start from, see "Fine-tuning from a shipped net" |
+| `TRAIN_VALIDATION_DIR` | unset (off) | a directory of held-out `.viribin` files, see "Held-out validation" |
+| `TRAIN_VALIDATION_BATCHES` | 64 | size of the validation set, in batches of `TRAIN_BATCH_SIZE`; at least 1 |
+| `TRAIN_PARITY_FENS` | unset | a file of FENs to evaluate instead of training, with the net of `TRAIN_RESUME_FROM` or `TRAIN_INIT_NET` (one of them is required), see "Parity" |
+| `TRAIN_PARITY_OUT` | `parity.txt` | where those evaluations are written |
+
+`TRAIN_ARCH`, `TRAIN_LR_SCHEDULE`, `TRAIN_WARMUP_SB`, `TRAIN_SHUFFLE_MB`, `TRAIN_L1_SPARSITY` and
+`TRAIN_VALIDATION_BATCHES` stop the run when their value is not valid. Any other number that does
+not parse is replaced by its default without a message.
+
+`TRAIN_INIT_NET`, `TRAIN_VALIDATION_DIR` and `TRAIN_PARITY_FENS` count as unset when they are
+empty, so a wrapper script can export them unconditionally.
+
+**Learning rate.** With `S = TRAIN_SUPERBATCHES`, `cosine` is bullet's cosine decay with progress
+`(sb - 1) / (S - 1)`, so superbatch 1 runs at `TRAIN_LR_INITIAL`. `cosine-legacy` has progress
+`sb / S`, so superbatch 1 is already below `TRAIN_LR_INITIAL`: it is the curve of earlier bullet
+revisions, kept to repeat the recipe of a net that was trained with it. `TRAIN_WARMUP_SB=n`
+multiplies the schedule by a factor that rises linearly, batch by batch, from one part in
+`n * TRAIN_BATCHES_PER_SB` to 1 over the first `n` superbatches. bullet's own `lr::Warmup` is not
+used for that: it acts only inside superbatch 1 and divides by the batches left, which is not a
+linear ramp.
+
+### Multi-layer runs
+
+`TRAIN_ARCH=multi` uses the same loss, data loader, schedule and held-out validation as the
+single-layer recipe. Two things differ:
 
 - **Initialisation.** The feature transformer is initialised as if it had 32 inputs
   (`init_with_effective_input_size(32)`, as in bullet's multi-layer example), because the default,
@@ -723,13 +796,55 @@ Two things differ from the single-layer recipe:
   comparable between runs with different coefficients, and with a coefficient above 0 it is no longer
   comparable with the training loss of the same run. The variable is an error with `TRAIN_ARCH=single`.
 
-`TRAIN_RESUME_FROM` with a checkpoint of the other architecture is refused, by the header of the
-checkpoint's `quantised.bin`.
-
 `quantised.bin` is the file above. bullet at the pinned revision expresses the whole network with
 its builder: sliced-affine pairwise, `concat`, `crelu`, the square as `x * x`, and
 `select(output_buckets)` for the three bucketed layers. The save format reorders `l1w` and `l2w`
 from bullet's column-major layout and scales `l1w` (`training/src/multilayer.rs`).
+
+### Held-out validation
+
+`TRAIN_VALIDATION_DIR` names a directory of held-out `.viribin` files, typically one per opening
+source, filtered like the training data; it must not be `TRAIN_DATA_DIR`. The trainer prints
+`validation superbatch <n> loss <value>` after every superbatch, and once before training starts,
+with `n = TRAIN_START_SB - 1`, so that a broken validation setup fails before any training time is
+spent. Only that first pass can stop the run: a later failure is printed as a warning, validation
+is switched off and training carries on.
+
+**The set** (`training/src/heldout.rs`) is `TRAIN_VALIDATION_BATCHES` batches of `TRAIN_BATCH_SIZE`
+positions, the same positions in the same order on every run and resume. Every file is read twice,
+one file at a time. The first pass counts the positions that pass the filter, which gives each
+file its quota: an equal share of the set, where a file that holds less than its share gives all
+it has and the others make up the difference equally. The files are served in ascending order of
+what they hold, each taking `ceil(still needed / files not yet served)`, so when the share does not
+divide evenly the files served first take one position more. The second pass takes the quota at an
+even stride over the file's filtered positions, the last position of each of `quota` equal
+strides, so the sample covers all of the file's games rather than the first ones. The samples are
+then interleaved round-robin across the files, so every batch mixes all sources. It is a startup
+error when the files hold fewer filtered positions than the set needs, or when a file's count
+differs between the two passes.
+
+The files are parsed by the trainer and not through bullet's `ViriBinpackLoader`, which shuffles
+with a time seed and loops over its files forever. This way the set depends only on the files, the
+filter and its size, and held-out files that are too small are an error instead of repeated
+positions.
+
+**The loss** (`training/src/validation.rs`) is the mean of `(sigmoid(output) - target)²` over the
+set, normalised like the training loss bullet prints. The targets use the WDL weight of the
+superbatch just finished, so the value is comparable with that superbatch's training loss. It is
+computed on the host from the model's output, not by the model's own loss node, which is why a
+term that a net adds to its training loss (`TRAIN_L1_SPARSITY`) never enters it.
+
+**Why the trainer has its own run loop.** bullet's `ValueTrainer::run` has neither a validation
+pass nor a hook at the end of a superbatch. A validated run therefore drives
+`bullet_trainer::run::train`, the layer that `ValueTrainer::run` wraps, and supplies again what
+`ValueTrainer` keeps private: the input mapper, the save format and the writing of checkpoints.
+`value_mapper` mirrors the mapper `ValueTrainer` builds for a net with a scalar output and neither
+datapoint weights nor a win-rate model, which is how each of the trainer's three builders
+(`run_chess768`, `run_buckets16`, `multilayer::run`) is set up. The loss evaluator follows bullet's
+`ModelEvaluator`, which is fixed to a batch size of 1. Compare `value_mapper` with bullet again
+whenever one of the builders gains a wdl-adjust, datapoint-weight, win-rate-model or wdl-output
+option, and whenever the bullet revision changes; the three lower-level bullet crates in
+`training/Cargo.toml` stay on the revision of `bullet` itself.
 
 ### Fine-tuning from a shipped net
 
@@ -753,7 +868,7 @@ file's feature weights already contain the factoriser, so with `TRAIN_FACTORISER
 weights get the file's values and the factoriser starts at zero. The optimiser state is fresh.
 Saving without a training step writes the input file again, byte for byte: a float is
 `stored / scale` to within a relative 2^-24, and the save rounds `float * scale` back to `stored`.
-`cargo test` checks that on `nets/nezha.nnue`, with and without the factoriser.
+The trainer's tests check that on `nets/nezha.nnue`, with and without the factoriser.
 
 **What it refuses**, each with a message naming the reason:
 
@@ -781,7 +896,9 @@ TRAIN_INIT_NET="$PWD/../nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_PARITY_FENS=fe
     TRAIN_PARITY_OUT=parity.txt TRAIN_DATA_DIR=/path/to/viribin ./target/release/avalanche-trainer
 ```
 
-`parity.txt` holds `<fen> | <centipawns>` for the side to move. `Avalanche nnue-parity` reads only
+`parity.txt` holds `<fen> | <centipawns>` for the side to move. `TRAIN_PARITY_FENS` takes one FEN
+per line and ignores `#` lines and everything from a `|` on, so the trainer reads its own output
+and a parity file can be regenerated in place. `Avalanche nnue-parity` reads only
 multi-layer nets, so a single-layer net is compared through the engine built with it: the UCI
 `eval` command prints `info string NNUE evaluation <cp> cp (white side)` for the current position.
 
@@ -973,6 +1090,11 @@ explicitly, so the tests of their arithmetic run in a build of either head. They
 `src/tests/nnue_heads.zig`: those named "multi head" for the multi-layer head, and those named
 "single head" for the single-layer one (the formula on random weights, and weights at their
 extremes). The tests that evaluate positions use the embedded network, so they reach the
-single-layer head only in a single-layer build: `zig build test -Dnet=nets/dianguang-1.nnue`.
+single-layer head only in a single-layer build: `zig build test -Dnet=nets/nezha.nnue`.
 `-Dtest-filter=<text>` runs the tests whose name contains the text. In Debug the intrinsics are
 not compiled, see "What has been executed"; use `-Doptimize=safe` for those.
+
+`cargo test --no-default-features` in `training/` covers the trainer's side of the file format
+without a device: the header bytes, the L1 and L2 layouts, the L1 shift (on the cases the engine's
+tests also assert), the learning-rate schedules, the validation sample and the `TRAIN_INIT_NET`
+round trip.
