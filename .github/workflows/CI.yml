@@ -19,6 +19,7 @@ permissions:
 
 env:
   ZIG_VERSION: "0.17.0"
+  RUFF_VERSION: "0.17.0"
 
 jobs:
   build:
@@ -43,6 +44,10 @@ jobs:
           zig version
           zig env
 
+      - name: Format
+        if: runner.os == 'Linux'
+        run: zig fmt --check src build.zig
+
       - name: Debug build
         if: runner.os == 'Linux'
         run: zig build
@@ -59,6 +64,10 @@ jobs:
 
       - name: Unit tests (fast)
         run: zig build test -Doptimize=fast
+
+      - name: Unit tests (safe)
+        if: runner.os == 'Linux'
+        run: zig build test -Doptimize=safe
 
       - name: Unit tests (single-layer head)
         if: runner.os == 'Linux'
@@ -144,16 +153,62 @@ jobs:
       - name: Format
         run: cargo fmt --check
       - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
-        run: cargo test
+        run: cargo test --locked
+
+  trainer:
+    name: trainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: training
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - name: Lint with the CUDA backend
+        run: CUDA_PATH="$RUNNER_TEMP" cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --no-default-features
+
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Shell lint
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -x
+
+      - name: Install ruff ${{ env.RUFF_VERSION }} and numpy
+        run: |
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install "ruff==$RUFF_VERSION" numpy
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+
+      - name: Python lint
+        run: ruff check scripts
+
+      - name: Python format
+        run: ruff format --check scripts
+
+      - name: Python tests
+        run: python3 -m unittest discover -s scripts
 
   wasm:
-    name: wasm / node ${{ matrix.node }}
-    strategy:
-      fail-fast: false
-      matrix:
-        node: [24, 26]
+    name: wasm / node
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -165,10 +220,10 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - name: Setup Node ${{ matrix.node }}
+      - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: ${{ matrix.node }}
+          node-version: 26
 
       - name: Install web dependencies
         working-directory: web

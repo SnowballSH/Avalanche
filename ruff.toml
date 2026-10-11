@@ -5,4 +5,4 @@ extend-exclude = ["deps", "scripts/legacy", "tcec/version.py"]
 
 [lint]
 select = ["ALL"]
-ignore = ["COM812", "D", "INP001", "PT", "S603", "T20"]
+ignore = ["COM812", "CPY", "D", "INP001", "PT", "S603", "T20"]
