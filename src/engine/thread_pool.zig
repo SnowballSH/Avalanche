@@ -61,11 +61,7 @@ pub const Worker = struct {
 
         while (true) {
             switch (self.take_job()) {
-                .reset_heuristics => {
-                    self.searcher.age_pending = false;
-                    self.searcher.has_searched = false;
-                    self.searcher.reset_heuristics(true);
-                },
+                .reset_heuristics => self.searcher.new_game(),
                 .search => |job| self.searcher.start_helper(job.color, job.mode, job.depth, job.alpha, job.beta),
                 .quit => {
                     self.searcher.deinit();

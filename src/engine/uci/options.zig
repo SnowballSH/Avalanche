@@ -193,17 +193,8 @@ fn set_threads(ctx: Context, value: Value) !void {
 }
 
 fn set_numa_policy(_: Context, value: Value) !void {
-    const chosen = std.meta.stringToEnum(numa.Policy, value.string).?;
-    if (chosen == numa.policy) return;
-    numa.policy = chosen;
-    numa.init();
-    if (numa.topology().is_numa()) restart_helpers();
-}
-
-fn restart_helpers() void {
-    const helpers = search.helper_count();
-    search.set_helper_count(0);
-    search.set_helper_count(helpers);
+    numa.policy = std.meta.stringToEnum(numa.Policy, value.string).?;
+    search.set_helper_count(search.helper_count());
 }
 
 fn set_move_overhead(_: Context, value: Value) !void {

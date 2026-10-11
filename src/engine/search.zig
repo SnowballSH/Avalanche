@@ -474,6 +474,12 @@ pub const Searcher = struct {
         }
     }
 
+    pub fn new_game(self: *Searcher) void {
+        self.age_pending = false;
+        self.has_searched = false;
+        self.reset_heuristics(true);
+    }
+
     inline fn stop_requested(self: *Searcher) bool {
         if (@atomicLoad(bool, &self.shared.stop, .monotonic)) return true;
         if (platform.host_stop_requested()) {
