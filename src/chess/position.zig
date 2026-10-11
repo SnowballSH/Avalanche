@@ -13,6 +13,7 @@ const see = @import("../engine/see.zig");
 pub const MAX_HISTORY_PLY: u32 = 1920;
 const SEARCH_PLY_ALLOWANCE: u32 = 256;
 pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + SEARCH_PLY_ALLOWANCE;
+pub const MAX_FULLMOVE: u32 = (std.math.maxInt(u32) - HISTORY_CAPACITY) / 2;
 
 const RANK_SEPARATORS = 7;
 const LONGEST_PIECE_PLACEMENT = types.N_SQUARES + RANK_SEPARATORS;
@@ -179,13 +180,8 @@ pub const Position = struct {
             self.history[self.game_ply].fifty = std.fmt.parseUnsigned(u16, fifty_tok, 10) catch 0;
         }
 
-        if (tokens.next()) |fullmove_tok| {
-            const fullmove = std.fmt.parseUnsigned(u32, fullmove_tok, 10) catch 1;
-            const fm = @max(fullmove, 1);
-            self.start_ply = (fm - 1) * 2 + @as(u32, if (self.turn == types.Color.Black) 1 else 0);
-        } else {
-            self.start_ply = 0;
-        }
+        const fullmove = if (tokens.next()) |field| parse_fullmove(field) else 1;
+        self.start_ply = (fullmove - 1) * 2 + @intFromBool(self.turn == types.Color.Black);
 
         self.hash ^= zobrist.CastlingHash[self.castling_rights()];
         self.history[self.game_ply].king_attackers = switch (self.turn) {
@@ -194,6 +190,14 @@ pub const Position = struct {
         };
 
         self.evaluator.full_refresh(self);
+    }
+
+    fn parse_fullmove(field: []const u8) u32 {
+        const number = std.fmt.parseUnsigned(u32, field, 10) catch |failure| switch (failure) {
+            error.Overflow => MAX_FULLMOVE,
+            error.InvalidCharacter => 1,
+        };
+        return std.math.clamp(number, 1, MAX_FULLMOVE);
     }
 
     fn capturable_en_passant_square(self: *const Position, field: []const u8) ?types.Square {

@@ -492,6 +492,22 @@ test "fen: set_fen drops an en-passant square that no double push can have left"
     }
 }
 
+test "fen: a fullmove number beyond the largest the ply counter can hold is read as that one" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    inline for (.{ "2147483649", "3000000000", "4294967295", "99999999999999999999" }) |fullmove| {
+        pos.set_fen("4k3/8/8/8/8/8/4P3/4K3 b - - 0 " ++ fullmove);
+        try expectEqual(position.MAX_FULLMOVE, pos.absolute_ply() / 2 + 1);
+        _ = try support.play_uci(pos, "e8d8");
+        try expectEqual(position.MAX_FULLMOVE + 1, pos.absolute_ply() / 2 + 1);
+    }
+
+    pos.set_fen("4k3/8/8/8/8/8/4P3/4K3 w - - 0 0");
+    try expectEqual(@as(u32, 0), pos.absolute_ply());
+}
+
 test "perft: positions are counted in 64 bits on every target" {
     const pos: *position.Position = undefined;
     try expectEqual(u64, @TypeOf(perft.perft(.White, pos, 0)));
