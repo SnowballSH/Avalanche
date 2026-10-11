@@ -283,7 +283,7 @@ fn run_genfens(tokens: *Tokens) !void {
     defer arguments.deinit(platform.allocator);
     try arguments.append(platform.allocator, "genfens");
     while (tokens.next()) |token| try arguments.append(platform.allocator, token);
-    genfens.run(arguments.items) catch {};
+    genfens.run(arguments.items) catch std.process.exit(1);
 }
 
 fn print_network(out: *std.Io.Writer) !void {
