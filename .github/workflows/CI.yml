@@ -62,7 +62,7 @@ jobs:
 
       - name: Unit tests (single-layer head)
         if: runner.os == 'Linux'
-        run: zig build test -Dnet=nets/dianguang-1.nnue
+        run: zig build test -Dnet=nets/nezha.nnue
 
       - name: Bench node count and nnue-speed checksum
         shell: bash
