@@ -15,6 +15,8 @@ const NODE_BUDGET = 5000;
 const LIMIT_POLL_INTERVAL_NODES = 1024;
 const SKILL_LEVEL = 1;
 const SKILL_DEPTH_LIMIT = SKILL_LEVEL + 1;
+const LARGEST_HASH_MB_BELOW_2_GIB = 2 * 1024 - 1;
+const HASH_OPTION = /^option name Hash type spin default \d+ min 1 max (?<max>\d+)$/;
 const NETWORK_ANNOUNCEMENT =
   /^info string NNUE evaluation using (?<name>\S+) \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/;
 
@@ -127,6 +129,12 @@ describe("wasm engine", () => {
     const options = run("uci").filter((line) => line.startsWith("option name "));
     assert.ok(options.includes("option name Threads type spin default 1 min 1 max 1"));
     assert.ok(!options.some((line) => line.includes("Syzygy")));
+  });
+
+  it("offers no hash table of 2 GiB or more, which a wasm32 module could not allocate", async () => {
+    const { run } = await createCapturingEngine();
+    const maxima = run("uci").flatMap((line) => HASH_OPTION.exec(line)?.groups?.["max"] ?? []);
+    assert.deepEqual(maxima, [String(LARGEST_HASH_MB_BELOW_2_GIB)]);
   });
 
   it("embeds the network exactly once", async () => {

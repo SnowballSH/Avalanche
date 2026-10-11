@@ -70,6 +70,9 @@ TUNABLE = "LMRWeight"
 LARGEST_CLOCK = 2**63 - 1
 LARGEST_INCREMENT = 2**64 - 1
 GENFENS_COUNT = 3
+GENFENS_WITH_A_BAD_SEED = "genfens 1 seed x book None"
+GENFENS_WITH_A_MISSING_BOOK = "genfens 1 seed 1 book /nonexistent/book.epd"
+GENFENS_REFUSED = 1
 USAGE_ERROR = 2
 
 THREE_QUEENS_UP_WHITE = "4k3/8/8/8/8/8/8/QQQ1K3 w - - 0 1"
@@ -252,6 +255,10 @@ def iterations(result: SearchResult) -> list[dict[str, str]]:
 
 def searched_depths(result: SearchResult) -> set[int]:
     return {int(iteration["depth"]) for iteration in iterations(result)}
+
+
+def genfens_positions(run: subprocess.CompletedProcess[str]) -> list[str]:
+    return [line for line in run.stdout.splitlines() if line.startswith("info string genfens ")]
 
 
 def final_nodes(result: SearchResult) -> int:
@@ -523,8 +530,15 @@ class CommandLineTest(EngineCommandTest):
     def test_genfens_argument_prints_the_requested_positions_and_exits(self) -> None:
         run = self.run_engine(f"genfens {GENFENS_COUNT} seed 1 book None", "quit")
         self.assertEqual(run.returncode, 0, run.stderr)
-        positions = [line for line in run.stdout.splitlines() if line.startswith("info string genfens ")]
-        self.assertEqual(len(positions), GENFENS_COUNT, run.stdout)
+        self.assertEqual(len(genfens_positions(run)), GENFENS_COUNT, run.stdout)
+
+    def test_genfens_with_a_refused_argument_or_book_ends_with_status_1(self) -> None:
+        for refused in (GENFENS_WITH_A_BAD_SEED, GENFENS_WITH_A_MISSING_BOOK):
+            with self.subTest(refused):
+                run = self.run_engine(refused, "quit")
+                self.assertEqual(run.returncode, GENFENS_REFUSED, run.stderr)
+                self.assertIn("genfens: ", run.stderr)
+                self.assertEqual(genfens_positions(run), [], run.stdout)
 
     def test_argument_that_is_not_a_command_is_a_usage_error(self) -> None:
         run = self.run_engine("--version")

@@ -149,13 +149,15 @@ test "datagen options: raweval takes exactly true or false" {
 test "datagen options: values outside their documented range are errors, not overflows" {
     var diag: Diagnostic = .{};
     const too_big = "18446744073709551615";
-    inline for (.{ "plies=0-" ++ too_big, "plies=" ++ too_big, "plies=0-501", "bookplies=501", "nodes=4294967296", "hardmult=4294967296", "ttmb=1048577", "ttmb=" ++ too_big, "randsee=-2147483648", "randsee=10001", "positions=0" }) |arg| {
+    const largest_tt = std.fmt.comptimePrint("ttmb={d}", .{MAX_TT_MB});
+    const tt_beyond_largest = std.fmt.comptimePrint("ttmb={d}", .{MAX_TT_MB + 1});
+    inline for (.{ "plies=0-" ++ too_big, "plies=" ++ too_big, "plies=0-501", "bookplies=501", "nodes=4294967296", "hardmult=4294967296", tt_beyond_largest, "ttmb=" ++ too_big, "randsee=-2147483648", "randsee=10001", "positions=0" }) |arg| {
         try testing.expectError(error.InvalidValue, parse(&.{ "4", arg }, &diag));
     }
     try testing.expectError(error.InvalidValue, parse(&.{"4097"}, &diag));
     try testing.expectEqualStrings("threads", diag.key);
 
-    const widest = try parse_ok(&.{ "4096", "plies=0-500", "bookplies=500", "nodes=4294967295", "hardmult=4294967295", "ttmb=1048576", "randsee=-10000", "positions=" ++ too_big });
+    const widest = try parse_ok(&.{ "4096", "plies=0-500", "bookplies=500", "nodes=4294967295", "hardmult=4294967295", largest_tt, "randsee=-10000", "positions=" ++ too_big });
     try testing.expectEqual(PlySpan{ .min = 0, .range = 501 }, widest.plies);
     try testing.expectEqual(PlySpan{ .min = 500, .range = 1 }, widest.book_plies);
     try testing.expectEqual(@as(u64, std.math.maxInt(u64)), widest.positions);
