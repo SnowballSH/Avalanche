@@ -11,7 +11,8 @@ A limited engine at (possibly fractional) level `L`:
 1. searches at most `1 + floor(L)` plies deep;
 2. searches `max(MultiPV, 2 + floor((20 - L) / 3))` MultiPV lines, so weaker
    levels consider more candidates (`MIN_CANDIDATES` and
-   `LEVELS_PER_EXTRA_CANDIDATE`);
+   `LEVELS_PER_EXTRA_CANDIDATE`). The extra candidate lines are searched but
+   not reported: `info` lines show only the lines `MultiPV` asks for;
 3. after the search, samples one candidate line with probability proportional
    to `exp(-(best - score) / T)` where `T = 2 + 0.6 * (20 - L)^2` centipawns
    (`BASE_TEMPERATURE` and `TEMPERATURE_PER_HANDICAP_SQUARED`; scores clamped

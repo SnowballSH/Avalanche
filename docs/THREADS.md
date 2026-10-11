@@ -139,8 +139,8 @@ With no helpers the total is the main thread's own counter, so
 single-threaded `go nodes N` stops exactly where it did.
 
 With helpers a search overshoots its budget, typically by about 1024 nodes
-per thread as before: what the helpers search between two limit checks of the
-main thread. Helpers no longer stop themselves, though. If the main thread
+per thread: what the helpers search between two limit checks of the
+main thread. Helpers do not stop themselves, though. If the main thread
 loses its CPU or blocks while writing output, they search on until its next
 limit check or the end of their fixed-depth job, whichever comes first, so
 the overshoot has no fixed bound; the search always terminates.
@@ -194,7 +194,9 @@ both words, the second with a new 15-bit sequence number. `get` reads the
 second word, the first, and the second again (`ldapr`, plain loads on x86)
 and rejects an entry whose second word changed or is locked. A reader can
 therefore not see words from two different stores, short of exactly 32768
-stores to that entry between its two reads of the second word.
+stores to that entry between its two reads of the second word. An entry
+also records whether its node was on the principal variation (`was_pv`);
+the search writes that bit and does not read it.
 
 A lockless variant was built and measured: the first word is stored XORed
 with a 64-bit mix of the second (`(w1 * K) ^ ((w1 * K) >> 64)`), so that words

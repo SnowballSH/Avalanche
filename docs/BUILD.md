@@ -66,17 +66,18 @@ Instruction counts are from `/usr/bin/time -l` on an Apple M4 that was running o
 wall time and cycles were useless (the same binary varied by more than 20% in cycles) and the retired
 instructions of one binary varied by 0.3 to 0.5% between runs. The binaries were built from commit
 870eeab with only the build changes this document describes: the function counts and sizes in the
-table are not those of a build that also has the other changes of pull requests #104 to #111.
+table are not those of a build that also has the later changes.
 Nothing here is a measured gain in time, so `build.zig` sets none of it. Frame pointers are the one
 worth timing on a quiet x86-64 machine: there the prologue is three instructions and `rbp` becomes
 a general register, and a profiler that walks frames is the price.
 
 One thing the build does choose: the `translate_c` tool is always compiled in Debug mode
 (`.optimize` in its `b.dependency` call). It runs once, on one header.
-`--release=fast` used to compile it with full optimisation, which costs 3.2 times the CPU of the
-Debug build (89.8 s against 27.7 s of user time on the loaded machine, from an empty cache) before
-the engine's own compilation starts, and gave release builds and test builds a tool each. The
-engine binary is the same, instruction for instruction.
+Compiled in the mode of the engine, it would cost a `--release=fast` build 3.2 times the CPU of
+the Debug tool (89.8 s against 27.7 s of user time on the loaded machine, from an empty cache)
+before the engine's own compilation starts, and release builds and test builds would each
+compile a tool of their own. The engine binary is the same either way, instruction for
+instruction.
 
 ## CPU baselines
 
@@ -233,10 +234,12 @@ the next tag otherwise. `artifacts` runs for nothing else because it is the slow
 a pull request from a fork must not be able to start a build of downloadable binaries. The
 binaries take their version from the tag alone, so for a tag the job first requires the tag,
 `version` in `build.zig.zon` and `version` in `web/package.json` to be one version. It uploads
-`artifacts/bin` without the `.pdb` files of the Windows builds.
+`artifacts/bin` without the `.pdb` files of the Windows builds as a workflow artifact, kept for
+30 days; it creates no GitHub release.
 
-The job `wasm` runs the checks of the `web/` package on Node 24, the oldest version
-`web/package.json` accepts, and on Node 26, the version its type definitions describe.
+The job `wasm` runs the checks of the `web/` package (type check, lint and tests) and then
+`scripts/uci_protocol_test.py` on the wasm module. `web/package.json` requires Node 26 or later,
+the version its type definitions describe.
 
 The actions that are not GitHub's own, `mlugg/setup-zig` (it installs the compiler that builds the
 release binaries) and `dtolnay/rust-toolchain`, are referenced by commit, with the tag the commit
@@ -252,8 +255,7 @@ the same `bench` node count and `nnue-speed` checksum, those of that tree and no
 core is the same and the instructions it may use are not. `bench` instructions are the median of
 two runs, the `nnue-speed` figures the median of three (whole program: two million evaluations
 and the stage loops). The builds are commit 870eeab with only the build changes this document
-describes: the absolute counts are not those of a build that also has the other changes of pull
-requests #104 to #111.
+describes: the absolute counts are not those of a build that also has the later changes.
 
 | `-Dcpu` | L1 | Atomics | `bench` instructions | `nnue-speed` cycles | `nnue-speed` user time |
 |---|---|---|---|---|---|

@@ -36,6 +36,28 @@
   would be wrong at the other parity, and an exact 0, which a probe would
   turn into a draw.
 
+## Tablebases
+
+- Syzygy probing goes through the vendored Pyrrhic library (`src/pyrrhic`, docs/BUILD.md). The
+  bit and attack primitives Pyrrhic asks its host for are callbacks exported from
+  `src/engine/syzygy.zig` and served by the engine's own attack tables, so no move generation
+  is duplicated. `src/pyrrhic/tbconfig.h` declares them; it inverts the color of the pawn
+  attacks, because Pyrrhic numbers White 1 and the engine 0.
+- Nothing probes until `SyzygyPath` has loaded tables: `syzygy.init` has to succeed, and every
+  probe in the search tests `syzygy.active()` before anything else. `bench` loads none, so
+  its node count is that of a search without tablebases.
+- An interior node probes the WDL tables when the fifty-move counter is zero, no side may
+  castle, at most `syzygy.max_pieces()` pieces are left (what the loaded tables cover, capped
+  by `SyzygyProbeLimit`) and the depth is at least `SyzygyProbeDepth`. Nodes that follow a
+  null move, singular verifications and nodes with an excluded move do not probe. A win is a
+  lower bound and a loss an upper bound in the band of "Score ranges", a draw is exact. A
+  result that decides the node is stored in the transposition table and returned; otherwise
+  it narrows the window. With `Syzygy50MoveRule` (the default) a cursed win and a blessed
+  loss are draws, without it the win and the loss they are.
+- The root probes the DTZ tables, or the WDL tables when Pyrrhic has no DTZ result, under the
+  same conditions on castling rights and piece count, and keeps the root moves that share
+  the best rank ("Root candidates" in docs/UCI.md).
+
 ## Correction history
 
 - `Position.pawn_hash` is the Zobrist XOR of the pawns, and
@@ -184,6 +206,17 @@ counts do not move.
   when a second move is requested, or when the search asks for the unpicked
   moves, and leaves the list as the eager scan would have; no table it reads
   has changed, because all scores were taken when the list was built.
+  That the hash move outscores every other move is checked when the engine
+  is built: `movepick.zig` derives the largest score any other move can get
+  from the score constants, the MVV-LVA table, the range of a
+  capture-history and of a continuation-history entry and the upper limits
+  of `HistoryGravityMax` and of the continuation weights, and does not
+  compile unless the hash move's score is above it. The main history is
+  bounded by its gravity rule, not by its type, which is why the upper
+  limit of the tunable stands in for it. The same check covers the
+  winning-capture test: a capture whose exchange wins cannot score below
+  the floor, and one whose exchange loses stays below it unless it promotes
+  to a queen.
 - Scan without branches. Once no exchange is pending, a slot becomes
   `min(carried, slot)` and the carried score `max(carried, slot)`, and the
   two moves are exchanged through a mask of the comparison. That is the same
@@ -249,8 +282,7 @@ branch-free scan removes.
 
 Retired instructions for `bench` on an Apple M4. The builds are commit
 870eeab with these changes alone, row by row: the absolute counts are not
-those of a build that also has the other changes of pull requests #104 to
-#111.
+those of a build that also has the later changes.
 
 | | instructions |
 |---|---:|

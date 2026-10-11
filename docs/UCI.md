@@ -31,7 +31,7 @@ command is an error: nothing is run, a usage message goes to standard error and 
 
 | Option | Type | Default | Notes |
 | --- | --- | --- | --- |
-| Hash | spin | 16 | MB |
+| Hash | spin | 16 | MB, up to 1048576; up to 2047 on wasm, see [WASM.md](WASM.md) |
 | Threads | spin | 1 | persistent helper pool, see [THREADS.md](THREADS.md); max 1 on wasm |
 | NumaPolicy | combo | auto | `auto` binds search threads to NUMA nodes on multi-node Linux machines once there are too many for one node (docs/THREADS.md), `none` leaves placement to the OS; not offered by builds without threads (wasm) |
 | Move Overhead | spin | 25 | ms; the former name `MoveOverhead` is still accepted |
@@ -52,9 +52,9 @@ Tunable search parameters are also exposed as spin options for SPSA; their names
 others, without regard to case.
 
 An option the build target cannot honour is neither advertised by `uci` nor accepted by `setoption`.
-A failed `setoption` is reported as `info string setoption failed (<reason>)`: `UnknownOption` when no
-option or tunable has that name, `InvalidValue` when the name is known and the value does not fit its
-type. Spin values outside the advertised range are clamped to it.
+A failed `setoption` is reported as `info string setoption failed (<reason>): <the rest of the line>`:
+`UnknownOption` when no option or tunable has that name, `InvalidValue` when the name is known and the
+value does not fit its type. Spin values outside the advertised range are clamped to it.
 
 `MultiPV`, `UCI_LimitStrength`, `UCI_Elo` and `Skill Level` are kept in `options.Settings` and read
 when a `go` starts; every other option changes engine-wide state as soon as it is set.
@@ -92,11 +92,16 @@ when a `go` starts; every other option changes engine-wide state as soon as it i
   With MultiPV 1 the search path is unchanged.
 - **Root candidates**: `searchmoves` and the Syzygy DTZ filter narrow
   `Searcher.root_moves`; helpers receive the same candidates and exclusions.
+  A filter that would leave no move is ignored.
 - **Live feedback**: once a search has run for 3 s, the main thread also
   reports `info depth D currmove M currmovenumber N` as it starts each root
-  move, and, with a single PV line, `lowerbound`/`upperbound` lines when an
-  aspiration window fails high/low. Shorter searches print only one line per
-  completed iteration (and MultiPV line).
+  move, and `lowerbound`/`upperbound` lines when an aspiration window fails
+  high/low. `D` is the depth of the iteration, also while an aspiration
+  re-search runs at a lower depth. Bounds are reported only with a single PV
+  line, as in Stockfish, because only then does the bounded score refer
+  unambiguously to the line a GUI displays; a search with limited strength
+  keeps several candidate lines and reports none. Shorter searches print
+  only one line per completed iteration (and MultiPV line).
 - **Network name**: every `go` (and `eval`) starts with
   `info string NNUE evaluation using <name> (<architecture>, <size> MiB)`,
   where `<name>` is the stem of the `-Dnet` file the binary embeds (e.g.
@@ -115,18 +120,35 @@ when a `go` starts; every other option changes engine-wide state as soon as it i
   different input-bucket layout cannot be detected and would be accepted; only
   load networks trained for this build's architecture.
 - Output lines use CRLF on Windows and the Stockfish field order
-  (`depth seldepth multipv score [wdl] nodes nps hashfull tbhits time pv`),
+  (`depth seldepth multipv score [wdl] [lowerbound|upperbound] nodes nps hashfull tbhits time pv`),
   which some GUIs require to record PVs.
 - `score cp` is normalized: `cp 100` is the internal score at which the side to move wins half of its
-  games at ply 64 under the engine's win-rate model (`src/engine/wdl.zig`; 138 internal centipawns), as in
-  Stockfish, so evaluations stay comparable across networks. A tablebase win or loss is reported as
-  `50000 - plies` to the conversion, with the sign of the result. `UCI_ShowWDL` permille, the `eval` command
-  and the data written by `datagen` use the internal score. The permille are those of the side to move; a
-  mate or tablebase score is shown as a certain win or loss and does not go through the model. The model is a logistic in the score whose
-  midpoint `a` and width `b` are cubics in `min(ply, 240) / 64`; the shipped coefficients were fitted on
-  13,000 games of the engine at 40+0.4, their scores unscaled with the pawn value of the build that played
-  them. To refit it for a new network, run
-  `scripts/fit_wdl.py --data '<its training data>/*.viribin'` on held-out self-play chunks, or
-  `--format pgn --score-scale <PAWN_VALUE of the build that played the games / 100>` on match games,
-  whose scores are in UCI units; it prints
-  the two coefficient arrays and the calibration by score bucket.
+  games at ply 64 under the engine's win-rate model (138 internal centipawns), as in Stockfish, so
+  evaluations stay comparable across networks. A tablebase win or loss is reported as `50000 - plies` to
+  the conversion, with the sign of the result. `UCI_ShowWDL` permille, the `eval` command and the data
+  written by `datagen` use the internal score. The permille are those of the side to move; a mate or
+  tablebase score is shown as a certain win or loss and does not go through the model.
+
+## Win-rate model
+
+The model (`src/engine/wdl.zig`) is a logistic in the score whose midpoint `a` and width `b` are cubics
+in `min(ply, 240) / 64`. The shipped coefficients were fitted on 13,000 games of the engine at 40+0.4,
+their scores unscaled with the pawn value of the build that played them.
+
+To refit it for a new network, run `python3 scripts/fit_wdl.py --data '<its training data>/*.viribin'`
+on held-out self-play chunks, or `--format pgn --score-scale <PAWN_VALUE of the build that played the
+games / 100>` on match games, whose scores are in UCI units. The script needs numpy, which
+`uv run scripts/fit_wdl.py ...` supplies. It prints the two coefficient arrays and the calibration by
+score bucket.
+
+- **PGN input.** Every move comment has to start with the mover's score in pawns, as in
+  `{+0.35/18 1.2s}`; a zero score may come without a sign. `{book}` moves are skipped, and a mate score
+  counts as the score limit of 2000. The script prints how many comments had no score, so a format it
+  does not read shows.
+- **The fit** minimises the mean log-loss over a histogram of (ply, score) cells. It starts with Adam,
+  which is cheap and tolerates the crude starting point, and finishes with damped Newton steps on a
+  finite-difference Hessian of the analytic gradient.
+- **bulletformat input** (`--format bullet`) is read as contiguous blocks of 65536 records at random
+  offsets. That is an unbiased sample only of a file that is already shuffled, and far cheaper to read
+  than scattered records. A record stores no ply, so this fit is against the piece count and is not
+  the model `wdl.zig` uses.

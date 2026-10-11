@@ -138,7 +138,7 @@ treats as unreachable.
 info string Hash: 64 MB, 64 MB on huge pages
 ```
 
-The number is read from `/proc/self/smaps` when it is asked for, no longer on every resize, so
+The number is read from `/proc/self/smaps` when it is asked for, not on every resize, so
 start-up does not pay for it. For everything else, look at the process:
 
 ```sh
@@ -237,7 +237,7 @@ page on Linux. The Finny table is touched one 2 KiB entry per king-bucket refres
   project's CI, so Windows stays on ordinary pages.
 - **Explicit huge pages on Linux** (`MAP_HUGETLB`, 1 GiB pages): they need a pool reserved by the
   administrator. Transparent huge pages need nothing.
-- **A copy of the network per NUMA node.** `weights.MODEL` is now a pointer to a block, which is
+- **A copy of the network per NUMA node.** `weights.MODEL` is a pointer to a block, which is
   the shape that needs, but every evaluation would have to take the pointer of its thread's node.
 - **Huge pages for the engine's own globals.** About 1.5 MiB of precomputed tables (the attack
   tables among them) are resident in `.bss` on 4 KiB pages. They could be gathered into one

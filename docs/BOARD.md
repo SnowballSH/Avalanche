@@ -35,12 +35,11 @@ enemy pieces attacking the king of the side to move, and the keys (`hash`, `pawn
 bitboards, repeated by `in_check`, both move generators, every exchange evaluation and the
 upcoming-repetition test.
 
-The occupancy has no slot for "no piece", so two edits now have a precondition: `place` must be
+The occupancy has no slot for "no piece", so two edits have a precondition: `place` must be
 given a piece, and the square `relocate` moves from must hold one. Both are `std.debug.assert`s:
 Debug and ReleaseSafe builds stop there, and in ReleaseFast the condition is handed to the
-optimiser as a fact, so breaking it is undefined behaviour. Before, moving from an empty square
-was tolerated: it wrote "no piece" to the destination and touched only the spare bitboard and a
-zero key. No caller does it; `move_piece` and `move_piece_quiet` are private to `Position`.
+optimiser as a fact, so breaking it is undefined behaviour. No caller moves from an empty
+square; `move_piece` and `move_piece_quiet` are private to `Position`.
 `relocate` also expects the square it moves to to be empty, which nothing checks: a capture goes
 through `move_piece`, or lifts the captured piece first.
 
@@ -58,6 +57,10 @@ of the side that just moved on the square the push ends on. Without the test the
 remove whatever stands there, the king included. `fen.validate`, which checks a line without
 building a position (datagen runs it over its books, docs/DATAGEN.md), calls the same function
 and rejects such a line, where `set_fen` plays on without the square.
+
+`set_fen` reads a fullmove number above `MAX_FULLMOVE` as `MAX_FULLMOVE`, the largest from which
+the 32-bit ply count of the game cannot overflow within the `HISTORY_CAPACITY` plies a position
+holds. A fullmove number of 0, or a field that is not a number, counts as 1.
 
 `write_fen` writes into a buffer of `FEN_CAPACITY` bytes, the length of the longest text it can
 produce, so it needs no allocator and cannot fail. docs/CHESS960.md describes the castling field.
@@ -82,7 +85,7 @@ between calls.
 
 `generate_legal_moves` builds the map of squares the other side attacks, for king moves and
 castling. `generate_q_moves` only needs it for king captures, and most positions have no enemy
-piece next to the king. It now asks, for each such piece, whether its square is attacked once the
+piece next to the king. It asks, for each such piece, whether its square is attacked once the
 king has left its own. A square is in the attack map exactly when it has an attacker, and both
 iterate the squares in the same order, so the moves and their order are the same.
 
@@ -146,8 +149,8 @@ before. The round-to-round ratios of this run spread about two points either way
 Apple M4, `--release=fast`. The machine was running other builds and benchmarks at load average
 15 to 20, so nps says nothing; the table gives what `/usr/bin/time -l` reports as the instructions
 retired by `bench`, one run per build, back to back. The builds are commit 870eeab with these
-changes alone, row by row: the absolute counts are not those of a build that also has the other
-changes of pull requests #104 to #111.
+changes alone, row by row: the absolute counts are not those of a build that also has the later
+changes.
 
 | Change | Instructions | Against the row above |
 |---|---|---|

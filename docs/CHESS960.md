@@ -37,9 +37,9 @@ flags those rules so standard chess never pays for the extra rook-attack lookup.
 
 Castling moves are stored king-captures-rook (`from` = king, `to` = rook) with
 the `OO`/`OOO` flag. This is unambiguous even when the king does not move (king
-already on g1) or when king and rook swap squares, which the old
-king-destination encoding could not express. `Move.castle_king_destination`
-recovers the standard notation.
+already on g1) or when king and rook swap squares, which a king-destination
+encoding cannot express. `Move.castle_king_destination` recovers the standard
+notation.
 
 `Position.castle` makes and unmakes the move: one `relocate` for the king and
 one for the rook when their squares do not overlap (always the case in standard
@@ -56,10 +56,9 @@ unkeyed on unmake, like every other move (docs/BOARD.md).
   is what the GUI asked for, not a property of a position, whereas
   `castling.Setup.is_chess960` is worked out anew from each FEN.
 - Input: `Move.parse` accepts king-captures-rook always, and
-  king-destination unless Chess960 notation is active. A string that is
-  malformed or names no legal move gives `Move.empty()`, which the caller has to
-  test for. No legal move equals it: origin and destination always differ,
-  castling included, since castling is stored king-captures-rook.
+  king-destination unless Chess960 notation is active. It returns `?Move`: a
+  string that is malformed or names no legal move gives `null`, so a caller
+  cannot play the result without testing it.
 - FEN input accepts `KQkq` (X-FEN: outermost rook on that wing) and Shredder
   file letters (`HAha`, `HFhf`, ...). Rights that do not name an actual rook on
   the back rank are dropped.

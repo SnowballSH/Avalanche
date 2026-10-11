@@ -56,8 +56,9 @@ Exports:
 | `avalanche_command(len)`    | Executes the command synchronously. Returns 0 once `quit` was received. Internal errors print `info string error: …`. |
 | `avalanche_bench()`         | Runs the fixed bench and prints `<nodes> nodes <nps> nps`.                                                            |
 
-`avalanche_bench` searches with the instance's transposition table and options as it finds them, so its
-node count equals the native `bench` only on a fresh instance.
+`avalanche_bench` searches with a 16 MiB transposition table of its own, so it prints the node count of the
+native `bench` at any point of a session, provided the options that change the search (`EvalScale`,
+`Contempt`, the tunable parameters) are at their defaults.
 
 ## Host bindings (`web/`)
 
@@ -134,9 +135,15 @@ error ends the process rather than leaving a dead engine behind a GUI.
 
 ## Platform layer
 
-`src/platform.zig` is the only place that knows which target it is running on:
+`src/platform.zig` owns the OS services the engine depends on, so the engine asks it for them and not the
+target:
 
+- `is_wasm`, `is_linux`: the two targets whose services differ from the rest.
 - `allocator`: libc `malloc` natively, `std.heap.wasm_allocator` (a `memory.grow` bump/size-class allocator) on wasm.
+- `large_memory`: page-aligned blocks straight from the OS for the large tables, the wasm allocator on wasm
+  ([MEMORY.md](MEMORY.md)).
+- `affinity`: reading and setting a thread's CPU mask, on Linux only ([THREADS.md](THREADS.md), "NUMA
+  placement").
 - `now_ns`, `Stdout`, `print`: `std.Io` natively, host imports on wasm. `print` backs the debug commands (`d`, `perft`,
   `perftdiv`): natively it writes to stderr, on wasm it shares the single UCI output channel.
 - `atomic_load`/`atomic_store`/`atomic_rmw`: real atomics natively. On wasm they are plain memory
@@ -144,6 +151,8 @@ error ends the process rather than leaving a dead engine behind a GUI.
   would reject the transposition table's 64-bit lock words.
 - `has_threads`: comptime-false on wasm. Thread spawns (search helpers, TT clearing, bench) run inline instead, and
   the `Threads` option is advertised with `max 1`.
+- `fatal`: ends the process with a message when the engine cannot go on, such as a table it cannot allocate.
+  On wasm the panic handler of `src/wasm.zig` prints `info string panic: …` and traps (see "Failures").
 
 All of these are comptime-resolved, so a native build contains none of the wasm paths.
 
@@ -152,7 +161,7 @@ power-of-two number of 64 KiB pages and reserves one word of its own in every sl
 bytes lands in the next slot size: the default `Hash 16` reserves 32 MiB and `Hash 64` reserves 128 MiB, while
 `Hash 15` and `Hash 63` fit 16 MiB and 64 MiB slots. The engine writes only the table itself, so the rest of the
 slot is grown but left untouched while the table is in use. A table of 2 GiB or more would need a 4 GiB slot,
-which a wasm32 module cannot address, so no `Hash` above 2047 can be allocated.
+which a wasm32 module cannot address, so the wasm build advertises `Hash` with `max 2047`.
 
 A resize allocates the new table before freeing the old one, and a freed slot serves only a later allocation of
 the same slot size. A `Hash` change therefore grows linear memory for good unless a slot of that size was freed
@@ -163,8 +172,8 @@ earlier; even setting the current size again grows it once. Set `Hash` once.
 - The single-layer head's `madd_i16` lowers to `i32x4.dot_i16x8_s` via the `llvm.wasm.dot` intrinsic (+36% nps).
 - The multi-layer head, which the default net uses, has its own wasm paths for every stage (pairwise
   `q15mulr_sat_s`, L1 `extadd_pairwise`, L2 `dot_i16x8_s`); see
-  "Inference paths" in [NNUE.md](NNUE.md). `bench` under Node 26 on an Apple M4: 1.00M to 1.50M nps
-  (+50%) against the portable paths, same node count.
+  "Inference paths" in [NNUE.md](NNUE.md). `bench` under Node 26 on an Apple M4: 1.00M to 1.47M nps
+  (+47%) against the portable paths, same node count.
 - Timing a stage in isolation under V8 needs `node --no-liftoff`: wasm functions are not replaced on
   the stack, so a loop inside one long-running call stays in the baseline compiler's code. `bench`
   is not affected, the search calls its functions many times.
@@ -174,8 +183,9 @@ earlier; even setting the current size again grows it once. Set `Hash` once.
   bytes at runtime in no other way, which would emit a second copy into the module (a web test asserts
   the module stays under 1.1x the network size). Linear memory is about 88 MiB in total at the default
   `Hash`.
-- `build_all_v3.sh` (and the tagged-release CI job) ships the module as `Avalanche-<version>-wasm.wasm`. It needs a
-  host: build the `web/` package (`npm run build`) or implement the small ABI above.
+- `scripts/build_release.sh` writes the module next to the native binaries as `Avalanche-<version>-wasm.wasm`
+  ([BUILD.md](BUILD.md), "Release matrix"). It needs a host: build the `web/` package (`npm run build`) or
+  implement the small ABI above.
 - `TranspositionTable.index` uses two 64-bit multiplies on 32-bit targets. The `u128` product would lower
   to a `__multi3` libcall; the replacement returns the identical index.
 
