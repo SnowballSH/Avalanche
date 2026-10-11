@@ -262,9 +262,12 @@ lock files. `trainer` does so without the `cuda` feature, which needs no GPU too
 "Training"), and also lints the default configuration, the one with CUDA: bullet's build script
 asks only that the directory `CUDA_PATH` names exists, and clippy does not link, so the runner's
 temporary directory is enough.
+Both jobs use the Rust release `RUST_VERSION` names, for the reason ruff is pinned: every release
+of clippy adds lints, and with warnings as errors a new one fails a commit that changed nothing.
 
-The job `tcec` runs the TCEC install and update scripts against the commit under test; docs/TCEC.md,
-"What CI checks", describes it.
+The job `tcec` lints the TCEC scripts and runs `tcec/install.sh` against the commit under test.
+`tcec/update.sh` it runs only into a failure and, on scheduled and manual runs of master, as TCEC
+does (docs/TCEC.md, "What CI checks").
 
 The actions that are not GitHub's own, `mlugg/setup-zig` (it installs the compiler that builds the
 release binaries) and `dtolnay/rust-toolchain`, are referenced by commit, with the tag the commit
@@ -275,10 +278,11 @@ was taken from in a trailing comment: a tag can be moved to other code, a commit
 `zig fmt` settles the layout of the source and nothing checks its names, so the convention is
 stated here. Functions, parameters, fields, local values, namespaces and the settings that change
 at run time are snake_case (`set_fen`, `search.contempt`). Types, and functions that return a
-type, are PascalCase. A constant of a file or of a type is SCREAMING_CASE (`MAX_PLY`), except two
+type, are PascalCase. A constant of a file or of a type is SCREAMING_CASE (`MAX_PLY`), except three
 kinds that are lower case because of how they read: a flag that selects code at compile time
-(`platform.is_wasm`, `arch.intrinsics`), and a value a type declares of itself, which is written
-like an enum tag wherever the type is known (`.stale` for `FrameState.stale`).
+(`platform.is_wasm`, `arch.intrinsics`), a value a type declares of itself, which is written
+like an enum tag wherever the type is known (`.stale` for `FrameState.stale`), and
+`platform.allocator`, which is passed around as the allocators of the standard library are.
 
 Two groups are named by something outside the engine. The search parameters of
 `src/engine/parameters.zig` are spelled as their UCI options (`LMRWeight`), because

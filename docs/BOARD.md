@@ -60,7 +60,7 @@ and rejects such a line, where `set_fen` plays on without the square.
 
 `set_fen` reads a fullmove number above `MAX_FULLMOVE` as `MAX_FULLMOVE`, the largest from which
 the 32-bit ply count of the game cannot overflow within the `HISTORY_CAPACITY` plies a position
-holds. A fullmove number of 0, or a field that is not a number, counts as 1.
+holds. A missing fullmove number, one of 0, or a field that is not a number, counts as 1.
 
 `write_fen` writes into a buffer of `FEN_CAPACITY` bytes, the length of the longest text it can
 produce, so it needs no allocator and cannot fail. docs/CHESS960.md describes the castling field.

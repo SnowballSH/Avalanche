@@ -194,7 +194,7 @@ class CommandLineTest(unittest.TestCase):
         self.assertIn("--min-ply", output)
 
     def test_a_score_scale_is_rejected_for_data_in_internal_units(self) -> None:
-        status, output = self.run_main("--data", str(self.bullet), "--score-scale", "1.38")
+        status, output = self.run_main("--data", str(self.bullet), "--score-scale", "1.39")
         self.assertEqual(status, USAGE_ERROR, output)
         self.assertIn("--score-scale", output)
 

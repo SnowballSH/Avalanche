@@ -257,11 +257,14 @@ mod tests {
         let net = std::fs::read(SINGLE_LAYER_NET).unwrap();
         let mut weights = buckets16_weights(HIDDEN / 2, true);
         let error = load_into(&mut weights, &net).unwrap_err();
-        assert!(error.contains("25200704 bytes"), "{error}");
+        assert!(error.contains(&format!("{} bytes", net.len())), "{error}");
 
         let mut weights = buckets16_weights(HIDDEN, true);
         let error = load_into(&mut weights, &net[..net.len() - 1]).unwrap_err();
-        assert!(error.contains("is 25200704 bytes"), "{error}");
+        assert!(
+            error.contains(&format!("is {} bytes", net.len())),
+            "{error}"
+        );
     }
 
     #[test]

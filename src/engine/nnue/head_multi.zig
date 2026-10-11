@@ -210,7 +210,7 @@ inline fn pairwise_lanes(a: PairwiseI16, b: PairwiseI16) ByteVector {
     switch (PAIRWISE_PATH) {
         .mulhrs => {
             // `pmulhrsw` is (x * y + 2^14) >> 15, one native vector at a time.
-            const mulhrs = @extern(*const fn (HalfI16, HalfI16) callconv(arch.intrinsic_call) HalfI16, .{ .name = switch (VECTOR_BYTES) {
+            const mulhrs = @extern(*const fn (HalfI16, HalfI16) callconv(arch.INTRINSIC_CALL) HalfI16, .{ .name = switch (VECTOR_BYTES) {
                 64 => "llvm.x86.avx512.pmul.hr.sw.512",
                 32 => "llvm.x86.avx2.pmul.hr.sw",
                 16 => if (wasm_simd) "llvm.wasm.q15mulr.sat.signed" else "llvm.x86.ssse3.pmul.hr.sw.128",
@@ -223,7 +223,7 @@ inline fn pairwise_lanes(a: PairwiseI16, b: PairwiseI16) ByteVector {
             // `packuswb` narrows with saturation to 0..255, so a product
             // below 0 becomes 0, but it works on 128-bit lanes: the result
             // alternates 8 bytes of each operand.
-            const packus = @extern(*const fn (HalfI16, HalfI16) callconv(arch.intrinsic_call) ByteVector, .{ .name = switch (VECTOR_BYTES) {
+            const packus = @extern(*const fn (HalfI16, HalfI16) callconv(arch.INTRINSIC_CALL) ByteVector, .{ .name = switch (VECTOR_BYTES) {
                 64 => "llvm.x86.avx512.packuswb.512",
                 32 => "llvm.x86.avx2.packuswb",
                 16 => if (wasm_simd) "llvm.wasm.narrow.unsigned.v16i8.v8i16" else "llvm.x86.sse2.packuswb.128",
@@ -236,8 +236,8 @@ inline fn pairwise_lanes(a: PairwiseI16, b: PairwiseI16) ByteVector {
             const HalfU8 = @Vector(HALF_LANES, u8);
             const HalfU16 = @Vector(HALF_LANES, u16);
             // `sqxtun` is clamp(x, 0, 255) as a byte; `umull` widens the product.
-            const sqxtun = @extern(*const fn (HalfI16) callconv(arch.intrinsic_call) HalfU8, .{ .name = "llvm.aarch64.neon.sqxtun.v8i8" });
-            const umull = @extern(*const fn (HalfU8, HalfU8) callconv(arch.intrinsic_call) HalfU16, .{ .name = "llvm.aarch64.neon.umull.v8i16" });
+            const sqxtun = @extern(*const fn (HalfI16) callconv(arch.INTRINSIC_CALL) HalfU8, .{ .name = "llvm.aarch64.neon.sqxtun.v8i8" });
+            const umull = @extern(*const fn (HalfU8, HalfU8) callconv(arch.INTRINSIC_CALL) HalfU16, .{ .name = "llvm.aarch64.neon.umull.v8i16" });
             var high: [2]HalfU8 = undefined;
             inline for (&high, halves(a), halves(b)) |*bytes, half_a, half_b| {
                 bytes.* = @truncate(umull.*(sqxtun.*(half_a), sqxtun.*(half_b)) >> @splat(8));
@@ -311,7 +311,7 @@ inline fn nonzero_mask(activations: *const [NNZ_BLOCKS * 4]u8) u8 {
     // leaves the largest activation of each block in one byte of a u64, and
     // the minimum with 1 makes it a flag.
     const Bytes = @Vector(16, u8);
-    const umaxp = @extern(*const fn (Bytes, Bytes) callconv(arch.intrinsic_call) Bytes, .{ .name = "llvm.aarch64.neon.umaxp.v16i8" });
+    const umaxp = @extern(*const fn (Bytes, Bytes) callconv(arch.INTRINSIC_CALL) Bytes, .{ .name = "llvm.aarch64.neon.umaxp.v16i8" });
     const pairs = umaxp.*(activations[0..16].*, activations[16..32].*);
     // Typed, because @min would otherwise narrow the element type.
     const flag_bytes: Bytes = @min(umaxp.*(pairs, pairs), @as(Bytes, @splat(1)));
@@ -326,7 +326,7 @@ pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *Block
         // One vector of block indices per step, of which `vpcompressb` keeps
         // those of the non-zero blocks, packed at the front. The whole vector
         // is stored; as below, `count` never passes the step's first block.
-        const compress = @extern(*const fn (ByteVector, ByteVector, @Vector(VECTOR_BYTES, bool)) callconv(arch.intrinsic_call) ByteVector, .{ .name = vpcompressb });
+        const compress = @extern(*const fn (ByteVector, ByteVector, @Vector(VECTOR_BYTES, bool)) callconv(arch.INTRINSIC_CALL) ByteVector, .{ .name = vpcompressb });
         const Blocks = @Vector(VECTOR_BYTES, u32);
         var block_indices: ByteVector = std.simd.iota(u8, VECTOR_BYTES);
         var first: usize = 0;
@@ -354,7 +354,7 @@ pub fn nonzero_blocks(activations: *align(64) const Activations, indices: *Block
 
 /// `a[2i] * b[2i] + a[2i + 1] * b[2i + 1]` in i32. Only four operands of -32768 overflow it.
 inline fn pair_products(a: DotI16, b: DotI16) DotI32 {
-    return @extern(*const fn (DotI16, DotI16) callconv(arch.intrinsic_call) DotI32, .{ .name = PAIR_PRODUCTS_INTRINSIC.? }).*(a, b);
+    return @extern(*const fn (DotI16, DotI16) callconv(arch.INTRINSIC_CALL) DotI32, .{ .name = PAIR_PRODUCTS_INTRINSIC.? }).*(a, b);
 }
 
 const DotSum = if (L1_PATH == .extadd) [2]DotI32 else DotI32;
@@ -378,7 +378,7 @@ inline fn byte_products(inputs: DotI8, block_weights: DotI8, comptime half: usiz
 
 inline fn widened_pairs(products: HalfI16) DotI32 {
     const name = if (wasm_simd) "llvm.wasm.extadd.pairwise.signed.v4i32" else "llvm.aarch64.neon.saddlp.v4i32.v8i16";
-    return @extern(*const fn (HalfI16) callconv(arch.intrinsic_call) DotI32, .{ .name = name }).*(products);
+    return @extern(*const fn (HalfI16) callconv(arch.INTRINSIC_CALL) DotI32, .{ .name = name }).*(products);
 }
 
 /// Exact only for `inputs` in 0..127: `vpdpbusd` and `pmaddubsw` read them as unsigned, `sdot` as signed.
@@ -390,10 +390,10 @@ inline fn dot_accumulate(sum: DotSum, inputs: DotI8, block_weights: DotI8) DotSu
                 32 => "llvm.x86.avx512.vpdpbusd.256",
                 else => unreachable,
             };
-            return @extern(*const fn (DotI32, DotI32, DotI32) callconv(arch.intrinsic_call) DotI32, .{ .name = name }).*(sum, @bitCast(inputs), @bitCast(block_weights));
+            return @extern(*const fn (DotI32, DotI32, DotI32) callconv(arch.INTRINSIC_CALL) DotI32, .{ .name = name }).*(sum, @bitCast(inputs), @bitCast(block_weights));
         },
         .maddubs => {
-            const maddubs = @extern(*const fn (DotI8, DotI8) callconv(arch.intrinsic_call) DotI16, .{ .name = switch (VECTOR_BYTES) {
+            const maddubs = @extern(*const fn (DotI8, DotI8) callconv(arch.INTRINSIC_CALL) DotI16, .{ .name = switch (VECTOR_BYTES) {
                 64 => "llvm.x86.avx512.pmaddubs.w.512",
                 32 => "llvm.x86.avx2.pmadd.ub.sw",
                 16 => "llvm.x86.ssse3.pmadd.ub.sw.128",
@@ -401,7 +401,7 @@ inline fn dot_accumulate(sum: DotSum, inputs: DotI8, block_weights: DotI8) DotSu
             } });
             return sum + pair_products(maddubs.*(inputs, block_weights), @splat(1));
         },
-        .sdot => return @extern(*const fn (DotI32, DotI8, DotI8) callconv(arch.intrinsic_call) DotI32, .{ .name = "llvm.aarch64.neon.sdot.v4i32.v16i8" }).*(sum, inputs, block_weights),
+        .sdot => return @extern(*const fn (DotI32, DotI8, DotI8) callconv(arch.INTRINSIC_CALL) DotI32, .{ .name = "llvm.aarch64.neon.sdot.v4i32.v16i8" }).*(sum, inputs, block_weights),
         .extadd => {
             // A product fits an i16, and the pairwise widening addition leaves
             // two i32 per output; they are kept apart until `output_sums`,

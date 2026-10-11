@@ -349,5 +349,5 @@ candidate_mean_abs`) and `eval_scale` (`factor` in permille, rounded). When `eva
 so the post-scaling, correction history and the hash table all see the scaled value; the default is an exact
 identity. The network file is never rewritten: the output weights of a single-layer network are small integers (at
 most 127 in magnitude), so re-rounding them adds eval noise of about 10 cp RMS per position that a mean cannot show,
-and a network whose weights already sit at the 127 clip, as Nezha's do, could not be scaled up at all. Datagen and
+and a network whose weights already sit at the 127 clip, as Dianguang-1's do, could not be scaled up at all. Datagen and
 `netscale` run at the default scale and record the unscaled output.

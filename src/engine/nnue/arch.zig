@@ -30,7 +30,7 @@ pub fn x86_has(comptime feature: std.Target.x86.Feature) bool {
 }
 
 /// For declaring LLVM intrinsics: passes every vector, masks included, as a vector.
-pub const intrinsic_call: std.lang.CallingConvention = if (builtin.target.cpu.arch == .x86_64) .{ .x86_64_vectorcall = .{} } else .c;
+pub const INTRINSIC_CALL: std.lang.CallingConvention = if (builtin.target.cpu.arch == .x86_64) .{ .x86_64_vectorcall = .{} } else .c;
 
 pub fn pair_products_intrinsic(comptime vector_bits: usize) ?[]const u8 {
     if (!intrinsics) return null;

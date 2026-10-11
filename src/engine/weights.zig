@@ -123,10 +123,10 @@ pub const head = switch (HEAD) {
 
 pub const NNUEWeights = Network(HEAD);
 
-const embedded_model align(@alignOf(NNUEWeights)) = NNUE_SOURCE.*;
-const embedded_bytes: *align(@alignOf(NNUEWeights)) const [@sizeOf(NNUEWeights)]u8 = embedded_model[0..@sizeOf(NNUEWeights)];
+const EMBEDDED_MODEL align(@alignOf(NNUEWeights)) = NNUE_SOURCE.*;
+const EMBEDDED_BYTES: *align(@alignOf(NNUEWeights)) const [@sizeOf(NNUEWeights)]u8 = EMBEDDED_MODEL[0..@sizeOf(NNUEWeights)];
 
-pub var MODEL: *const NNUEWeights = @ptrCast(embedded_bytes);
+pub var MODEL: *const NNUEWeights = @ptrCast(EMBEDDED_BYTES);
 
 var model_block: ?*align(large_memory.ALIGNMENT) NNUEWeights = null;
 
@@ -222,8 +222,8 @@ comptime {
 }
 
 pub fn use_embedded() void {
-    validate(embedded_bytes) catch |err| platform.fatal("embedded network is unusable: {s}", .{@errorName(err)});
-    if (platform.is_wasm) prepare() else adopt(embedded_bytes);
+    validate(EMBEDDED_BYTES) catch |err| platform.fatal("embedded network is unusable: {s}", .{@errorName(err)});
+    if (platform.is_wasm) prepare() else adopt(EMBEDDED_BYTES);
 }
 
 pub const MAX_FILE_SIZE = @max(@sizeOf(Network(.single)), @sizeOf(Network(.multi)));
@@ -240,7 +240,7 @@ pub fn install(bytes: []const u8) NetworkError!void {
 pub fn load(path: []const u8) !void {
     if (comptime !supports_eval_file) return error.Unsupported;
     if (std.mem.eql(u8, path, EMBEDDED_NAME)) {
-        try install(embedded_bytes);
+        try install(EMBEDDED_BYTES);
         active_name = build_options.net_name;
         return;
     }

@@ -179,7 +179,7 @@ earlier; even setting the current size again grows it once. Set `Hash` once.
   is not affected, the search calls its functions many times.
 - Release builds are stripped: ~300 KB of code next to the 25 MB network. The network is in the module
   once and in linear memory once. The engine reads it in place from the data segment through
-  `embedded_model` rather than copying it into a second 25 MB buffer, and touches the `@embedFile`
+  `EMBEDDED_MODEL` rather than copying it into a second 25 MB buffer, and touches the `@embedFile`
   bytes at runtime in no other way, which would emit a second copy into the module (a web test asserts
   the module stays under 1.1x the network size). Linear memory is about 88 MiB in total at the default
   `Hash`.

@@ -41,7 +41,7 @@ comptime {
 
 inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
     if (comptime arch.pair_products_intrinsic(@bitSizeOf(OutputI16))) |name| {
-        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = name }).*(a, b);
+        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.INTRINSIC_CALL) OutputI32, .{ .name = name }).*(a, b);
     }
 
     const a_parts = std.simd.deinterlace(2, a);

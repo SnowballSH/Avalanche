@@ -20,6 +20,7 @@ permissions:
 env:
   ZIG_VERSION: "0.17.0"
   RUFF_VERSION: "0.17.0"
+  RUST_VERSION: "1.99.0"
 
 jobs:
   build:
@@ -148,7 +149,7 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
       - name: Format
         run: cargo fmt --check
@@ -170,7 +171,7 @@ jobs:
       - name: Rust toolchain
         uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
-          toolchain: stable
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
       - name: Format
         run: cargo fmt --check
