@@ -17,11 +17,10 @@ fn expect_same_evaluation(a: *position.Position, b: *position.Position) !void {
 }
 
 fn expect_matches_fresh(pos: *position.Position) !void {
-    const fen = pos.basic_fen(std.testing.allocator);
-    defer std.testing.allocator.free(fen);
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
     const fresh = try support.new_position();
     defer support.destroy_position(fresh);
-    fresh.set_fen(fen);
+    fresh.set_fen(pos.write_fen(&fen_buf));
     try expectEqual(fresh.hash, pos.hash);
     try expectEqual(fresh.pawn_hash, pos.pawn_hash);
     try expectEqual(fresh.nonpawn_hash, pos.nonpawn_hash);
@@ -121,9 +120,7 @@ test "smp root: helper sees a repetition from before the root" {
 
 test "smp root: multi-threaded search returns legal moves and helpers end on the root" {
     if (comptime !platform.has_threads) return error.SkipZigTest;
-    platform.io = std.testing.io;
-    support.init_search();
-    tt.GlobalTT.reset(16);
+    support.init_engine();
 
     search.set_helper_count(3);
     defer search.set_helper_count(0);
@@ -194,9 +191,7 @@ test "smp root: the node budget is compared with the nodes of every thread" {
 
 test "smp root: a node budget ends a search that the main thread alone would continue" {
     if (comptime !platform.has_threads) return error.SkipZigTest;
-    platform.io = std.testing.io;
-    support.init_search();
-    tt.GlobalTT.reset(16);
+    support.init_engine();
 
     search.set_helper_count(3);
     defer search.set_helper_count(0);

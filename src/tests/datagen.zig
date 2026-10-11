@@ -1,11 +1,10 @@
 const std = @import("std");
 const platform = @import("../platform.zig");
 const datagen = @import("../engine/datagen.zig");
-const arguments = @import("../engine/datagen/arguments.zig");
 const book = @import("../engine/datagen/book.zig");
-const Format = @import("../engine/datagen/format.zig").Format;
 const genfens = @import("../engine/genfens.zig");
 const types = @import("../chess/types.zig");
+const utils = @import("../chess/utils.zig");
 const hce = @import("../engine/hce.zig");
 const support = @import("support.zig");
 const testing = std.testing;
@@ -135,19 +134,26 @@ test "datagen: default output path is portable and seed-derived" {
     try testing.expectEqualStrings("data_ffffffffffffffff.viribin", datagen.default_output_path(&buf, std.math.maxInt(u64), .viri));
 }
 
-const DECISIVE_OPENING = "4k3/8/8/8/8/8/8/4KQ2 w - - 0 1";
+const MATE_IN_ONE_OPENING = "6k1/5ppp/8/8/8/8/8/R6K w - - 0 1";
 const STALEMATE_OPENING = "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1";
+
+fn searching_book_lines_as_they_are(config: datagen.DatagenConfig) datagen.DatagenConfig {
+    var without_random_plies = config;
+    without_random_plies.book_random_plies_min = 0;
+    without_random_plies.book_random_plies_range = 1;
+    return without_random_plies;
+}
 
 test "datagen: a book whose every opening is rejected fails the run instead of running forever" {
     platform.io = std.testing.io;
     support.init_search();
 
-    inline for (.{ DECISIVE_OPENING, STALEMATE_OPENING }, .{ .viri, .bullet }) |opening, format| {
+    inline for (.{ MATE_IN_ONE_OPENING, MATE_IN_ONE_OPENING, STALEMATE_OPENING }, .{ .viri, .bullet, .bullet }) |opening, format| {
         var run: Run = undefined;
         try run.init("rejected.out");
         defer run.tmp.cleanup();
 
-        var config = quick_config(100);
+        var config = searching_book_lines_as_they_are(quick_config(100));
         config.format = format;
         config.max_consecutive_discards = 20;
         var gen = datagen.Datagen.new(config, 1);
@@ -164,6 +170,14 @@ test "datagen: a book whose every opening is rejected fails the run instead of r
     }
 }
 
+fn seed_whose_first_game_starts_from(opening: usize, opening_count: usize) u64 {
+    var seed: u64 = 0;
+    while (true) : (seed += 1) {
+        var first_worker = utils.PRNG.new(datagen.thread_seed(seed, 0));
+        if (first_worker.rand64() % opening_count == opening) return seed;
+    }
+}
+
 test "datagen: discarded games are counted in the summary and leave no trace in the file" {
     platform.io = std.testing.io;
     support.init_search();
@@ -171,9 +185,10 @@ test "datagen: discarded games are counted in the summary and leave no trace in 
     try run.init("mixed.viribin");
     defer run.tmp.cleanup();
 
-    var gen = datagen.Datagen.new(quick_config(300), 5);
+    const openings = [_][]const u8{ STALEMATE_OPENING, MATE_IN_ONE_OPENING, types.DEFAULT_FEN };
+    var gen = datagen.Datagen.new(quick_config(300), seed_whose_first_game_starts_from(0, openings.len));
     defer gen.deinit();
-    gen.openings = &.{ types.DEFAULT_FEN, DECISIVE_OPENING, STALEMATE_OPENING };
+    gen.openings = &openings;
     try gen.start(1, run.path);
 
     const summary = gen.summary();
@@ -463,68 +478,5 @@ test "datagen: the summary line carries the discarded games and ends with raw_ev
         const line = try std.mem.print(&buf, "{f}", .{std.json.fmt(datagen.Summary{ .discarded_games = 3, .raw_eval = case[0] }, .{})});
         try testing.expect(std.mem.endsWith(u8, line, case[1]));
         try testing.expect(std.mem.find(u8, line, "\"discarded_games\":3,") != null);
-    }
-}
-
-const Fruit = enum { apple, pear };
-
-test "arguments: a key=value argument splits at the first equals sign" {
-    var diag: arguments.Diagnostic = .{};
-    var options: arguments.KeyValues(Fruit) = .{};
-    const entry = try options.next("apple=a=b", null, &diag);
-    try testing.expectEqual(Fruit.apple, entry.key);
-    try testing.expectEqualStrings("a=b", entry.value);
-    try testing.expect(options.given(.apple));
-    try testing.expect(!options.given(.pear));
-}
-
-test "arguments: a bare argument is the value of the bare key, or a key without a value" {
-    var diag: arguments.Diagnostic = .{};
-    var with_bare_key: arguments.KeyValues(Fruit) = .{};
-    const entry = try with_bare_key.next("conference", .pear, &diag);
-    try testing.expectEqual(Fruit.pear, entry.key);
-    try testing.expectEqualStrings("conference", entry.value);
-
-    var without: arguments.KeyValues(Fruit) = .{};
-    try testing.expectEqualStrings("", (try without.next("pear", null, &diag)).value);
-    try testing.expectError(error.UnknownKey, without.next("conference", null, &diag));
-    try testing.expectEqualStrings("conference", diag.key);
-}
-
-test "arguments: unknown and repeated keys are errors naming the key and value" {
-    var diag: arguments.Diagnostic = .{};
-    var options: arguments.KeyValues(Fruit) = .{};
-    try testing.expectError(error.UnknownKey, options.next("plum=1", null, &diag));
-    try testing.expectEqualStrings("plum", diag.key);
-    _ = try options.next("apple=1", null, &diag);
-    try testing.expectError(error.DuplicateKey, options.next("apple=2", null, &diag));
-    try testing.expectEqualStrings("apple", diag.key);
-    try testing.expectEqualStrings("2", diag.value);
-}
-
-test "arguments: values outside their range or their set of choices are invalid" {
-    try testing.expectEqual(@as(u32, 7), try arguments.integer(u32, "7", 2, 7));
-    for ([_][]const u8{ "1", "8", "", "7,", "-3", "seven", "99999999999999999999" }) |text| {
-        try testing.expectError(error.InvalidValue, arguments.integer(u32, text, 2, 7));
-    }
-    try testing.expectEqual(Fruit.pear, try arguments.choice(Fruit, "pear"));
-    try testing.expectError(error.InvalidValue, arguments.choice(Fruit, "Pear"));
-    try testing.expectError(error.InvalidValue, arguments.non_empty(""));
-    try testing.expect(try arguments.boolean("true"));
-    try testing.expect(!try arguments.boolean("false"));
-    try testing.expectError(error.InvalidValue, arguments.boolean("1"));
-}
-
-test "format: each format is recognised by the extension datagen gives its files" {
-    try testing.expectEqual(@as(?Format, .viri), Format.of_path("data/chunk-0001.viribin"));
-    try testing.expectEqual(@as(?Format, .bullet), Format.of_path("shuffled.bin"));
-    inline for (comptime std.enums.values(Format)) |format| {
-        try testing.expectEqual(@as(?Format, format), Format.of_path("x" ++ comptime format.extension()));
-    }
-}
-
-test "format: any other extension decides nothing" {
-    for ([_][]const u8{ "chunk", "chunk.viribin.tmp", "chunk.vf", "chunk.BIN", ".bin", "bin" }) |path| {
-        try testing.expectEqual(@as(?Format, null), Format.of_path(path));
     }
 }

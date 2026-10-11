@@ -115,10 +115,8 @@ pub fn generate(options: Options, book_lines: []const []const u8, out: *std.Io.W
         }
         consecutive_unusable = 0;
 
-        const fen = pos.basic_fen(std.heap.page_allocator);
-        defer std.heap.page_allocator.free(fen);
-
-        try out.print("info string genfens {s}\n", .{fen});
+        var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
+        try out.print("info string genfens {s}\n", .{pos.write_fen(&fen_buf)});
         try out.flush();
 
         generated += 1;

@@ -21,6 +21,7 @@ comptime {
 
 test {
     _ = @import("platform.zig");
+    _ = @import("platform/affinity.zig");
     _ = @import("engine/search.zig");
     _ = @import("engine/wdl.zig");
     _ = @import("tests/frc.zig");
@@ -36,6 +37,8 @@ test {
     _ = @import("tests/thread_pool.zig");
     _ = @import("tests/smp_root.zig");
     _ = @import("tests/tt_concurrency.zig");
+    _ = @import("engine/datagen/arguments.zig");
+    _ = @import("engine/datagen/format.zig");
     _ = @import("engine/datagen/options.zig");
     _ = @import("engine/datagen/adjudicator.zig");
     _ = @import("tests/datagen.zig");
@@ -46,7 +49,7 @@ test {
     _ = @import("tests/tbfilter_viri.zig");
     _ = @import("engine/netscale.zig");
     _ = @import("tests/netscale.zig");
-    _ = @import("tests/nnue_multi.zig");
+    _ = @import("tests/nnue_heads.zig");
     _ = @import("tests/nnue_lazy.zig");
     _ = @import("engine/nnue/eval_cache.zig");
     _ = @import("tests/movepick.zig");
@@ -512,18 +515,16 @@ test "fen: an en-passant square that no pawn can capture on is dropped and the b
     try expect(pos.piece_bitboards[types.Piece.WHITE_PAWN.index()] == 0x1000ef00);
 }
 
-test "fen: basic_fen board round-trips" {
+test "fen: write_fen board round-trips" {
     support.init_tables();
 
     const pos = try support.new_position();
     defer support.destroy_position(pos);
-
-    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-    defer arena.deinit();
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
 
     pos.set_fen(types.DEFAULT_FEN[0..]);
     {
-        const out = pos.basic_fen(arena.allocator());
+        const out = pos.write_fen(&fen_buf);
         var it = std.mem.tokenizeScalar(u8, out, ' ');
         const board = it.next().?;
         try expect(std.mem.eql(u8, board, "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR"));
@@ -534,7 +535,7 @@ test "fen: basic_fen board round-trips" {
 
     pos.set_fen("r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R b KQkq -"[0..]);
     {
-        const out = pos.basic_fen(arena.allocator());
+        const out = pos.write_fen(&fen_buf);
         var it = std.mem.tokenizeScalar(u8, out, ' ');
         const board = it.next().?;
         try expect(std.mem.eql(u8, board, "r1bqk2r/pppp1ppp/2n2n2/2b1p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R"));
@@ -576,8 +577,7 @@ test "eval: nnue weights load and dimensions" {
 
 fn evaluate_nnue_scalar(pos: *position.Position, comptime turn: types.Color) i32 {
     const accumulator = pos.evaluator.nnue_evaluator.accumulator(pos);
-    const pieces = types.popcount_usize(pos.all_all_pieces());
-    const bucket = @min((pieces -| 2) / 4, weights.OUTPUT_SIZE - 1);
+    const bucket = weights.arch.output_bucket(@popCount(pos.all_all_pieces()));
     const own = if (turn == types.Color.White) &accumulator.white else &accumulator.black;
     const opp = if (turn == types.Color.White) &accumulator.black else &accumulator.white;
     if (weights.HEAD == .multi) return weights.head_multi.evaluate_scalar(&weights.MODEL.head, weights.l1_shift(&weights.MODEL.header), own, opp, bucket);

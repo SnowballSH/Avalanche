@@ -129,10 +129,6 @@ fn apply_rmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operan
     };
 }
 
-test {
-    _ = affinity;
-}
-
 test "apply_rmw matches @atomicRmw for every operation" {
     const cases = [_][2]i64{ .{ 0, 0 }, .{ 5, -3 }, .{ std.math.maxInt(i64), 1 }, .{ std.math.minInt(i64), -1 }, .{ -7, 7 } };
     inline for (comptime std.enums.values(std.lang.AtomicRmwOp)) |op| {

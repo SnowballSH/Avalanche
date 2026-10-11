@@ -60,3 +60,54 @@ pub fn boolean(text: []const u8) ValueError!bool {
 pub fn non_empty(text: []const u8) ValueError![]const u8 {
     return if (text.len == 0) error.InvalidValue else text;
 }
+
+const testing = std.testing;
+
+const Fruit = enum { apple, pear };
+
+test "arguments: a key=value argument splits at the first equals sign" {
+    var diag: Diagnostic = .{};
+    var options: KeyValues(Fruit) = .{};
+    const entry = try options.next("apple=a=b", null, &diag);
+    try testing.expectEqual(Fruit.apple, entry.key);
+    try testing.expectEqualStrings("a=b", entry.value);
+    try testing.expect(options.given(.apple));
+    try testing.expect(!options.given(.pear));
+}
+
+test "arguments: a bare argument is the value of the bare key, or a key without a value" {
+    var diag: Diagnostic = .{};
+    var with_bare_key: KeyValues(Fruit) = .{};
+    const entry = try with_bare_key.next("conference", .pear, &diag);
+    try testing.expectEqual(Fruit.pear, entry.key);
+    try testing.expectEqualStrings("conference", entry.value);
+
+    var without: KeyValues(Fruit) = .{};
+    try testing.expectEqualStrings("", (try without.next("pear", null, &diag)).value);
+    try testing.expectError(error.UnknownKey, without.next("conference", null, &diag));
+    try testing.expectEqualStrings("conference", diag.key);
+}
+
+test "arguments: unknown and repeated keys are errors naming the key and value" {
+    var diag: Diagnostic = .{};
+    var options: KeyValues(Fruit) = .{};
+    try testing.expectError(error.UnknownKey, options.next("plum=1", null, &diag));
+    try testing.expectEqualStrings("plum", diag.key);
+    _ = try options.next("apple=1", null, &diag);
+    try testing.expectError(error.DuplicateKey, options.next("apple=2", null, &diag));
+    try testing.expectEqualStrings("apple", diag.key);
+    try testing.expectEqualStrings("2", diag.value);
+}
+
+test "arguments: values outside their range or their set of choices are invalid" {
+    try testing.expectEqual(@as(u32, 7), try integer(u32, "7", 2, 7));
+    for ([_][]const u8{ "1", "8", "", "7,", "-3", "seven", "99999999999999999999" }) |text| {
+        try testing.expectError(error.InvalidValue, integer(u32, text, 2, 7));
+    }
+    try testing.expectEqual(Fruit.pear, try choice(Fruit, "pear"));
+    try testing.expectError(error.InvalidValue, choice(Fruit, "Pear"));
+    try testing.expectError(error.InvalidValue, non_empty(""));
+    try testing.expect(try boolean("true"));
+    try testing.expect(!try boolean("false"));
+    try testing.expectError(error.InvalidValue, boolean("1"));
+}

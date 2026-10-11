@@ -1,12 +1,9 @@
 const std = @import("std");
-const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const castling = @import("../chess/castling.zig");
 const frc = @import("../chess/frc.zig");
 const perft = @import("../chess/perft.zig");
-const search = @import("../engine/search.zig");
-const tt = @import("../engine/tt.zig");
 const support = @import("support.zig");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
@@ -253,24 +250,14 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
 }
 
 test "frc: search returns a legal move from a double fischer random position" {
-    platform.io = std.testing.io;
-    support.init_search();
-    tt.GlobalTT.reset(16);
-
-    const pos = try new_position();
-    defer destroy_position(pos);
     var buf: [frc.FEN_CAPACITY]u8 = undefined;
-    pos.set_fen(frc.dfrc_fen(123, 876, &buf));
+    var f = try support.SearchFixture.init(frc.dfrc_fen(123, 876, &buf));
+    defer f.deinit();
+    _ = f.run(6);
 
-    var searcher = search.Searcher.new();
-    defer searcher.deinit();
-    searcher.force_thinking = true;
-    searcher.silent_output = true;
-    _ = searcher.iterative_deepening(pos, .White, 6);
-
-    const moves = pos.legal_moves();
+    const moves = f.pos.legal_moves();
     for (moves.items()) |move| {
-        if (move.to_u16() == searcher.best_move.to_u16()) return;
+        if (move.to_u16() == f.searcher.best_move.to_u16()) return;
     }
     return error.TestUnexpectedResult;
 }

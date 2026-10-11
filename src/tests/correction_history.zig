@@ -75,9 +75,8 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
                 played[ply] = move;
                 try expect_keys_match(pos);
 
-                const board_fen = pos.basic_fen(std.testing.allocator);
-                defer std.testing.allocator.free(board_fen);
-                fresh.set_fen(board_fen);
+                var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
+                fresh.set_fen(pos.write_fen(&fen_buf));
                 try expectEqual(fresh.pawn_hash, pos.pawn_hash);
                 try expectEqual(fresh.nonpawn_hash, pos.nonpawn_hash);
             }

@@ -862,7 +862,7 @@ unsigned, so it is a string of digits for every network.
   f32 one, so the two can differ for a largest weight within f32 rounding of a boundary. The cases
   the test asserts for its rule are those of the trainer's own test.
 
-The unit tests (`src/tests/nnue_multi.zig`) hold the tolerances. They assert the first two rows on
+The unit tests (`src/tests/nnue_heads.zig`) hold the tolerances. They assert the first two rows on
 random accumulators with values between the clamps: values drawn from all of i16, or only from 0
 and 255, give almost only pairwise products of 0 or 1, where the rounding leaves next to nothing
 to measure. The mean evaluation must be three times the tolerance, so that a wrong formula cannot
@@ -970,7 +970,7 @@ equal.
 
 `zig build test` in the default build covers the multi-layer head. Both heads take their weights
 explicitly, so the tests of their arithmetic run in a build of either head. They are in
-`src/tests/nnue_multi.zig`: those named "multi head" for the multi-layer head, and those named
+`src/tests/nnue_heads.zig`: those named "multi head" for the multi-layer head, and those named
 "single head" for the single-layer one (the formula on random weights, and weights at their
 extremes). The tests that evaluate positions use the embedded network, so they reach the
 single-layer head only in a single-layer build: `zig build test -Dnet=nets/dianguang-1.nnue`.

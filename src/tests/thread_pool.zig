@@ -4,7 +4,6 @@ const types = @import("../chess/types.zig");
 const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const thread_pool = @import("../engine/thread_pool.zig");
-const tt = @import("../engine/tt.zig");
 const support = @import("support.zig");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
@@ -65,9 +64,7 @@ const StopTiming = enum { before_the_job_is_posted, right_after_posting, during_
 
 test "thread pool: every posted job runs and stops, whenever the stop flag is raised" {
     if (comptime !platform.has_threads) return error.SkipZigTest;
-    platform.io = std.testing.io;
-    support.init_search();
-    tt.GlobalTT.reset(16);
+    support.init_engine();
 
     const pos = try support.new_position();
     defer support.destroy_position(pos);

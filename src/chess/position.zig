@@ -363,11 +363,6 @@ pub const Position = struct {
         try writer.print(" {s} {d} {d}", .{ en_passant, undo.fifty, self.absolute_ply() / 2 + 1 });
     }
 
-    pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
-        var buf: [FEN_CAPACITY]u8 = undefined;
-        return allocator.dupe(u8, self.write_fen(&buf)) catch @panic("out of memory");
-    }
-
     pub inline fn phase(self: *const Position) usize {
         var val: usize = 0;
         val += types.popcount_usize(self.piece_bitboards[types.Piece.WHITE_KNIGHT.index()] | self.piece_bitboards[types.Piece.WHITE_BISHOP.index()] | self.piece_bitboards[types.Piece.BLACK_KNIGHT.index()] | self.piece_bitboards[types.Piece.BLACK_BISHOP.index()]);

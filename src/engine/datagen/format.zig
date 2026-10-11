@@ -21,3 +21,19 @@ pub const Format = enum {
         return null;
     }
 };
+
+const testing = std.testing;
+
+test "format: each format is recognised by the extension datagen gives its files" {
+    try testing.expectEqual(@as(?Format, .viri), Format.of_path("data/chunk-0001.viribin"));
+    try testing.expectEqual(@as(?Format, .bullet), Format.of_path("shuffled.bin"));
+    inline for (comptime std.enums.values(Format)) |format| {
+        try testing.expectEqual(@as(?Format, format), Format.of_path("x" ++ comptime format.extension()));
+    }
+}
+
+test "format: any other extension decides nothing" {
+    for ([_][]const u8{ "chunk", "chunk.viribin.tmp", "chunk.vf", "chunk.BIN", ".bin", "bin" }) |path| {
+        try testing.expectEqual(@as(?Format, null), Format.of_path(path));
+    }
+}
