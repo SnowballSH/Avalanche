@@ -50,10 +50,12 @@ code, is vendored under `deps/`, so a build never downloads anything.
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
 zig build                     # debug build
 zig build test                # unit tests
+zig fmt --check src build.zig build.zig.zon  # formatting
 python3 scripts/uci_protocol_test.py  # end-to-end UCI checks (needs the release build)
 python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalanche.wasm  # same checks on wasm
 ruff check scripts && ruff format --check scripts  # lint and format check of the Python scripts
 python3 -m unittest discover -s scripts  # tests of scripts/fit_wdl.py (needs numpy)
+git ls-files -z '*.sh' | xargs -0 shellcheck -x  # lint of the shell scripts
 ./zig-out/bin/Avalanche bench # fixed-position benchmark
 zig build wasm --release=fast # WebAssembly build -> zig-out/web/avalanche.wasm (see docs/WASM.md)
 ```

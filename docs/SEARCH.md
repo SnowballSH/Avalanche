@@ -299,18 +299,18 @@ those of a build that also has the later changes.
 - Scoring was the largest remaining cost at about 6.5% of the run. It read the
   ply, both killers, the previous moves and the base of each continuation
   table again for every move, because the compiler cannot prove that storing
-  a score leaves the searcher untouched. `SearchContext.at` now reads them
-  once per node: 3.2% fewer instructions, and 2.4% fewer cycles as the median
-  of five alternating pairs (-5.4% to +0.6%).
+  a score leaves the searcher untouched. `SearchContext.at` reads them once
+  per node: 3.2% fewer instructions, and 2.4% fewer cycles as the median of
+  five alternating pairs (-5.4% to +0.6%).
 
 Tried and left out:
 
 - A picker whose scan was an out-of-line function with a `std.StaticBitSet`
   for the pending marks retired 6% more instructions than the plain scalar
   scan: most lists are short quiescence lists, where the call and the
-  by-value bit set copy cost more than the scan. The scan is now inlined into
-  the move loop; only the SEE call and the replay of the deferred hash step
-  are out of line.
+  by-value bit set copy cost more than the scan. The scan is inlined into the
+  move loop; only the SEE call and the replay of the deferred hash step are
+  out of line.
 - Counting the unpicked captures and promotions instead of rescanning the
   unpicked moves at a skipped move. On `bench` 3,057,765 checks lead to
   1,745,395 exits, so 0.75 checks per exit stop at a move that keeps the loop

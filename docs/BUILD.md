@@ -217,6 +217,15 @@ The job `build` puts its native binary through `scripts/verify_binary.sh` on Lin
 Windows. On Linux it also compiles the engine in Debug mode: the unit tests do not include the UCI
 frontend, so no other step would compile that without optimisation.
 
+The same job runs the unit tests in Debug and with `-Doptimize=fast` on every runner, and with
+`-Doptimize=safe` on Linux and macOS. The safe run is the one that executes the intrinsic SIMD
+paths with bounds and overflow checks: Debug does not compile them and a fast build has no such
+checks (docs/NNUE.md, "What has been executed"). Linux executes the x86 paths of its runner and
+macOS the NEON ones; Windows would be x86 a second time. On Linux the job also checks the
+formatting, `zig fmt --check src build.zig build.zig.zon`, and runs the tests once more with
+`-Dnet=nets/nezha.nnue`, a single-layer network: the tests that evaluate positions reach only the
+head of the embedded network, which by default is the multi-layer one (docs/NNUE.md, "Tests").
+
 The job `tiers` runs the release script on every pull request, with `VERSION=ci`: a fixed version
 lets unchanged sources be cache hits, and the binaries a runner executes must report it.
 
@@ -241,9 +250,39 @@ The job `wasm` runs the checks of the `web/` package (type check, lint and tests
 `scripts/uci_protocol_test.py` on the wasm module. `web/package.json` requires Node 26 or later,
 the version its type definitions describe.
 
+The job `scripts` runs shellcheck over every tracked shell script, then `ruff check`,
+`ruff format --check` and the unit tests of `scripts/`. ruff is installed at the version
+`RUFF_VERSION` names: `ruff.toml` selects every rule, so a newer ruff can report rules the scripts
+were never checked against. `artifacts` waits for this job as well, because two of the scripts it
+lints, `build_release.sh` and `verify_binary.sh`, are the ones that build and check the release
+binaries.
+
+The jobs `datatool` and `trainer` format, lint and test the two Rust crates with their committed
+lock files. `trainer` does so without the `cuda` feature, which needs no GPU toolkit (docs/NNUE.md,
+"Training"), and also lints the default configuration, the one with CUDA: bullet's build script
+asks only that the directory `CUDA_PATH` names exists, and clippy does not link, so the runner's
+temporary directory is enough.
+
 The actions that are not GitHub's own, `mlugg/setup-zig` (it installs the compiler that builds the
 release binaries) and `dtolnay/rust-toolchain`, are referenced by commit, with the tag the commit
 was taken from in a trailing comment: a tag can be moved to other code, a commit cannot.
+
+## Naming
+
+`zig fmt` settles the layout of the source and nothing checks its names, so the convention is
+stated here. Functions, parameters, fields, local values, namespaces and the settings that change
+at run time are snake_case (`set_fen`, `search.contempt`). Types, and functions that return a
+type, are PascalCase. A constant of a file or of a type is SCREAMING_CASE (`MAX_PLY`), except two
+kinds that are lower case because of how they read: a flag that selects code at compile time
+(`platform.is_wasm`, `arch.intrinsics`), and a value a type declares of itself, which is written
+like an enum tag wherever the type is known (`.stale` for `FrameState.stale`).
+
+Two groups are named by something outside the engine. The search parameters of
+`src/engine/parameters.zig` are spelled as their UCI options (`LMRWeight`), because
+`parameters.set` finds an option's variable by the option's name, and the callbacks of
+`src/engine/syzygy.zig` have the names Pyrrhic calls them by (`pawnAttacks`). Any other name that
+differs, such as the PascalCase lookup tables of `src/chess/tables.zig`, is not a second
+convention, and new code does not follow it.
 
 ## Measurements
 

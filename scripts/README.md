@@ -65,9 +65,11 @@ python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalan
 Drives one engine process, given as the command to start it, through options,
 search, pondering, MultiPV, Chess960 and strength limiting, with the standard
 library's `unittest`. Tests for options a build does not advertise are
-skipped. Every test ends by stopping the search and restoring the options it
-changed; an engine that exits fails that test, and the next one starts a new
-process.
+skipped. The tests of the engine's own command line start further engine
+processes with arguments, so they run only when the engine command is a
+single word and not a launcher such as `node ...`. Every test ends by stopping
+the search and restoring the options it changed; an engine that exits fails
+that test, and the next one starts a new process.
 
 ### Checks of a build, and their reference data
 
@@ -124,7 +126,11 @@ The third command runs the tests of the fit in `test_fit_wdl.py` and needs
 numpy 2 or later. `fit_wdl.py` declares numpy in inline script metadata, so
 `uv run scripts/fit_wdl.py ...` works without installing it.
 
-`ruff.toml` selects every rule and ignores six families:
+CI runs ruff at the version that `RUFF_VERSION` in `.github/workflows/CI.yml`
+names: every rule is selected, so a newer ruff can report rules the scripts
+were never checked against.
+
+`ruff.toml` selects every rule and ignores seven rules or rule families:
 
 | Rule | Why it is off |
 |------|---------------|
@@ -134,6 +140,7 @@ numpy 2 or later. `fit_wdl.py` declares numpy in inline script metadata, so
 | `S603` | the scripts start the engine, zig, git and fastchess by design |
 | `INP001` | `scripts/` is not a package |
 | `COM812` | the formatter owns trailing commas |
+| `CPY` | the scripts carry no copyright notice of their own; the notice is in [README.md](../README.md) |
 
 It excludes `deps` (vendored) and `tcec/version.py` (a token TCEC reads, not
 Python).

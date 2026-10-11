@@ -732,8 +732,8 @@ cargo test --no-default-features
 
 A run is configured by environment variables, all optional. The defaults are a short single-layer
 run, not the recipe of the shipped network: that one is multi-layer (`TRAIN_ARCH=multi`) and was
-trained far longer (`TRAIN_SUPERBATCHES`; README.md gives the length for each network). A net
-trained with the defaults is refused by `EvalFile` in a default build.
+trained far longer (`TRAIN_SUPERBATCHES`; README.md gives the length of the shipped network's
+run). A net trained with the defaults is refused by `EvalFile` in a default build.
 
 | Variable | Default | Meaning |
 |---|---|---|
