@@ -123,7 +123,7 @@ when a `go` starts; every other option changes engine-wide state as soon as it i
   (`depth seldepth multipv score [wdl] [lowerbound|upperbound] nodes nps hashfull tbhits time pv`),
   which some GUIs require to record PVs.
 - `score cp` is normalized: `cp 100` is the internal score at which the side to move wins half of its
-  games at ply 64 under the engine's win-rate model (138 internal centipawns), as in Stockfish, so
+  games at ply 64 under the engine's win-rate model (139 internal centipawns), as in Stockfish, so
   evaluations stay comparable across networks. A tablebase win or loss is reported as `50000 - plies` to
   the conversion, with the sign of the result. `UCI_ShowWDL` permille, the `eval` command and the data
   written by `datagen` use the internal score. The permille are those of the side to move; a mate or
