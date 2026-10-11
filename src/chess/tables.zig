@@ -77,8 +77,8 @@ pub const BlackPawnAttacks = [64]types.Bitboard{
     0x28000000000000, 0x50000000000000, 0xa0000000000000, 0x40000000000000,
 };
 
-pub inline fn reverse_bitboard(b_: types.Bitboard) types.Bitboard {
-    var b = b_;
+pub inline fn reverse_bitboard(bitboard: types.Bitboard) types.Bitboard {
+    var b = bitboard;
     b = (b & 0x5555555555555555) << 1 | ((b >> 1) & 0x5555555555555555);
     b = (b & 0x3333333333333333) << 2 | ((b >> 2) & 0x3333333333333333);
     b = (b & 0x0f0f0f0f0f0f0f0f) << 4 | ((b >> 4) & 0x0f0f0f0f0f0f0f0f);
@@ -89,8 +89,8 @@ pub inline fn reverse_bitboard(b_: types.Bitboard) types.Bitboard {
 }
 
 // Hyperbola Quintessence Algorithm
-pub inline fn sliding_attack(square_: types.Square, occ: types.Bitboard, mask: types.Bitboard) types.Bitboard {
-    const square = square_.index();
+pub inline fn sliding_attack(sq: types.Square, occ: types.Bitboard, mask: types.Bitboard) types.Bitboard {
+    const square = sq.index();
     return (((mask & occ) -% types.SquareIndexBB[square] *% 2) ^
         reverse_bitboard(reverse_bitboard(mask & occ) -% reverse_bitboard(types.SquareIndexBB[square]) *% 2)) & mask;
 }

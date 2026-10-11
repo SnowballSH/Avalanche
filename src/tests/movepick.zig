@@ -4,12 +4,12 @@ const movepick = @import("../engine/movepick.zig");
 const search = @import("../engine/search.zig");
 
 const capacity = types.MoveList.capacity;
-const block_lens = [_]usize{ 4, 8, 16 };
+const BLOCK_LENS = [_]usize{ 4, 8, 16 };
 
-const quiet_flags = [_]types.MoveFlags{ .QUIET, .DOUBLE_PUSH, .OO, .OOO };
-const promotion_flags = [_]types.MoveFlags{ .PR_KNIGHT, .PR_BISHOP, .PR_ROOK, .PR_QUEEN };
-const capture_flags = [_]types.MoveFlags{ .CAPTURE, .EN_PASSANT };
-const promotion_capture_flags = [_]types.MoveFlags{ .PC_KNIGHT, .PC_BISHOP, .PC_ROOK, .PC_QUEEN };
+const QUIET_FLAGS = [_]types.MoveFlags{ .QUIET, .DOUBLE_PUSH, .OO, .OOO };
+const PROMOTION_FLAGS = [_]types.MoveFlags{ .PR_KNIGHT, .PR_BISHOP, .PR_ROOK, .PR_QUEEN };
+const CAPTURE_FLAGS = [_]types.MoveFlags{ .CAPTURE, .EN_PASSANT };
+const PROMOTION_CAPTURE_FLAGS = [_]types.MoveFlags{ .PC_KNIGHT, .PC_BISHOP, .PC_ROOK, .PC_QUEEN };
 
 const Script = struct {
     moves: [capacity]types.Move = undefined,
@@ -124,10 +124,10 @@ fn chance(random: std.Random, of_hundred: u8) bool {
 
 fn random_flags(random: std.Random, capture: bool, promotion: bool) types.MoveFlags {
     const kind = random.uintLessThan(usize, 4);
-    if (capture and promotion) return promotion_capture_flags[kind];
-    if (promotion) return promotion_flags[kind];
-    if (capture) return capture_flags[kind % capture_flags.len];
-    return quiet_flags[kind];
+    if (capture and promotion) return PROMOTION_CAPTURE_FLAGS[kind];
+    if (promotion) return PROMOTION_FLAGS[kind];
+    if (capture) return CAPTURE_FLAGS[kind % CAPTURE_FLAGS.len];
+    return QUIET_FLAGS[kind];
 }
 
 fn random_palette(random: std.Random, palette: []i32) void {
@@ -292,7 +292,7 @@ test "move picker: lazy exchanges and the deferred hash move keep the eager pick
     const random = prng.random();
     var script: Script = .{};
 
-    inline for (block_lens) |block_len| {
+    inline for (BLOCK_LENS) |block_len| {
         for (0..15_000) |trial| {
             const len = random_len(random, trial);
             random_script(random, &script, len);
@@ -327,7 +327,7 @@ test "move loops: leaving early searches the moves the full loops search" {
     var quiet_exits: usize = 0;
     var capture_exits: usize = 0;
 
-    inline for (block_lens) |block_len| {
+    inline for (BLOCK_LENS) |block_len| {
         for (0..10_000) |trial| {
             const len = random_len(random, trial);
             random_script(random, &script, len);
@@ -347,7 +347,7 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
         .{ types.Move.empty(), killer },
     };
     for (killers) |pair| {
-        for (quiet_flags) |flags| {
+        for (QUIET_FLAGS) |flags| {
             const move = Script.move_of(3, flags);
             try std.testing.expect(search.is_prunable_quiet(move, pair));
             try std.testing.expect(search.only_prunable_quiets(&.{ move, move }, pair));
@@ -357,20 +357,20 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
         try std.testing.expectEqual(!is_killer, search.is_prunable_quiet(killer, pair));
 
         const plain = Script.move_of(3, .QUIET);
-        for (promotion_flags) |flags| {
+        for (PROMOTION_FLAGS) |flags| {
             const move = Script.move_of(3, flags);
             try std.testing.expect(!search.is_prunable_quiet(move, pair));
             try std.testing.expect(!search.only_prunable_quiets(&.{ plain, move }, pair));
             try std.testing.expect(!search.only_captures(&.{move}));
         }
-        for (capture_flags) |flags| {
+        for (CAPTURE_FLAGS) |flags| {
             const move = Script.move_of(3, flags);
             try std.testing.expect(!search.is_prunable_quiet(move, pair));
             try std.testing.expect(!search.only_prunable_quiets(&.{ plain, move }, pair));
             try std.testing.expect(search.only_captures(&.{ move, move }));
             try std.testing.expect(!search.only_captures(&.{ move, plain }));
         }
-        for (promotion_capture_flags) |flags| {
+        for (PROMOTION_CAPTURE_FLAGS) |flags| {
             const move = Script.move_of(3, flags);
             try std.testing.expect(!search.is_prunable_quiet(move, pair));
             try std.testing.expect(search.only_captures(&.{move}));

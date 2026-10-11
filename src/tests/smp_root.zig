@@ -30,7 +30,7 @@ fn expect_matches_fresh(pos: *position.Position) !void {
 
 const RootCase = struct { fen: []const u8, moves: []const []const u8 };
 
-const root_cases = [_]RootCase{
+const ROOT_CASES = [_]RootCase{
     .{ .fen = types.DEFAULT_FEN, .moves = &.{} },
     .{ .fen = types.DEFAULT_FEN, .moves = &.{ "e2e4", "e7e5", "e1e2", "e8e7", "e2d3", "e7d6" } },
     .{ .fen = "r3k2r/pppq1ppp/2npbn2/2b1p3/2B1P3/2NPBN2/PPPQ1PPP/R3K2R w KQkq - 4 8", .moves = &.{ "e1c1", "e8g8", "c1b1", "g8h8" } },
@@ -57,7 +57,7 @@ test "smp root: adopted root evaluates like a fresh set_fen" {
     const helper = try support.new_position();
     defer support.destroy_position(helper);
 
-    for (root_cases) |case| {
+    for (ROOT_CASES) |case| {
         main.set_fen(case.fen);
         for (case.moves) |move| _ = try support.play_uci(main, move);
 
@@ -134,7 +134,7 @@ test "smp root: multi-threaded search returns legal moves and helpers end on the
     s.silent_output = true;
 
     var helper_nodes: u64 = 0;
-    for (root_cases) |case| {
+    for (ROOT_CASES) |case| {
         tt.GlobalTT.clear();
         try enter_root(&s, pos, case);
         const root_hash = pos.hash;
@@ -206,7 +206,7 @@ test "smp root: a node budget ends a search that the main thread alone would con
     const budget: u64 = 200_000;
     s.max_nodes = budget;
     s.soft_max_nodes = budget;
-    for (root_cases[1..3]) |case| {
+    for (ROOT_CASES[1..3]) |case| {
         tt.GlobalTT.clear();
         try enter_root(&s, pos, case);
         s.shared.stop = false;
