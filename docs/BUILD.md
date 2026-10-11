@@ -223,7 +223,7 @@ paths with bounds and overflow checks: Debug does not compile them and a fast bu
 checks (docs/NNUE.md, "What has been executed"). Linux executes the x86 paths of its runner and
 macOS the NEON ones; Windows would be x86 a second time. On Linux the job also checks the
 formatting, `zig fmt --check src build.zig build.zig.zon`, and runs the tests once more with
-`-Dnet=nets/nezha.nnue`, a single-layer network: the tests that evaluate positions reach only the
+`-Dnet=nets/dianguang-1.nnue`, a single-layer network: the tests that evaluate positions reach only the
 head of the embedded network, which by default is the multi-layer one (docs/NNUE.md, "Tests").
 
 The job `tiers` runs the release script on every pull request, with `VERSION=ci`: a fixed version

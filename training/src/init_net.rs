@@ -187,8 +187,8 @@ mod tests {
         buckets16_save_format,
     };
 
-    const NEZHA: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../nets/nezha.nnue");
-    const NEZHA_HIDDEN: usize = 1024;
+    const SINGLE_LAYER_NET: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../nets/dianguang-1.nnue");
+    const HIDDEN: usize = 1024;
 
     fn buckets16_weights(hidden_size: usize, use_factoriser: bool) -> ModelWeights {
         let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
@@ -212,25 +212,25 @@ mod tests {
             .unwrap()
     }
 
-    fn assert_reproduces_nezha(use_factoriser: bool) {
-        let nezha = std::fs::read(NEZHA).unwrap();
-        let mut weights = buckets16_weights(NEZHA_HIDDEN, use_factoriser);
+    fn assert_reproduces_the_file(use_factoriser: bool) {
+        let net = std::fs::read(SINGLE_LAYER_NET).unwrap();
+        let mut weights = buckets16_weights(HIDDEN, use_factoriser);
         if use_factoriser {
             let size = weights.get(FACTORISER).values.size();
             assert!(weights.set(FACTORISER, TValue::F32(vec![1.0; size])));
         }
-        load_into(&mut weights, &nezha).unwrap();
-        assert!(saved(&weights, use_factoriser) == nezha);
+        load_into(&mut weights, &net).unwrap();
+        assert!(saved(&weights, use_factoriser) == net);
     }
 
     #[test]
-    fn nezha_loaded_and_saved_is_the_same_file_with_a_factoriser() {
-        assert_reproduces_nezha(true);
+    fn a_net_loaded_and_saved_is_the_same_file_with_a_factoriser() {
+        assert_reproduces_the_file(true);
     }
 
     #[test]
-    fn nezha_loaded_and_saved_is_the_same_file_without_a_factoriser() {
-        assert_reproduces_nezha(false);
+    fn a_net_loaded_and_saved_is_the_same_file_without_a_factoriser() {
+        assert_reproduces_the_file(false);
     }
 
     #[test]
@@ -254,21 +254,21 @@ mod tests {
 
     #[test]
     fn a_net_of_another_size_is_refused() {
-        let nezha = std::fs::read(NEZHA).unwrap();
-        let mut weights = buckets16_weights(NEZHA_HIDDEN / 2, true);
-        let error = load_into(&mut weights, &nezha).unwrap_err();
+        let net = std::fs::read(SINGLE_LAYER_NET).unwrap();
+        let mut weights = buckets16_weights(HIDDEN / 2, true);
+        let error = load_into(&mut weights, &net).unwrap_err();
         assert!(error.contains("25200704 bytes"), "{error}");
 
-        let mut weights = buckets16_weights(NEZHA_HIDDEN, true);
-        let error = load_into(&mut weights, &nezha[..nezha.len() - 1]).unwrap_err();
+        let mut weights = buckets16_weights(HIDDEN, true);
+        let error = load_into(&mut weights, &net[..net.len() - 1]).unwrap_err();
         assert!(error.contains("is 25200704 bytes"), "{error}");
     }
 
     #[test]
     fn a_multilayer_net_is_refused() {
-        let mut net = std::fs::read(NEZHA).unwrap();
+        let mut net = std::fs::read(SINGLE_LAYER_NET).unwrap();
         net[..8].copy_from_slice(b"AVALNNUE");
-        let mut weights = buckets16_weights(NEZHA_HIDDEN, true);
+        let mut weights = buckets16_weights(HIDDEN, true);
         let error = load_into(&mut weights, &net).unwrap_err();
         assert!(error.contains("multi-layer"), "{error}");
     }
@@ -282,12 +282,19 @@ mod tests {
     }
 
     #[test]
-    fn nezha_fits_the_default_clip_but_not_the_factorised_one() {
-        let nezha = std::fs::read(NEZHA).unwrap();
-        let mut weights = buckets16_weights(NEZHA_HIDDEN, false);
-        load_into(&mut weights, &nezha).unwrap();
+    fn a_net_trained_with_a_factoriser_fits_the_default_clip_but_not_the_factorised_one() {
+        let net = std::fs::read(SINGLE_LAYER_NET).unwrap();
+        let mut weights = buckets16_weights(HIDDEN, false);
+        load_into(&mut weights, &net).unwrap();
         check_clips(&weights, AdamWParams::default().max_weight).unwrap();
+
+        let feature_weights = weights.get(FEATURE_WEIGHTS).values.f32();
+        let beyond = changed_by_clip(feature_weights, QA, FACTORISED_CLIP);
+        assert!(beyond > 0);
         let error = check_clips(&weights, FACTORISED_CLIP).unwrap_err();
-        assert!(error.contains("16036 of its l0w weights"), "{error}");
+        assert!(
+            error.contains(&format!("{beyond} of its l0w weights")),
+            "{error}"
+        );
     }
 }

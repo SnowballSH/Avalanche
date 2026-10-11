@@ -209,7 +209,7 @@ range does not bound it for every file, though: when the positive weights of a b
 more than 33025, activations of 255 on exactly those inputs take `s` past 2³¹, and likewise for
 the negative weights. The loader does not check that total, because the limit would sit too close
 to real networks, which never saturate all of those activations at once: the positive weights of
-a bucket add up to as much as 18120 in `nets/nezha.nnue`, and to 20366 in Dianguang-1. So the
+a bucket add up to as much as 20366 in `nets/dianguang-1.nnue`. So the
 evaluation is total instead. `s` wraps, which gives a meaningless but defined number, the same on
 every target and in every build mode, and the last step is computed in i64, because
 `(trunc(s / 255) + bias) * 400` leaves an i32 long before `s` does. Whatever a file holds, the
@@ -852,8 +852,8 @@ option, and whenever the bullet revision changes; the three lower-level bullet c
 instead of a random initialisation:
 
 ```
-TRAIN_INIT_NET="$PWD/nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_LR_INITIAL=0.0001 TRAIN_WARMUP_SB=1 \
-    TRAIN_NET_ID=nezha-ft TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
+TRAIN_INIT_NET="$PWD/nets/dianguang-1.nnue" TRAIN_FACTORISER=0 TRAIN_LR_INITIAL=0.0001 TRAIN_WARMUP_SB=1 \
+    TRAIN_NET_ID=dianguang-1-ft TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
 ```
 
 **Why.** bullet's checkpoints hold float weights and the optimiser state, and `TRAIN_RESUME_FROM`
@@ -868,7 +868,7 @@ file's feature weights already contain the factoriser, so with `TRAIN_FACTORISER
 weights get the file's values and the factoriser starts at zero. The optimiser state is fresh.
 Saving without a training step writes the input file again, byte for byte: a float is
 `stored / scale` to within a relative 2^-24, and the save rounds `float * scale` back to `stored`.
-The trainer's tests check that on `nets/nezha.nnue`, with and without the factoriser.
+The trainer's tests check that on `nets/dianguang-1.nnue`, with and without the factoriser.
 
 **What it refuses**, each with a message naming the reason:
 
@@ -880,7 +880,7 @@ The trainer's tests check that on `nets/nezha.nnue`, with and without the factor
   given. The clip is ±1.98 for every weight, except ±0.99 for the feature weights when a factoriser
   is trained (so that bucketed weight plus factoriser stays within ±1.98). A net that was trained
   with a factoriser has merged feature weights up to ±1.98, so it needs `TRAIN_FACTORISER=0`:
-  `nets/nezha.nnue` has 16036 feature weights beyond ±0.99. Refusing is a choice, not a limit: such
+  `nets/dianguang-1.nnue` has 12682 feature weights beyond ±0.99. Refusing is a choice, not a limit: such
   weights can be split exactly into a non-zero factoriser plus a remainder within the clip whenever
   the buckets of one feature weight span at most 1.98, and that split is not implemented.
 
@@ -892,7 +892,7 @@ file, or any existing file as the argument).
 
 ```
 cd training
-TRAIN_INIT_NET="$PWD/../nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_PARITY_FENS=fens.txt \
+TRAIN_INIT_NET="$PWD/../nets/dianguang-1.nnue" TRAIN_FACTORISER=0 TRAIN_PARITY_FENS=fens.txt \
     TRAIN_PARITY_OUT=parity.txt TRAIN_DATA_DIR=/path/to/viribin ./target/release/avalanche-trainer
 ```
 
@@ -1090,7 +1090,7 @@ explicitly, so the tests of their arithmetic run in a build of either head. They
 `src/tests/nnue_heads.zig`: those named "multi head" for the multi-layer head, and those named
 "single head" for the single-layer one (the formula on random weights, and weights at their
 extremes). The tests that evaluate positions use the embedded network, so they reach the
-single-layer head only in a single-layer build: `zig build test -Dnet=nets/nezha.nnue`.
+single-layer head only in a single-layer build: `zig build test -Dnet=nets/dianguang-1.nnue`.
 `-Dtest-filter=<text>` runs the tests whose name contains the text. In Debug the intrinsics are
 not compiled, see "What has been executed"; use `-Doptimize=safe` for those.
 
