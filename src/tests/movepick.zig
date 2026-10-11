@@ -3,7 +3,7 @@ const types = @import("../chess/types.zig");
 const movepick = @import("../engine/movepick.zig");
 const search = @import("../engine/search.zig");
 
-const CAPACITY = types.MoveList.capacity;
+const CAPACITY = types.MoveList.CAPACITY;
 const BLOCK_LENS = [_]usize{ 4, 8, 16 };
 
 const QUIET_FLAGS = [_]types.MoveFlags{ .QUIET, .DOUBLE_PUSH, .OO, .OOO };

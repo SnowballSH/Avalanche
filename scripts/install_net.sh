@@ -28,10 +28,10 @@ esac
 NET="nets/$NAME.nnue"
 cp "$QUANTISED" "$ROOT/$NET"
 
-DEFAULT_NET_LINE="const default_net = \"$NET\";"
-sed -i.previous "s|^const default_net = \".*\";\$|$DEFAULT_NET_LINE|" "$ROOT/build.zig"
+DEFAULT_NET_LINE="const DEFAULT_NET = \"$NET\";"
+sed -i.previous "s|^const DEFAULT_NET = \".*\";\$|$DEFAULT_NET_LINE|" "$ROOT/build.zig"
 rm "$ROOT/build.zig.previous"
-grep -q -x -F -- "$DEFAULT_NET_LINE" "$ROOT/build.zig" || fail "build.zig has no default_net line to rewrite"
+grep -q -x -F -- "$DEFAULT_NET_LINE" "$ROOT/build.zig" || fail "build.zig has no DEFAULT_NET line to rewrite"
 echo "==> $NET is the default network"
 
 "$ROOT/scripts/update_bench.sh"

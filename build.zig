@@ -2,7 +2,7 @@ const std = @import("std");
 
 const Translator = @import("translate_c").Translator;
 
-const default_net = "nets/dianguang-5.nnue";
+const DEFAULT_NET = "nets/dianguang-5.nnue";
 
 fn build_timestamp(b: *std.Build) []const u8 {
     const now: std.time.epoch.EpochSeconds = .{ .secs = @intCast(std.Io.Clock.real.now(b.graph.io).toSeconds()) };
@@ -77,7 +77,7 @@ const Native = struct {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const target_name = b.option([]const u8, "target-name", "Change the out name of the binary") orelse "Avalanche";
-    const net_path = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse default_net;
+    const net_path = b.option([]const u8, "net", "Path to the .nnue file to embed") orelse DEFAULT_NET;
     const net: std.Build.LazyPath = if (std.fs.path.isAbsolute(net_path))
         .{ .cwd_relative = net_path }
     else

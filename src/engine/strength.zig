@@ -10,7 +10,7 @@ pub const DEFAULT_ELO: u32 = MAX_ELO;
 
 const DECISIVE_CLAMP: i32 = 2000;
 const MIN_CANDIDATES: usize = 2;
-const MAX_CANDIDATES: usize = types.MoveList.capacity;
+const MAX_CANDIDATES: usize = types.MoveList.CAPACITY;
 const LEVELS_PER_EXTRA_CANDIDATE: f32 = 3.0;
 const BASE_TEMPERATURE: f32 = 2.0;
 const TEMPERATURE_PER_HANDICAP_SQUARED: f32 = 0.6;

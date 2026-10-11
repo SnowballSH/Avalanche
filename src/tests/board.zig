@@ -508,6 +508,17 @@ test "fen: a fullmove number beyond the largest the ply counter can hold is read
     try expectEqual(@as(u32, 0), pos.absolute_ply());
 }
 
+test "fen: a position given without a fullmove number is at move 1" {
+    support.init_tables();
+    const pos = try support.new_position();
+    defer support.destroy_position(pos);
+
+    pos.set_fen("4k3/8/8/8/8/8/4P3/4K3 w - -");
+    try expectEqual(@as(u32, 0), pos.absolute_ply());
+    pos.set_fen("4k3/8/8/8/8/8/4P3/4K3 b - -");
+    try expectEqual(@as(u32, 1), pos.absolute_ply());
+}
+
 test "perft: positions are counted in 64 bits on every target" {
     const pos: *position.Position = undefined;
     try expectEqual(u64, @TypeOf(perft.perft(.White, pos, 0)));

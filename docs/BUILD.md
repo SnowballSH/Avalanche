@@ -38,7 +38,7 @@ the binary is copied there and run.
 | `-Dtarget-name=<name>` | File name of the binary |
 | `-Dtest-filter=<text>` | Only the unit tests whose name contains the text |
 
-The default network is named in one place, the `default_net` line of `build.zig`.
+The default network is named in one place, the `DEFAULT_NET` line of `build.zig`.
 `scripts/install_net.sh <checkpoint directory>` copies the checkpoint's `quantised.bin` to
 `nets/<checkpoint name>.nnue`, rewrites that line and runs `scripts/update_bench.sh`;
 `scripts/openbench_build_check.sh` reads it.
@@ -262,6 +262,9 @@ lock files. `trainer` does so without the `cuda` feature, which needs no GPU too
 "Training"), and also lints the default configuration, the one with CUDA: bullet's build script
 asks only that the directory `CUDA_PATH` names exists, and clippy does not link, so the runner's
 temporary directory is enough.
+
+The job `tcec` runs the TCEC install and update scripts against the commit under test; docs/TCEC.md,
+"What CI checks", describes it.
 
 The actions that are not GitHub's own, `mlugg/setup-zig` (it installs the compiler that builds the
 release binaries) and `dtolnay/rust-toolchain`, are referenced by commit, with the tag the commit

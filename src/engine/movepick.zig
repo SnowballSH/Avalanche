@@ -40,7 +40,7 @@ const NATIVE_BLOCK_LEN = @min(std.simd.suggestVectorLength(i32) orelse 4, MAX_BL
 const SLOT_WORD_BITS = @bitSizeOf(usize);
 
 comptime {
-    std.debug.assert(types.MoveList.capacity % SLOT_WORD_BITS == 0);
+    std.debug.assert(types.MoveList.CAPACITY % SLOT_WORD_BITS == 0);
 }
 
 pub fn PickerOver(comptime Context: type, comptime block_len: usize) type {
@@ -53,8 +53,8 @@ pub fn PickerOver(comptime Context: type, comptime block_len: usize) type {
 
         context: Context,
         moves: []types.Move,
-        scores: [types.MoveList.capacity + block_len - 1]i32,
-        pending_slots: [types.MoveList.capacity / SLOT_WORD_BITS]usize,
+        scores: [types.MoveList.CAPACITY + block_len - 1]i32,
+        pending_slots: [types.MoveList.CAPACITY / SLOT_WORD_BITS]usize,
         pending_count: usize,
         deferred_hash_slot: ?usize,
         picked: usize,

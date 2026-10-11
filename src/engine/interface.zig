@@ -17,8 +17,6 @@ const options = @import("uci/options.zig");
 const go = @import("uci/go.zig");
 const numa = @import("numa.zig");
 
-const nl = search.LINE_ENDING;
-
 const Tokens = std.mem.TokenIterator(u8, .scalar);
 
 const OVERHEAD_PER_HELPER_MS: u64 = 5;
@@ -89,7 +87,7 @@ pub const UciInterface = struct {
             syzygy.deinit();
         }
 
-        try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)" ++ nl, .{build_options.version});
+        try stdout.print("Avalanche {s} by Yinuo Huang (SnowballSH)" ++ search.LINE_ENDING, .{build_options.version});
         try stdout.flush();
 
         if (!try self.run_commands(startup_commands, stdout)) return;
@@ -123,26 +121,26 @@ pub const UciInterface = struct {
                 },
                 .stop => self.stop_search(),
                 .ponderhit => self.searcher.ponderhit(),
-                .isready => try out.writeAll("readyok" ++ nl),
+                .isready => try out.writeAll("readyok" ++ search.LINE_ENDING),
             }
             return true;
         }
 
         if (@atomicLoad(bool, &self.searcher.shared.is_searching, .acquire)) {
-            try out.print("info string ignored while searching: {s}" ++ nl, .{tokens.buffer});
+            try out.print("info string ignored while searching: {s}" ++ search.LINE_ENDING, .{tokens.buffer});
             return true;
         }
         self.join_search();
 
         switch (std.meta.stringToEnum(IdleCommand, word) orelse return true) {
             .uci => {
-                try out.writeAll("id name Avalanche " ++ build_options.version ++ nl);
-                try out.writeAll("id author Yinuo Huang" ++ nl ++ nl);
+                try out.writeAll("id name Avalanche " ++ build_options.version ++ search.LINE_ENDING);
+                try out.writeAll("id author Yinuo Huang" ++ search.LINE_ENDING ++ search.LINE_ENDING);
                 try options.print_all(out);
-                try out.writeAll("uciok" ++ nl);
+                try out.writeAll("uciok" ++ search.LINE_ENDING);
             },
             .setoption => options.set_option(tokens.rest(), .{ .settings = &self.settings, .position = &self.position, .out = out }) catch |err| {
-                try out.print("info string setoption failed ({s}): {s}" ++ nl, .{ @errorName(err), tokens.rest() });
+                try out.print("info string setoption failed ({s}): {s}" ++ search.LINE_ENDING, .{ @errorName(err), tokens.rest() });
             },
             .ucinewgame => self.new_game(),
             .position => self.set_position(&tokens),
@@ -189,8 +187,8 @@ pub const UciInterface = struct {
             .Black => hce.evaluate_comptime(pos, .Black),
         };
         try print_network(out);
-        try out.print("info string NNUE evaluation {d} cp (white side)" ++ nl, .{white_sign * hce.evaluate_nnue(pos)});
-        try out.print("info string Final evaluation {d} cp (white side)" ++ nl, .{white_sign * final});
+        try out.print("info string NNUE evaluation {d} cp (white side)" ++ search.LINE_ENDING, .{white_sign * hce.evaluate_nnue(pos)});
+        try out.print("info string Final evaluation {d} cp (white side)" ++ search.LINE_ENDING, .{white_sign * final});
     }
 
     fn set_position(self: *UciInterface, tokens: *Tokens) void {
@@ -274,7 +272,7 @@ fn print_tunables(out: *std.Io.Writer, selection: enum { all, worth_tuning }) !v
     for (parameters.TunableParams) |tunable| {
         if (selection == .worth_tuning and !tunable.worth_tuning) continue;
         const live = parameters.live_uci_value(tunable.name) orelse tunable.value;
-        try out.print("{s}, int, {d}, {d}, {d}, {d}, {d}" ++ nl, .{ tunable.name, live, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
+        try out.print("{s}, int, {d}, {d}, {d}, {d}, {d}" ++ search.LINE_ENDING, .{ tunable.name, live, tunable.min_value, tunable.max_value, tunable.c_end, tunable.r_end });
     }
 }
 
@@ -287,7 +285,7 @@ fn run_genfens(tokens: *Tokens) !void {
 }
 
 fn print_network(out: *std.Io.Writer) !void {
-    try out.print("info string NNUE evaluation using {s} ({s}, {d} MiB)" ++ nl, .{
+    try out.print("info string NNUE evaluation using {s} ({s}, {d} MiB)" ++ search.LINE_ENDING, .{
         weights.active_network(),
         weights.ARCHITECTURE,
         @sizeOf(weights.NNUEWeights) >> 20,

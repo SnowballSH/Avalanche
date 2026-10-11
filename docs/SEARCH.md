@@ -56,7 +56,7 @@
   loss are draws, without it the win and the loss they are.
 - The root probes the DTZ tables, or the WDL tables when Pyrrhic has no DTZ result, under the
   same conditions on castling rights and piece count, and keeps the root moves that share
-  the best rank ("Root candidates" in docs/UCI.md).
+  the best rank ("Search integration" in docs/UCI.md, under "Root candidates").
 
 ## Correction history
 

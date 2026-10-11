@@ -428,13 +428,13 @@ pub const Move = packed struct {
 };
 
 pub const MoveList = struct {
-    pub const capacity = 256;
+    pub const CAPACITY = 256;
 
-    buffer: [capacity]Move = undefined,
+    buffer: [CAPACITY]Move = undefined,
     len: usize = 0,
 
     pub inline fn append(self: *MoveList, move: Move) void {
-        if (self.len == capacity) return;
+        if (self.len == CAPACITY) return;
         self.buffer[self.len] = move;
         self.len += 1;
     }

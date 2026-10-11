@@ -24,11 +24,11 @@ fn expect_consistent_lines(searcher: *const search.Searcher) !void {
 test "move list: a set-up position with more moves than a list holds is cut at the capacity and searched" {
     var fixture = try support.SearchFixture.init("QQQQQQQQ/Q6Q/Q6Q/Q6Q/Q6Q/Q1k4Q/Q6Q/KQQQQQQQ w - - 0 1");
     defer fixture.deinit();
-    try expectEqual(@as(usize, types.MoveList.capacity), fixture.pos.legal_moves().len);
+    try expectEqual(@as(usize, types.MoveList.CAPACITY), fixture.pos.legal_moves().len);
 
     fixture.pos.set_fen("knQQQQQQ/pp5Q/Q6Q/Q6Q/Q6Q/Q6Q/Q6Q/KQQQQQQQ w - - 0 1");
     const moves = fixture.pos.legal_moves();
-    try expectEqual(@as(usize, types.MoveList.capacity), moves.len);
+    try expectEqual(@as(usize, types.MoveList.CAPACITY), moves.len);
 
     _ = fixture.run(3);
     var best_is_listed = false;

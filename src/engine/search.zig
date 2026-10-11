@@ -79,7 +79,7 @@ inline fn reserve_next_iteration(
 
 pub const MAX_PLY = 200;
 const MAX_SEARCH_DEPTH: usize = MAX_PLY - 2;
-pub const MAX_MOVES = types.MoveList.capacity;
+pub const MAX_MOVES = types.MoveList.CAPACITY;
 pub const MAX_MULTI_PV = MAX_MOVES;
 pub const SEARCH_STACK_SIZE: usize = 64 * 1024 * 1024;
 
