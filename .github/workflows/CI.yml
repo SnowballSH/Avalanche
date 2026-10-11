@@ -46,7 +46,7 @@ jobs:
 
       - name: Format
         if: runner.os == 'Linux'
-        run: zig fmt --check src build.zig
+        run: zig fmt --check src build.zig build.zig.zon
 
       - name: Debug build
         if: runner.os == 'Linux'
@@ -66,7 +66,7 @@ jobs:
         run: zig build test -Doptimize=fast
 
       - name: Unit tests (safe)
-        if: runner.os == 'Linux'
+        if: runner.os != 'Windows'
         run: zig build test -Doptimize=safe
 
       - name: Unit tests (single-layer head)
@@ -293,7 +293,7 @@ jobs:
 
   artifacts:
     name: release artifacts
-    needs: [build, tiers, wasm]
+    needs: [build, tiers, wasm, scripts]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 90

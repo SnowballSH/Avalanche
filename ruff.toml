@@ -1,7 +1,7 @@
 target-version = "py312"
 line-length = 110
 src = ["scripts"]
-extend-exclude = ["deps", "scripts/legacy", "tcec/version.py"]
+extend-exclude = ["deps", "tcec/version.py"]
 
 [lint]
 select = ["ALL"]
