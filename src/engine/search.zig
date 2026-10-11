@@ -1993,8 +1993,8 @@ const InfoLineCase = struct {
     pos: position.Position,
     line: RootLine,
 
-    const stats = InfoStats{ .nodes = 10, .nps = 20, .hashfull = 3, .tbhits = 0, .time_ms = 500 };
-    const stats_and_pv = " nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ LINE_ENDING;
+    const STATS = InfoStats{ .nodes = 10, .nps = 20, .hashfull = 3, .tbhits = 0, .time_ms = 500 };
+    const STATS_AND_PV = " nodes 10 nps 20 hashfull 3 tbhits 0 time 500 pv e2e4" ++ LINE_ENDING;
 
     fn init(self: *InfoLineCase, score: i32) void {
         self.pos.uci_chess960 = false;
@@ -2007,7 +2007,7 @@ const InfoLineCase = struct {
 
     fn print(self: *const InfoLineCase, buffer: []u8, multipv: usize, bound: ScoreBound) []const u8 {
         var w = std.Io.Writer.fixed(buffer);
-        print_line(&w, &self.pos, &self.line, multipv, bound, stats);
+        print_line(&w, &self.pos, &self.line, multipv, bound, STATS);
         return w.buffered();
     }
 };
@@ -2023,7 +2023,7 @@ test "info line: the bound follows the score, and follows wdl when wdl is shown,
 
     wdl_model.show_wdl = false;
     try std.testing.expectEqualStrings(
-        std.fmt.comptimePrint("info depth 9 seldepth 12 multipv 1 score cp {} lowerbound", .{comptime uci_centipawns(42)}) ++ InfoLineCase.stats_and_pv,
+        std.fmt.comptimePrint("info depth 9 seldepth 12 multipv 1 score cp {} lowerbound", .{comptime uci_centipawns(42)}) ++ InfoLineCase.STATS_AND_PV,
         case.print(&buf, 1, .lower),
     );
     try std.testing.expect(std.mem.find(u8, case.print(&buf, 2, .exact), std.fmt.comptimePrint("multipv 2 score cp {} nodes", .{comptime uci_centipawns(42)})) != null);
@@ -2032,7 +2032,7 @@ test "info line: the bound follows the score, and follows wdl when wdl is shown,
     const p = wdl_model.predict(42, case.pos.absolute_ply());
     var expected = std.Io.Writer.fixed(&expected_buf);
     try expected.print("info depth 9 seldepth 12 multipv 1 score cp {} wdl {} {} {} upperbound", .{ uci_centipawns(42), p.win, p.draw, p.loss });
-    try expected.writeAll(InfoLineCase.stats_and_pv);
+    try expected.writeAll(InfoLineCase.STATS_AND_PV);
     try std.testing.expectEqualStrings(expected.buffered(), case.print(&buf, 1, .upper));
 }
 
@@ -2096,7 +2096,7 @@ test "info lines: candidates searched beyond MultiPV for a limited strength are 
 
     var buf: [2048]u8 = undefined;
     var w = std.Io.Writer.fixed(&buf);
-    s.report_iteration(&w, &case.pos, InfoLineCase.stats);
+    s.report_iteration(&w, &case.pos, InfoLineCase.STATS);
     try std.testing.expectEqual(@as(usize, 2), std.mem.count(u8, w.buffered(), LINE_ENDING));
     try std.testing.expect(std.mem.find(u8, w.buffered(), "multipv 2 ") != null);
     try std.testing.expect(std.mem.find(u8, w.buffered(), "multipv 3 ") == null);
@@ -2115,7 +2115,7 @@ test "info lines: every line of an iteration reaches the output as one whole wri
     try std.testing.expect(line_len <= buf.len and line_count * line_len > buf.len);
 
     var probe = WriteProbe.init(&buf);
-    s.report_iteration(&probe.interface, &case.pos, InfoLineCase.stats);
+    s.report_iteration(&probe.interface, &case.pos, InfoLineCase.STATS);
     try std.testing.expectEqual(@as(usize, 0), probe.writes_ending_inside_a_line);
     try std.testing.expectEqual(@as(usize, line_count), probe.writes);
 }

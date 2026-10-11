@@ -3,7 +3,7 @@ const types = @import("../chess/types.zig");
 const movepick = @import("../engine/movepick.zig");
 const search = @import("../engine/search.zig");
 
-const capacity = types.MoveList.capacity;
+const CAPACITY = types.MoveList.capacity;
 const BLOCK_LENS = [_]usize{ 4, 8, 16 };
 
 const QUIET_FLAGS = [_]types.MoveFlags{ .QUIET, .DOUBLE_PUSH, .OO, .OOO };
@@ -12,10 +12,10 @@ const CAPTURE_FLAGS = [_]types.MoveFlags{ .CAPTURE, .EN_PASSANT };
 const PROMOTION_CAPTURE_FLAGS = [_]types.MoveFlags{ .PC_KNIGHT, .PC_BISHOP, .PC_ROOK, .PC_QUEEN };
 
 const Script = struct {
-    moves: [capacity]types.Move = undefined,
-    scored: [capacity]movepick.ScoredMove = undefined,
-    exchange_wins: [capacity]bool = undefined,
-    exchange_queries: [capacity]u32 = @splat(0),
+    moves: [CAPACITY]types.Move = undefined,
+    scored: [CAPACITY]movepick.ScoredMove = undefined,
+    exchange_wins: [CAPACITY]bool = undefined,
+    exchange_queries: [CAPACITY]u32 = @splat(0),
 
     fn move_of(id: usize, flags: types.MoveFlags) types.Move {
         return @bitCast((@as(u16, @intCast(id + 1)) << 4) | @backingInt(flags));
@@ -57,8 +57,8 @@ fn ScriptedPicker(comptime block_len: usize) type {
 }
 
 const ReferenceOrder = struct {
-    moves: [capacity]types.Move = undefined,
-    scores: [capacity]i32 = undefined,
+    moves: [CAPACITY]types.Move = undefined,
+    scores: [CAPACITY]i32 = undefined,
     len: usize,
 
     fn init(script: *const Script, len: usize) ReferenceOrder {
@@ -90,8 +90,8 @@ const ReferenceOrder = struct {
 };
 
 const Searched = struct {
-    moves: [capacity]types.Move = undefined,
-    indices: [capacity]usize = undefined,
+    moves: [CAPACITY]types.Move = undefined,
+    indices: [CAPACITY]usize = undefined,
     len: usize = 0,
 
     fn add(self: *Searched, index: usize, move: types.Move) void {
@@ -182,7 +182,7 @@ fn random_script(random: std.Random, script: *Script, len: usize) void {
 
 fn random_len(random: std.Random, trial: usize) usize {
     return switch (trial % 16) {
-        0 => random.intRangeAtMost(usize, 200, capacity),
+        0 => random.intRangeAtMost(usize, 200, CAPACITY),
         1 => random.uintAtMost(usize, 3),
         else => random.uintAtMost(usize, 70),
     };
@@ -382,8 +382,8 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
 
 test "move list: appending past the capacity drops the surplus" {
     var list: types.MoveList = .{};
-    for (0..capacity + 13) |id| list.append(Script.move_of(id, .QUIET));
+    for (0..CAPACITY + 13) |id| list.append(Script.move_of(id, .QUIET));
 
-    try std.testing.expectEqual(@as(usize, capacity), list.len);
+    try std.testing.expectEqual(@as(usize, CAPACITY), list.len);
     for (list.items(), 0..) |move, id| try std.testing.expectEqual(Script.move_of(id, .QUIET).to_u16(), move.to_u16());
 }
