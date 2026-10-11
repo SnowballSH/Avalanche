@@ -22,7 +22,7 @@ fn build_game(allocator: std.mem.Allocator, fen: []const u8, moves: []const []co
     header.wdl = white_result;
     try bytes.appendSlice(allocator, std.mem.asBytes(&header));
     for (moves, 0..) |text, index| {
-        const move = types.Move.new_from_string(pos, text);
+        const move = try support.parse_move(pos, text);
         const pair = viriformat.MoveScorePair{ .move = viriformat.encode_move(move), .score = @intCast(100 + index) };
         try bytes.appendSlice(allocator, std.mem.asBytes(&pair));
         if (pos.turn == types.Color.White) pos.play_move(types.Color.White, move) else pos.play_move(types.Color.Black, move);

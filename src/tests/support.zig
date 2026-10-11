@@ -60,9 +60,12 @@ pub fn undo(pos: *position.Position, last_move: types.Move) void {
     }
 }
 
+pub fn parse_move(pos: *position.Position, text: []const u8) !types.Move {
+    return types.Move.parse(pos, text) orelse error.NotALegalMove;
+}
+
 pub fn play_uci(pos: *position.Position, text: []const u8) !types.Move {
-    const move = types.Move.new_from_string(pos, text);
-    try std.testing.expect(move.to_u16() != 0);
+    const move = try parse_move(pos, text);
     play(pos, move);
     return move;
 }
@@ -144,7 +147,7 @@ pub const SearchFixture = struct {
         };
     }
 
-    pub fn move(self: *SearchFixture, text: []const u8) types.Move {
-        return types.Move.new_from_string(self.pos, text);
+    pub fn move(self: *SearchFixture, text: []const u8) !types.Move {
+        return parse_move(self.pos, text);
     }
 };

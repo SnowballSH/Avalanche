@@ -7,9 +7,9 @@ const capacity = types.MoveList.capacity;
 const block_lens = [_]usize{ 4, 8, 16 };
 
 const quiet_flags = [_]types.MoveFlags{ .QUIET, .DOUBLE_PUSH, .OO, .OOO };
-const promotion_flags = [_]u4{ types.PR_KNIGHT, types.PR_BISHOP, types.PR_ROOK, types.PR_QUEEN };
+const promotion_flags = [_]types.MoveFlags{ .PR_KNIGHT, .PR_BISHOP, .PR_ROOK, .PR_QUEEN };
 const capture_flags = [_]types.MoveFlags{ .CAPTURE, .EN_PASSANT };
-const promotion_capture_flags = [_]u4{ types.PC_KNIGHT, types.PC_BISHOP, types.PC_ROOK, types.PC_QUEEN };
+const promotion_capture_flags = [_]types.MoveFlags{ .PC_KNIGHT, .PC_BISHOP, .PC_ROOK, .PC_QUEEN };
 
 const Script = struct {
     moves: [capacity]types.Move = undefined,
@@ -17,8 +17,8 @@ const Script = struct {
     exchange_wins: [capacity]bool = undefined,
     exchange_queries: [capacity]u32 = @splat(0),
 
-    fn move_of(id: usize, flags: u4) types.Move {
-        return @bitCast((@as(u16, @intCast(id + 1)) << 4) | flags);
+    fn move_of(id: usize, flags: types.MoveFlags) types.Move {
+        return @bitCast((@as(u16, @intCast(id + 1)) << 4) | @backingInt(flags));
     }
 
     fn id_of(move: types.Move) usize {
@@ -122,12 +122,12 @@ fn chance(random: std.Random, of_hundred: u8) bool {
     return random.uintLessThan(u8, 100) < of_hundred;
 }
 
-fn random_flags(random: std.Random, capture: bool, promotion: bool) u4 {
+fn random_flags(random: std.Random, capture: bool, promotion: bool) types.MoveFlags {
     const kind = random.uintLessThan(usize, 4);
     if (capture and promotion) return promotion_capture_flags[kind];
     if (promotion) return promotion_flags[kind];
-    if (capture) return @backingInt(capture_flags[kind % capture_flags.len]);
-    return @backingInt(quiet_flags[kind]);
+    if (capture) return capture_flags[kind % capture_flags.len];
+    return quiet_flags[kind];
 }
 
 fn random_palette(random: std.Random, palette: []i32) void {
@@ -305,7 +305,7 @@ test "move picker: a hash move that is the only pick costs no exchange evaluatio
     var script: Script = .{};
     const len = 9;
     for (0..len) |id| {
-        script.moves[id] = Script.move_of(id, @backingInt(types.MoveFlags.CAPTURE));
+        script.moves[id] = Script.move_of(id, .CAPTURE);
         script.scored[id] = .{ .score = movepick.SORT_WINNING_CAPTURE + @as(i32, @intCast(id)), .kind = .assumes_winning_exchange };
         script.exchange_wins[id] = id % 2 == 0;
     }
@@ -340,7 +340,7 @@ test "move loops: leaving early searches the moves the full loops search" {
 }
 
 test "move loops: only plain quiet moves that are not killers are prunable" {
-    const killer = Script.move_of(7, @backingInt(types.MoveFlags.QUIET));
+    const killer = Script.move_of(7, .QUIET);
     const killers = [_][2]types.Move{
         .{ types.Move.empty(), types.Move.empty() },
         .{ killer, types.Move.empty() },
@@ -348,7 +348,7 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
     };
     for (killers) |pair| {
         for (quiet_flags) |flags| {
-            const move = Script.move_of(3, @backingInt(flags));
+            const move = Script.move_of(3, flags);
             try std.testing.expect(search.is_prunable_quiet(move, pair));
             try std.testing.expect(search.only_prunable_quiets(&.{ move, move }, pair));
             try std.testing.expect(!search.only_captures(&.{move}));
@@ -356,7 +356,7 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
         const is_killer = pair[0].to_u16() == killer.to_u16() or pair[1].to_u16() == killer.to_u16();
         try std.testing.expectEqual(!is_killer, search.is_prunable_quiet(killer, pair));
 
-        const plain = Script.move_of(3, @backingInt(types.MoveFlags.QUIET));
+        const plain = Script.move_of(3, .QUIET);
         for (promotion_flags) |flags| {
             const move = Script.move_of(3, flags);
             try std.testing.expect(!search.is_prunable_quiet(move, pair));
@@ -364,7 +364,7 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
             try std.testing.expect(!search.only_captures(&.{move}));
         }
         for (capture_flags) |flags| {
-            const move = Script.move_of(3, @backingInt(flags));
+            const move = Script.move_of(3, flags);
             try std.testing.expect(!search.is_prunable_quiet(move, pair));
             try std.testing.expect(!search.only_prunable_quiets(&.{ plain, move }, pair));
             try std.testing.expect(search.only_captures(&.{ move, move }));
@@ -382,8 +382,8 @@ test "move loops: only plain quiet moves that are not killers are prunable" {
 
 test "move list: appending past the capacity drops the surplus" {
     var list: types.MoveList = .{};
-    for (0..capacity + 13) |id| list.append(Script.move_of(id, 0));
+    for (0..capacity + 13) |id| list.append(Script.move_of(id, .QUIET));
 
     try std.testing.expectEqual(@as(usize, capacity), list.len);
-    for (list.items(), 0..) |move, id| try std.testing.expectEqual(Script.move_of(id, 0).to_u16(), move.to_u16());
+    for (list.items(), 0..) |move, id| try std.testing.expectEqual(Script.move_of(id, .QUIET).to_u16(), move.to_u16());
 }

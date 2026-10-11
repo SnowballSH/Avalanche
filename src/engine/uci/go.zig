@@ -54,8 +54,7 @@ pub const GoCommand = struct {
 
     fn parse_search_moves(self: *GoCommand, tokens: *std.mem.TokenIterator(u8, .scalar), pos: *position.Position) void {
         while (tokens.peek()) |token| {
-            const move = types.Move.new_from_string(pos, token);
-            if (move.to_u16() == 0) return;
+            const move = types.Move.parse(pos, token) orelse return;
             _ = tokens.next();
             if (self.search_move_count < self.search_moves.len) {
                 self.search_moves[self.search_move_count] = move;

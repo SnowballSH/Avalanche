@@ -49,8 +49,8 @@ const Fixture = struct {
         }
     }
 
-    fn move(self: *Fixture, uci: []const u8) types.Move {
-        return types.Move.new_from_string(self.pos, uci);
+    fn move(self: *Fixture, uci: []const u8) !types.Move {
+        return support.parse_move(self.pos, uci);
     }
 };
 
@@ -118,7 +118,7 @@ test "go mate: stops once a short enough mate is proven" {
 
     f.searcher.mate_in = 1;
     f.run(null);
-    try expectEqual(f.move("h5f7").to_u16(), f.searcher.best_move.to_u16());
+    try expectEqual((try f.move("h5f7")).to_u16(), f.searcher.best_move.to_u16());
     try expect(f.searcher.lines[0].depth < 10);
 }
 
@@ -127,7 +127,7 @@ test "searchmoves: only the listed root moves are searched" {
     try f.init(types.DEFAULT_FEN);
     defer f.deinit();
 
-    const allowed = [_]types.Move{ f.move("a2a3"), f.move("h2h4") };
+    const allowed = [_]types.Move{ try f.move("a2a3"), try f.move("h2h4") };
     @memcpy(f.searcher.search_moves[0..allowed.len], &allowed);
     f.searcher.search_move_count = allowed.len;
     f.searcher.multi_pv = 5;
@@ -191,7 +191,7 @@ test "reset_heuristics: ageing halves the histories towards zero, keeps the corr
     defer f.deinit();
 
     const s = f.searcher;
-    const move = f.move("e2e4");
+    const move = try f.move("e2e4");
     const last_ply = search.MAX_PLY;
     const last_key = search.CORRHIST_SIZE - 1;
     s.killer[last_ply] = .{ move, move };

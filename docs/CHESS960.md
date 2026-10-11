@@ -55,7 +55,7 @@ unkeyed on unmake, like every other move (docs/BOARD.md).
   is kept in `Position.uci_chess960`, which `reset` and `set_fen` carry over: it
   is what the GUI asked for, not a property of a position, whereas
   `castling.Setup.is_chess960` is worked out anew from each FEN.
-- Input: `Move.new_from_string` accepts king-captures-rook always, and
+- Input: `Move.parse` accepts king-captures-rook always, and
   king-destination unless Chess960 notation is active. A string that is
   malformed or names no legal move gives `Move.empty()`, which the caller has to
   test for. No legal move equals it: origin and destination always differ,

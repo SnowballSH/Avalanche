@@ -108,11 +108,11 @@ test "pawn key: ignores pieces other than pawns" {
     const start = pos.pawn_hash;
     try expect(start != 0);
 
-    const knight = types.Move.new_from_string(pos, "g1f3");
+    const knight = try support.parse_move(pos, "g1f3");
     pos.play_move(.White, knight);
     try expectEqual(start, pos.pawn_hash);
 
-    const pawn = types.Move.new_from_string(pos, "e7e5");
+    const pawn = try support.parse_move(pos, "e7e5");
     pos.play_move(.Black, pawn);
     try expect(start != pos.pawn_hash);
 }
@@ -127,12 +127,12 @@ test "non-pawn key: tracks only its own color's pieces" {
     const black = pos.nonpawn_hash[1];
     try expect(white != 0 and black != 0 and white != black);
 
-    const pawn = types.Move.new_from_string(pos, "e2e4");
+    const pawn = try support.parse_move(pos, "e2e4");
     pos.play_move(.White, pawn);
     try expectEqual(white, pos.nonpawn_hash[0]);
     try expectEqual(black, pos.nonpawn_hash[1]);
 
-    const knight = types.Move.new_from_string(pos, "g8f6");
+    const knight = try support.parse_move(pos, "g8f6");
     pos.play_move(.Black, knight);
     try expectEqual(white, pos.nonpawn_hash[0]);
     try expect(black != pos.nonpawn_hash[1]);

@@ -222,7 +222,7 @@ pub fn encode_move(move: types.Move) u16 {
     return @bitCast(PackedMove{
         .from = move.from,
         .to = move.to,
-        .promoted = if (kind == .promotion) @truncate(move.flags) else 0,
+        .promoted = if (kind == .promotion) @intCast(move.get_flags().promote_type().index() - types.PieceType.Knight.index()) else 0,
         .kind = kind,
     });
 }

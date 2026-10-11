@@ -215,8 +215,7 @@ pub const UciInterface = struct {
         if (!eql(tokens.next() orelse return, "moves")) return;
         while (tokens.next()) |tok| {
             if (self.position.game_ply >= position.MAX_HISTORY_PLY) break;
-            const move = types.Move.new_from_string(&self.position, tok);
-            if (move.to_u16() == 0) break;
+            const move = types.Move.parse(&self.position, tok) orelse break;
             switch (self.position.turn) {
                 .White => self.position.play_move(.White, move),
                 .Black => self.position.play_move(.Black, move),

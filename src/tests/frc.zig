@@ -232,24 +232,24 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
     var buf: [8]u8 = undefined;
 
     pos.uci_chess960 = false;
-    const standard = types.Move.new_from_string(pos, "e1g1");
+    const standard = try support.parse_move(pos, "e1g1");
     try expect(standard.is_castle());
     try expectEqualStrings("e1g1", format_move(standard, pos.chess960_notation(), &buf));
-    try expectEqual(standard.to_u16(), types.Move.new_from_string(pos, "e1h1").to_u16());
+    try expectEqual(standard.to_u16(), (try support.parse_move(pos, "e1h1")).to_u16());
 
     pos.uci_chess960 = true;
-    const king_takes_rook = types.Move.new_from_string(pos, "e1a1");
+    const king_takes_rook = try support.parse_move(pos, "e1a1");
     try expect(king_takes_rook.is_castle());
     try expectEqualStrings("e1a1", format_move(king_takes_rook, pos.chess960_notation(), &buf));
-    try expectEqual(@as(u16, 0), types.Move.new_from_string(pos, "e1c1").to_u16());
+    try expect(types.Move.parse(pos, "e1c1") == null);
 
     pos.uci_chess960 = false;
     pos.set_fen("4k3/8/8/8/8/8/8/1R3K2 w B - 0 1");
     try expect(pos.chess960_notation());
-    const b_file_castle = types.Move.new_from_string(pos, "f1b1");
+    const b_file_castle = try support.parse_move(pos, "f1b1");
     try expect(b_file_castle.is_castle());
     try expectEqualStrings("f1b1", format_move(b_file_castle, pos.chess960_notation(), &buf));
-    try expect(!types.Move.new_from_string(pos, "f1c1").is_castle());
+    try expect(types.Move.parse(pos, "f1c1") == null);
 }
 
 test "frc: search returns a legal move from a double fischer random position" {

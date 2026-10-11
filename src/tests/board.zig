@@ -390,8 +390,7 @@ test "see: the exact value of free, defended and even captures, of pins before a
         const moves = set_up(pos, case.fen);
         try expect_see_matches_reference(&prng, pos, moves.items());
 
-        const move = types.Move.new_from_string(pos, case.move);
-        try expect(move.to_u16() != 0);
+        const move = try support.parse_move(pos, case.move);
         try expect(see.see_threshold(pos, move, case.value));
         try expect(!see.see_threshold(pos, move, case.value + 1));
     }
@@ -525,4 +524,15 @@ test "make/unmake: castling in which king and rook swap squares" {
 
         try expect_moves_round_trip(fresh, pos, pos.legal_moves().items());
     }
+}
+
+test "move parsing: text that is not a legal move of the position is no move" {
+    const pos = try support.position_at("4k3/P7/8/8/8/8/4P3/4K3 w - - 0 1");
+    defer support.destroy_position(pos);
+
+    for ([_][]const u8{ "", "e2", "0000", "a1a1", "e2e5", "e2e9", "i2i4", "e2e4q", "a7a8k" }) |text| {
+        try expect(types.Move.parse(pos, text) == null);
+    }
+    try expectEqual(types.MoveFlags.DOUBLE_PUSH, types.Move.parse(pos, "e2e4").?.get_flags());
+    try expectEqual(types.MoveFlags.PR_ROOK, types.Move.parse(pos, "a7a8r").?.get_flags());
 }

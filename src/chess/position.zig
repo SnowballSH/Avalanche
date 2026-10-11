@@ -814,10 +814,10 @@ pub const Position = struct {
                         while (b1 != 0) {
                             var psq = types.pop_lsb(&b1);
                             if (self.mailbox[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_QUEEN));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_ROOK));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_KNIGHT));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_BISHOP));
                             } else {
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.CAPTURE));
                             }
@@ -876,10 +876,10 @@ pub const Position = struct {
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_QUEEN));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_ROOK));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_KNIGHT));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_BISHOP));
                         }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
@@ -956,10 +956,10 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_BISHOP));
             }
 
             b2 = types.shift_bitboard(b1, rel_northwest) & capture_mask;
@@ -968,19 +968,19 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_BISHOP));
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_BISHOP));
             }
         }
     }
@@ -1124,10 +1124,10 @@ pub const Position = struct {
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_QUEEN));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_ROOK));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_KNIGHT));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_BISHOP));
                         }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
@@ -1181,28 +1181,28 @@ pub const Position = struct {
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_BISHOP));
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_BISHOP));
             }
 
             b2 = types.shift_bitboard(b1, rel_north) & quiet_mask;
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_BISHOP));
             }
         }
     }

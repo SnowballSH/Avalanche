@@ -56,19 +56,19 @@ test "viriformat: en passant and promotions carry their type, and a promotion it
     defer support.destroy_position(pos);
 
     pos.set_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 2");
-    const en_passant = types.Move.new_from_string(pos, "e5d6");
+    const en_passant = try support.parse_move(pos, "e5d6");
     try testing.expectEqual(types.MoveFlags.EN_PASSANT, en_passant.get_flags());
     try testing.expectEqual(@as(u16, 1), viriformat.encode_move(en_passant) >> 14);
 
     pos.set_fen("1n2k3/P7/8/8/8/8/8/4K3 w - - 0 1");
     inline for (.{ "a7a8n", "a7a8b", "a7a8r", "a7a8q", "a7b8n", "a7b8q" }, .{ 0, 1, 2, 3, 0, 3 }) |text, piece| {
-        const encoded = viriformat.encode_move(types.Move.new_from_string(pos, text));
+        const encoded = viriformat.encode_move(try support.parse_move(pos, text));
         try testing.expectEqual(@as(u16, 3), encoded >> 14);
         try testing.expectEqual(@as(u16, piece), (encoded >> 12) & 3);
     }
 
     pos.set_fen(types.DEFAULT_FEN);
-    try testing.expectEqual(@as(u16, 0), viriformat.encode_move(types.Move.new_from_string(pos, "e2e4")) >> 12);
+    try testing.expectEqual(@as(u16, 0), viriformat.encode_move(try support.parse_move(pos, "e2e4")) >> 12);
 }
 
 test "viriformat: FRC unmoved castling rooks are marked as type 6" {

@@ -303,37 +303,29 @@ pub const MoveFlags = enum(u4) {
     DOUBLE_PUSH = 0b0001,
     OO = 0b0010,
     OOO = 0b0011,
-    CAPTURE = 0b1000,
-    CAPTURES = 0b1111,
-    EN_PASSANT = 0b1010,
-    PROMOTIONS = 0b0111,
-    PROMOTION_CAPTURES = 0b1100,
-
     PR_KNIGHT = 0b0100,
     PR_BISHOP = 0b0101,
     PR_ROOK = 0b0110,
+    PR_QUEEN = 0b0111,
+    CAPTURE = 0b1000,
+    EN_PASSANT = 0b1010,
+    PC_KNIGHT = 0b1100,
     PC_BISHOP = 0b1101,
     PC_ROOK = 0b1110,
+    PC_QUEEN = 0b1111,
+
+    const CAPTURE_BIT: u4 = @backingInt(MoveFlags.CAPTURE);
 
     pub inline fn promote_type(self: MoveFlags) PieceType {
-        return switch (@backingInt(self) & @backingInt(MoveFlags.PROMOTIONS)) {
-            PR_KNIGHT => PieceType.Knight,
-            PR_BISHOP => PieceType.Bishop,
-            PR_ROOK => PieceType.Rook,
-            PR_QUEEN => PieceType.Queen,
+        return switch (@backingInt(self) & ~CAPTURE_BIT) {
+            @backingInt(MoveFlags.PR_KNIGHT) => PieceType.Knight,
+            @backingInt(MoveFlags.PR_BISHOP) => PieceType.Bishop,
+            @backingInt(MoveFlags.PR_ROOK) => PieceType.Rook,
+            @backingInt(MoveFlags.PR_QUEEN) => PieceType.Queen,
             else => unreachable,
         };
     }
 };
-
-pub const PR_KNIGHT: u4 = 0b0100;
-pub const PR_BISHOP: u4 = 0b0101;
-pub const PR_ROOK: u4 = 0b0110;
-pub const PR_QUEEN: u4 = 0b0111;
-pub const PC_KNIGHT: u4 = 0b1100;
-pub const PC_BISHOP: u4 = 0b1101;
-pub const PC_ROOK: u4 = 0b1110;
-pub const PC_QUEEN: u4 = 0b1111;
 
 pub const Move = packed struct {
     flags: u4,
@@ -368,10 +360,10 @@ pub const Move = packed struct {
         return Move{ .flags = @backingInt(flag), .from = @as(u6, @intCast(@backingInt(from))), .to = @as(u6, @intCast(@backingInt(to))) };
     }
 
-    pub fn new_from_string(pos: *position.Position, move: []const u8) Move {
-        const from = parse_square(move, 0) orelse return Move.empty();
-        const to = parse_square(move, 2) orelse return Move.empty();
-        const promo: ?u8 = if (move.len >= 5) move[4] else null;
+    pub fn parse(pos: *position.Position, text: []const u8) ?Move {
+        const from = parse_square(text, 0) orelse return null;
+        const to = parse_square(text, 2) orelse return null;
+        const promo: ?u8 = if (text.len >= 5) text[4] else null;
         const chess960 = pos.chess960_notation();
 
         const list = pos.legal_moves();
@@ -385,13 +377,13 @@ pub const Move = packed struct {
             }
             return m;
         }
-        return Move.empty();
+        return null;
     }
 
-    fn parse_square(move: []const u8, offset: usize) ?Square {
-        if (move.len < offset + 2) return null;
-        const f = move[offset];
-        const r = move[offset + 1];
+    fn parse_square(text: []const u8, offset: usize) ?Square {
+        if (text.len < offset + 2) return null;
+        const f = text[offset];
+        const r = text[offset + 1];
         if (f < 'a' or f > 'h' or r < '1' or r > '8') return null;
         return Square.new(@fromBackingInt(@intCast(f - 'a')), @fromBackingInt(@intCast(r - '1')));
     }
@@ -404,11 +396,12 @@ pub const Move = packed struct {
     }
 
     pub inline fn is_capture(self: Move) bool {
-        return (self.flags & 0b1000) != 0;
+        return (self.flags & MoveFlags.CAPTURE_BIT) != 0;
     }
 
     pub inline fn is_promotion(self: Move) bool {
-        return (self.flags >= 4 and self.flags <= 7) or (self.flags >= 12 and self.flags <= 15);
+        return (self.flags >= @backingInt(MoveFlags.PR_KNIGHT) and self.flags <= @backingInt(MoveFlags.PR_QUEEN)) or
+            (self.flags >= @backingInt(MoveFlags.PC_KNIGHT) and self.flags <= @backingInt(MoveFlags.PC_QUEEN));
     }
 
     pub inline fn is_castle(self: Move) bool {

@@ -220,11 +220,11 @@ test "Position" {
     pos.set_fen(types.DEFAULT_FEN[0..]);
     const output = support.network_output(pos);
 
-    const m1 = types.Move.new_from_string(pos, "e2e4"[0..]);
+    const m1 = try support.parse_move(pos, "e2e4");
     pos.play_move(types.Color.White, m1);
-    const m2 = types.Move.new_from_string(pos, "d7d5"[0..]);
+    const m2 = try support.parse_move(pos, "d7d5");
     pos.play_move(types.Color.Black, m2);
-    const m3 = types.Move.new_from_string(pos, "e4d5"[0..]);
+    const m3 = try support.parse_move(pos, "e4d5");
     pos.play_move(types.Color.White, m3);
 
     pos.undo_move(types.Color.White, m3);
@@ -331,7 +331,7 @@ test "zobrist: hash differs after a real move" {
     pos.set_fen(types.DEFAULT_FEN[0..]);
 
     const orig_hash = pos.hash;
-    const m = types.Move.new_from_string(pos, "e2e4"[0..]);
+    const m = try support.parse_move(pos, "e2e4");
     pos.play_move(types.Color.White, m);
     try expect(pos.hash != orig_hash);
     pos.undo_move(types.Color.White, m);
@@ -363,8 +363,6 @@ fn packed_move_bits(flags: types.MoveFlags, from: types.Square, to: types.Square
 }
 
 test "types-move: packed layout and to_u16 bit ordering" {
-    const quiet_queen_promotion: types.MoveFlags = @fromBackingInt(types.PR_QUEEN);
-    const capturing_queen_promotion: types.MoveFlags = @fromBackingInt(types.PC_QUEEN);
     {
         const m = types.Move.new_from_to_flag(types.Square.e2, types.Square.e4, types.MoveFlags.DOUBLE_PUSH);
         try expect(m.get_from() == types.Square.e2);
@@ -394,17 +392,17 @@ test "types-move: packed layout and to_u16 bit ordering" {
         try expect(m.to_u16() == packed_move_bits(.CAPTURE, .e4, .d5));
     }
     {
-        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, quiet_queen_promotion);
+        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, .PR_QUEEN);
         try expect(m.is_promotion());
         try expect(!m.is_capture());
-        try expect(m.flags == types.PR_QUEEN);
-        try expect(m.to_u16() == packed_move_bits(quiet_queen_promotion, .h7, .h8));
+        try expect(m.get_flags() == types.MoveFlags.PR_QUEEN);
+        try expect(m.to_u16() == packed_move_bits(.PR_QUEEN, .h7, .h8));
     }
     {
-        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, capturing_queen_promotion);
+        const m = types.Move.new_from_to_flag(types.Square.h7, types.Square.h8, .PC_QUEEN);
         try expect(m.is_promotion());
         try expect(m.is_capture());
-        try expect(m.flags == types.PC_QUEEN);
+        try expect(m.get_flags() == types.MoveFlags.PC_QUEEN);
     }
     {
         const m = types.Move.empty();
@@ -667,13 +665,13 @@ test "eval: nnue incremental equals fresh refresh after moves" {
     defer support.destroy_position(pos);
     pos.set_fen(types.DEFAULT_FEN[0..]);
 
-    const m1 = types.Move.new_from_string(pos, "e2e4"[0..]);
+    const m1 = try support.parse_move(pos, "e2e4");
     pos.play_move(types.Color.White, m1);
-    const m2 = types.Move.new_from_string(pos, "c7c5"[0..]);
+    const m2 = try support.parse_move(pos, "c7c5");
     pos.play_move(types.Color.Black, m2);
-    const m3 = types.Move.new_from_string(pos, "g1f3"[0..]);
+    const m3 = try support.parse_move(pos, "g1f3");
     pos.play_move(types.Color.White, m3);
-    const m4 = types.Move.new_from_string(pos, "d7d6"[0..]);
+    const m4 = try support.parse_move(pos, "d7d6");
     pos.play_move(types.Color.Black, m4);
 
     const incremental_w = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.White, pos);
@@ -694,7 +692,7 @@ test "eval: nnue king mirror crossing matches fresh (white e1d1)" {
     defer support.destroy_position(pos);
     pos.set_fen("4k3/8/8/8/8/8/8/4K3 w - -"[0..]);
 
-    const mv = types.Move.new_from_string(pos, "e1d1"[0..]);
+    const mv = try support.parse_move(pos, "e1d1");
     pos.play_move(types.Color.White, mv);
     try support.expect_nnue_matches_fresh(pos);
 
@@ -709,7 +707,7 @@ test "eval: nnue king mirror crossing matches fresh (black e8d8)" {
     defer support.destroy_position(pos);
     pos.set_fen("4k3/8/8/8/8/8/8/4K3 b - -"[0..]);
 
-    const mv = types.Move.new_from_string(pos, "e8d8"[0..]);
+    const mv = try support.parse_move(pos, "e8d8");
     pos.play_move(types.Color.Black, mv);
     try support.expect_nnue_matches_fresh(pos);
 
@@ -724,7 +722,7 @@ test "eval: nnue white castling OO matches fresh (bucket change)" {
     defer support.destroy_position(pos);
     pos.set_fen("r3k2r/8/8/8/8/8/8/R3K2R w KQkq -"[0..]);
 
-    const mv = types.Move.new_from_string(pos, "e1g1"[0..]);
+    const mv = try support.parse_move(pos, "e1g1");
     pos.play_move(types.Color.White, mv);
     try support.expect_nnue_matches_fresh(pos);
 
@@ -739,7 +737,7 @@ test "eval: nnue black castling OOO matches fresh" {
     defer support.destroy_position(pos);
     pos.set_fen("r3k2r/8/8/8/8/8/8/R3K2R b KQkq -"[0..]);
 
-    const mv = types.Move.new_from_string(pos, "e8c8"[0..]);
+    const mv = try support.parse_move(pos, "e8c8");
     pos.play_move(types.Color.Black, mv);
     try support.expect_nnue_matches_fresh(pos);
 
@@ -754,15 +752,15 @@ test "eval: nnue king capture into another bucket, then further moves, matches f
     defer support.destroy_position(pos);
     pos.set_fen("4k3/8/8/8/8/8/3p3P/4K3 w - -"[0..]);
 
-    const capture = types.Move.new_from_string(pos, "e1d2"[0..]);
+    const capture = try support.parse_move(pos, "e1d2");
     pos.play_move(types.Color.White, capture);
     try support.expect_nnue_matches_fresh(pos);
 
-    const reply = types.Move.new_from_string(pos, "e8e7"[0..]);
+    const reply = try support.parse_move(pos, "e8e7");
     pos.play_move(types.Color.Black, reply);
     try support.expect_nnue_matches_fresh(pos);
 
-    const push = types.Move.new_from_string(pos, "h2h4"[0..]);
+    const push = try support.parse_move(pos, "h2h4");
     pos.play_move(types.Color.White, push);
     try support.expect_nnue_matches_fresh(pos);
 
@@ -780,15 +778,15 @@ test "eval: nnue finny revisit after leaving and returning to bucket" {
     defer support.destroy_position(pos);
     pos.set_fen("4k3/8/8/8/8/8/8/4K3 w - -"[0..]);
 
-    const m1 = types.Move.new_from_string(pos, "e1d1"[0..]);
+    const m1 = try support.parse_move(pos, "e1d1");
     pos.play_move(types.Color.White, m1);
     try support.expect_nnue_matches_fresh(pos);
 
-    const m2 = types.Move.new_from_string(pos, "e8f8"[0..]);
+    const m2 = try support.parse_move(pos, "e8f8");
     pos.play_move(types.Color.Black, m2);
     try support.expect_nnue_matches_fresh(pos);
 
-    const m3 = types.Move.new_from_string(pos, "d1e1"[0..]);
+    const m3 = try support.parse_move(pos, "d1e1");
     pos.play_move(types.Color.White, m3);
     try support.expect_nnue_matches_fresh(pos);
 
@@ -807,11 +805,11 @@ test "eval: nnue incremental equals fresh after a capture" {
     defer support.destroy_position(pos);
     pos.set_fen(types.DEFAULT_FEN[0..]);
 
-    const m1 = types.Move.new_from_string(pos, "e2e4"[0..]);
+    const m1 = try support.parse_move(pos, "e2e4");
     pos.play_move(types.Color.White, m1);
-    const m2 = types.Move.new_from_string(pos, "d7d5"[0..]);
+    const m2 = try support.parse_move(pos, "d7d5");
     pos.play_move(types.Color.Black, m2);
-    const m3 = types.Move.new_from_string(pos, "e4d5"[0..]);
+    const m3 = try support.parse_move(pos, "e4d5");
     pos.play_move(types.Color.White, m3);
 
     const incremental = pos.evaluator.nnue_evaluator.evaluate_uncached(types.Color.Black, pos);
@@ -866,7 +864,7 @@ test "search: mate in 1 (white back-rank)" {
 
     try expect(@as(i32, @intCast(@abs(score))) >= hce.MateScore - hce.MaxMate);
     try expect(score > 0);
-    try expect(f.searcher.best_move.to_u16() == f.move("a1a8").to_u16());
+    try expect(f.searcher.best_move.to_u16() == (try f.move("a1a8")).to_u16());
 }
 
 test "search: mate in 1 (black back-rank)" {
@@ -877,7 +875,7 @@ test "search: mate in 1 (black back-rank)" {
 
     try expect(@as(i32, @intCast(@abs(score))) >= hce.MateScore - hce.MaxMate);
     try expect(score > 0);
-    try expect(f.searcher.best_move.to_u16() == f.move("a8a1").to_u16());
+    try expect(f.searcher.best_move.to_u16() == (try f.move("a8a1")).to_u16());
 }
 
 test "search: forced node-limited search continues after reporting mate" {
