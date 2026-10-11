@@ -1,0 +1,8 @@
+target-version = "py312"
+line-length = 110
+src = ["scripts"]
+extend-exclude = ["deps", "tcec/version.py"]
+
+[lint]
+select = ["ALL"]
+ignore = ["COM812", "CPY", "D", "INP001", "PT", "S603", "T20"]

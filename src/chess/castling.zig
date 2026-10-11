@@ -1,4 +1,4 @@
-const std = @import("std");
+//! See docs/CHESS960.md.
 const types = @import("types.zig");
 const tables = @import("tables.zig");
 
@@ -23,8 +23,6 @@ pub inline fn color_rights(color: types.Color) Rights {
     return right(color, .King) | right(color, .Queen);
 }
 
-/// Geometry of one castling move. Every square set is precomputed so movegen
-/// only performs mask tests.
 pub const Rule = struct {
     king_from: types.Square = .NO_SQUARE,
     rook_from: types.Square = .NO_SQUARE,
@@ -32,8 +30,6 @@ pub const Rule = struct {
     rook_to: types.Square = .NO_SQUARE,
     must_be_empty: types.Bitboard = 0,
     must_be_safe: types.Bitboard = 0,
-    // The castling rook can shield `king_to` from a rank attack only when it is
-    // not on an edge file; only then does movegen re-check `king_to` without it.
     rook_may_shield: bool = false,
 
     pub fn init(color: types.Color, side: Side, king_from: types.Square, rook_from: types.Square) Rule {
@@ -55,7 +51,6 @@ pub const Rule = struct {
         };
     }
 
-    // Squares strictly between `from` and `to` plus `to` itself.
     fn path(from: types.Square, to: types.Square) types.Bitboard {
         const between = if (from == to) 0 else tables.SquaresBetween[from.index()][to.index()];
         return between | types.SquareIndexBB[to.index()];
@@ -67,8 +62,6 @@ pub const Rule = struct {
     }
 };
 
-/// Castling configuration of a game: which rook castles on which side, and the
-/// rights each square revokes when a piece leaves or lands on it.
 pub const Setup = struct {
     rules: [types.N_COLORS][2]Rule = .{ .{ .{}, .{} }, .{ .{}, .{} } },
     revoked_by: [types.N_SQUARES]Rights = @splat(0),

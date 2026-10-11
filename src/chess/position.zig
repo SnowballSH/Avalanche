@@ -1,43 +1,36 @@
+//! See docs/BOARD.md and docs/CHESS960.md.
 const std = @import("std");
 const builtin = @import("builtin");
 const platform = @import("../platform.zig");
 const types = @import("types.zig");
 const tables = @import("tables.zig");
 const castling = @import("castling.zig");
+const fen = @import("fen.zig");
 const zobrist = @import("zobrist.zig");
-const utils = @import("utils.zig");
 const hce = @import("../engine/hce.zig");
 const see = @import("../engine/see.zig");
 
 pub const MAX_HISTORY_PLY: u32 = 1920;
+const SEARCH_PLY_ALLOWANCE: u32 = 256;
+pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + SEARCH_PLY_ALLOWANCE;
+pub const MAX_FULLMOVE: u32 = (std.math.maxInt(u32) - HISTORY_CAPACITY) / 2;
 
-/// Entries of the undo stack, one per position from `set_fen` on: the longest
-/// game the UCI position parser replays (MAX_HISTORY_PLY moves) and the deepest
-/// search on top of it. search.zig checks its MAX_PLY against this.
-pub const HISTORY_CAPACITY: u32 = MAX_HISTORY_PLY + 256;
+const RANK_SEPARATORS = 7;
+const LONGEST_PIECE_PLACEMENT = types.N_SQUARES + RANK_SEPARATORS;
+pub const FEN_CAPACITY = LONGEST_PIECE_PLACEMENT + std.fmt.count(" w KQkq a3 {d} {d}", .{ std.math.maxInt(u16), std.math.maxInt(u32) });
 
 pub const Keys = struct {
     hash: u64 = 0,
     pawn_hash: u64 = 0,
-    nonpawn_hash: [2]u64 = .{ 0, 0 },
+    nonpawn_hash: [types.N_COLORS]u64 = .{ 0, 0 },
 };
 
-// Stores information for undoing a move.
 pub const UndoInfo = struct {
     previous_keys: Keys,
-
-    // Enemy pieces attacking the king of the side to move
     king_attackers: types.Bitboard,
-
-    // Fifty-move rule counter
     fifty: u16,
-
     castling: castling.Rights,
-
-    // piece that was captured
     captured: types.Piece,
-
-    // EP square
     ep_sq: types.Square,
 
     pub fn new() UndoInfo {
@@ -63,40 +56,25 @@ pub const UndoInfo = struct {
     }
 };
 
-// A chess position
 pub const Position = struct {
-    // Bitboards of each piece
     piece_bitboards: [types.N_PIECES]types.Bitboard = undefined,
     occupancy: [types.N_COLORS]types.Bitboard = .{ 0, 0 },
-    // Mailbox representation of the board
     mailbox: [types.N_SQUARES]types.Piece = undefined,
-    // Current player
     turn: types.Color = types.Color.White,
-    // Ply since the last `set_fen` / `init` (indexes `history[]`).
     game_ply: u32 = 0,
-    // Half-moves implied by FEN fullmove + side to move at `set_fen`.
     start_ply: u32 = 0,
-    // Zobrist Hash
     hash: u64 = 0,
-    // Zobrist hash of the pawns only
     pawn_hash: u64 = 0,
-    // Zobrist hash of each color's knights, bishops, rooks, queens and king
-    nonpawn_hash: [2]u64 = .{ 0, 0 },
+    nonpawn_hash: [types.N_COLORS]u64 = .{ 0, 0 },
 
-    // History of Undo information.
     history: [HISTORY_CAPACITY]UndoInfo = undefined,
 
-    // Working values of the move generators: the pieces attacking the king of
-    // the side they last ran for, and that side's pieces pinned to it.
     checkers: types.Bitboard = 0,
     pinned: types.Bitboard = 0,
 
     castling: castling.Setup = .{},
-    // UCI_Chess960: write castling king-captures-rook. A UCI preference, so
-    // it survives `reset`/`set_fen`.
     uci_chess960: bool = false,
 
-    // Classical Evaluator
     evaluator: hce.DynamicEvaluator = undefined,
 
     pub fn init(self: *Position) void {
@@ -106,8 +84,6 @@ pub const Position = struct {
         self.reset();
     }
 
-    /// Recomputes evaluation state from scratch; required after the network
-    /// weights change for a position that is kept.
     pub fn refresh_evaluation(self: *Position) void {
         self.evaluator.full_refresh(self);
     }
@@ -116,10 +92,6 @@ pub const Position = struct {
         self.evaluator.nnue_evaluator.release_storage();
     }
 
-    /// Installs `src`'s current position without touching the evaluator, so
-    /// this position keeps its own accumulator stack and Finny table; follow
-    /// with `rebuild_evaluation`. Only the current undo entry is copied: moves
-    /// played from here never read the entries below it.
     pub fn copy_game_state(self: *Position, src: *const Position) void {
         self.piece_bitboards = src.piece_bitboards;
         self.occupancy = src.occupancy;
@@ -135,9 +107,6 @@ pub const Position = struct {
         self.uci_chess960 = src.uci_chess960;
     }
 
-    /// Recomputes evaluation state for the current pieces at the bottom of the
-    /// accumulator stack. Finny entries record the bitboards they were built
-    /// for, so the existing table is reused whatever position it last saw.
     pub fn rebuild_evaluation(self: *Position) void {
         self.evaluator.nnue_evaluator.depth = 0;
         self.evaluator.need_hce = false;
@@ -155,24 +124,17 @@ pub const Position = struct {
         self.evaluator.nnue_evaluator.adopt_storage(storage);
     }
 
-    pub fn new() Position {
-        var pos: Position = undefined;
-        pos.init();
-        return pos;
-    }
-
     pub fn debug_print(self: *const Position) void {
         const line = "   +---+---+---+---+---+---+---+---+\n";
         const letters = "     A   B   C   D   E   F   G   H\n";
         platform.print("{s}", .{letters});
-        var i: i32 = 56;
-        while (i >= 0) : (i -= 8) {
-            platform.print("{s} {} ", .{ line, @divTrunc(i, 8) + 1 });
-            var j: i32 = 0;
-            while (j < 8) : (j += 1) {
-                platform.print("| {c} ", .{types.PieceString[self.mailbox[@as(usize, @intCast(i + j))].index()]});
+        for (0..8) |ranks_below_top| {
+            const rank = 7 - ranks_below_top;
+            platform.print("{s} {} ", .{ line, rank + 1 });
+            for (self.mailbox[rank * 8 ..][0..8]) |piece| {
+                platform.print("| {c} ", .{types.PieceString[piece.index()]});
             }
-            platform.print("| {}\n", .{@divTrunc(i, 8) + 1});
+            platform.print("| {}\n", .{rank + 1});
         }
         platform.print("{s}", .{line});
         platform.print("{s}\n", .{letters});
@@ -183,10 +145,10 @@ pub const Position = struct {
         platform.print("Hash: 0x{x}\n", .{self.hash});
     }
 
-    pub fn set_fen(self: *Position, fen: []const u8) void {
+    pub fn set_fen(self: *Position, text: []const u8) void {
         self.reset();
         var sq: i32 = @as(i32, @intCast(@backingInt(types.Square.a8)));
-        var tokens = std.mem.tokenizeScalar(u8, fen, ' ');
+        var tokens = std.mem.tokenizeScalar(u8, text, ' ');
         const bd = tokens.next() orelse return;
         for (bd) |ch| {
             if (std.ascii.isDigit(ch)) {
@@ -194,7 +156,7 @@ pub const Position = struct {
             } else if (ch == '/') {
                 sq += @backingInt(types.Direction.South) * 2;
             } else {
-                self.add_piece(@as(types.Piece, @fromBackingInt(@intCast(utils.first_index(u8, types.PieceString[0..], ch).?))), @as(types.Square, @fromBackingInt(@intCast(sq))));
+                self.add_piece(@as(types.Piece, @fromBackingInt(@intCast(std.mem.findScalar(u8, types.PieceString, ch).?))), @as(types.Square, @fromBackingInt(@intCast(sq))));
                 sq += 1;
             }
         }
@@ -209,40 +171,17 @@ pub const Position = struct {
 
         self.parse_castling(tokens.next() orelse "-");
 
-        const ep = tokens.next() orelse "-";
-        if (ep.len == 2) {
-            for (types.SquareToString, 0..) |sq_str, i| {
-                if (std.mem.eql(u8, ep, sq_str)) {
-                    // Same "phantom EP" guard as play_move: only record the square
-                    // when a pawn of the side to move can actually capture en
-                    // passant, so an idle EP square in the FEN does not give this
-                    // position a hash that differs from the same position with the
-                    // EP right expired (see play_move's DOUBLE_PUSH branch).
-                    const ep_target = @as(types.Square, @fromBackingInt(@intCast(i)));
-                    const can_capture = if (self.turn == types.Color.White)
-                        (tables.get_pawn_attacks(types.Color.Black, ep_target) & self.piece_bitboards[types.Piece.WHITE_PAWN.index()]) != 0
-                    else
-                        (tables.get_pawn_attacks(types.Color.White, ep_target) & self.piece_bitboards[types.Piece.BLACK_PAWN.index()]) != 0;
-                    if (can_capture) {
-                        self.history[self.game_ply].ep_sq = ep_target;
-                        self.hash ^= zobrist.EnPassantHash[types.file_plain(i)];
-                    }
-                    break;
-                }
-            }
+        if (self.capturable_en_passant_square(tokens.next() orelse "-")) |ep_sq| {
+            self.history[self.game_ply].ep_sq = ep_sq;
+            self.hash ^= zobrist.EnPassantHash[ep_sq.file().index()];
         }
 
         if (tokens.next()) |fifty_tok| {
             self.history[self.game_ply].fifty = std.fmt.parseUnsigned(u16, fifty_tok, 10) catch 0;
         }
 
-        if (tokens.next()) |fullmove_tok| {
-            const fullmove = std.fmt.parseUnsigned(u32, fullmove_tok, 10) catch 1;
-            const fm = @max(fullmove, 1);
-            self.start_ply = (fm - 1) * 2 + @as(u32, if (self.turn == types.Color.Black) 1 else 0);
-        } else {
-            self.start_ply = 0;
-        }
+        const fullmove = if (tokens.next()) |field| parse_fullmove(field) else 1;
+        self.start_ply = (fullmove - 1) * 2 + @intFromBool(self.turn == types.Color.Black);
 
         self.hash ^= zobrist.CastlingHash[self.castling_rights()];
         self.history[self.game_ply].king_attackers = switch (self.turn) {
@@ -251,6 +190,23 @@ pub const Position = struct {
         };
 
         self.evaluator.full_refresh(self);
+    }
+
+    fn parse_fullmove(field: []const u8) u32 {
+        const number = std.fmt.parseUnsigned(u32, field, 10) catch |failure| switch (failure) {
+            error.Overflow => MAX_FULLMOVE,
+            error.InvalidCharacter => 1,
+        };
+        return std.math.clamp(number, 1, MAX_FULLMOVE);
+    }
+
+    fn capturable_en_passant_square(self: *const Position, field: []const u8) ?types.Square {
+        const opponent = self.turn.invert();
+        const their_pawns = self.piece_bitboards[types.Piece.new(opponent, .Pawn).index()];
+        const our_pawns = self.piece_bitboards[types.Piece.new(self.turn, .Pawn).index()];
+        const square = (fen.en_passant_square(field, self.turn, their_pawns, self.all_all_pieces()) catch null) orelse return null;
+        const capturers = tables.PawnAttacks[@backingInt(opponent)][square.index()] & our_pawns;
+        return if (capturers != 0) square else null;
     }
 
     pub fn compute_pawn_hash(self: *const Position) u64 {
@@ -292,8 +248,6 @@ pub const Position = struct {
         structure_hash.* ^= key;
     }
 
-    // Accepts standard, X-FEN (K/Q = outermost rook on that wing) and
-    // Shredder-FEN (rook file letters); rights naming a missing rook are dropped.
     fn parse_castling(self: *Position, field: []const u8) void {
         var rights = castling.NO_RIGHTS;
         for (field) |ch| {
@@ -331,7 +285,6 @@ pub const Position = struct {
         self.history[self.game_ply].castling = rights;
     }
 
-    // Squares on the given wing's side of `sq` (higher indices for the king side).
     fn squares_beyond(sq: types.Square, side: castling.Side) types.Bitboard {
         const bit = types.SquareIndexBB[sq.index()];
         return switch (side) {
@@ -376,98 +329,42 @@ pub const Position = struct {
         return self.start_ply + self.game_ply;
     }
 
-    pub fn basic_fen(self: *const Position, allocator: std.mem.Allocator) []u8 {
-        var buf: [128]u8 = undefined;
-        const fen: []u8 = &buf;
-        var index: usize = 0;
+    pub fn write_fen(self: *const Position, buf: *[FEN_CAPACITY]u8) []const u8 {
+        var writer: std.Io.Writer = .fixed(buf);
+        self.print_fen(&writer) catch unreachable;
+        return writer.buffered();
+    }
 
-        var i: i32 = 56;
-        while (i >= 0) : (i -= 8) {
+    fn print_fen(self: *const Position, writer: *std.Io.Writer) std.Io.Writer.Error!void {
+        for (0..8) |ranks_below_top| {
+            const rank = 7 - ranks_below_top;
+            if (ranks_below_top != 0) try writer.writeByte('/');
             var empty_count: u8 = 0;
-            var j: i32 = 0;
-            while (j < 8) : (j += 1) {
-                const idx = @as(usize, @intCast(i + j));
-
-                if (self.mailbox[idx] == types.Piece.NO_PIECE) {
+            for (self.mailbox[rank * 8 ..][0..8]) |piece| {
+                if (piece == types.Piece.NO_PIECE) {
                     empty_count += 1;
-                } else {
-                    const pieceChar = types.PieceString[self.mailbox[idx].index()];
-                    if (empty_count > 0) {
-                        fen[index] = empty_count + '0';
-                        index += 1;
-                        empty_count = 0;
-                    }
-                    fen[index] = pieceChar;
-                    index += 1;
+                    continue;
                 }
+                if (empty_count > 0) try writer.writeByte('0' + empty_count);
+                empty_count = 0;
+                try writer.writeByte(types.PieceString[piece.index()]);
             }
-            if (empty_count > 0) {
-                fen[index] = empty_count + '0';
-                index += 1;
-            }
-            if (i > 0) {
-                fen[index] = '/';
-                index += 1;
-            }
+            if (empty_count > 0) try writer.writeByte('0' + empty_count);
         }
 
-        fen[index] = ' ';
-        index += 1;
-
-        fen[index] = if (self.turn == types.Color.White) 'w' else 'b';
-        index += 1;
-
-        fen[index] = ' ';
-        index += 1;
+        try writer.print(" {c} ", .{@as(u8, if (self.turn == .White) 'w' else 'b')});
 
         const rights = self.castling_rights();
-        const castle_start = index;
+        if (rights == castling.NO_RIGHTS) try writer.writeByte('-');
         for ([_]types.Color{ .White, .Black }) |color| {
             for ([_]castling.Side{ .King, .Queen }) |side| {
-                if (rights & castling.right(color, side) != 0) {
-                    fen[index] = self.castling_symbol(color, side);
-                    index += 1;
-                }
+                if (rights & castling.right(color, side) != 0) try writer.writeByte(self.castling_symbol(color, side));
             }
         }
-        if (index == castle_start) {
-            fen[index] = '-';
-            index += 1;
-        }
 
-        fen[index] = ' ';
-        index += 1;
-
-        const ep = self.history[self.game_ply].ep_sq;
-        if (ep == types.Square.NO_SQUARE) {
-            fen[index] = '-';
-            index += 1;
-        } else {
-            const ep_str = types.SquareToString[ep.index()];
-            fen[index] = ep_str[0];
-            index += 1;
-            fen[index] = ep_str[1];
-            index += 1;
-        }
-
-        fen[index] = ' ';
-        index += 1;
-
-        var fifty_buf: [8]u8 = undefined;
-        const fifty_str = std.fmt.bufPrint(&fifty_buf, "{}", .{self.history[self.game_ply].fifty}) catch "0";
-        @memcpy(fen[index..][0..fifty_str.len], fifty_str);
-        index += fifty_str.len;
-
-        fen[index] = ' ';
-        index += 1;
-
-        const fullmove: u32 = @max(@as(u32, 1), self.absolute_ply() / 2 + 1);
-        var fm_buf: [8]u8 = undefined;
-        const fm_str = std.fmt.bufPrint(&fm_buf, "{}", .{fullmove}) catch "1";
-        @memcpy(fen[index..][0..fm_str.len], fm_str);
-        index += fm_str.len;
-
-        return allocator.dupe(u8, fen[0..index]) catch unreachable;
+        const undo = &self.history[self.game_ply];
+        const en_passant: []const u8 = if (undo.ep_sq == types.Square.NO_SQUARE) "-" else types.SquareToString[undo.ep_sq.index()];
+        try writer.print(" {s} {d} {d}", .{ en_passant, undo.fifty, self.absolute_ply() / 2 + 1 });
     }
 
     pub inline fn phase(self: *const Position) usize {
@@ -527,7 +424,6 @@ pub const Position = struct {
         }
     }
 
-    // DO NOT CALL IF DESTINATION IS NOT EMPTY
     inline fn move_piece_quiet(self: *Position, from: types.Square, to: types.Square) void {
         self.relocate(from, to, true);
     }
@@ -601,7 +497,6 @@ pub const Position = struct {
         }
     }
 
-    /// Enemy pieces attacking the king of `color`.
     pub inline fn king_attackers(self: *const Position, comptime color: types.Color) types.Bitboard {
         const king_bb = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.King).index()];
         if (king_bb == 0) return 0;
@@ -620,10 +515,6 @@ pub const Position = struct {
         return self.king_attackers(color) != 0;
     }
 
-    pub inline fn has_non_pawns(self: *const Position) bool {
-        return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] | self.piece_bitboards[types.Piece.WHITE_KING.index()] | self.piece_bitboards[types.Piece.BLACK_KING.index()] != self.all_pieces(types.Color.White) | self.all_pieces(types.Color.Black);
-    }
-
     pub inline fn has_non_pawns_color(self: *const Position, comptime color: types.Color) bool {
         const king = types.Piece.new_comptime(color, types.PieceType.King);
         const pawn = types.Piece.new_comptime(color, types.PieceType.Pawn);
@@ -634,8 +525,6 @@ pub const Position = struct {
         return self.piece_bitboards[types.Piece.WHITE_PAWN.index()] | self.piece_bitboards[types.Piece.BLACK_PAWN.index()] != 0;
     }
 
-    // Moving pieces
-
     pub fn play_move(self: *Position, comptime color: types.Color, move: types.Move) void {
         self.evaluator.nnue_evaluator.push(self);
         const previous = self.history[self.game_ply];
@@ -643,9 +532,6 @@ pub const Position = struct {
         self.turn = self.turn.invert();
         self.game_ply += 1;
 
-        // The previous position's en-passant key leaves the hash (mirrors
-        // play_null_move). A DOUBLE_PUSH below adds the new EP key; otherwise
-        // the new position simply has no EP square.
         var state_key = zobrist.TurnHash;
         if (previous.ep_sq != types.Square.NO_SQUARE) {
             state_key ^= zobrist.EnPassantHash[previous.ep_sq.file().index()];
@@ -672,7 +558,6 @@ pub const Position = struct {
             types.MoveFlags.DOUBLE_PUSH => {
                 self.move_piece_quiet(from, to);
 
-                // Only record/hash EP when an enemy pawn can actually capture.
                 const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
                 const ep_target = from.add(types.Direction.North.relative_dir(color));
                 if (tables.get_pawn_attacks(color, ep_target) & self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()] != 0) {
@@ -759,7 +644,6 @@ pub const Position = struct {
         const rook_from = if (undo) rule.rook_to else rule.rook_from;
         const rook_to = if (undo) rule.rook_from else rule.rook_to;
 
-        // In Chess960 the king and rook may land on each other's origin squares.
         if (king_to == rook_from or rook_to == king_from) {
             self.lift(rook_from, !undo);
             if (king_from != king_to) self.relocate(king_from, king_to, !undo);
@@ -824,7 +708,6 @@ pub const Position = struct {
         return list;
     }
 
-    // Generate all LEGAL moves
     pub fn generate_legal_moves(self: *Position, comptime color: types.Color, list: *types.MoveList) void {
         const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
@@ -840,7 +723,6 @@ pub const Position = struct {
         const our_ortho_sliders = self.orthogonal_sliders(color);
         const their_ortho_sliders = self.orthogonal_sliders(opp);
 
-        // Bitboards just for temp storage
         var b1: types.Bitboard = 0;
         var b2: types.Bitboard = 0;
         var b3: types.Bitboard = 0;
@@ -850,7 +732,6 @@ pub const Position = struct {
         const rel_northwest = if (color == types.Color.White) types.Direction.NorthWest else types.Direction.SouthEast;
         const rel_northeast = if (color == types.Color.White) types.Direction.NorthEast else types.Direction.SouthWest;
 
-        // Squares King cannot go to
         var danger: types.Bitboard = 0;
 
         const their_pawns = self.piece_bitboards[types.Piece.new_comptime(opp, types.PieceType.Pawn).index()];
@@ -872,7 +753,6 @@ pub const Position = struct {
             danger |= tables.get_attacks(types.PieceType.Rook, types.pop_lsb(&b1), all_bb ^ types.SquareIndexBB[our_king.index()]);
         }
 
-        // King moves
         b1 = tables.get_attacks(types.PieceType.King, our_king, all_bb) & ~(us_bb | danger);
 
         types.Move.make_all(types.MoveFlags.QUIET, our_king, b1 & ~them_bb, list);
@@ -895,10 +775,8 @@ pub const Position = struct {
             b1 = tables.SquaresBetween[our_king.index()][sq.index()] & us_bb;
 
             if (b1 == 0) {
-                // No our piece between king and slider: check
                 self.checkers ^= types.SquareIndexBB[sq.index()];
             } else if ((b1 & (b1 - 1)) == 0) {
-                // Only one of our piece between king and slider: pinned
                 self.pinned ^= b1;
             }
         }
@@ -907,12 +785,9 @@ pub const Position = struct {
 
         switch (types.popcount(self.checkers)) {
             2 => {
-                // Double check: we have to move the king
                 return;
             },
             1 => {
-                // Single check: Move, capture, or block
-
                 var checker_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.checkers))));
 
                 switch (self.mailbox[checker_sq.index()]) {
@@ -925,7 +800,6 @@ pub const Position = struct {
                             }
                         }
 
-                        // If checker is a pawn, then we can only move or capture.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned & ~types.SquareIndexBB[our_king.index()];
                         while (b1 != 0) {
                             list.append(types.Move.new_from_to_flag(types.pop_lsb(&b1), checker_sq, types.MoveFlags.CAPTURE));
@@ -935,15 +809,14 @@ pub const Position = struct {
                     },
 
                     types.Piece.new_comptime(opp, types.PieceType.Knight) => {
-                        // If checker is a knight, then we can only move or capture.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned & ~types.SquareIndexBB[our_king.index()];
                         while (b1 != 0) {
                             var psq = types.pop_lsb(&b1);
                             if (self.mailbox[psq.index()].piece_type() == types.PieceType.Pawn and (types.SquareIndexBB[psq.index()] & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()]) != 0) {
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                                list.append(types.Move.new_from_to_flag(psq, checker_sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_QUEEN));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_ROOK));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_KNIGHT));
+                                list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.PC_BISHOP));
                             } else {
                                 list.append(types.Move.new_from_to_flag(psq, checker_sq, types.MoveFlags.CAPTURE));
                             }
@@ -959,12 +832,7 @@ pub const Position = struct {
                 }
             },
             else => {
-                // No check: do anything
-
-                // we can take anything
                 capture_mask = them_bb;
-
-                // or play quiet move to empty squares
                 quiet_mask = ~all_bb;
 
                 var ep = self.history[self.game_ply].ep_sq;
@@ -980,7 +848,7 @@ pub const Position = struct {
                         }
                     }
 
-                    // Diagonal pin? OK
+                    // A pinned pawn may capture en passant only along its pin line, which then runs through the en-passant square.
                     b1 = b2 & self.pinned & tables.LineOf[ep.index()][our_king.index()];
                     if (b1 != 0) {
                         list.append(types.Move.new_from_to_flag(@as(types.Square, @fromBackingInt(@intCast(types.lsb(b1)))), ep, types.MoveFlags.EN_PASSANT));
@@ -989,12 +857,9 @@ pub const Position = struct {
 
                 self.generate_castling(color, all_bb, danger, list);
 
-                // pinned rook, bishop, or queen
                 b1 = ~(not_pinned | self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Knight).index()]);
                 while (b1 != 0) {
                     sq = types.pop_lsb(&b1);
-
-                    // Only include moves that align with king.
 
                     b2 = tables.get_attacks(self.mailbox[sq.index()].piece_type(), sq, all_bb) & tables.LineOf[our_king.index()][sq.index()];
                     types.Move.make_all(types.MoveFlags.QUIET, sq, b2 & quiet_mask, list);
@@ -1006,22 +871,20 @@ pub const Position = struct {
                     sq = types.pop_lsb(&b1);
 
                     if (sq.rank() == types.Rank.RANK7.relative_rank(color)) {
-                        // Quiet promotions are not possible here
+                        // A pawn pinned on its seventh rank cannot push: the pinner of a pin along the file stands on the promotion square.
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_QUEEN));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_ROOK));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_KNIGHT));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_BISHOP));
                         }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
                         types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2, list);
 
-                        // Single Pawn Pushes
                         b2 = types.shift_bitboard(types.SquareIndexBB[sq.index()], rel_north) & ~all_bb & tables.LineOf[our_king.index()][sq.index()];
-                        // Double Pawn Pushes
                         b3 = types.shift_bitboard(b2 & types.MaskRank[types.Rank.RANK3.relative_rank(color).index()], rel_north) & ~all_bb & tables.LineOf[our_king.index()][sq.index()];
 
                         types.Move.make_all(types.MoveFlags.QUIET, sq, b2, list);
@@ -1031,7 +894,6 @@ pub const Position = struct {
             },
         }
 
-        // Non-pinned knight moves
         b1 = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Knight).index()] & not_pinned;
         while (b1 != 0) {
             sq = types.pop_lsb(&b1);
@@ -1040,7 +902,6 @@ pub const Position = struct {
             types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2 & capture_mask, list);
         }
 
-        // Non-pinned diagonal moves
         b1 = our_diag_sliders & not_pinned;
         while (b1 != 0) {
             sq = types.pop_lsb(&b1);
@@ -1049,7 +910,6 @@ pub const Position = struct {
             types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2 & capture_mask, list);
         }
 
-        // Non-pinned orthogonal moves
         b1 = our_ortho_sliders & not_pinned;
         while (b1 != 0) {
             sq = types.pop_lsb(&b1);
@@ -1060,10 +920,8 @@ pub const Position = struct {
 
         b1 = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Pawn).index()] & not_pinned & ~types.MaskRank[types.Rank.RANK7.relative_rank(color).index()];
 
-        // Single pushes
         b2 = types.shift_bitboard(b1, rel_north) & ~all_bb;
 
-        // Double pushes
         b3 = types.shift_bitboard(b2 & types.MaskRank[types.Rank.RANK3.relative_rank(color).index()], rel_north) & quiet_mask;
 
         b2 &= quiet_mask;
@@ -1078,7 +936,6 @@ pub const Position = struct {
             list.append(types.Move.new_from_to_flag(sq.sub(rel_north).sub(rel_north), sq, types.MoveFlags.DOUBLE_PUSH));
         }
 
-        // Pawn captures
         b2 = types.shift_bitboard(b1, rel_northwest) & capture_mask;
         b3 = types.shift_bitboard(b1, rel_northeast) & capture_mask;
 
@@ -1092,48 +949,41 @@ pub const Position = struct {
             list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.CAPTURE));
         }
 
-        // Promotions
         b1 = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Pawn).index()] & not_pinned & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()];
         if (b1 != 0) {
-            // Quiet Promotions
             b2 = types.shift_bitboard(b1, rel_north) & quiet_mask;
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_BISHOP));
             }
 
-            // Promotion Captures
             b2 = types.shift_bitboard(b1, rel_northwest) & capture_mask;
             b3 = types.shift_bitboard(b1, rel_northeast) & capture_mask;
 
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_BISHOP));
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_BISHOP));
             }
         }
-
-        // Finish!
-        return;
     }
 
-    // Generate all CAPTURE moves
     pub fn generate_q_moves(self: *Position, comptime color: types.Color, list: *types.MoveList) void {
         const opp = if (color == types.Color.White) types.Color.Black else types.Color.White;
 
@@ -1148,7 +998,6 @@ pub const Position = struct {
         const our_ortho_sliders = self.orthogonal_sliders(color);
         const their_ortho_sliders = self.orthogonal_sliders(opp);
 
-        // Bitboards just for temp storage
         var b1: types.Bitboard = 0;
         var b2: types.Bitboard = 0;
         var b3: types.Bitboard = 0;
@@ -1184,10 +1033,8 @@ pub const Position = struct {
             b1 = tables.SquaresBetween[our_king.index()][sq.index()] & us_bb;
 
             if (b1 == 0) {
-                // No our piece between king and slider: check
                 self.checkers ^= types.SquareIndexBB[sq.index()];
             } else if ((b1 & (b1 - 1)) == 0) {
-                // Only one of our piece between king and slider: pinned
                 self.pinned ^= b1;
             }
         }
@@ -1196,12 +1043,9 @@ pub const Position = struct {
 
         switch (types.popcount(self.checkers)) {
             2 => {
-                // Double check: we have to move the king
                 return;
             },
             1 => {
-                // Single check: Move, capture, or block
-
                 var checker_sq = @as(types.Square, @fromBackingInt(@intCast(types.lsb(self.checkers))));
 
                 switch (self.mailbox[checker_sq.index()]) {
@@ -1214,7 +1058,6 @@ pub const Position = struct {
                             }
                         }
 
-                        // If checker is a pawn, then we can only move or capture.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned & ~types.SquareIndexBB[our_king.index()];
                         while (b1 != 0) {
                             list.append(types.Move.new_from_to_flag(types.pop_lsb(&b1), checker_sq, types.MoveFlags.CAPTURE));
@@ -1224,7 +1067,6 @@ pub const Position = struct {
                     },
 
                     types.Piece.new_comptime(opp, types.PieceType.Knight) => {
-                        // If checker is a knight, then we can only move or capture.
                         b1 = self.attackers_from(color, checker_sq, all_bb) & not_pinned & ~types.SquareIndexBB[our_king.index()];
                         while (b1 != 0) {
                             list.append(types.Move.new_from_to_flag(types.pop_lsb(&b1), checker_sq, types.MoveFlags.CAPTURE));
@@ -1240,12 +1082,7 @@ pub const Position = struct {
                 }
             },
             else => {
-                // No check: do anything
-
-                // we can take anything
                 capture_mask = them_bb;
-
-                // or play quiet move to empty squares
                 quiet_mask = ~all_bb;
 
                 var ep = self.history[self.game_ply].ep_sq;
@@ -1261,19 +1098,16 @@ pub const Position = struct {
                         }
                     }
 
-                    // Diagonal pin? OK
+                    // A pinned pawn may capture en passant only along its pin line, which then runs through the en-passant square.
                     b1 = b2 & self.pinned & tables.LineOf[ep.index()][our_king.index()];
                     if (b1 != 0) {
                         list.append(types.Move.new_from_to_flag(@as(types.Square, @fromBackingInt(@intCast(types.lsb(b1)))), ep, types.MoveFlags.EN_PASSANT));
                     }
                 }
 
-                // pinned rook, bishop, or queen
                 b1 = ~(not_pinned | self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Knight).index()]);
                 while (b1 != 0) {
                     sq = types.pop_lsb(&b1);
-
-                    // Only include moves that align with king.
 
                     b2 = tables.get_attacks(self.mailbox[sq.index()].piece_type(), sq, all_bb) & tables.LineOf[our_king.index()][sq.index()];
 
@@ -1285,14 +1119,14 @@ pub const Position = struct {
                     sq = types.pop_lsb(&b1);
 
                     if (sq.rank() == types.Rank.RANK7.relative_rank(color)) {
-                        // Quiet promotions are not possible here
+                        // A pawn pinned on its seventh rank cannot push: the pinner of a pin along the file stands on the promotion square.
                         b2 = tables.get_pawn_attacks(color, sq) & capture_mask & tables.LineOf[our_king.index()][sq.index()];
                         while (b2 != 0) {
                             const pcsq = types.pop_lsb(&b2);
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                            list.append(types.Move.new_from_to_flag(sq, pcsq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_QUEEN));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_ROOK));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_KNIGHT));
+                            list.append(types.Move.new_from_to_flag(sq, pcsq, types.MoveFlags.PC_BISHOP));
                         }
                     } else {
                         b2 = tables.get_pawn_attacks(color, sq) & them_bb & tables.LineOf[sq.index()][our_king.index()];
@@ -1302,7 +1136,6 @@ pub const Position = struct {
             },
         }
 
-        // Non-pinned knight moves
         b1 = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Knight).index()] & not_pinned;
         while (b1 != 0) {
             sq = types.pop_lsb(&b1);
@@ -1310,7 +1143,6 @@ pub const Position = struct {
             types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2 & capture_mask, list);
         }
 
-        // Non-pinned diagonal moves
         b1 = our_diag_sliders & not_pinned;
         while (b1 != 0) {
             sq = types.pop_lsb(&b1);
@@ -1318,7 +1150,6 @@ pub const Position = struct {
             types.Move.make_all(types.MoveFlags.CAPTURE, sq, b2 & capture_mask, list);
         }
 
-        // Non-pinned orthogonal moves
         b1 = our_ortho_sliders & not_pinned;
         while (b1 != 0) {
             sq = types.pop_lsb(&b1);
@@ -1328,7 +1159,6 @@ pub const Position = struct {
 
         b1 = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Pawn).index()] & not_pinned & ~types.MaskRank[types.Rank.RANK7.relative_rank(color).index()];
 
-        // Pawn captures
         b2 = types.shift_bitboard(b1, rel_northwest) & capture_mask;
         b3 = types.shift_bitboard(b1, rel_northeast) & capture_mask;
 
@@ -1342,42 +1172,37 @@ pub const Position = struct {
             list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.CAPTURE));
         }
 
-        // Promotions
         b1 = self.piece_bitboards[types.Piece.new_comptime(color, types.PieceType.Pawn).index()] & not_pinned & types.MaskRank[types.Rank.RANK7.relative_rank(color).index()];
         if (b1 != 0) {
-            // Promotion Captures
             b2 = types.shift_bitboard(b1, rel_northwest) & capture_mask;
             b3 = types.shift_bitboard(b1, rel_northeast) & capture_mask;
 
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northwest), sq, types.MoveFlags.PC_BISHOP));
             }
 
             while (b3 != 0) {
                 sq = types.pop_lsb(&b3);
 
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PC_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_northeast), sq, types.MoveFlags.PC_BISHOP));
             }
 
             b2 = types.shift_bitboard(b1, rel_north) & quiet_mask;
             while (b2 != 0) {
                 sq = types.pop_lsb(&b2);
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_QUEEN)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_ROOK)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_KNIGHT)))));
-                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, @as(types.MoveFlags, @fromBackingInt(@intCast(types.PR_BISHOP)))));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_QUEEN));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_ROOK));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_KNIGHT));
+                list.append(types.Move.new_from_to_flag(sq.sub(rel_north), sq, types.MoveFlags.PR_BISHOP));
             }
         }
-
-        // Finish!
-        return;
     }
 };

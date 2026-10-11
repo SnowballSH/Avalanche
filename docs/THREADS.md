@@ -19,7 +19,12 @@ of them, the 6 MiB continuation history, is on huge pages where the OS has
 them; docs/MEMORY.md lists what lives where. The main thread's `Searcher` is
 created by the UCI thread, which is not bound, so its tables are not placed.
 `ucinewgame` resets all helpers' heuristics in parallel on their own threads.
-Lowering `Threads` shuts down surplus workers and frees their tables.
+Lowering `Threads` shuts down surplus workers and frees their tables. When the
+OS refuses a thread, the pool keeps the helpers it could start, and setting
+`Threads` answers with an `info string` that says how many threads search. A
+helper that cannot allocate its `Searcher` ends the process
+(`platform.fatal`). A pool that was shut down (`deinit`) is an empty pool and
+can be resized again.
 
 A helper takes over the root once per search, not per job: the main thread
 copies the game state (`Position.copy_game_state`: the piece bitboards, the
@@ -34,6 +39,9 @@ the whole `Position` instead cost 157 KB per helper per re-search (80 MB at
 Finny table with the main thread's. After a network is loaded (`EvalFile`), a
 helper drops its Finny table and its evaluation cache when it next rebuilds
 its root: both carry the generation of the network they were filled with.
+`src/tests/smp_root.zig` has one helper adopt a series of unrelated roots, so
+that every rebuild meets a Finny table warmed by another position; the kings
+of those roots walk across input buckets and the mirroring boundary.
 
 The search contract is unchanged: helpers run a fixed-depth root search per
 job and stop when the main thread tells them to. On wasm
@@ -66,11 +74,11 @@ across x86 microarchitectures, spinning is wasted on a machine with fewer
 CPUs than threads, and helpers that spin all start a job within microseconds
 of each other, where sleeping ones are woken one after the other. What it
 does to a search at 16 or more threads could not be measured: on a 64-core
-EPYC 9R14, nodes per second of 1 to 3 s searches moved by about 8% from round
-to round, and the version with the spin came out between 0.91 and 1.04 of the
-code before this work at 16 and 32 threads. A spin has to show a gain in time
-to depth there before it comes back, with a bound in time rather than in
-instructions.
+Zen 4 server CPU, nodes per second of 1 to 3 s searches moved by about 8% from
+round to round, and the version with the spin came out between 0.91 and 1.04
+of the code before this work at 16 and 32 threads. A spin has to show a gain
+in time to depth there before it comes back, with a bound in time rather than
+in instructions.
 
 ## Shared state on the search path
 
@@ -88,7 +96,7 @@ in `Searcher.shared` (`CrossThreadState`).
 | `shared.is_searching` | UCI thread before the search, main thread after it | UCI thread | per UCI command |
 | `Worker` events and job | controller and worker | controller and worker | per job |
 | Standard output | main thread (`info`, `bestmove`), UCI thread (`readyok`, refusals) | | whole lines through two buffered writers |
-| Network weights, attack tables, `CONTEMPT`, options | nobody during a search | every thread, every node | read-only |
+| Network weights, attack tables, `contempt`, options | nobody during a search | every thread, every node | read-only |
 
 Between jobs, while a helper is parked, the main thread also writes that
 helper's root (game state, hash history, root moves once per search, excluded
@@ -131,8 +139,8 @@ With no helpers the total is the main thread's own counter, so
 single-threaded `go nodes N` stops exactly where it did.
 
 With helpers a search overshoots its budget, typically by about 1024 nodes
-per thread as before: what the helpers search between two limit checks of the
-main thread. Helpers no longer stop themselves, though. If the main thread
+per thread: what the helpers search between two limit checks of the
+main thread. Helpers do not stop themselves, though. If the main thread
 loses its CPU or blocks while writing output, they search on until its next
 limit check or the end of their fixed-depth job, whichever comes first, so
 the overshoot has no fixed bound; the search always terminates.
@@ -140,10 +148,10 @@ the overshoot has no fixed bound; the search always terminates.
 Before, a search with a node budget did an atomic add on one shared counter
 for every node of every thread (`ldadd` on ARM, `lock xadd` on x86), which
 moves that cache line between all cores once per node. The main thread and
-datagen paid the atomic add even when single-threaded. On a 64-core EPYC
-9R14, `go nodes 20000000` ran at 7.95M, 22.2M and 25.5M nodes per second with
-8, 32 and 64 threads before and at 11.5M, 47.1M and 77.6M after (1.45, 2.14
-and 3.04 times as fast), and at the same speed with one thread.
+datagen paid the atomic add even when single-threaded. On a 64-core Zen 4
+server CPU, `go nodes 20000000` ran at 7.95M, 22.2M and 25.5M nodes per second
+with 8, 32 and 64 threads before and at 11.5M, 47.1M and 77.6M after (1.45,
+2.14 and 3.04 times as fast), and at the same speed with one thread.
 
 ### Searcher layout
 
@@ -174,9 +182,9 @@ nested, and 0.998 to 1.000 with the layout described here. The counts that
 (113.19 G in a run of 43.9 G cycles, 112.67 G in one of 28.7 G, same binary),
 which is more than the layouts differ by. All of these builds are commit
 870eeab with only this work on top: the absolute counts are not those of a
-build that also has the other changes of pull requests #104 to #111. `ply`
-alone is used on 74 lines of `negamax` and `quiescence_search`, so nesting it
-has a cost in the source and no measured gain.
+build that also has the later changes. `ply` alone is used on 74 lines of
+`negamax` and `quiescence_search`, so nesting it has a cost in the source and
+no measured gain.
 
 ### Transposition table
 
@@ -186,13 +194,15 @@ both words, the second with a new 15-bit sequence number. `get` reads the
 second word, the first, and the second again (`ldapr`, plain loads on x86)
 and rejects an entry whose second word changed or is locked. A reader can
 therefore not see words from two different stores, short of exactly 32768
-stores to that entry between its two reads of the second word.
+stores to that entry between its two reads of the second word. An entry
+also records whether its node was on the principal variation (`was_pv`);
+the search writes that bit and does not read it.
 
 A lockless variant was built and measured: the first word is stored XORed
 with a 64-bit mix of the second (`(w1 * K) ^ ((w1 * K) >> 64)`), so that words
 from two different stores decode to a different key. It needs no atomic
 read-modify-write and no sequence number, returns the same hits
-single-threaded (`bench` is unchanged at 15472869 nodes), and lets a torn
+single-threaded (the node count of `bench` is unchanged), and lets a torn
 entry through only when 32 bits of the mix coincide, which is the rate at
 which the 32-bit key already accepts a different position. It was not
 adopted:
@@ -201,11 +211,10 @@ adopted:
   113.99 G instructions against 113.75 G in one run each, on a machine where
   repeated runs of one binary differ by more than that. Both builds are
   commit 870eeab with only this work on top: the absolute counts are not
-  those of a build that also has the other changes of pull requests #104 to
-  #111. The atomic OR works on a line the core already holds; `lock or` is
-  usually quoted at about 20 cycles, around 1% of a node on a current x86
-  core, which bounds what removing it can give there. That has not been
-  measured on x86.
+  those of a build that also has the later changes. The atomic OR works on a
+  line the core already holds; `lock or` is usually quoted at about 20
+  cycles, around 1% of a node on a current x86 core, which bounds what
+  removing it can give there. That has not been measured on x86.
 - It does not scale differently. The lock is per entry and the line has to
   come to the storing core in exclusive state for a plain store just the
   same; two threads meet on one entry only when they store the same position
@@ -218,24 +227,57 @@ not its concurrency scheme.
 
 - The time check runs on the main thread only, every 1024 nodes, and costs
   one clock read through the `std.Io` vtable.
-- Helper stacks are 64 MiB of address space each; only the touched pages are
-  backed by memory, and a `negamax` frame is 3 to 4 KB, so a 200-ply line
-  stays under 1 MB.
-- `helpers_live`, a debugging flag written twice per job, sat on the cache
-  line that holds `CONTEMPT`, the Syzygy switch and `platform.io`, which
-  every thread reads on every node. It is gone; `helpers_are_live` asks the
-  pool.
+- Helper stacks are 64 MiB each (`search.SEARCH_STACK_SIZE`), like the
+  stack of the main search thread. Only the touched pages are backed by
+  memory, and a `negamax` frame of a release build is 3 to 4 KB, so a 200-ply
+  line stays under 1 MB. On Linux and macOS the rest is address space. On
+  Windows `std.Thread.spawn` passes the size as the amount to commit, so every
+  helper counts 64 MiB against the system's commit limit for as long as the
+  pool holds it, touched or not: about 32 GiB at 512 threads. The size stays
+  as it is until the deepest stack of a Debug build has been measured.
+- `helpers_are_live` asks the pool whether a worker is busy. There is no flag
+  for it: a global written twice per job would share a cache line with globals
+  that every thread reads on every node (`contempt`, the Syzygy switch,
+  `platform.io`).
 
 ## NUMA placement (`src/engine/numa.zig`)
 
 On Linux the topology is read once from `/sys/devices/system/node`
-(`online` and each node's `cpulist`). With `NumaPolicy auto` (default) and
-more than one node, search thread `i` (0 = main) is bound with
-`sched_setaffinity` to the node that owns the `i`-th CPU when nodes are filled
-in order, wrapping when threads outnumber CPUs. Small thread counts therefore
-stay on one node, and large ones spread across all nodes in proportion to
-their CPU counts. `NumaPolicy none` leaves placement to the OS scheduler;
-changing the policy restarts the helpers so the new placement applies.
+(`online` and each node's `cpulist`), restricted to the CPUs the process was
+started with. `NumaPolicy none` leaves placement to the OS scheduler. With
+`NumaPolicy auto` (default) search threads are bound with `sched_setaffinity`,
+but only when there are too many of them for one node to hold comfortably:
+
+- **Whether to bind** (`Topology.needs_binding`) is Stockfish's rule: more
+  threads than half the CPUs of the largest node, or at least four threads per
+  node (counting only nodes with more than 60% of the largest node's CPUs).
+  Below that nothing is bound. One search thread is never bound, however few
+  CPUs the nodes have: an engine under test is one of many single-threaded
+  processes on the machine, and a rule that binds each of them would put every
+  process on the same node.
+- **Where a thread goes** (`Topology.node_for_thread`): thread `i` (0 = main)
+  takes the node with the most room left in proportion to its CPU count, given
+  where threads `0..i-1` went. Equal nodes are therefore filled in turn, so the
+  second socket's cores are used before the first socket's hyperthreads, and
+  several engine processes spread over the nodes the same way instead of all
+  starting on the first. A thread's node does not depend on how many threads
+  follow it, so growing the pool leaves the existing helpers where they are.
+
+A helper is placed when its thread starts, by the decision for the thread
+count that was asked for, which the pool keeps (`ThreadPool.helpers_bound`).
+When a change of `Threads` or of `NumaPolicy` reverses that decision, the pool
+releases all helpers and starts them again, so they are either all bound or
+all unbound. When the OS refuses some of the threads, the helpers that did
+start keep the decision made for the count that was asked for, while the main
+search thread and the hash table go by the count that searches.
+
+Reading and setting a thread's CPU mask (`sched_getaffinity`,
+`sched_setaffinity`) is behind `src/platform/affinity.zig`: `current` returns
+the CPUs the calling thread may run on and `bind` restricts it to a set. Its
+`CpuSet` has the size and the bit order of the kernel's `cpu_set_t`, so a set
+is passed to the kernel as it is. Detection keeps only the CPUs its caller may
+run on, so `numa.init` has to run on a thread that is not bound yet. All its
+callers are on the UCI thread, which never is.
 
 On single-node machines and on other operating systems, placement is a no-op.
 

@@ -59,7 +59,7 @@ describe("worker client", () => {
     await client.whenClosed;
     assert.throws(() => {
       client.send("isready");
-    }, /quit/);
+    }, /closed/);
   });
 
   it("interrupts an infinite search", async (t) => {

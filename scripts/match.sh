@@ -1,27 +1,15 @@
 #!/usr/bin/env bash
-# match.sh — run a fixed N-game match between a candidate engine and a reference
-# engine and report Elo. No SPRT (use this to screen candidates; sprt.py for SPRT).
-#
-# Usage: scripts/match.sh <cand_bin> <ref_bin> [games] [concurrency] [tc] [tag]
-#   cand_bin    : candidate engine binary
-#   ref_bin     : reference engine binary
-#   games       : total games (default 500, must be even)
-#   concurrency : parallel games (default 10)
-#   tc          : time control (default 10+0.1)
-#   tag         : label for logs (default: candidate binary basename)
-#
-# Result line (Elo +/- ...) is printed to stdout and saved under tmp/matches/.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 FASTCHESS="$REPO/fastchess/fastchess"
 BOOK="$REPO/books/UHO_4060_v4.epd"
 
-CAND="${1:?usage: match.sh <cand_bin> <ref_bin> [games] [conc] [tc] [tag]}"
-REF="${2:?need ref_bin}"
+USAGE="usage: match.sh <candidate binary> <reference binary> [games] [concurrency] [time control] [tag]"
+CAND="${1:?$USAGE}"
+REF="${2:?$USAGE}"
 GAMES="${3:-500}"
 CONC="${4:-10}"
 TC="${5:-10+0.1}"
-# Display names: strip a leading "Avalanche-" from the binary basename for readability.
 CAND_NAME="$(basename "$CAND" | sed 's/^Avalanche-//')"
 REF_NAME="$(basename "$REF" | sed 's/^Avalanche-//')"
 TAG="${6:-$CAND_NAME}"

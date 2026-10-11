@@ -1,20 +1,18 @@
-//! Single-layer head: `(1024)x2 -> SCReLU -> 1x8`, i16 weights.
+//! See "Single-layer head" in docs/NNUE.md.
 
 const std = @import("std");
-const builtin = @import("builtin");
 const arch = @import("arch.zig");
 
 const HIDDEN_SIZE = arch.HIDDEN_SIZE;
 const OUTPUT_SIZE = arch.OUTPUT_SIZE;
 const QA = arch.QA;
-const QB: i32 = 64;
+pub const QB: i32 = 64;
 const QAB: i32 = QA * QB;
 const SCALE = arch.SCALE;
 
 pub const OUTPUT_WEIGHT_MIN: i16 = -128;
 pub const OUTPUT_WEIGHT_MAX: i16 = 127;
 
-/// The part of the architecture name after the feature transformer.
 pub const DESCRIPTION = std.fmt.comptimePrint("{d}", .{OUTPUT_SIZE});
 
 pub const Weights = extern struct {
@@ -24,9 +22,7 @@ pub const Weights = extern struct {
 
 pub const ValidateError = error{OutputWeightOutOfRange};
 
-/// Checks the head's bytes (the layout of `Weights`) for the output-weight
-/// range the SIMD inference assumes.
-pub fn validate(bytes: []const u8) ValidateError!void {
+pub fn validate(bytes: *const [@sizeOf(Weights)]u8) ValidateError!void {
     const layer_2 = bytes[@offsetOf(Weights, "layer_2")..][0..@sizeOf(@FieldType(Weights, "layer_2"))];
     var i: usize = 0;
     while (i < layer_2.len) : (i += 2) {
@@ -43,23 +39,9 @@ comptime {
     std.debug.assert(HIDDEN_SIZE % (OUTPUT_LANES * 4) == 0);
 }
 
-/// Pairwise signed i16 dot product. Optimized x86 builds use pmaddwd directly;
-/// Debug and other architectures retain the portable expression. LLVM leaves
-/// x86 intrinsics unresolved at -Doptimize=debug, hence the explicit mode guard.
 inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
-    if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isX86()) {
-        if (comptime OUTPUT_LANES == 32 and builtin.target.cpu.has(.x86, .avx512f) and builtin.target.cpu.has(.x86, .avx512bw)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.avx512.pmaddw.d.512" }).*(a, b);
-        }
-        if (comptime OUTPUT_LANES == 16 and builtin.target.cpu.has(.x86, .avx2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.avx2.pmadd.wd" }).*(a, b);
-        }
-        if (comptime OUTPUT_LANES == 8 and builtin.target.cpu.has(.x86, .sse2)) {
-            return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.x86.sse2.pmadd.wd" }).*(a, b);
-        }
-    }
-    if (comptime builtin.mode != .debug and builtin.target.cpu.arch.isWasm() and OUTPUT_LANES == 8) {
-        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.intrinsic_call) OutputI32, .{ .name = "llvm.wasm.dot" }).*(a, b);
+    if (comptime arch.pair_products_intrinsic(@bitSizeOf(OutputI16))) |name| {
+        return @extern(*const fn (OutputI16, OutputI16) callconv(arch.INTRINSIC_CALL) OutputI32, .{ .name = name }).*(a, b);
     }
 
     const a_parts = std.simd.deinterlace(2, a);
@@ -69,7 +51,6 @@ inline fn madd_i16(a: OutputI16, b: OutputI16) OutputI32 {
     return even + odd;
 }
 
-/// Evaluation in centipawns for the side to move, whose accumulator is `own`.
 pub inline fn evaluate(head: *const Weights, own: arch.AccumulatorPtr, opp: arch.AccumulatorPtr, bucket: usize) i32 {
     const w2 = &head.layer_2[bucket];
 
@@ -85,14 +66,15 @@ pub inline fn evaluate(head: *const Weights, own: arch.AccumulatorPtr, opp: arch
             const own_weights: OutputI16 = w2[i..][0..OUTPUT_LANES].*;
             const opp_weights: OutputI16 = w2[HIDDEN_SIZE + i ..][0..OUTPUT_LANES].*;
 
-            sum.* += madd_i16(own_activation *% own_weights, own_activation) +
+            sum.* +%= madd_i16(own_activation *% own_weights, own_activation) +
                 madd_i16(opp_activation *% opp_weights, opp_activation);
             i += OUTPUT_LANES;
         }
     }
 
     var sum = sums[0];
-    inline for (sums[1..]) |partial| sum += partial;
+    inline for (sums[1..]) |partial| sum +%= partial;
     const result = @reduce(.Add, sum);
-    return @divTrunc((@divTrunc(result, QA) + @as(i32, head.layer_2_bias[bucket])) * SCALE, QAB);
+    const scaled = (@as(i64, @divTrunc(result, QA)) + head.layer_2_bias[bucket]) * SCALE;
+    return @intCast(@divTrunc(scaled, QAB));
 }

@@ -1,61 +1,67 @@
+//! Transposition table of the search. See docs/THREADS.md ("Transposition table") and docs/MEMORY.md.
 const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
-const position = @import("../chess/position.zig");
 const search = @import("search.zig");
-const hce = @import("hce.zig");
 const numa = @import("numa.zig");
 
 pub const MB: usize = 1 << 20;
-pub const MAX_HASH_MB: usize = 1048576;
+const LARGEST_HASH_MB_BELOW_2_GIB: usize = 2 * 1024 - 1;
+pub const MAX_HASH_MB: usize = if (@bitSizeOf(usize) <= 32) LARGEST_HASH_MB_BELOW_2_GIB else 1048576;
+pub const DEFAULT_HASH_MB: usize = 16;
+
+comptime {
+    if (MAX_HASH_MB > std.math.maxInt(usize) / MB) {
+        @compileError("tt.MAX_HASH_MB must be a size whose bytes a usize can count");
+    }
+}
 
 pub const Bound = enum(u2) {
     None,
-    Exact, // PV Nodes
-    Lower, // Cut Nodes
-    Upper, // All Nodes
+    Exact,
+    Lower,
+    Upper,
 };
 
 pub const EVAL_NONE: i16 = -32768;
 
 pub const Item = packed struct {
-    key: u32, // verification = @truncate(hash)
-    eval: i32, // SEARCH score - used ONLY for alpha/beta cutoff
-    static_eval: i16, // raw static eval for pruning
-    bestmove: types.Move, // u16
-    flag: Bound, // u2
+    key: u32,
+    score: i32,
+    static_eval: i16,
+    bestmove: types.Move,
+    flag: Bound,
     depth: u8,
-    was_pv: u1, // PV node indicator
+    was_pv: u1,
     age: u5,
-    _padding: u16 = 0, // pad to 128 bits
+    sequence: u15 = 0,
+    locked: bool = false,
 };
 
-// Verify Item fits in exactly 16 bytes (128 bits) for the two-i64 atomic scheme
 comptime {
-    if (@sizeOf(Item) != 16) {
-        @compileError("tt.Item must be exactly 16 bytes");
+    if (@bitSizeOf(Item) != 2 * @bitSizeOf(i64)) {
+        @compileError("tt.Item must fill the two 64-bit words of a slot exactly");
+    }
+    if (@bitOffsetOf(Item, "sequence") < @bitSizeOf(i64)) {
+        @compileError("tt.Item.sequence must be in the second word, the one a probe reads twice");
     }
 }
 
 const large_memory = platform.large_memory;
 
-/// Who searches with a table, which decides who backs and clears its memory.
 pub const Sharing = enum {
-    /// One thread; whoever creates the table backs it.
     private,
-    /// The search threads: the parts of a new table are backed on threads
-    /// placed like search threads spread evenly over all of them. See docs/MEMORY.md.
     search_threads,
 };
 
-fn search_thread_count() usize {
+fn backing_thread_count() usize {
     if (comptime !platform.has_threads) return 1;
-    return if (search.THREADS_CONFIGURED) search.NUM_THREADS + 1 else std.Thread.getCpuCount() catch 1;
+    return if (search.threads_configured) search.thread_count() else std.Thread.getCpuCount() catch 1;
 }
 
-/// Part `part` of `parts` goes where the search thread at the same fraction of all search threads runs.
 fn place_like_search_thread(part: usize, parts: usize) void {
-    numa.place_current_thread(search_thread_of_part(part, parts, search_thread_count()));
+    const threads = search.thread_count();
+    numa.place_current_thread(search_thread_of_part(part, parts, threads), threads);
 }
 
 fn search_thread_of_part(part: usize, parts: usize, threads: usize) usize {
@@ -82,7 +88,7 @@ pub const TranspositionTable = struct {
         if (comptime !platform.has_threads) return 1;
         return switch (self.sharing) {
             .private => 1,
-            .search_threads => search_thread_count(),
+            .search_threads => backing_thread_count(),
         };
     }
 
@@ -90,7 +96,7 @@ pub const TranspositionTable = struct {
         if (comptime !platform.has_threads) return null;
         if (self.sharing == .private) return null;
         numa.init();
-        return if (numa.binds_threads()) &place_like_search_thread else null;
+        return if (numa.binds_threads(search.thread_count())) &place_like_search_thread else null;
     }
 
     pub fn reset(self: *TranspositionTable, mb: u64) void {
@@ -111,7 +117,6 @@ pub const TranspositionTable = struct {
         large_memory.zero(std.mem.sliceAsBytes(self.data), self.parallelism());
     }
 
-    /// How much of the table the OS backs with huge pages right now.
     pub fn huge_page_bytes(self: *const TranspositionTable) u64 {
         return large_memory.huge_page_bytes(std.mem.sliceAsBytes(self.data));
     }
@@ -132,26 +137,19 @@ pub const TranspositionTable = struct {
         return @as(usize, @intCast(@as(u128, @intCast(hash)) * @as(u128, @intCast(self.size)) >> 64));
     }
 
-    const LOCK_BIT: i64 = @bitCast(@as(u64, 1) << 63);
+    const LOCK_BIT: i64 = @bitCast(@as(u64, 1) << (@bitOffsetOf(Item, "locked") - @bitSizeOf(i64)));
+    const REPLACEMENT_DEPTH_MARGIN: u16 = 4;
 
-    const Snapshot = struct {
-        item: Item,
-        w1: i64,
-    };
-
-    inline fn loadSnapshot(p: *i128) ?Snapshot {
-        const w1_before = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+    inline fn load_snapshot(p: *i128) ?Item {
+        const w1_before = platform.atomic_load(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
         if (w1_before & LOCK_BIT != 0) return null;
 
-        const w0 = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
-        const w1_after = platform.atomicLoad(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
+        const w0 = platform.atomic_load(i64, @as(*i64, @ptrFromInt(@intFromPtr(p))), .acquire);
+        const w1_after = platform.atomic_load(i64, @as(*i64, @ptrFromInt(@intFromPtr(p) + 8)), .acquire);
         if (w1_before != w1_after or w1_after & LOCK_BIT != 0) return null;
 
         const combined: i128 = @as(i128, @bitCast([2]i64{ w0, w1_after }));
-        return .{
-            .item = @as(Item, @bitCast(combined)),
-            .w1 = w1_after,
-        };
+        return @as(Item, @bitCast(combined));
     }
 
     pub inline fn set(self: *TranspositionTable, hash: u64, entry: Item) void {
@@ -159,31 +157,25 @@ pub const TranspositionTable = struct {
         const idx = self.index(hash);
         const p = &self.data[idx];
 
-        // Slot lock in the high bit of word1; remaining padding bits are a sequence.
         const w1_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p) + 8));
-        const old_w1 = platform.atomicRmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
+        const old_w1 = platform.atomic_rmw(i64, w1_ptr, .Or, LOCK_BIT, .acquire);
         if (old_w1 & LOCK_BIT != 0) return;
 
         const w0_ptr = @as(*i64, @ptrFromInt(@intFromPtr(p)));
-        const old_w0 = platform.atomicLoad(i64, w0_ptr, .acquire);
+        const old_w0 = platform.atomic_load(i64, w0_ptr, .acquire);
         const existing_combined: i128 = @as(i128, @bitCast([2]i64{ old_w0, old_w1 }));
-        const p_val: Item = @as(Item, @bitCast(existing_combined));
+        const previous: Item = @as(Item, @bitCast(existing_combined));
 
-        // We overwrite entry if:
-        // 1. It's empty
-        // 2. New entry is exact
-        // 3. Previous entry is from older search
-        // 4. It is a different position
-        // 5. Previous entry has lower depth (with +4 margin)
-        if ((old_w0 == 0 and old_w1 == 0) or entry.flag == Bound.Exact or p_val.age != self.age or p_val.key != entry.key or @as(u16, p_val.depth) <= @as(u16, entry.depth) + 4) {
+        if ((old_w0 == 0 and old_w1 == 0) or entry.flag == Bound.Exact or previous.age != self.age or previous.key != entry.key or @as(u16, previous.depth) <= @as(u16, entry.depth) + REPLACEMENT_DEPTH_MARGIN) {
             var stored_entry = entry;
-            stored_entry._padding = (p_val._padding +% 1) & 0x7fff;
+            stored_entry.sequence = previous.sequence +% 1;
+            stored_entry.locked = false;
             const entry_as_i128: i128 = @as(i128, @bitCast(stored_entry));
             const words: [2]i64 = @as([2]i64, @bitCast(entry_as_i128));
-            platform.atomicStore(i64, w0_ptr, words[0], .monotonic);
-            platform.atomicStore(i64, w1_ptr, words[1], .release);
+            platform.atomic_store(i64, w0_ptr, words[0], .monotonic);
+            platform.atomic_store(i64, w1_ptr, words[1], .release);
         } else {
-            platform.atomicStore(i64, w1_ptr, old_w1, .release);
+            platform.atomic_store(i64, w1_ptr, old_w1, .release);
         }
     }
 
@@ -200,15 +192,9 @@ pub const TranspositionTable = struct {
         const sample = @min(@as(usize, 1000), self.size);
         if (sample == 0) return 0;
         var count: u64 = 0;
-        var i: usize = 0;
-        while (i < sample) : (i += 1) {
-            const p = &self.data[i];
-            if (loadSnapshot(p)) |snapshot| {
-                const entry = snapshot.item;
-                if (entry.flag != .None and entry.age == self.age) {
-                    count += 1;
-                }
-            }
+        for (self.data[0..sample]) |*slot| {
+            const entry = load_snapshot(slot) orelse continue;
+            if (entry.flag != .None and entry.age == self.age) count += 1;
         }
         return count * 1000 / @as(u64, sample);
     }
@@ -216,8 +202,7 @@ pub const TranspositionTable = struct {
     pub inline fn get(self: *TranspositionTable, hash: u64) ?Item {
         if (self.size == 0) return null;
         const p = &self.data[self.index(hash)];
-        const snapshot = loadSnapshot(p) orelse return null;
-        const entry = snapshot.item;
+        const entry = load_snapshot(p) orelse return null;
 
         if (entry.flag != Bound.None and entry.key == @as(u32, @truncate(hash))) {
             return entry;
@@ -233,7 +218,7 @@ const testing = std.testing;
 fn test_item(hash: u64, age: u5) Item {
     return .{
         .key = @truncate(hash),
-        .eval = 17,
+        .score = 17,
         .static_eval = 3,
         .bestmove = types.Move.empty(),
         .flag = .Exact,
@@ -269,7 +254,7 @@ test "tt: a table shrinks and grows to the size asked for and frees the one it r
     try testing.expectEqual(8 * MB / @sizeOf(Item), table.size);
     try expect_only_table_live(&table, live_before);
     table.set(TEST_HASHES[3], test_item(TEST_HASHES[3], table.age));
-    try testing.expectEqual(@as(i32, 17), table.get(TEST_HASHES[3]).?.eval);
+    try testing.expectEqual(@as(i32, 17), table.get(TEST_HASHES[3]).?.score);
 
     table.deinit();
     try testing.expectEqual(@as(usize, 0), table.size);
@@ -305,14 +290,14 @@ test "tt: clear empties the table" {
 test "tt: the search threads' table is backed and cleared in one part per thread" {
     if (comptime !platform.has_threads) return error.SkipZigTest;
     platform.io = testing.io;
-    const configured = search.THREADS_CONFIGURED;
-    const helpers = search.NUM_THREADS;
+    const configured = search.threads_configured;
+    const helpers = search.active_helpers;
     defer {
-        search.THREADS_CONFIGURED = configured;
-        search.NUM_THREADS = helpers;
+        search.threads_configured = configured;
+        search.active_helpers = helpers;
     }
-    search.THREADS_CONFIGURED = true;
-    search.NUM_THREADS = 1;
+    search.threads_configured = true;
+    search.active_helpers = 1;
 
     var table: TranspositionTable = .{ .sharing = .search_threads };
     defer table.deinit();

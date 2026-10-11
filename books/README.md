@@ -1,17 +1,20 @@
 # Opening books
 
-The SPRT tooling (`tools/test`) defaults to an opening book at
-`books/noob_4moves.epd`. Opening books are **not committed** (`*.epd` is
-git-ignored), so drop the book here yourself:
+Opening books are **not committed** (`*.epd` is git-ignored), so put them here yourself.
+
+The match scripts `scripts/sprt.py`, `scripts/quick-test.sh` and `scripts/match.sh` play from
 
 ```
-books/noob_4moves.epd
+books/UHO_4060_v4.epd
 ```
 
-`noob_4moves.epd` is a standard engine-testing book (one FEN/EPD opening per
-line, played from both sides). Obtain it from your engine-testing book
-collection — e.g. the Stockfish testing books at
-<https://github.com/official-stockfish/books> — and place it at the path above.
+an engine-testing book with one FEN/EPD opening per line, played from both
+sides. It is one of the Stockfish testing books at
+<https://github.com/official-stockfish/books>. `scripts/sprt.py` takes any
+other book (`.epd` or `.pgn`) with `--book <path>`; the other two scripts use
+this file only.
 
-To use a different book (any `.epd` or `.pgn`), pass `--book <path>` to
-`tools/test`.
+The bulk datagen schedule `scripts/datagen_a_lot.json` names the books of its
+jobs by path, `books/<name>.epd`; a job whose book is missing fails when its
+worker starts. Datagen checks every line of a book before it plays from it
+(see "Openings" in [docs/DATAGEN.md](../docs/DATAGEN.md)).

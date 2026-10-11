@@ -13,7 +13,8 @@ Where the engine's large data lives, which of it is on huge pages, and why.
 | Evaluator storage            | 2.0 MiB              | each `Position`               | two adjacent 4 KiB accumulator frames per node, by ply, and one random 8-byte entry of the 1 MiB evaluation cache |
 | `Position` with Finny table  | 239 KiB              | each `Position`               | board state every node, one 2 KiB Finny entry per refresh; 102 KiB of it is the undo stack (docs/BOARD.md), one 48-byte entry per ply |
 
-A search thread therefore owns 8.7 MiB, not counting its 64 MiB of mostly untouched stack.
+A search thread therefore owns 8.7 MiB, not counting its 64 MiB of mostly untouched stack, which
+Windows nevertheless counts against the commit limit (docs/THREADS.md, "Smaller items").
 
 With 4 KiB pages the first three rows alone are thousands of pages, far beyond the 64 to 96
 entries of a first-level data TLB and, with the hash table, beyond the second level as well. On
@@ -62,21 +63,24 @@ Rounding a block up to whole huge pages matters: Linux only installs a huge page
 
 `alloc` backs nothing until a page is written, and Linux then puts the page on the node of the
 thread that wrote it. That places the per-thread tables of a helper: the helper thread is bound to
-its node first and then allocates and clears its own `Searcher` and continuation history
-(docs/THREADS.md). The main searcher is the exception. The UCI thread creates it, and that thread
-is not bound, so the main thread's tables are on whatever node the UCI thread ran on.
+its node first, when search threads are bound at all (docs/THREADS.md, "NUMA placement"), and then
+allocates and clears its own `Searcher` and continuation history. The main searcher is the
+exception. The UCI thread creates it, and that thread is not bound, so the main thread's tables
+are on whatever node the UCI thread ran on.
 
 `alloc_populated` is for the table the search threads share. It splits the block into up to
 `threads` parts of at least 32 MiB and backs each part by storing one byte to every page: the OS
 hands out zeroed pages, so nothing has to be cleared a second time, but it has to be a store,
-because reading a fresh page only maps the kernel's shared zero page. Given a `placement`, every
-part gets a thread of its own, which calls `placement(index, parts)` before touching anything; the
-calling thread only waits, since it must not be moved. The transposition table's placement binds
-the thread of part `i` of `n` like search thread `i * threads / n`: with a part per thread that is
-search thread `i`, and a table too small for that (under 32 MiB per thread) still has its parts
-spread evenly over all the search threads. Threads fill the nodes in order (docs/THREADS.md), so a
-table for a few threads is on the first node with them, and a table for many is spread over the
-nodes in proportion to the threads on each.
+because reading a fresh page only maps the kernel's shared zero page. A part is a whole number of
+huge pages, because the first store to a huge page backs all of it on the storing thread's node.
+Given a `placement`, every part gets a thread of its own, which calls `placement(index, parts)`
+before touching anything; the calling thread only waits, since it must not be moved. The
+transposition table's placement binds the thread of part `i` of `n` like search thread
+`i * threads / n`: with a part per thread that is search thread `i`, and a table too small for
+that (under 32 MiB per thread) still has its parts spread evenly over all the search threads. The
+table has a placement only when the search threads are bound (docs/THREADS.md, "NUMA placement"),
+and it is then spread over the nodes in proportion to the threads on each. The thread count used
+for that decision is the one that will search: one, until `Threads` has been set.
 
 Limits of that, as the code stands:
 
@@ -85,16 +89,16 @@ Limits of that, as the code stands:
   faster by many.
 - A table is not moved afterwards. One created before `Threads` or `NumaPolicy` changed stays
   where it is until `Hash` is set again.
-- Without a placement (a single node, `NumaPolicy none`, other operating systems) no thread is
-  bound: the calling thread backs the last part itself, and a table under 64 MiB starts no thread
-  at all, because engines under test are started thousands of times on busy machines. The 32 MiB
-  per part is a judgement, not a measurement.
+- Without a placement (a single node, too few threads to bind, `NumaPolicy none`, other operating
+  systems) no thread is bound: the calling thread backs the last part itself, and a table under
+  64 MiB starts no thread at all, because engines under test are started thousands of times on
+  busy machines. The 32 MiB per part is a judgement, not a measurement.
 - A private table (`tt.Sharing.private`: datagen gives every game thread its own two) is backed
   by the thread that creates it, in one part and with no thread started. Datagen creates all of
   them on its main thread before the game threads exist.
 - This placement has only run on single-node machines. The binding is covered by the tests of
-  `numa.zig` and the mapping of parts to threads by tests with a recording placement, but no
-  per-node page counts (`numa_maps`) have been looked at.
+  `numa.zig` and `platform/affinity.zig` and the mapping of parts to threads by tests with a
+  recording placement, but no per-node page counts (`numa_maps`) have been looked at.
 
 `zero` is the parallel `memset` for a table already in use; it moves no pages and binds no thread.
 
@@ -108,13 +112,13 @@ treats as unreachable.
 - **Transposition table** (`tt.zig`): `alloc_populated` on `Hash`, `zero` on `ucinewgame` and
   `Clear Hash`. Label `hash`.
 - **Network weights** (`weights.zig`): `weights.MODEL` points at the embedded network, aligned in
-  the executable, until `do_nnue` has copied it into one block. The embedded network is declared
+  the executable, until `use_embedded` has copied it into one block. The embedded network is declared
   as the embedded file itself (`@embedFile(...).*` with an alignment, its type left to be
   inferred) and viewed through a typed pointer: declaring it as a compile-time copy of a slice of
   the file made the compiler run for minutes and crash on a 64-core machine, while 4- and 8-core
   machines built it normally. Once copied, `EvalFile` overwrites that block
-  in place. Label `network`. Wasm keeps running on the embedded image. Before, the weights were a
-  2 MiB-aligned global with its own `madvise`, which left the last 168 KiB (the whole head) on
+  in place. Label `network`. Wasm keeps running on the embedded image. The alternative, a
+  2 MiB-aligned global with its own `madvise`, leaves the last 168 KiB (the whole head) on
   4 KiB pages.
 - **Continuation history** (`search.zig`): exactly 6 MiB, three huge pages with no slack. Label
   `search`.
@@ -122,7 +126,7 @@ treats as unreachable.
   evaluation cache of a `Position` are one block. A compile-time check keeps it within one huge
   page, which is why the frame stack has 254 entries and not 256: the first huge page is resident
   in full once it is touched, and a second one would be for 3 KiB of records. Label `evaluator`.
-  EPYC 9R14 (Zen 4), single thread, against the block coming from the C allocator on 4 KiB pages:
+  A Zen 4 server CPU, single thread, against the block coming from the C allocator on 4 KiB pages:
   `bench` +0.4% (seven rounds, 0.998 to 1.011), 3 s searches +0.2% (1.000 to 1.005), and 0.8 ms
   less start-up.
 
@@ -134,7 +138,7 @@ treats as unreachable.
 info string Hash: 64 MB, 64 MB on huge pages
 ```
 
-The number is read from `/proc/self/smaps` when it is asked for, no longer on every resize, so
+The number is read from `/proc/self/smaps` when it is asked for, not on every resize, so
 start-up does not pay for it. For everything else, look at the process:
 
 ```sh
@@ -195,8 +199,7 @@ macOS on the same Apple M4 (16 KiB pages, no huge pages to ask for) is unchanged
 112.80 billion after, in alternating runs, and the three start-up sessions above took the same
 time within noise (medians of 15 runs: 20.9 against 21.2 ms, 43.6 against 42.9 ms, 26.8 against
 26.1 ms). Both builds are on commit 870eeab, one without this change and one with it alone: the
-absolute counts are not those of a build that also has the other changes of pull requests #104 to
-#111.
+absolute counts are not those of a build that also has the later changes.
 
 ## The per-thread data, reviewed for cache and TLB behaviour
 
@@ -234,9 +237,8 @@ page on Linux. The Finny table is touched one 2 KiB entry per king-bucket refres
   project's CI, so Windows stays on ordinary pages.
 - **Explicit huge pages on Linux** (`MAP_HUGETLB`, 1 GiB pages): they need a pool reserved by the
   administrator. Transparent huge pages need nothing.
-- **A copy of the network per NUMA node.** `weights.MODEL` is now a pointer to a block, which is
+- **A copy of the network per NUMA node.** `weights.MODEL` is a pointer to a block, which is
   the shape that needs, but every evaluation would have to take the pointer of its thread's node.
 - **Huge pages for the engine's own globals.** About 1.5 MiB of precomputed tables (the attack
   tables among them) are resident in `.bss` on 4 KiB pages. They could be gathered into one
-  2 MiB-aligned global with its own `madvise`, as the network was before, or allocated here. Not
-  measured.
+  2 MiB-aligned global with its own `madvise`, or allocated here. Not measured.

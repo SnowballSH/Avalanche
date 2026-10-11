@@ -4,7 +4,6 @@ const types = @import("../chess/types.zig");
 const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const thread_pool = @import("../engine/thread_pool.zig");
-const tt = @import("../engine/tt.zig");
 const support = @import("support.zig");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
@@ -40,6 +39,23 @@ test "thread pool: grows, resets in parallel, shrinks and shuts down" {
     try expectEqual(@as(usize, 0), pool.count());
 }
 
+test "thread pool: a shut-down pool holds no memory and can be started again" {
+    if (comptime !platform.has_threads) return error.SkipZigTest;
+    platform.io = std.testing.io;
+    support.init_tables();
+    search.init_lmr();
+
+    var pool: thread_pool.ThreadPool = .{};
+    pool.resize(2);
+    pool.deinit();
+    try expectEqual(@as(usize, 0), pool.count());
+    try expectEqual(@as(usize, 0), pool.workers.capacity);
+
+    pool.resize(1);
+    defer pool.deinit();
+    try expectEqual(@as(usize, 1), pool.count());
+}
+
 const STRESS_HELPERS = 3;
 const STRESS_CYCLES = 2000;
 const STRESS_RESET_EVERY = 500;
@@ -48,9 +64,7 @@ const StopTiming = enum { before_the_job_is_posted, right_after_posting, during_
 
 test "thread pool: every posted job runs and stops, whenever the stop flag is raised" {
     if (comptime !platform.has_threads) return error.SkipZigTest;
-    platform.io = std.testing.io;
-    support.init_search();
-    tt.GlobalTT.reset(16);
+    support.init_engine();
 
     const pos = try support.new_position();
     defer support.destroy_position(pos);

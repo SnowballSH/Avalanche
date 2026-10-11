@@ -1,9 +1,3 @@
-# Viriformat filter config for Avalanche NNUE training
-# Used by: bullet-utils viribinpack splat <input> <output> filter.toml
-#
-# This filters positions when converting viriformat -> bulletformat.
-# We want quiet, balanced positions that the NNUE can learn from.
-
 min_ply = 8
 min_pieces = 4
 max_eval = 10000

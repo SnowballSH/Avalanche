@@ -37,25 +37,32 @@ flags those rules so standard chess never pays for the extra rook-attack lookup.
 
 Castling moves are stored king-captures-rook (`from` = king, `to` = rook) with
 the `OO`/`OOO` flag. This is unambiguous even when the king does not move (king
-already on g1) or when king and rook swap squares, which the old
-king-destination encoding could not express. `Move.castle_king_destination`
-recovers the standard notation.
+already on g1) or when king and rook swap squares, which a king-destination
+encoding cannot express. `Move.castle_king_destination` recovers the standard
+notation.
 
-Make/unmake move the king and rook with `move_piece_quiet` when their squares
-do not overlap (always the case in standard chess, keeping NNUE updates to two
-feature moves). When they overlap (king f1/rook g1, etc.) the rook is removed
-and re-added around the king move.
+`Position.castle` makes and unmakes the move: one `relocate` for the king and
+one for the rook when their squares do not overlap (always the case in standard
+chess, keeping NNUE updates to two feature moves). When the king or the rook
+lands on the other's origin square (king f1/rook g1, etc.) the rook is lifted
+first and placed again after the king move. The edits are keyed on make and
+unkeyed on unmake, like every other move (docs/BOARD.md).
 
 ## Notation and FEN
 
 - Output: king-captures-rook when `UCI_Chess960` is set or the position's setup
-  is not the standard one (to stay unambiguous), else `e1g1`-style.
-- Input: `Move.new_from_string` accepts king-captures-rook always, and
-  king-destination unless Chess960 notation is active.
+  is not the standard one (to stay unambiguous), else `e1g1`-style. The option
+  is kept in `Position.uci_chess960`, which `reset` and `set_fen` carry over: it
+  is what the GUI asked for, not a property of a position, whereas
+  `castling.Setup.is_chess960` is worked out anew from each FEN.
+- Input: `Move.parse` accepts king-captures-rook always, and
+  king-destination unless Chess960 notation is active. It returns `?Move`: a
+  string that is malformed or names no legal move gives `null`, so a caller
+  cannot play the result without testing it.
 - FEN input accepts `KQkq` (X-FEN: outermost rook on that wing) and Shredder
   file letters (`HAha`, `HFhf`, ...). Rights that do not name an actual rook on
   the back rank are dropped.
-- FEN output (`basic_fen`) writes X-FEN: `K`/`Q` when the castling rook is the
+- FEN output (`write_fen`) writes X-FEN: `K`/`Q` when the castling rook is the
   outermost rook on its wing, otherwise the rook's file letter.
 
 ## Start positions

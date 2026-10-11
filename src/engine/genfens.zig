@@ -1,15 +1,4 @@
-// genfens — generate opening FENs for OpenBench datagen workloads.
-//
-// OpenBench invokes the engine as:
-//   ./engine "genfens N seed S book <None|path/to/book.epd>" "quit"
-//
-// We must print N lines to stdout in the form:
-//   info string genfens <fen>
-// then exit.  Each FEN is a random opening position produced by:
-//   - picking a random book line (if a book is given), OR starting from startpos,
-//     or from a random Chess960 ("frc") / Double Fischer Random ("dfrc") start
-//   - playing 9-12 random legal plies
-//   - ensuring the position is not in check and is not drawn
+//! See "Opening generation for OpenBench" in docs/DATAGEN.md.
 
 const std = @import("std");
 const platform = @import("../platform.zig");
@@ -17,12 +6,62 @@ const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
 const frc = @import("../chess/frc.zig");
+const book = @import("datagen/book.zig");
 
-const Variant = enum { standard, frc, dfrc };
+pub const Variant = enum { standard, frc, dfrc };
 
-fn playRandomMoves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) void {
-    var ply: usize = 0;
-    while (ply < n_plies) : (ply += 1) {
+const NO_BOOK = "None";
+const MAX_CONSECUTIVE_UNUSABLE_OPENINGS = 10_000;
+
+const PlyRange = struct {
+    min: usize,
+    count: usize,
+
+    fn pick(self: PlyRange, prng: *utils.PRNG) usize {
+        return self.min + @as(usize, @intCast(prng.rand64() % self.count));
+    }
+};
+
+const PLIES_AFTER_BOOK: PlyRange = .{ .min = 1, .count = 3 };
+const PLIES_WITHOUT_BOOK: PlyRange = .{ .min = 9, .count = 4 };
+
+pub const Options = struct {
+    count: u64 = 1,
+    seed: u64 = 0,
+    book_path: ?[]const u8 = null,
+    variant: Variant = .standard,
+};
+
+pub const ParseError = error{ InvalidValue, MissingValue, UnknownArgument };
+
+pub fn parse(args: []const []const u8, offending: *[]const u8) ParseError!Options {
+    var options: Options = .{};
+    if (args.len == 0) return options;
+    offending.* = args[0];
+    options.count = std.fmt.parseInt(u64, args[0], 10) catch return error.InvalidValue;
+
+    var index: usize = 1;
+    while (index < args.len) : (index += 1) {
+        offending.* = args[index];
+        if (std.meta.stringToEnum(Variant, args[index])) |variant| {
+            options.variant = variant;
+            continue;
+        }
+        const keyword = std.meta.stringToEnum(enum { seed, book }, args[index]) orelse return error.UnknownArgument;
+        index += 1;
+        if (index == args.len) return error.MissingValue;
+        const value = args[index];
+        offending.* = value;
+        switch (keyword) {
+            .seed => options.seed = std.fmt.parseInt(u64, value, 10) catch return error.InvalidValue,
+            .book => options.book_path = if (std.mem.eql(u8, value, NO_BOOK)) null else value,
+        }
+    }
+    return options;
+}
+
+fn play_random_moves(pos: *position.Position, prng: *utils.PRNG, n_plies: usize) void {
+    for (0..n_plies) |_| {
         const movelist = pos.legal_moves();
         if (movelist.len == 0) return;
         const move = movelist.items()[prng.rand64() % movelist.len];
@@ -38,69 +77,14 @@ fn random_start(prng: *utils.PRNG) u16 {
     return @intCast(prng.rand64() % frc.N_POSITIONS);
 }
 
-fn positionIsUsable(pos: *position.Position) bool {
+fn position_is_usable(pos: *position.Position) bool {
     const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
     if (in_check) return false;
     return pos.legal_moves().len > 0;
 }
 
-pub fn run(args_in: []const []const u8) !void {
-    const io = platform.io;
-    var out_buf: [4096]u8 = undefined;
-    var out_file = std.Io.File.stdout().writerStreaming(io, &out_buf);
-    const out = &out_file.interface;
-
-    // Parse: genfens <count> seed <S> book <None|path> [frc|dfrc]
-    // args_in[0] = "genfens", args_in[1] = count, then keyword pairs
-    var n_fens: u64 = 1;
-    var seed: u64 = 0;
-    var book_path: ?[]const u8 = null;
-    var variant = Variant.standard;
-
-    if (args_in.len >= 2) {
-        n_fens = std.fmt.parseInt(u64, args_in[1], 10) catch 1;
-    }
-
-    var i: usize = 2;
-    while (i < args_in.len) : (i += 1) {
-        const tok = args_in[i];
-        if (std.mem.eql(u8, tok, "seed")) {
-            i += 1;
-            if (i < args_in.len) seed = std.fmt.parseInt(u64, args_in[i], 10) catch seed;
-        } else if (std.mem.eql(u8, tok, "book")) {
-            i += 1;
-            if (i < args_in.len and !std.mem.eql(u8, args_in[i], "None")) {
-                book_path = args_in[i];
-            }
-        } else if (std.meta.stringToEnum(Variant, tok)) |v| {
-            variant = v;
-        }
-    }
-
-    // Load book lines if provided
-    var book_lines: []const []const u8 = &.{};
-    if (book_path) |path| {
-        const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch null;
-        if (file) |f| {
-            const file_len = f.length(io) catch 0;
-            if (file_len > 0) {
-                const content = std.heap.page_allocator.alloc(u8, @as(usize, @intCast(file_len))) catch null;
-                if (content) |buf| {
-                    _ = f.readPositionalAll(io, buf, 0) catch {};
-                    var lines_list = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
-                    var iter = std.mem.splitScalar(u8, buf, '\n');
-                    while (iter.next()) |line| {
-                        const trimmed = std.mem.trim(u8, line, " \t\r");
-                        if (trimmed.len > 0) {
-                            lines_list.append(trimmed) catch {};
-                        }
-                    }
-                    book_lines = lines_list.items;
-                }
-            }
-        }
-    }
-
+pub fn generate(options: Options, book_lines: []const []const u8, out: *std.Io.Writer) !void {
+    const seed = options.seed;
     var prng = utils.PRNG.new(@as(u128, seed) | (@as(u128, seed) << 64) ^ 0xdeadbeefcafe1234);
 
     var pos: position.Position = undefined;
@@ -108,32 +92,71 @@ pub fn run(args_in: []const []const u8) !void {
     defer pos.deinit();
 
     var generated: u64 = 0;
-    while (generated < n_fens) {
+    var consecutive_unusable: usize = 0;
+    while (generated < options.count) {
         if (book_lines.len > 0) {
             const line = book_lines[prng.rand64() % book_lines.len];
             pos.set_fen(line);
-            // 1-3 extra random plies on top of book position
-            const extra_plies = 1 + (prng.rand64() % 3);
-            playRandomMoves(&pos, &prng, extra_plies);
+            play_random_moves(&pos, &prng, PLIES_AFTER_BOOK.pick(&prng));
         } else {
             var fen_buf: [frc.FEN_CAPACITY]u8 = undefined;
-            pos.set_fen(switch (variant) {
+            pos.set_fen(switch (options.variant) {
                 .standard => types.DEFAULT_FEN,
                 .frc => frc.frc_fen(random_start(&prng), &fen_buf),
                 .dfrc => frc.dfrc_fen(random_start(&prng), random_start(&prng), &fen_buf),
             });
-            const random_plies = 9 + (prng.rand64() % 4);
-            playRandomMoves(&pos, &prng, random_plies);
+            play_random_moves(&pos, &prng, PLIES_WITHOUT_BOOK.pick(&prng));
         }
 
-        if (!positionIsUsable(&pos)) continue;
+        if (!position_is_usable(&pos)) {
+            consecutive_unusable += 1;
+            if (consecutive_unusable == MAX_CONSECUTIVE_UNUSABLE_OPENINGS) return error.NoUsableOpening;
+            continue;
+        }
+        consecutive_unusable = 0;
 
-        const fen = pos.basic_fen(std.heap.page_allocator);
-        defer std.heap.page_allocator.free(fen);
-
-        try out.print("info string genfens {s}\n", .{fen});
+        var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
+        try out.print("info string genfens {s}\n", .{pos.write_fen(&fen_buf)});
         try out.flush();
 
         generated += 1;
     }
+}
+
+pub fn write_openings(args: []const []const u8, out: *std.Io.Writer, err: *std.Io.Writer) !void {
+    var offending: []const u8 = "";
+    const options = parse(args, &offending) catch |failure| {
+        try err.print("genfens: {s} at '{s}'\n", .{ @errorName(failure), offending });
+        return failure;
+    };
+
+    var diag: book.Diagnostic = .{};
+    var openings: ?book.Book = if (options.book_path) |path|
+        book.Book.load(platform.allocator, path, &diag) catch |failure| {
+            if (failure == error.InvalidBookLine) {
+                try err.print("genfens: book '{s}' line {}: {s}\n", .{ path, diag.line, diag.reason });
+            } else {
+                try err.print("genfens: cannot load book '{s}': {s}\n", .{ path, @errorName(failure) });
+            }
+            return failure;
+        }
+    else
+        null;
+    defer if (openings) |*loaded| loaded.deinit();
+
+    generate(options, if (openings) |loaded| loaded.lines else &.{}, out) catch |failure| {
+        if (failure == error.NoUsableOpening) {
+            try err.print("genfens: {} consecutive openings ended in check or without a legal move\n", .{MAX_CONSECUTIVE_UNUSABLE_OPENINGS});
+        }
+        return failure;
+    };
+}
+
+pub fn run(args_in: []const []const u8) !void {
+    var out_buf: [4096]u8 = undefined;
+    var out_file = std.Io.File.stdout().writerStreaming(platform.io, &out_buf);
+    var err_buf: [512]u8 = undefined;
+    var err_file = std.Io.File.stderr().writerStreaming(platform.io, &err_buf);
+    defer err_file.interface.flush() catch {};
+    return write_openings(args_in[1..], &out_file.interface, &err_file.interface);
 }

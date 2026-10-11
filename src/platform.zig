@@ -1,10 +1,10 @@
-//! OS services the engine depends on, backed by std.Io/libc natively and by
-//! host imports on wasm32-freestanding. See docs/WASM.md.
+//! OS services the engine depends on. See docs/WASM.md.
 
 const std = @import("std");
 const builtin = @import("builtin");
 
 pub const is_wasm = builtin.target.cpu.arch.isWasm();
+pub const is_linux = builtin.target.os.tag == .linux and !is_wasm;
 pub const has_threads = !builtin.single_threaded;
 
 pub var io: std.Io = undefined;
@@ -12,6 +12,7 @@ pub var io: std.Io = undefined;
 pub const allocator: std.mem.Allocator = if (is_wasm) std.heap.wasm_allocator else std.heap.c_allocator;
 
 pub const large_memory = @import("platform/large_memory.zig");
+pub const affinity = @import("platform/affinity.zig");
 
 const host = if (is_wasm) struct {
     extern "env" fn avalanche_write(ptr: [*]const u8, len: usize) void;
@@ -20,24 +21,20 @@ const host = if (is_wasm) struct {
     extern "env" fn avalanche_ponderhit_requested() bool;
 } else struct {};
 
-pub fn nowNs() i96 {
+pub fn now_ns() i96 {
     if (is_wasm) return @intFromFloat(host.avalanche_now_ms() * std.time.ns_per_ms);
     return std.Io.Clock.awake.now(io).nanoseconds;
 }
 
-pub inline fn hostStopRequested() bool {
+pub inline fn host_stop_requested() bool {
     return is_wasm and host.avalanche_stop_requested();
 }
 
-/// On wasm a search runs synchronously, so `ponderhit` arrives through the host
-/// like `stop` does; natively it is delivered as a UCI command instead.
-pub inline fn hostPonderhitRequested() bool {
+pub inline fn host_ponderhit_requested() bool {
     return is_wasm and host.avalanche_ponderhit_requested();
 }
 
-/// Yields while waiting on another thread or the host. Wasm has no sleep, so
-/// callers there busy-poll the host signals.
-pub fn sleepMs(ms: i64) void {
+pub fn sleep_ms(ms: i64) void {
     if (is_wasm) return;
     io.sleep(std.Io.Duration.fromMilliseconds(ms), .awake) catch {};
 }
@@ -87,8 +84,6 @@ const HostStdout = struct {
     }
 };
 
-/// std.debug.print has no sink on freestanding wasm, so user-facing debug
-/// output goes through here instead.
 pub fn print(comptime fmt: []const u8, args: anytype) void {
     if (!is_wasm) return std.debug.print(fmt, args);
     var buf: [1024]u8 = undefined;
@@ -98,27 +93,29 @@ pub fn print(comptime fmt: []const u8, args: anytype) void {
     w.flush() catch {};
 }
 
-// wasm32 caps atomic operands at 32 bits; single-threaded builds need no
-// atomicity, so these lower to plain memory operations there.
+pub fn fatal(comptime format: []const u8, args: anytype) noreturn {
+    @branchHint(.cold);
+    std.debug.panic(format, args);
+}
 
-pub inline fn atomicLoad(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {
+pub inline fn atomic_load(comptime T: type, ptr: *const T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicLoad(T, ptr, order);
     return ptr.*;
 }
 
-pub inline fn atomicStore(comptime T: type, ptr: *T, value: T, comptime order: std.lang.AtomicOrder) void {
+pub inline fn atomic_store(comptime T: type, ptr: *T, value: T, comptime order: std.lang.AtomicOrder) void {
     if (comptime has_threads) return @atomicStore(T, ptr, value, order);
     ptr.* = value;
 }
 
-pub inline fn atomicRmw(comptime T: type, ptr: *T, comptime op: std.lang.AtomicRmwOp, operand: T, comptime order: std.lang.AtomicOrder) T {
+pub inline fn atomic_rmw(comptime T: type, ptr: *T, comptime op: std.lang.AtomicRmwOp, operand: T, comptime order: std.lang.AtomicOrder) T {
     if (comptime has_threads) return @atomicRmw(T, ptr, op, operand, order);
     const old = ptr.*;
-    ptr.* = applyRmw(T, op, old, operand);
+    ptr.* = apply_rmw(T, op, old, operand);
     return old;
 }
 
-fn applyRmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operand: T) T {
+fn apply_rmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operand: T) T {
     return switch (op) {
         .Xchg => operand,
         .Add => old +% operand,
@@ -132,14 +129,14 @@ fn applyRmw(comptime T: type, comptime op: std.lang.AtomicRmwOp, old: T, operand
     };
 }
 
-test "applyRmw matches @atomicRmw for every operation" {
+test "apply_rmw matches @atomicRmw for every operation" {
     const cases = [_][2]i64{ .{ 0, 0 }, .{ 5, -3 }, .{ std.math.maxInt(i64), 1 }, .{ std.math.minInt(i64), -1 }, .{ -7, 7 } };
     inline for (comptime std.enums.values(std.lang.AtomicRmwOp)) |op| {
         for (cases) |case| {
             var cell = case[0];
             const previous = @atomicRmw(i64, &cell, op, case[1], .monotonic);
             try std.testing.expectEqual(case[0], previous);
-            try std.testing.expectEqual(cell, applyRmw(i64, op, case[0], case[1]));
+            try std.testing.expectEqual(cell, apply_rmw(i64, op, case[0], case[1]));
         }
     }
 }

@@ -1,8 +1,6 @@
+//! See "Draw detection" in docs/BOARD.md.
 const std = @import("std");
 
-/// Keys of the positions of a game followed by those of the line being
-/// searched, oldest first, in a buffer that never grows: a full history
-/// refuses an `append`. See "Draw detection" in docs/BOARD.md.
 pub const KeyHistory = struct {
     items: []u64,
     capacity: usize,

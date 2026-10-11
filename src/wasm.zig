@@ -1,4 +1,4 @@
-//! wasm32-freestanding entry point. The host ABI is specified in docs/WASM.md.
+//! See docs/WASM.md.
 
 const std = @import("std");
 const platform = @import("platform.zig");
@@ -15,16 +15,16 @@ comptime {
     if (!platform.is_wasm) @compileError("src/wasm.zig must be built for a wasm32 target");
 }
 
-pub const panic = std.debug.FullPanic(reportPanic);
+pub const panic = std.debug.FullPanic(report_panic);
 
-fn reportPanic(msg: []const u8, _: ?usize) noreturn {
+fn report_panic(msg: []const u8, _: ?usize) noreturn {
     platform.print("info string panic: {s}\n", .{msg});
     @trap();
 }
 
-const input_capacity = 1 << 16;
+const INPUT_CAPACITY = 1 << 16;
 
-var input_buf: [input_capacity]u8 = undefined;
+var input_buf: [INPUT_CAPACITY]u8 = undefined;
 var output_buf: [1 << 16]u8 = undefined;
 var output: platform.Stdout = undefined;
 var engine: *interface.UciInterface = undefined;
@@ -33,12 +33,12 @@ export fn avalanche_init() void {
     tables.init_all();
     zobrist.init_zobrist();
     cuckoo.init();
-    tt.GlobalTT.reset(16);
-    weights.do_nnue();
+    tt.GlobalTT.reset(tt.DEFAULT_HASH_MB);
+    weights.use_embedded();
     search.init_lmr();
 
     output = platform.Stdout.init(&output_buf);
-    engine = platform.allocator.create(interface.UciInterface) catch @panic("out of memory");
+    engine = platform.allocator.create(interface.UciInterface) catch platform.fatal("out of memory: UCI interface", .{});
     engine.init();
 }
 
@@ -47,12 +47,12 @@ export fn avalanche_input_ptr() [*]u8 {
 }
 
 export fn avalanche_input_cap() usize {
-    return input_capacity;
+    return INPUT_CAPACITY;
 }
 
 export fn avalanche_command(len: usize) bool {
     const w = output.writer();
-    const running = engine.handle_command(input_buf[0..@min(len, input_capacity)], w) catch |err| blk: {
+    const running = engine.handle_command(input_buf[0..@min(len, INPUT_CAPACITY)], w) catch |err| blk: {
         w.print("info string error: {s}\n", .{@errorName(err)}) catch {};
         break :blk true;
     };

@@ -1,5 +1,63 @@
 # Search notes
 
+## Score ranges
+
+- A mate found at ply `p` scores `MateScore - p`, and every score within
+  `MaxMate` of `MateScore` is a mate score.
+- A tablebase win found at ply `p` scores `TB_WIN_SCORE - p` and a loss the
+  negation, so the shallower win is preferred. `TB_WIN_SCORE` is
+  `MateScore - MaxMate - MAX_PLY`: the band lies just below the mate band, so
+  a tablebase result is a large centipawn score, is never reported as a mate
+  and is never taken for one by the search.
+- Scores above `SCORE_PLY_ADJ` (`TB_WIN_SCORE - MAX_PLY`) in magnitude, which
+  covers both bands, are stored in the transposition table relative to the
+  node: the ply is added to the magnitude on a store and subtracted on a
+  probe. A score stored at one ply and probed at another can therefore come
+  back up to `2 * MAX_PLY` smaller in magnitude. `MaxMate` is at least
+  `2 * MAX_PLY` for that reason, which a compile-time check enforces, so a
+  mate score always stays a mate score.
+- For the search the tablebase band is only `MAX_PLY` wide. A tablebase score
+  that has lost more than that is an ordinary evaluation to the search from
+  then on, but the UCI output treats every score down to
+  `TB_WIN_SCORE - 2 * MAX_PLY` as a tablebase result: it is printed in the
+  fixed band of docs/UCI.md and as a decided game under `UCI_ShowWDL`.
+- The corrected static evaluation is clamped below `SCORE_PLY_ADJ`.
+
+## Contempt and the transposition table
+
+- A draw is worth `-Contempt` to the side to move at the root and `+Contempt`
+  to its opponent, so `contempt_score` depends on whether the ply is even or
+  odd. A transposition-table entry can be probed at a ply of the other
+  parity, where a stored draw value would have the wrong sign.
+- A tablebase draw is therefore stored as an exact 0, and an exact 0 read
+  from the table becomes the draw value of the probing node.
+- With a non-zero contempt every other store skips the two scores this makes
+  ambiguous: one equal to the node's draw value, which may be a draw and
+  would be wrong at the other parity, and an exact 0, which a probe would
+  turn into a draw.
+
+## Tablebases
+
+- Syzygy probing goes through the vendored Pyrrhic library (`src/pyrrhic`, docs/BUILD.md). The
+  bit and attack primitives Pyrrhic asks its host for are callbacks exported from
+  `src/engine/syzygy.zig` and served by the engine's own attack tables, so no move generation
+  is duplicated. `src/pyrrhic/tbconfig.h` declares them; it inverts the color of the pawn
+  attacks, because Pyrrhic numbers White 1 and the engine 0.
+- Nothing probes until `SyzygyPath` has loaded tables: `syzygy.init` has to succeed, and every
+  probe in the search tests `syzygy.active()` before anything else. `bench` loads none, so
+  its node count is that of a search without tablebases.
+- An interior node probes the WDL tables when the fifty-move counter is zero, no side may
+  castle, at most `syzygy.max_pieces()` pieces are left (what the loaded tables cover, capped
+  by `SyzygyProbeLimit`) and the depth is at least `SyzygyProbeDepth`. Nodes that follow a
+  null move, singular verifications and nodes with an excluded move do not probe. A win is a
+  lower bound and a loss an upper bound in the band of "Score ranges", a draw is exact. A
+  result that decides the node is stored in the transposition table and returned; otherwise
+  it narrows the window. With `Syzygy50MoveRule` (the default) a cursed win and a blessed
+  loss are draws, without it the win and the loss they are.
+- The root probes the DTZ tables, or the WDL tables when Pyrrhic has no DTZ result, under the
+  same conditions on castling rights and piece count, and keeps the root moves that share
+  the best rank ("Search integration" in docs/UCI.md, under "Root candidates").
+
 ## Correction history
 
 - `Position.pawn_hash` is the Zobrist XOR of the pawns, and
@@ -31,10 +89,26 @@
 
 - The history term that shortens or lengthens a reduction is, for quiet moves,
   the main history plus the one-ply and two-ply continuation histories of the
-  move, divided by `LMRHistoryDivisor`. Captures use the main history alone.
-- The three tables share one bonus and gravity rule, so their sum spans about
-  three times the range of one; the divisor was widened from 5164 to 8192 with
-  the change and has not been tuned since.
+  move, divided by `LMRHistoryDivisor`. Captures use the main history alone,
+  and so does every move of a node that follows a null move or is a singular
+  verification (see "Continuation history").
+- The three tables share one bonus and gravity rule, so the sum that the
+  divisor applies to spans about three times the range of one.
+
+## Continuation history
+
+- `ContinuationHistory` is indexed by the piece and target square of an earlier
+  move, then by the from and to squares of the quiet move it scores.
+- The earlier moves are those one, two and four plies back
+  (`CONTINUATION_PLIES_AGO`, counted from the previous move). Move ordering
+  adds all three with the weights `ContHistWeight1`, `ContHistWeight2` and
+  `ContHistWeight4`, late move reductions use the first two, and a beta cutoff
+  by a quiet move updates all three for every quiet move searched, with the
+  bonus and gravity rule of the main history. An earlier null move has no
+  entry.
+- A node that follows a null move or is a singular verification
+  (`is_null_or_singular`) neither reads nor updates the table, and does not set
+  a counter move.
 
 ## Pruning eval
 
@@ -66,8 +140,7 @@
   `lmr_depth = max(depth - 1 - QuietLMR[depth][index], 0)`, the depth the move
   would be searched to after its base reduction. The depth limits of both
   prunings, late move pruning, history pruning and the SEE threshold of
-  captures still use `depth`. `FPBase`, `FPMargin` and `SEEQuietMargin` were
-  tuned for `depth` and have not been retuned.
+  captures still use `depth`.
 
 ## Move picking
 
@@ -81,8 +154,8 @@ counts do not move.
 - Move generation fills a `MoveList`: 256 moves inline and a length, no
   allocator. A legal position has at most 218 moves, but a set-up position
   can have more (`knQQQQQQ/pp5Q/Q6Q/Q6Q/Q6Q/Q6Q/Q6Q/KQQQQQQQ w - - 0 1` has
-  259), so `append` drops what does not fit. The search lists used to stop at
-  218 the same way; such a position is now searched on its first 256 moves.
+  259), so `append` drops what does not fit: such a position is searched on
+  its first 256 moves.
 
 ### The order
 
@@ -133,6 +206,17 @@ counts do not move.
   when a second move is requested, or when the search asks for the unpicked
   moves, and leaves the list as the eager scan would have; no table it reads
   has changed, because all scores were taken when the list was built.
+  That the hash move outscores every other move is checked when the engine
+  is built: `movepick.zig` derives the largest score any other move can get
+  from the score constants, the MVV-LVA table, the range of a
+  capture-history and of a continuation-history entry and the upper limits
+  of `HistoryGravityMax` and of the continuation weights, and does not
+  compile unless the hash move's score is above it. The main history is
+  bounded by its gravity rule, not by its type, which is why the upper
+  limit of the tunable stands in for it. The same check covers the
+  winning-capture test: a capture whose exchange wins cannot score below
+  the floor, and one whose exchange loses stays below it unless it promotes
+  to a queen.
 - Scan without branches. Once no exchange is pending, a slot becomes
   `min(carried, slot)` and the carried score `max(carried, slot)`, and the
   two moves are exchanged through a mask of the comparison. That is the same
@@ -171,14 +255,17 @@ of move.
 
 ### Measurements
 
-On an idle EPYC 9R14 (Zen 4), one thread, alternating runs, identical node
+The figures in this section were taken with an earlier network and search
+tune, for which `bench` searched 15,472,869 nodes; the count of the current
+tree is in `bench.nodes`.
+
+On an idle Zen 4 server CPU, one thread, alternating runs, identical node
 counts, the picker with the early exits against the allocator-backed lists
 and the eager selection sort: `bench` +10.1% nodes per second and 3-second
 searches +10.65%. The fixed-capacity list alone is +2.4% and +2.8% of that.
 Those runs predate the scoring change below.
 
-Counts over `bench` (15,472,869 nodes; 6,246,026 nodes build a list, 13.8
-moves each):
+Counts over `bench` (6,246,026 nodes build a list, 13.8 moves each):
 
 | | eager, full loops | now |
 |---|---:|---:|
@@ -195,8 +282,7 @@ branch-free scan removes.
 
 Retired instructions for `bench` on an Apple M4. The builds are commit
 870eeab with these changes alone, row by row: the absolute counts are not
-those of a build that also has the other changes of pull requests #104 to
-#111.
+those of a build that also has the later changes.
 
 | | instructions |
 |---|---:|
@@ -213,18 +299,18 @@ those of a build that also has the other changes of pull requests #104 to
 - Scoring was the largest remaining cost at about 6.5% of the run. It read the
   ply, both killers, the previous moves and the base of each continuation
   table again for every move, because the compiler cannot prove that storing
-  a score leaves the searcher untouched. `SearchContext.at` now reads them
-  once per node: 3.2% fewer instructions, and 2.4% fewer cycles as the median
-  of five alternating pairs (-5.4% to +0.6%).
+  a score leaves the searcher untouched. `SearchContext.at` reads them once
+  per node: 3.2% fewer instructions, and 2.4% fewer cycles as the median of
+  five alternating pairs (-5.4% to +0.6%).
 
 Tried and left out:
 
 - A picker whose scan was an out-of-line function with a `std.StaticBitSet`
   for the pending marks retired 6% more instructions than the plain scalar
   scan: most lists are short quiescence lists, where the call and the
-  by-value bit set copy cost more than the scan. The scan is now inlined into
-  the move loop; only the SEE call and the replay of the deferred hash step
-  are out of line.
+  by-value bit set copy cost more than the scan. The scan is inlined into the
+  move loop; only the SEE call and the replay of the deferred hash step are
+  out of line.
 - Counting the unpicked captures and promotions instead of rescanning the
   unpicked moves at a skipped move. On `bench` 3,057,765 checks lead to
   1,745,395 exits, so 0.75 checks per exit stop at a move that keeps the loop
@@ -240,12 +326,23 @@ Tried and left out:
 `negamax` is compiled once per value of its compile-time parameters. The side to move, the
 evaluation mode and the node type (root, PV, non-PV) stay compile-time: the board code is
 specialised by color, and the node type removes whole blocks (root reporting, PV bookkeeping,
-pruning). Whether the node follows a null move or a singular verification (`is_null`) and whether
-it is an expected cut node (`cutnode`) are run-time values: they only feed conditions, and as
-compile-time parameters they doubled the function twice over for the non-PV nodes, 24 copies of
-about 8 KiB each instead of 12. The move picker takes the first of them as
-`without_continuation_history`, which is all it uses it for.
+pruning). Whether the node follows a null move or is a singular verification
+(`is_null_or_singular`) and whether it is an expected cut node (`cutnode`) are run-time values:
+they only feed conditions, and as compile-time parameters they doubled the function twice over
+for the non-PV nodes, 24 copies of about 8 KiB each instead of 12. The move picker takes the first
+of them as `without_continuation_history`, which is all it uses it for.
 
-Single thread, nine alternating rounds, node counts identical: EPYC 9R14 (Zen 4) `bench` +1.2%,
-3 s searches +1.0%; EPYC 9R45 (Zen 5) +1.1% and +0.5%. Making the node type a run-time value as
-well (four copies) lost 0.8% on the EPYC 9R45 and was left out.
+Single thread, nine alternating rounds, node counts identical: a Zen 4 server CPU `bench` +1.2%,
+3 s searches +1.0%; a Zen 5 server CPU +1.1% and +0.5%. Making the node type a run-time value as
+well (four copies) lost 0.8% on the Zen 5 server CPU and was left out.
+
+## Sources
+
+- Internal iterative reduction follows the discussion at
+  http://talkchess.com/forum3/viewtopic.php?f=7&t=74769.
+- The exchange evaluation against a threshold (`see_threshold`), with its treatment of pinned
+  attackers, follows Weiss (https://github.com/TerjeKir/weiss).
+- Scaling the final evaluation by the remaining material and the fifty-move counter is an idea
+  from Clover.
+- The `bench` positions come from Stormphrax, which took them from Alexandria, which took them
+  from Bit-Genie.

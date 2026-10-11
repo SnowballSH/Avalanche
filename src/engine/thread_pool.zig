@@ -5,9 +5,8 @@ const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const numa = @import("numa.zig");
 const hce = @import("hce.zig");
-const Searcher = @import("search.zig").Searcher;
-
-const STACK_SIZE = 64 * 1024 * 1024;
+const search = @import("search.zig");
+const Searcher = search.Searcher;
 
 pub const SearchJob = struct {
     color: types.Color,
@@ -23,14 +22,12 @@ const Job = union(enum) {
     quit,
 };
 
-/// One parked helper thread and the searcher it owns. The searcher is
-/// allocated and initialised on the worker's own thread after NUMA placement,
-/// so its tables are first touched on the worker's node.
 pub const Worker = struct {
     job_posted: std.Io.Event align(std.atomic.cache_line) = .unset,
     idle: std.Io.Event = .unset,
     job: Job = undefined,
     helper_index: usize,
+    search_thread_count: usize,
     searcher: *Searcher = undefined,
     thread: std.Thread = undefined,
 
@@ -56,19 +53,15 @@ pub const Worker = struct {
     }
 
     fn main(self: *Worker) void {
-        numa.place_current_thread(self.helper_index + 1);
-        self.searcher = platform.allocator.create(Searcher) catch @panic("out of memory for helper searcher");
+        numa.place_current_thread(self.helper_index + 1, self.search_thread_count);
+        self.searcher = platform.allocator.create(Searcher) catch platform.fatal("out of memory: helper searcher", .{});
         self.searcher.init();
         self.searcher.thread_id = self.helper_index + 1;
         self.idle.set(platform.io);
 
         while (true) {
             switch (self.take_job()) {
-                .reset_heuristics => {
-                    self.searcher.age_pending = false;
-                    self.searcher.has_searched = false;
-                    self.searcher.reset_heuristics(true);
-                },
+                .reset_heuristics => self.searcher.new_game(),
                 .search => |job| self.searcher.start_helper(job.color, job.mode, job.depth, job.alpha, job.beta),
                 .quit => {
                     self.searcher.deinit();
@@ -82,7 +75,8 @@ pub const Worker = struct {
 };
 
 pub const ThreadPool = struct {
-    workers: std.array_list.Managed(*Worker) = std.array_list.Managed(*Worker).init(platform.allocator),
+    workers: std.ArrayList(*Worker) = .empty,
+    helpers_bound: bool = false,
 
     pub fn count(self: *const ThreadPool) usize {
         return self.workers.items.len;
@@ -92,23 +86,19 @@ pub const ThreadPool = struct {
         return self.workers.items[index];
     }
 
-    /// Grows or shrinks to `target` helpers; stops early if a thread cannot be created.
     pub fn resize(self: *ThreadPool, target: usize) void {
         if (comptime !platform.has_threads) return;
         numa.init();
-        while (self.workers.items.len > target) {
-            const w = self.workers.pop().?;
-            w.submit(.quit);
-            w.thread.join();
-            platform.allocator.destroy(w);
-        }
+        const binds_helpers = numa.binds_threads(target + 1);
+        self.release_down_to(if (binds_helpers != self.helpers_bound) 0 else target);
+        self.helpers_bound = binds_helpers;
 
         const old_len = self.workers.items.len;
-        self.workers.ensureTotalCapacity(target) catch return;
+        self.workers.ensureTotalCapacity(platform.allocator, target) catch return;
         while (self.workers.items.len < target) {
             const w = platform.allocator.create(Worker) catch break;
-            w.* = .{ .helper_index = self.workers.items.len };
-            w.thread = std.Thread.spawn(.{ .stack_size = STACK_SIZE }, Worker.main, .{w}) catch {
+            w.* = .{ .helper_index = self.workers.items.len, .search_thread_count = target + 1 };
+            w.thread = std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, Worker.main, .{w}) catch {
                 platform.allocator.destroy(w);
                 break;
             };
@@ -117,11 +107,19 @@ pub const ThreadPool = struct {
         for (self.workers.items[old_len..]) |w| w.wait_idle();
     }
 
+    fn release_down_to(self: *ThreadPool, target: usize) void {
+        while (self.workers.items.len > target) {
+            const w = self.workers.pop().?;
+            w.submit(.quit);
+            w.thread.join();
+            platform.allocator.destroy(w);
+        }
+    }
+
     pub fn start_search(self: *ThreadPool, index: usize, job: SearchJob) void {
         self.worker(index).submit(.{ .search = job });
     }
 
-    /// Runs a job on every worker in parallel and waits for all of them.
     pub fn reset_heuristics(self: *ThreadPool) void {
         for (self.workers.items) |w| w.submit(.reset_heuristics);
         self.wait_all();
@@ -140,6 +138,6 @@ pub const ThreadPool = struct {
 
     pub fn deinit(self: *ThreadPool) void {
         self.resize(0);
-        self.workers.deinit();
+        self.workers.clearAndFree(platform.allocator);
     }
 };

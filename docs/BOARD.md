@@ -22,7 +22,12 @@ enemy pieces attacking the king of the side to move, and the keys (`hash`, `pawn
   A jump table over all sixteen flags was mispredicted on undo.
 - An entry is 48 bytes and the stack `HISTORY_CAPACITY` (2176) entries, 102 KiB where the packed
   entries took 17 KiB. A search touches the entries of the plies it is at; the rest is the game
-  played so far.
+  played so far. The capacity is one entry per position from `set_fen` on: the `MAX_HISTORY_PLY`
+  (1920) moves the `position` command replays at most, and 256 for the search on top of them.
+- `copy_game_state` copies the current entry alone. `play_move` reads the entry of the position
+  it moves from and `undo_move` the one it takes back, so nothing reads below the position a copy
+  starts from. The copy leaves the evaluator alone and has to be followed by
+  `rebuild_evaluation` (docs/THREADS.md).
 
 ## Occupancy
 
@@ -30,12 +35,35 @@ enemy pieces attacking the king of the side to move, and the keys (`hash`, `pawn
 bitboards, repeated by `in_check`, both move generators, every exchange evaluation and the
 upcoming-repetition test.
 
-The occupancy has no slot for "no piece", so two edits now have a precondition: `place` must be
+The occupancy has no slot for "no piece", so two edits have a precondition: `place` must be
 given a piece, and the square `relocate` moves from must hold one. Both are `std.debug.assert`s:
 Debug and ReleaseSafe builds stop there, and in ReleaseFast the condition is handed to the
-optimiser as a fact, so breaking it is undefined behaviour. Before, moving from an empty square
-was tolerated: it wrote "no piece" to the destination and touched only the spare bitboard and a
-zero key. No caller does it; `move_piece` and `move_piece_quiet` are private to `Position`.
+optimiser as a fact, so breaking it is undefined behaviour. No caller moves from an empty
+square; `move_piece` and `move_piece_quiet` are private to `Position`.
+`relocate` also expects the square it moves to to be empty, which nothing checks: a capture goes
+through `move_piece`, or lifts the captured piece first.
+
+## FEN
+
+`history[game_ply].ep_sq` holds an en-passant square only while a pawn of the side to move
+attacks it, after a double push (`play_move`) as well as from a FEN (`set_fen`), and only then is
+the en-passant key part of `hash`. A square that nobody can capture on would give the position
+another key than the same position has without the square, and the repetition rule counts the
+two as one.
+
+`set_fen` also drops a square that no double push can have left: `fen.en_passant_square` asks
+for the right rank, for the square and the origin square of the push to be empty, and for a pawn
+of the side that just moved on the square the push ends on. Without the test the capture would
+remove whatever stands there, the king included. `fen.validate`, which checks a line without
+building a position (datagen runs it over its books, docs/DATAGEN.md), calls the same function
+and rejects such a line, where `set_fen` plays on without the square.
+
+`set_fen` reads a fullmove number above `MAX_FULLMOVE` as `MAX_FULLMOVE`, the largest from which
+the 32-bit ply count of the game cannot overflow within the `HISTORY_CAPACITY` plies a position
+holds. A missing fullmove number, one of 0, or a field that is not a number, counts as 1.
+
+`write_fen` writes into a buffer of `FEN_CAPACITY` bytes, the length of the longest text it can
+produce, so it needs no allocator and cannot fail. docs/CHESS960.md describes the castling field.
 
 ## King attackers
 
@@ -57,7 +85,7 @@ between calls.
 
 `generate_legal_moves` builds the map of squares the other side attacks, for king moves and
 castling. `generate_q_moves` only needs it for king captures, and most positions have no enemy
-piece next to the king. It now asks, for each such piece, whether its square is attacked once the
+piece next to the king. It asks, for each such piece, whether its square is attacked once the
 king has left its own. A square is in the attack map exactly when it has an attacker, and both
 iterate the squares in the same order, so the moves and their order are the same.
 
@@ -79,8 +107,9 @@ valuable one, with the occupancy of the exchange so far.
   by the many calls that never took a second step.
 
 `src/tests/board.zig` keeps the previous implementation and compares the two on every legal move
-of random games, over fixed and random thresholds, and on positions built for a pin along the
-capture line, a pin that appears during the exchange, en passant and king recaptures.
+of random games, at every piece weight and difference of two weights, their neighbours and random
+thresholds, and on positions built for a pin along the capture line, a pin that appears during
+the exchange, en passant and king recaptures.
 
 ## Draw detection
 
@@ -96,9 +125,7 @@ capture line, a pin that appears during the exchange, en passant and king recapt
   `unreachable`, and a compile-time check in `search.zig` holds `HISTORY_CAPACITY` to the longest
   game plus `MAX_PLY`. It is `unreachable` as well where a history starts over: the `position`
   command (which stops reading moves at `MAX_HISTORY_PLY`), `bench`, a new datagen game and a
-  helper adopting the root all append to a history they have just cleared. Only datagen's record
-  of a game's moves ignores a refusal, because the length of its random opening is an option that
-  nothing bounds.
+  helper adopting the root all append to a history they have just cleared.
 - The repetition scan compares the keys two, four, ... plies back, as far as `fifty + 3`. It is
   not narrowed to `4 ..= fifty`, although no real game repeats outside that window: a null move
   adds to the fifty-move counter without adding a key, so a key two entries back can be a real
@@ -107,10 +134,10 @@ capture line, a pin that appears during the exchange, en passant and king recapt
 
 ## Measurements
 
-`bench` searches 15472869 nodes at every commit, and the standard perft counts and eight
-`go depth 13` searches (every info line) are equal before and after.
+None of these changes moved the `bench` node count (`bench.nodes` holds the current one), the
+standard perft counts or an info line of eight `go depth 13` searches.
 
-EPYC 9R14 (Zen 4), idle, one thread, seven alternating rounds: nodes per second against the code
+A Zen 4 server CPU, idle, one thread, seven alternating rounds: nodes per second against the code
 before. The round-to-round ratios of this run spread about two points either way.
 
 | State | `bench` | 3 s searches |
@@ -122,8 +149,8 @@ before. The round-to-round ratios of this run spread about two points either way
 Apple M4, `--release=fast`. The machine was running other builds and benchmarks at load average
 15 to 20, so nps says nothing; the table gives what `/usr/bin/time -l` reports as the instructions
 retired by `bench`, one run per build, back to back. The builds are commit 870eeab with these
-changes alone, row by row: the absolute counts are not those of a build that also has the other
-changes of pull requests #104 to #111.
+changes alone, row by row: the absolute counts are not those of a build that also has the later
+changes.
 
 | Change | Instructions | Against the row above |
 |---|---|---|
@@ -155,11 +182,11 @@ different load and their other shares are not comparable.
   moved piece (two table loads, no slider lookup) unless the origin square was on a line with the
   king, and Debug builds checked the result against the general query on every move. It retired
   0.2% fewer instructions on the M4 (109.60 G to 109.43 G), which the counts do not resolve, and
-  on the EPYC 9R14 the build with it measured +3.3% on `bench` and +3.8% on 3 s searches against
-  +4.3% and +3.9% without: nothing gained. The test of the origin square is a branch that depends
-  on the position, taken for an estimated third of the moves, which is the likely price of the
-  lookups it saves. It also left the stored attackers wrong after a move from a position set up
-  with the side not to move in check.
+  on the Zen 4 server CPU the build with it measured +3.3% on `bench` and +3.8% on 3 s searches
+  against +4.3% and +3.9% without: nothing gained. The test of the origin square is a branch that
+  depends on the position, taken for an estimated third of the moves, which is the likely price
+  of the lookups it saves. It also left the stored attackers wrong after a move from a position
+  set up with the side not to move in check.
 
 ## Looked at and left as they are
 

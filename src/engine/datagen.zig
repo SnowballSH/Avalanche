@@ -1,9 +1,10 @@
+//! See docs/DATAGEN.md.
+
 const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const utils = @import("../chess/utils.zig");
 const position = @import("../chess/position.zig");
-const fen = @import("../chess/fen.zig");
 const search = @import("search.zig");
 const see = @import("see.zig");
 const tt = @import("tt.zig");
@@ -13,18 +14,27 @@ const viriformat = @import("datagen/viriformat.zig");
 
 pub const Format = options.Format;
 
+const DRAWN_AFTER_PLY: usize = 500;
+const LONGEST_GAME_PLIES = @max(options.MAX_RANDOM_PLIES, DRAWN_AFTER_PLY + 1) + 1;
+
+comptime {
+    if (LONGEST_GAME_PLIES > position.MAX_HISTORY_PLY) {
+        @compileError("a datagen game must fit position.MAX_HISTORY_PLY: a position and a searcher's key history hold that many game plies before a search");
+    }
+}
+
 pub const Summary = struct {
     positions: u64 = 0,
     games: u64 = 0,
     white_wins: u64 = 0,
     draws: u64 = 0,
     black_wins: u64 = 0,
+    discarded_games: u64 = 0,
     seconds: f64 = 0,
     seed: u64 = 0,
     raw_eval: bool = false,
 };
 
-/// Shared by all datagen threads; `lock` serializes whole-game writes and the totals.
 pub const Output = struct {
     file: std.Io.File,
     lock: std.Io.Mutex = .init,
@@ -32,8 +42,17 @@ pub const Output = struct {
     positions_target: u64,
     stop: std.atomic.Value(bool) = .init(false),
 
-    /// Caller holds `lock` and has flushed the complete game.
-    fn record_game(self: *Output, positions: u64, outcome: adjudicator.Outcome) void {
+    const WRITE_BUFFER_SIZE = 8192;
+
+    fn write_game(self: *Output, parts: []const []const u8, positions: u64, outcome: adjudicator.Outcome) !void {
+        self.lock.lockUncancelable(platform.io);
+        defer self.lock.unlock(platform.io);
+
+        var buffer: [WRITE_BUFFER_SIZE]u8 = undefined;
+        var file_writer = self.file.writerStreaming(platform.io, &buffer);
+        for (parts) |part| try file_writer.interface.writeAll(part);
+        try file_writer.interface.flush();
+
         self.totals.positions += positions;
         self.totals.games += 1;
         switch (outcome) {
@@ -44,6 +63,12 @@ pub const Output = struct {
         if (self.positions_target != 0 and self.totals.positions >= self.positions_target) {
             self.stop.store(true, .release);
         }
+    }
+
+    fn record_discarded_game(self: *Output) void {
+        self.lock.lockUncancelable(platform.io);
+        defer self.lock.unlock(platform.io);
+        self.totals.discarded_games += 1;
     }
 
     fn stopped(self: *Output) bool {
@@ -65,6 +90,11 @@ pub const DatagenConfig = struct {
     thresholds: adjudicator.Thresholds = .{},
     positions_target: u64 = 0,
     raw_eval: bool = false,
+    max_consecutive_discards: u64 = 10_000,
+
+    pub fn hard_nodes(self: DatagenConfig) u64 {
+        return self.soft_nodes * self.hard_node_multiplier;
+    }
 
     pub fn from_options(o: options.Options) DatagenConfig {
         return .{
@@ -99,7 +129,7 @@ comptime {
 
 const PendingRecord = struct {
     board: ChessBoard,
-    white_was_stm: bool,
+    mover: types.Color,
 };
 
 fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) PendingRecord {
@@ -173,11 +203,8 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
         break :blk @as(u8, @intCast(@ctz(kb))) ^ 56;
     };
 
-    const clamped = std.math.clamp(white_relative_score, -32000, 32000);
-    const score: i16 = if (stm == types.Color.White)
-        @as(i16, @intCast(clamped))
-    else
-        @as(i16, @intCast(-clamped));
+    const clamped = viriformat.clamp_eval(white_relative_score);
+    const score: i16 = if (stm == types.Color.White) clamped else -clamped;
 
     return PendingRecord{
         .board = ChessBoard{
@@ -189,11 +216,11 @@ fn pos_to_chessboard(pos: *position.Position, white_relative_score: i32) Pending
             .opp_ksq = opp_king_sq,
             .extra = .{ 0, 0, 0 },
         },
-        .white_was_stm = (stm == types.Color.White),
+        .mover = stm,
     };
 }
 
-pub const DatagenSingle = struct {
+pub const Worker = struct {
     id: u64,
     timer: types.Timer,
     count: u64,
@@ -206,18 +233,19 @@ pub const DatagenSingle = struct {
     openings: ?[]const []const u8,
     config: DatagenConfig,
 
-    pub fn new(output: *Output, seed: u128, id: u64, openings: ?[]const []const u8, config: DatagenConfig) DatagenSingle {
-        const white_tt = newDatagenTT(config.datagen_tt_mb);
-        const black_tt = newDatagenTT(config.datagen_tt_mb);
+    pub fn new(output: *Output, seed: u128, id: u64, openings: ?[]const []const u8, config: DatagenConfig) !Worker {
+        const white_tt = try create_table(config.datagen_tt_mb);
+        errdefer destroy_table(white_tt);
+        const black_tt = try create_table(config.datagen_tt_mb);
 
-        return DatagenSingle{
+        return Worker{
             .id = id,
             .timer = undefined,
             .count = 0,
             .game_count = 0,
             .searchers = .{
-                newDatagenSearcher(config, white_tt),
-                newDatagenSearcher(config, black_tt),
+                new_searcher(config, white_tt),
+                new_searcher(config, black_tt),
             },
             .ttables = .{ white_tt, black_tt },
             .output = output,
@@ -227,28 +255,32 @@ pub const DatagenSingle = struct {
         };
     }
 
-    pub fn deinit(self: *DatagenSingle) void {
+    pub fn deinit(self: *Worker) void {
         for (&self.searchers) |*s| {
             s.deinit();
         }
-        for (self.ttables) |table| {
-            table.deinit();
-            std.heap.c_allocator.destroy(table);
-        }
+        for (self.ttables) |table| destroy_table(table);
     }
 
-    fn newDatagenTT(mb: u64) *tt.TranspositionTable {
-        const table = std.heap.c_allocator.create(tt.TranspositionTable) catch unreachable;
+    fn create_table(mb: u64) !*tt.TranspositionTable {
+        const table = try platform.allocator.create(tt.TranspositionTable);
+        errdefer platform.allocator.destroy(table);
         table.* = tt.TranspositionTable.new();
         table.reset(mb);
+        if (table.data.len == 0) return error.OutOfMemory;
         return table;
     }
 
-    fn newDatagenSearcher(config: DatagenConfig, table: *tt.TranspositionTable) search.Searcher {
+    fn destroy_table(table: *tt.TranspositionTable) void {
+        table.deinit();
+        platform.allocator.destroy(table);
+    }
+
+    fn new_searcher(config: DatagenConfig, table: *tt.TranspositionTable) search.Searcher {
         var s = search.Searcher.new();
         s.max_millis = 999999999;
         s.ideal_time = 999999999;
-        s.max_nodes = config.soft_nodes * config.hard_node_multiplier;
+        s.max_nodes = config.hard_nodes();
         s.soft_max_nodes = config.soft_nodes;
         s.min_depth = 1;
         s.silent_output = true;
@@ -261,11 +293,11 @@ pub const DatagenSingle = struct {
         best_move: types.Move,
     };
 
-    fn activeSearcher(self: *DatagenSingle, turn: types.Color) *search.Searcher {
+    fn active_searcher(self: *Worker, turn: types.Color) *search.Searcher {
         return &self.searchers[@as(usize, @backingInt(turn))];
     }
 
-    fn resetSearchStateForGame(self: *DatagenSingle, pos: *position.Position) void {
+    fn reset_search_state_for_game(self: *Worker, pos: *position.Position) void {
         for (&self.searchers) |*s| {
             s.reset_heuristics(true);
             @atomicStore(bool, &s.shared.stop, false, .monotonic);
@@ -277,18 +309,22 @@ pub const DatagenSingle = struct {
         }
     }
 
-    fn noteGamePosition(self: *DatagenSingle, pos: *position.Position) void {
+    fn note_game_position(self: *Worker, pos: *position.Position) void {
         for (&self.searchers) |*s| {
-            s.hash_history.append(pos.hash) catch {};
+            s.hash_history.append(pos.hash) catch unreachable;
         }
     }
 
-    fn isCurrentPositionDraw(self: *DatagenSingle, pos: *position.Position) bool {
-        return self.activeSearcher(pos.turn).is_draw(pos, true);
+    fn is_current_position_draw(self: *Worker, pos: *position.Position) bool {
+        return self.active_searcher(pos.turn).is_draw(pos, true);
     }
 
-    fn searchPosition(self: *DatagenSingle, pos: *position.Position) SearchResult {
-        var s = self.activeSearcher(pos.turn);
+    fn completed_no_iteration(searcher: *const search.Searcher) bool {
+        return searcher.line_count == 0;
+    }
+
+    fn search_position(self: *Worker, pos: *position.Position) !SearchResult {
+        var s = self.active_searcher(pos.turn);
         s.time_stop = false;
         s.force_thinking = false;
         @atomicStore(bool, &s.shared.stop, false, .monotonic);
@@ -298,6 +334,7 @@ pub const DatagenSingle = struct {
                 inline else => |raw| s.iterative_deepening_mode(pos, turn, if (raw) .raw else .scaled, null),
             },
         };
+        if (completed_no_iteration(s)) return error.NodeBudgetBelowDepthOne;
         const white_score = if (pos.turn == types.Color.White) score else -score;
 
         @atomicStore(bool, &s.shared.stop, false, .monotonic);
@@ -310,7 +347,7 @@ pub const DatagenSingle = struct {
         };
     }
 
-    fn playMove(pos: *position.Position, move: types.Move) void {
+    fn play_move(pos: *position.Position, move: types.Move) void {
         if (pos.turn == types.Color.White) {
             pos.play_move(types.Color.White, move);
         } else {
@@ -318,14 +355,14 @@ pub const DatagenSingle = struct {
         }
     }
 
-    fn randomPlyCount(self: *DatagenSingle, using_book: bool) usize {
+    fn random_ply_count(self: *Worker, using_book: bool) usize {
         const min = if (using_book) self.config.book_random_plies_min else self.config.random_plies_min;
         const range = if (using_book) self.config.book_random_plies_range else self.config.random_plies_range;
         const extra = if (range == 0) 0 else self.prng.rand64() % range;
         return @as(usize, @intCast(min + extra));
     }
 
-    fn randomMovePasses(self: *DatagenSingle, pos: *position.Position, move: types.Move) bool {
+    fn random_move_passes(self: *Worker, pos: *position.Position, move: types.Move) bool {
         const flags = move.get_flags();
         if (flags == types.MoveFlags.OO or flags == types.MoveFlags.OOO or flags == types.MoveFlags.EN_PASSANT or move.is_promotion()) {
             return true;
@@ -333,14 +370,14 @@ pub const DatagenSingle = struct {
         return see.see_threshold(pos, move, self.config.random_move_see_threshold);
     }
 
-    fn pickRandomOpeningMove(self: *DatagenSingle, pos: *position.Position, moves: []const types.Move) types.Move {
+    fn pick_random_opening_move(self: *Worker, pos: *position.Position, moves: []const types.Move) types.Move {
         const fallback_index = @as(usize, @intCast(self.prng.rand64() % @as(u64, @intCast(moves.len))));
         const fallback = moves[fallback_index];
 
         var accepted: u64 = 0;
         var chosen = types.Move.empty();
         for (moves) |move| {
-            if (!self.randomMovePasses(pos, move)) continue;
+            if (!self.random_move_passes(pos, move)) continue;
             accepted += 1;
             if (self.prng.rand64() % accepted == 0) {
                 chosen = move;
@@ -350,159 +387,145 @@ pub const DatagenSingle = struct {
         return if (chosen.to_u16() != 0) chosen else fallback;
     }
 
-    pub fn playGameViri(self: *DatagenSingle) !void {
+    const GameFate = enum { written, discarded };
+
+    pub fn play_viri_game(self: *Worker) !GameFate {
         var pos: position.Position = undefined;
         pos.init();
         defer pos.deinit();
 
         const using_book = self.openings != null;
-        if (self.openings) |book| {
-            const line = book[self.prng.rand64() % book.len];
+        if (self.openings) |openings| {
+            const line = openings[self.prng.rand64() % openings.len];
             pos.set_fen(line);
         } else {
             pos.set_fen(types.DEFAULT_FEN);
         }
 
-        self.resetSearchStateForGame(&pos);
+        self.reset_search_state_for_game(&pos);
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        var move_scores = try std.array_list.Managed(viriformat.MoveScorePair).initCapacity(arena.allocator(), 256);
-        defer move_scores.deinit();
+        var move_scores: std.ArrayList(viriformat.MoveScorePair) = try .initCapacity(arena.allocator(), 256);
 
         var outcome: adjudicator.Outcome = .draw;
         var adjudication = adjudicator.Adjudicator.init(self.config.thresholds);
         var ply: usize = 0;
         const cfg = self.config;
 
-        const random_plies = self.randomPlyCount(using_book);
+        const random_plies = self.random_ply_count(using_book);
 
         var initial_board: ?viriformat.PackedBoard = null;
 
         while (true) : (ply += 1) {
             const movelist = pos.legal_moves();
             const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-            if (adjudicator.terminal(movelist.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+            if (adjudicator.terminal(movelist.len, in_check, pos.turn, self.is_current_position_draw(&pos))) |ended| {
                 outcome = ended;
                 break;
             }
 
-            // Random opening moves
             if (ply < random_plies) {
-                const move = self.pickRandomOpeningMove(&pos, movelist.items());
-                playMove(&pos, move);
-                self.noteGamePosition(&pos);
+                const move = self.pick_random_opening_move(&pos, movelist.items());
+                play_move(&pos, move);
+                self.note_game_position(&pos);
                 continue;
             }
 
-            // The first search after the random plies both screens the opening and plays the first recorded move.
             var opening_search: ?SearchResult = null;
             if (initial_board == null) {
-                const screened = self.searchPosition(&pos);
+                const screened = try self.search_position(&pos);
                 if (screened.score > cfg.opening_reject_threshold or screened.score < -cfg.opening_reject_threshold) {
-                    return;
+                    return .discarded;
                 }
-                initial_board = viriformat.pack_board(&pos, screened.score);
+                initial_board = viriformat.PackedBoard.pack(&pos, screened.score);
                 opening_search = screened;
             }
 
-            const result = opening_search orelse self.searchPosition(&pos);
-            const res = result.score;
+            const result = opening_search orelse try self.search_position(&pos);
+            const white_score = result.score;
             const best_move = result.best_move;
 
-            // Record move+score pair
-            const viri_move = viriformat.encode_move(best_move);
-            try move_scores.append(viriformat.MoveScorePair{
-                .move = viri_move,
-                .score = @as(i16, @intCast(std.math.clamp(res, -32000, 32000))),
+            try move_scores.append(arena.allocator(), .{
+                .move = viriformat.encode_move(best_move),
+                .score = viriformat.clamp_eval(white_score),
             });
 
-            // Play the move
-            playMove(&pos, best_move);
-            self.noteGamePosition(&pos);
+            play_move(&pos, best_move);
+            self.note_game_position(&pos);
 
-            if (adjudication.observe(res, ply)) |adjudicated| {
+            if (adjudication.observe(white_score, ply)) |adjudicated| {
                 outcome = adjudicated;
                 break;
             }
 
-            // Safety: max game length
-            if (ply > 500) {
+            if (ply > DRAWN_AFTER_PLY) {
                 outcome = .draw;
                 break;
             }
         }
 
-        if (initial_board == null or move_scores.items.len == 0) return;
+        if (initial_board == null or move_scores.items.len == 0) return .discarded;
 
-        // Set game result in the initial board
         var board = initial_board.?;
         board.wdl = @backingInt(outcome);
 
-        // Write game under file lock: PackedBoard + viriformat.MoveScorePairs + Terminator
-        self.output.lock.lockUncancelable(platform.io);
-        defer self.output.lock.unlock(platform.io);
-        var wbuf: [8192]u8 = undefined;
-        var file_writer = self.output.file.writerStreaming(platform.io, &wbuf);
-        const writer = &file_writer.interface;
-        try writer.writeAll(std.mem.asBytes(&board));
-        for (move_scores.items) |*ms| {
-            try writer.writeAll(std.mem.asBytes(ms));
-        }
-        try writer.writeAll(std.mem.asBytes(&viriformat.TERMINATOR));
-        try writer.flush();
-        self.output.record_game(move_scores.items.len, outcome);
+        try self.output.write_game(
+            &.{ std.mem.asBytes(&board), std.mem.sliceAsBytes(move_scores.items), std.mem.asBytes(&viriformat.TERMINATOR) },
+            move_scores.items.len,
+            outcome,
+        );
         self.count += move_scores.items.len;
         self.game_count += 1;
+        return .written;
     }
 
-    pub fn playGame(self: *DatagenSingle) !void {
+    pub fn play_bullet_game(self: *Worker) !GameFate {
         var pos: position.Position = undefined;
         pos.init();
         defer pos.deinit();
 
         const using_book = self.openings != null;
-        if (self.openings) |book| {
-            const line = book[self.prng.rand64() % book.len];
+        if (self.openings) |openings| {
+            const line = openings[self.prng.rand64() % openings.len];
             pos.set_fen(line);
         } else {
             pos.set_fen(types.DEFAULT_FEN);
         }
 
-        self.resetSearchStateForGame(&pos);
+        self.reset_search_state_for_game(&pos);
 
         var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
         defer arena.deinit();
 
-        var records = try std.array_list.Managed(PendingRecord).initCapacity(arena.allocator(), 128);
-        defer records.deinit();
+        var records: std.ArrayList(PendingRecord) = try .initCapacity(arena.allocator(), 128);
 
         var outcome: adjudicator.Outcome = .draw;
         var adjudication = adjudicator.Adjudicator.init(self.config.thresholds);
         var ply: usize = 0;
         const cfg = self.config;
-        const random_plies = self.randomPlyCount(using_book);
+        const random_plies = self.random_ply_count(using_book);
 
         while (true) : (ply += 1) {
             const movelist = pos.legal_moves();
             const in_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
-            if (adjudicator.terminal(movelist.len, in_check, pos.turn, self.isCurrentPositionDraw(&pos))) |ended| {
+            if (adjudicator.terminal(movelist.len, in_check, pos.turn, self.is_current_position_draw(&pos))) |ended| {
                 outcome = ended;
                 break;
             }
 
             if (ply < random_plies) {
-                const move = self.pickRandomOpeningMove(&pos, movelist.items());
-                playMove(&pos, move);
-                self.noteGamePosition(&pos);
+                const move = self.pick_random_opening_move(&pos, movelist.items());
+                play_move(&pos, move);
+                self.note_game_position(&pos);
                 continue;
             }
 
-            const result = self.searchPosition(&pos);
-            const res = result.score;
+            const result = try self.search_position(&pos);
+            const white_score = result.score;
 
-            if (ply == random_plies and (res > cfg.opening_reject_threshold or res < -cfg.opening_reject_threshold)) {
+            if (ply == random_plies and (white_score > cfg.opening_reject_threshold or white_score < -cfg.opening_reject_threshold)) {
                 break;
             }
 
@@ -511,112 +534,94 @@ pub const DatagenSingle = struct {
             const min_record_ply: usize = if (using_book) 8 else 16;
             const should_record = ply > min_record_ply and !in_check and
                 !best_move.is_capture() and !best_move.is_promotion() and
-                res > -2000 and res < 2000;
+                white_score > -2000 and white_score < 2000;
 
             var pending: ?PendingRecord = null;
             if (should_record) {
-                pending = pos_to_chessboard(&pos, res);
+                pending = pos_to_chessboard(&pos, white_score);
             }
 
-            playMove(&pos, best_move);
-            self.noteGamePosition(&pos);
+            play_move(&pos, best_move);
+            self.note_game_position(&pos);
 
             const gave_check = if (pos.turn == types.Color.White) pos.in_check(types.Color.White) else pos.in_check(types.Color.Black);
             if (pending != null and !gave_check) {
-                try records.append(pending.?);
+                try records.append(arena.allocator(), pending.?);
             }
 
-            if (adjudication.observe(res, ply)) |adjudicated| {
+            if (adjudication.observe(white_score, ply)) |adjudicated| {
                 outcome = adjudicated;
                 break;
             }
 
-            if (ply > 500) {
+            if (ply > DRAWN_AFTER_PLY) {
                 outcome = .draw;
                 break;
             }
         }
 
-        if (records.items.len == 0) return;
+        if (records.items.len == 0) return .discarded;
 
-        for (records.items) |*rec| {
-            rec.board.result = if (rec.white_was_stm) @backingInt(outcome) else 2 - @backingInt(outcome);
+        const boards = try arena.allocator().alloc(ChessBoard, records.items.len);
+        for (boards, records.items) |*board, record| {
+            board.* = record.board;
+            board.result = @backingInt(outcome.relative_to(record.mover));
         }
 
-        self.output.lock.lockUncancelable(platform.io);
-        defer self.output.lock.unlock(platform.io);
-        var wbuf: [4096]u8 = undefined;
-        var file_writer = self.output.file.writerStreaming(platform.io, &wbuf);
-        const writer = &file_writer.interface;
-        for (records.items) |*rec| {
-            const bytes = std.mem.asBytes(&rec.board);
-            try writer.writeAll(bytes);
-        }
-        try writer.flush();
-        self.output.record_game(records.items.len, outcome);
+        try self.output.write_game(&.{std.mem.sliceAsBytes(boards)}, boards.len, outcome);
         self.count += records.items.len;
         self.game_count += 1;
+        return .written;
     }
 
-    /// Thread entry point: a failing worker records its error and stops the others, so the run fails as a whole.
-    fn run(self: *DatagenSingle) void {
-        self.startMany() catch |err| {
+    fn run(self: *Worker) void {
+        self.run_games() catch |err| {
             self.failure = err;
             self.output.stop.store(true, .release);
         };
     }
 
-    pub fn startMany(self: *DatagenSingle) !void {
+    pub fn run_games(self: *Worker) !void {
         self.timer = types.Timer.start();
+        var consecutive_discards: u64 = 0;
         while (!self.output.stopped()) {
-            if (self.config.format == .viri) {
-                try self.playGameViri();
-            } else {
-                try self.playGame();
-            }
-            if (self.game_count % 50 == 0 and self.game_count > 0) {
-                const elapsed = @as(f64, @floatFromInt(self.timer.read())) / std.time.ns_per_s;
-                const pps = @as(f64, @floatFromInt(self.count)) / elapsed;
-                const gps = @as(f64, @floatFromInt(self.game_count)) / elapsed;
-
-                std.debug.print("id {}: {} games, {} pos, {d:.0} pos/s, {d:.2} games/s\n", .{ self.id, self.game_count, self.count, pps, gps });
+            const fate = switch (self.config.format) {
+                .viri => try self.play_viri_game(),
+                .bullet => try self.play_bullet_game(),
+            };
+            switch (fate) {
+                .written => {
+                    consecutive_discards = 0;
+                    if (self.game_count % PROGRESS_INTERVAL_GAMES == 0) self.print_progress();
+                },
+                .discarded => {
+                    self.output.record_discarded_game();
+                    consecutive_discards += 1;
+                    if (consecutive_discards == self.config.max_consecutive_discards) return error.NoUsableOpening;
+                },
             }
         }
     }
-};
 
-pub const BookDiagnostic = struct {
-    line: usize = 0,
-    reason: []const u8 = "",
-};
+    const PROGRESS_INTERVAL_GAMES = 50;
 
-/// Loads every non-empty line of an EPD/FEN book, rejecting the whole book at the first line that is not a legal
-/// position: a bad line would otherwise be played as an empty board or read out of bounds.
-pub fn loadEpdFile(path: []const u8, diag: *BookDiagnostic) ![]const []const u8 {
-    const file = try std.Io.Dir.cwd().openFile(platform.io, path, .{});
-    defer file.close(platform.io);
-    const file_len = try file.length(platform.io);
-    const content = try std.heap.page_allocator.alloc(u8, @as(usize, @intCast(file_len)));
-    _ = try file.readPositionalAll(platform.io, content, 0);
+    fn print_progress(self: *const Worker) void {
+        const elapsed = @as(f64, @floatFromInt(self.timer.read())) / std.time.ns_per_s;
+        const pps = @as(f64, @floatFromInt(self.count)) / elapsed;
+        const gps = @as(f64, @floatFromInt(self.game_count)) / elapsed;
 
-    var lines = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
-    var iter = std.mem.splitScalar(u8, content, '\n');
-    var number: usize = 0;
-    while (iter.next()) |line| {
-        number += 1;
-        const trimmed = std.mem.trim(u8, line, " \t\r");
-        if (trimmed.len == 0) continue;
-        fen.validate(trimmed) catch |err| {
-            diag.* = .{ .line = number, .reason = @errorName(err) };
-            return error.InvalidBookLine;
-        };
-        try lines.append(trimmed);
+        std.debug.print("id {}: {} games, {} pos, {d:.0} pos/s, {d:.2} games/s\n", .{ self.id, self.game_count, self.count, pps, gps });
     }
-    if (lines.items.len == 0) return error.EmptyBook;
-    return lines.items;
+};
+
+pub fn explain(failure: anyerror) []const u8 {
+    return switch (failure) {
+        error.NoUsableOpening => "too many consecutive openings were rejected by the first search or left nothing to record",
+        error.NodeBudgetBelowDepthOne => "the hard node limit ended a search before depth 1 completed; raise nodes= or hardmult=",
+        else => "",
+    };
 }
 
-/// Per-thread PRNG seed derived with splitmix64, so every run seed (including 0) gives distinct, non-zero states.
 pub fn thread_seed(run_seed: u64, thread: usize) u128 {
     var state = run_seed ^ (@as(u64, thread) *% 0x9E3779B97F4A7C15);
     const low = splitmix64(&state);
@@ -633,30 +638,34 @@ fn splitmix64(state: *u64) u64 {
     return z ^ (z >> 31);
 }
 
-pub fn default_output_path(buf: []u8, seed: u64, format: Format) []const u8 {
-    const ext = if (format == .viri) ".viribin" else ".bin";
-    return std.fmt.bufPrint(buf, "data_{x:0>16}{s}", .{ seed, ext }) catch unreachable;
+pub const DEFAULT_OUTPUT_PATH_CAPACITY = 64;
+
+pub fn default_output_path(buf: *[DEFAULT_OUTPUT_PATH_CAPACITY]u8, seed: u64, format: Format) []const u8 {
+    const pattern = "data_{x:0>16}{s}";
+    comptime {
+        for (std.enums.values(Format)) |any_format| {
+            std.debug.assert(std.fmt.count(pattern, .{ std.math.maxInt(u64), any_format.extension() }) <= DEFAULT_OUTPUT_PATH_CAPACITY);
+        }
+    }
+    return std.mem.print(buf, pattern, .{ seed, format.extension() }) catch unreachable;
 }
 
 pub const Datagen = struct {
     output: Output = undefined,
     seed: u64,
-    datagens: std.array_list.Managed(DatagenSingle),
+    workers: std.ArrayList(Worker) = .empty,
     openings: ?[]const []const u8 = null,
     config: DatagenConfig,
     timer: types.Timer = undefined,
+    output_failure: ?anyerror = null,
 
     pub fn new(config: DatagenConfig, seed: u64) Datagen {
-        return .{
-            .seed = seed,
-            .datagens = std.array_list.Managed(DatagenSingle).init(std.heap.c_allocator),
-            .config = config,
-        };
+        return .{ .seed = seed, .config = config };
     }
 
     pub fn deinit(self: *Datagen) void {
-        for (self.datagens.items) |*d| d.deinit();
-        self.datagens.deinit();
+        for (self.workers.items) |*worker| worker.deinit();
+        self.workers.deinit(platform.allocator);
     }
 
     pub fn summary(self: *const Datagen) Summary {
@@ -667,33 +676,58 @@ pub const Datagen = struct {
         return s;
     }
 
-    /// Creates `out_path` (which must not exist) and generates games until the positions target is reached.
     pub fn start(self: *Datagen, num_threads: usize, out_path: []const u8) !void {
-        const file = try std.Io.Dir.cwd().createFile(platform.io, out_path, .{ .read = true, .exclusive = true });
+        self.generate(num_threads, out_path) catch |failure| {
+            switch (failure) {
+                error.WorkerFailed => self.print_worker_failures(),
+                error.OutputNotCreated => std.debug.print("datagen: cannot write '{s}': {s}\n", .{ out_path, @errorName(self.output_failure.?) }),
+                else => std.debug.print("datagen: cannot start workers: {s}\n", .{@errorName(failure)}),
+            }
+            return failure;
+        };
+    }
+
+    fn print_worker_failures(self: *const Datagen) void {
+        for (self.workers.items) |worker| {
+            const failure = worker.failure orelse continue;
+            const explanation = explain(failure);
+            std.debug.print("datagen: worker {} failed: {s}{s}{s}\n", .{ worker.id, @errorName(failure), if (explanation.len > 0) ": " else "", explanation });
+        }
+    }
+
+    pub fn generate(self: *Datagen, num_threads: usize, out_path: []const u8) !void {
+        const file = std.Io.Dir.cwd().createFile(platform.io, out_path, .{ .read = true, .exclusive = true }) catch |failure| {
+            self.output_failure = failure;
+            return error.OutputNotCreated;
+        };
         defer file.close(platform.io);
         self.output = .{ .file = file, .positions_target = self.config.positions_target };
         self.timer = types.Timer.start();
 
-        const contempt = search.CONTEMPT;
-        defer search.CONTEMPT = contempt;
-        if (self.config.raw_eval) search.CONTEMPT = 0;
+        const contempt = search.contempt;
+        defer search.contempt = contempt;
+        if (self.config.raw_eval) search.contempt = 0;
 
-        try self.datagens.ensureTotalCapacity(num_threads);
+        try self.workers.ensureTotalCapacity(platform.allocator, num_threads);
         for (0..num_threads) |th| {
-            self.datagens.appendAssumeCapacity(DatagenSingle.new(&self.output, thread_seed(self.seed, th), th, self.openings, self.config));
+            self.workers.appendAssumeCapacity(try Worker.new(&self.output, thread_seed(self.seed, th), th, self.openings, self.config));
         }
 
-        var threads = std.array_list.Managed(std.Thread).init(std.heap.c_allocator);
-        defer threads.deinit();
-        for (self.datagens.items) |*d| {
-            try threads.append(try std.Thread.spawn(.{ .stack_size = 64 * 1024 * 1024 }, DatagenSingle.run, .{d}));
+        try self.run_workers();
+        for (self.workers.items) |worker| {
+            if (worker.failure != null) return error.WorkerFailed;
         }
-        for (threads.items) |thread| thread.join();
-        for (self.datagens.items) |d| {
-            if (d.failure) |err| {
-                std.debug.print("datagen: worker {} failed: {s}\n", .{ d.id, @errorName(err) });
-                return error.WorkerFailed;
-            }
+    }
+
+    fn run_workers(self: *Datagen) !void {
+        var threads: std.ArrayList(std.Thread) = .empty;
+        defer threads.deinit(platform.allocator);
+        try threads.ensureTotalCapacity(platform.allocator, self.workers.items.len);
+
+        defer for (threads.items) |thread| thread.join();
+        errdefer self.output.stop.store(true, .release);
+        for (self.workers.items) |*worker| {
+            threads.appendAssumeCapacity(try std.Thread.spawn(.{ .stack_size = search.SEARCH_STACK_SIZE }, Worker.run, .{worker}));
         }
     }
 
@@ -703,7 +737,7 @@ pub const Datagen = struct {
         const book_plies_max = c.book_random_plies_min + c.book_random_plies_range -| 1;
         std.debug.print("=== Avalanche Datagen ===\n", .{});
         std.debug.print("Format:    {s}\n", .{if (c.format == .viri) "viriformat binpack" else "bulletformat"});
-        std.debug.print("Nodes:     {} soft, {} hard\n", .{ c.soft_nodes, c.soft_nodes * c.hard_node_multiplier });
+        std.debug.print("Nodes:     {} soft, {} hard\n", .{ c.soft_nodes, c.hard_nodes() });
         std.debug.print("Opening:   {}-{} plies, book {}-{} plies, SEE >= {}\n", .{ c.random_plies_min, plies_max, c.book_random_plies_min, book_plies_max, c.random_move_see_threshold });
         std.debug.print("Eval:      {s}\n", .{if (c.raw_eval) "raw network output (raweval=true)" else "scaled (raweval=false)"});
         std.debug.print("TT:        {} MB per side per worker\n", .{c.datagen_tt_mb});

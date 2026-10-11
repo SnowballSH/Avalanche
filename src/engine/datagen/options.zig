@@ -1,19 +1,24 @@
-const std = @import("std");
+//! See "Command line" in docs/DATAGEN.md.
 
-pub const Format = enum { bullet, viri };
+const std = @import("std");
+const arguments = @import("arguments.zig");
+const tt = @import("../tt.zig");
+
+pub const Format = @import("format.zig").Format;
+
+const MAX_THREADS: usize = 4096;
+pub const MAX_RANDOM_PLIES: u64 = 500;
+const RANDOM_SEE_LIMIT: i32 = 10_000;
+const MAX_TT_MB: u64 = tt.MAX_HASH_MB;
 
 pub const PlySpan = struct {
     min: u64,
     range: u64,
 
-    fn parse(text: []const u8) ?PlySpan {
-        const sep = std.mem.indexOfScalar(u8, text, '-') orelse {
-            const plies = std.fmt.parseInt(u64, text, 10) catch return null;
-            return .{ .min = plies, .range = 1 };
-        };
-        const min = std.fmt.parseInt(u64, text[0..sep], 10) catch return null;
-        const max = std.fmt.parseInt(u64, text[sep + 1 ..], 10) catch return null;
-        if (max < min) return null;
+    fn parse(text: []const u8) arguments.ValueError!PlySpan {
+        const separator = std.mem.findScalar(u8, text, '-') orelse text.len;
+        const min = try arguments.integer(u64, text[0..separator], 0, MAX_RANDOM_PLIES);
+        const max = if (separator == text.len) min else try arguments.integer(u64, text[separator + 1 ..], min, MAX_RANDOM_PLIES);
         return .{ .min = min, .range = max - min + 1 };
     }
 };
@@ -22,8 +27,8 @@ pub const Options = struct {
     threads: usize,
     book: ?[]const u8 = null,
     format: Format = .viri,
-    soft_nodes: u64 = 10000,
-    hard_multiplier: u64 = 8,
+    soft_nodes: u32 = 10000,
+    hard_multiplier: u32 = 8,
     plies: PlySpan = .{ .min = 8, .range = 3 },
     book_plies: PlySpan = .{ .min = 0, .range = 3 },
     random_see: i32 = -200,
@@ -34,68 +39,41 @@ pub const Options = struct {
     out: ?[]const u8 = null,
 };
 
-pub const Diagnostic = struct {
-    key: []const u8 = "",
-    value: []const u8 = "",
-};
+pub const Diagnostic = arguments.Diagnostic;
 
-pub const ParseError = error{ InvalidValue, UnknownKey, DuplicateKey, MissingThreads };
+pub const ParseError = arguments.KeyError || arguments.ValueError || error{MissingThreads};
 
 const Key = enum { book, format, nodes, hardmult, plies, bookplies, randsee, ttmb, positions, seed, raweval, out };
 
-/// `args` are the arguments after `datagen`: a thread count, then at most one book path and `key=value` options, each key once.
 pub fn parse(args: []const []const u8, diag: *Diagnostic) ParseError!Options {
     if (args.len == 0) return error.MissingThreads;
-    const threads = std.fmt.parseInt(usize, args[0], 10) catch return invalid(diag, "threads", args[0]);
-    if (threads == 0) return invalid(diag, "threads", args[0]);
+    diag.* = .{ .key = "threads", .value = args[0] };
+    var options: Options = .{ .threads = try arguments.integer(usize, args[0], 1, MAX_THREADS) };
 
-    var options: Options = .{ .threads = threads };
-    var seen: std.EnumSet(Key) = .empty;
+    var given: arguments.KeyValues(Key) = .{};
     for (args[1..]) |arg| {
-        // A bare argument is the book path.
-        const eq = std.mem.indexOfScalar(u8, arg, '=');
-        const key = if (eq) |at| arg[0..at] else "book";
-        const value = if (eq) |at| arg[at + 1 ..] else arg;
-        diag.* = .{ .key = key, .value = value };
-        const known = std.meta.stringToEnum(Key, key) orelse return error.UnknownKey;
-        if (seen.contains(known)) return error.DuplicateKey;
-        seen.insert(known);
-        switch (known) {
+        const option = try given.next(arg, .book, diag);
+        const value = option.value;
+        switch (option.key) {
             .book => options.book = value,
-            .format => options.format = std.meta.stringToEnum(Format, value) orelse return error.InvalidValue,
-            .nodes => options.soft_nodes = try positive(u64, value),
-            .hardmult => options.hard_multiplier = try positive(u64, value),
-            .plies => options.plies = PlySpan.parse(value) orelse return error.InvalidValue,
-            .bookplies => options.book_plies = PlySpan.parse(value) orelse return error.InvalidValue,
-            .randsee => options.random_see = std.fmt.parseInt(i32, value, 10) catch return error.InvalidValue,
-            .ttmb => options.tt_mb = try positive(u64, value),
+            .format => options.format = try arguments.choice(Format, value),
+            .nodes => options.soft_nodes = try positive(u32, value),
+            .hardmult => options.hard_multiplier = try positive(u32, value),
+            .plies => options.plies = try PlySpan.parse(value),
+            .bookplies => options.book_plies = try PlySpan.parse(value),
+            .randsee => options.random_see = try arguments.integer(i32, value, -RANDOM_SEE_LIMIT, RANDOM_SEE_LIMIT),
+            .ttmb => options.tt_mb = try arguments.integer(u64, value, 1, MAX_TT_MB),
             .positions => options.positions = try positive(u64, value),
             .seed => options.seed = std.fmt.parseInt(u64, value, 0) catch return error.InvalidValue,
-            .raweval => options.raw_eval = boolean(value) orelse return error.InvalidValue,
-            .out => {
-                if (value.len == 0) return error.InvalidValue;
-                options.out = value;
-            },
+            .raweval => options.raw_eval = try arguments.boolean(value),
+            .out => options.out = try arguments.non_empty(value),
         }
     }
     return options;
 }
 
-fn positive(comptime T: type, value: []const u8) ParseError!T {
-    const n = std.fmt.parseInt(T, value, 10) catch return error.InvalidValue;
-    if (n == 0) return error.InvalidValue;
-    return n;
-}
-
-fn boolean(value: []const u8) ?bool {
-    if (std.mem.eql(u8, value, "true")) return true;
-    if (std.mem.eql(u8, value, "false")) return false;
-    return null;
-}
-
-fn invalid(diag: *Diagnostic, key: []const u8, value: []const u8) ParseError {
-    diag.* = .{ .key = key, .value = value };
-    return error.InvalidValue;
+fn positive(comptime T: type, value: []const u8) arguments.ValueError!T {
+    return arguments.integer(T, value, 1, std.math.maxInt(T));
 }
 
 const testing = std.testing;
@@ -108,7 +86,7 @@ fn parse_ok(args: []const []const u8) !Options {
 test "datagen options: defaults with only a thread count" {
     const o = try parse_ok(&.{"4"});
     try testing.expectEqual(@as(usize, 4), o.threads);
-    try testing.expectEqual(@as(u64, 10000), o.soft_nodes);
+    try testing.expectEqual(@as(u32, 10000), o.soft_nodes);
     try testing.expectEqual(@as(u64, 0), o.positions);
     try testing.expectEqual(@as(?u64, null), o.seed);
     try testing.expectEqual(Format.viri, o.format);
@@ -119,7 +97,7 @@ test "datagen options: defaults with only a thread count" {
 test "datagen options: every key parses" {
     const o = try parse_ok(&.{ "8", "books/x.epd", "nodes=6000", "hardmult=8", "plies=8-9", "bookplies=6-8", "randsee=-150", "ttmb=16", "positions=2000000", "seed=42", "out=/tmp/c.viribin", "format=viri" });
     try testing.expectEqualStrings("books/x.epd", o.book.?);
-    try testing.expectEqual(@as(u64, 6000), o.soft_nodes);
+    try testing.expectEqual(@as(u32, 6000), o.soft_nodes);
     try testing.expectEqual(PlySpan{ .min = 8, .range = 2 }, o.plies);
     try testing.expectEqual(PlySpan{ .min = 6, .range = 3 }, o.book_plies);
     try testing.expectEqual(@as(i32, -150), o.random_see);
@@ -166,4 +144,21 @@ test "datagen options: raweval takes exactly true or false" {
         try testing.expectError(error.InvalidValue, parse(&.{ "4", arg }, &diag));
         try testing.expectEqualStrings("raweval", diag.key);
     }
+}
+
+test "datagen options: values outside their documented range are errors, not overflows" {
+    var diag: Diagnostic = .{};
+    const too_big = "18446744073709551615";
+    const largest_tt = std.fmt.comptimePrint("ttmb={d}", .{MAX_TT_MB});
+    const tt_beyond_largest = std.fmt.comptimePrint("ttmb={d}", .{MAX_TT_MB + 1});
+    inline for (.{ "plies=0-" ++ too_big, "plies=" ++ too_big, "plies=0-501", "bookplies=501", "nodes=4294967296", "hardmult=4294967296", tt_beyond_largest, "ttmb=" ++ too_big, "randsee=-2147483648", "randsee=10001", "positions=0" }) |arg| {
+        try testing.expectError(error.InvalidValue, parse(&.{ "4", arg }, &diag));
+    }
+    try testing.expectError(error.InvalidValue, parse(&.{"4097"}, &diag));
+    try testing.expectEqualStrings("threads", diag.key);
+
+    const widest = try parse_ok(&.{ "4096", "plies=0-500", "bookplies=500", "nodes=4294967295", "hardmult=4294967295", largest_tt, "randsee=-10000", "positions=" ++ too_big });
+    try testing.expectEqual(PlySpan{ .min = 0, .range = 501 }, widest.plies);
+    try testing.expectEqual(PlySpan{ .min = 500, .range = 1 }, widest.book_plies);
+    try testing.expectEqual(@as(u64, std.math.maxInt(u64)), widest.positions);
 }

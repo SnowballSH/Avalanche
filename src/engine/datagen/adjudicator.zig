@@ -1,7 +1,6 @@
 const std = @import("std");
 const types = @import("../../chess/types.zig");
 
-/// White-relative game result; the numeric value is the WDL byte stored in viriformat and bulletformat.
 pub const Outcome = enum(u8) {
     black_win = 0,
     draw = 1,
@@ -10,10 +9,27 @@ pub const Outcome = enum(u8) {
     pub fn for_winner(winner: types.Color) Outcome {
         return if (winner == types.Color.White) .white_win else .black_win;
     }
+
+    pub fn relative_to(self: Outcome, side: types.Color) SideResult {
+        const white_relative: SideResult = @fromBackingInt(@backingInt(self));
+        return if (side == types.Color.White) white_relative else white_relative.inverted();
+    }
 };
 
-/// How a game ends before any search: no legal moves decides first (checkmate or stalemate), so a mate delivered on
-/// the move that also completes the fifty-move count or a repetition is scored as a win.
+pub const SideResult = enum(u8) {
+    loss = 0,
+    draw = 1,
+    win = 2,
+
+    fn inverted(self: SideResult) SideResult {
+        return switch (self) {
+            .loss => .win,
+            .draw => .draw,
+            .win => .loss,
+        };
+    }
+};
+
 pub fn terminal(legal_moves: usize, in_check: bool, mover: types.Color, rule_draw: bool) ?Outcome {
     if (legal_moves == 0) return if (in_check) Outcome.for_winner(mover.invert()) else .draw;
     return if (rule_draw) .draw else null;
@@ -81,6 +97,16 @@ test "adjudicator: winner maps to a white-relative outcome" {
     try testing.expectEqual(Outcome.white_win, Outcome.for_winner(types.Color.White));
     try testing.expectEqual(Outcome.black_win, Outcome.for_winner(types.Color.Black));
     try testing.expectEqual(@as(u8, 2), @backingInt(Outcome.white_win));
+}
+
+test "adjudicator: an outcome seen from Black is the inverse of the one seen from White" {
+    try testing.expectEqual(SideResult.win, Outcome.white_win.relative_to(types.Color.White));
+    try testing.expectEqual(SideResult.loss, Outcome.white_win.relative_to(types.Color.Black));
+    try testing.expectEqual(SideResult.win, Outcome.black_win.relative_to(types.Color.Black));
+    try testing.expectEqual(SideResult.loss, Outcome.black_win.relative_to(types.Color.White));
+    inline for (.{ types.Color.White, types.Color.Black }) |side| {
+        try testing.expectEqual(SideResult.draw, Outcome.draw.relative_to(side));
+    }
 }
 
 test "terminal: checkmate beats the fifty-move rule and repetition" {

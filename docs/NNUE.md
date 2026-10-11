@@ -19,12 +19,16 @@ exact size of a single-layer network and no multi-layer header, `NotANetwork` to
 without that header, `UnsupportedHeader` to one whose header differs (or is cut short), and
 `WrongSize` to one with a valid header and another length. A single-layer build answers
 `WrongArchitecture` to a file with the multi-layer header and `WrongSize` to any other length. A
-file larger than both layouts is not read at all (`StreamTooLong`).
+file is read up to the size of the larger of the two layouts, so that a network of the other
+architecture is still recognised and named as such; a file larger than both is not read at all
+(`StreamTooLong`).
 
 Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
+`src/engine/nnue/arch.zig` (what the accumulators and both heads share),
 `src/engine/nnue/head_single.zig`, `src/engine/nnue/head_multi.zig`, `src/engine/weights.zig`
-(file layouts, loading),
-`training/src/main.rs` and `training/src/multilayer.rs` (trainer).
+(file layouts, loading), `src/engine/nnue/parity.zig` (the float forward pass, random networks and
+the `nnue-` commands, see "Parity"), `training/src/main.rs` and `training/src/multilayer.rs`
+(trainer).
 
 ## Shared by both heads
 
@@ -32,15 +36,20 @@ Code: `src/engine/nnue.zig` (accumulators), `src/engine/nnue/eval_cache.zig`,
   (bullet's `ChessBucketsMirrored`, layout `BUCKET_LAYOUT_16`). For a perspective, with squares
   flipped vertically for black, the king on `k` and `m = 7` if the king is on files e to h, else 0:
   `feature = 768 * bucket[k] + 384 * [piece is the opponent's] + 64 * piece_type + (square ^ m)`.
+  `-Dbuckets=1` builds an engine for a network without king buckets (bullet's `Chess768`): one
+  bucket and no mirroring, so `bucket[k]` and `m` are always 0. The default is `-Dbuckets=16`.
 - **Accumulator.** Per perspective, `acc[i] = l0b[i] + sum over active features f of l0w[f][i]`,
-  i16, `i < 1024`. Quantised by `QA = 255`: 255 is 1.0.
-- **Output bucket.** `b = min((piece_count - 2) / 4, 7)`.
+  i16, `i < 1024`. Quantised by `QA = 255`: 255 is 1.0. The engine keeps every accumulator
+  aligned to 64 bytes, and a head receives it through a pointer type that carries the alignment
+  (`arch.AccumulatorPtr`), so the heads' vector loads are aligned loads at every vector width.
+- **Output bucket.** `b = min((piece_count - 2) / 4, 7)` (`arch.output_bucket`).
 - **Perspectives.** `own` is the accumulator of the side to move, `opp` the other one. The result
   is in centipawns for the side to move. `SCALE = 400`.
 
 **Accumulator updates** (`src/engine/nnue.zig`). A move opens the next frame of a stack and
-records in it the features that appeared and disappeared (one of each for a quiet move, a second
-removal for a capture, two of each for castling) and whether its king left its bucket or crossed
+records in it the features that appeared and disappeared (one of each for a quiet move or a
+promotion, a second removal for a capture, en passant and capturing promotions included, two of
+each for castling; no legal move changes more) and whether its king left its bucket or crossed
 the mirror line. The frame's accumulators are computed at once, or later when an evaluation
 needs them ("Lazy updates" below), each perspective in one pass: the values of the frame below
 plus the rows of the features that appeared, minus those that disappeared. When a king moves to
@@ -48,21 +57,30 @@ another bucket or crosses the mirror line, every feature of that king's perspect
 perspective is then not updated at all: it is rebuilt from the "Finny table", a cache with one
 accumulator per perspective, mirror side and bucket and the piece sets it was computed for. The
 rebuild adds and removes only the rows by which the position differs from the cached one, and
-writes the result to the cache and to the frame in the same pass. Wrapping arithmetic makes the
-order of the additions irrelevant.
+writes the result to the cache and to the frame in the same pass. Updates and rebuilds add and
+subtract with wrapping arithmetic: only the finished accumulator has to fit an i16, not every
+partial sum, so the order of the rows is irrelevant.
+
+The frames, the records of their moves and the evaluation cache of a `Position` are one block of
+large memory (docs/MEMORY.md, "What uses it"). A position allocates it once and keeps it through
+`reset` and every `set_fen`: the evaluator of the new position takes the block over with an empty
+stack whose bottom frame is marked for a rebuild, and the cache keeps its entries, which hold for
+any position of the same network.
 
 **Evaluation cache** (`src/engine/nnue/eval_cache.zig`). The network's output is a function of
 the pieces and of the side it is computed for, and the search asks for it again and again for the
 same position: a quiescence node that fails low without a best move is not stored in the
 transposition table, quiescence evaluates before it probes the table, razoring hands a node that
 was just evaluated to quiescence, and every re-search and every new iteration walks over the
-leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) are of
+leaves of the one before. Of the 12.57M network evaluations of a `bench` run, 4.70M (37.4%) were of
 a position evaluated earlier in the run. So every `Position` keeps a direct-mapped table of 2^17
 outputs, 1 MiB. A helper thread has one such position, the root position of its `Searcher`. The
 main thread searches the position it is given (the UCI layer's, or that of `bench` or datagen),
 and its `Searcher` owns a root position as well, with a cache it does not use. An entry is 8
-bytes: the output in 20 bits (the largest any head can produce is ±131586) and 44 further bits of
-the Zobrist hash. The slot is the low 17 bits of the hash (the transposition table uses the high
+bytes: the output in 20 bits and 44 further bits of the Zobrist hash. The largest output any head
+can produce is ±207212 (the single-layer head with weights no trained network has, see there),
+and the most negative 20-bit value is never an output: it marks an entry that holds nothing. The
+slot is the low 17 bits of the hash (the transposition table uses the high
 ones), so 61 bits of the hash decide a hit, against the 32 key bits and the index of the
 transposition table. The evaluations are therefore those of the head except when two positions
 agree in those 61 bits, about once in 2^44 probes that land on another position's entry. The
@@ -71,9 +89,15 @@ scaling the search applies to the output (`EvalScale`, material, the fifty-move 
 after the cache, because the counter is not part of the hash. A cache belongs to the network it
 was filled with: `weights.generation` changes with every network that becomes active, and a
 position whose evaluation is rebuilt under another generation clears its cache and its Finny
-table first.
+table first. The rebuild is the caller's part: whoever makes another network the active one
+(`weights.load`, `weights.install`) refreshes the evaluation of every position it keeps
+(`Position.refresh_evaluation`) or sets it up again. Until then such a position still holds the
+accumulators of the network before.
 
-Hit rate by table size, measured with whole 64-bit keys:
+Hit rate by table size, measured with whole 64-bit keys. These counts, like the other counts over
+a `bench` run in this document unless another net is named, were taken while Dianguang-3 was the
+default net and `bench` searched 15.5M nodes; `bench.nodes` holds the count of the current default
+net.
 
 | Entries | 2^10 | 2^12 | 2^14 | 2^16 | 2^18 | 2^20 | unbounded |
 |---|---|---|---|---|---|---|---|
@@ -104,7 +128,7 @@ update come from all over a 25 MiB table, and in `play_move` that memory traffic
 transposition-table probe of the new node, which is fetched at the same time. Deferred to the
 evaluation, the same work runs after the probe and on the critical path of the head. And without
 the cache there is little to skip: 13.10M of the 13.84M frames of a `bench` run (95%) are
-evaluated or lie below an evaluated one. EPYC 9R14 (Zen 4, 512-bit build), single thread,
+evaluated or lie below an evaluated one. A Zen 4 server CPU (512-bit build), single thread,
 alternating runs, against the eager updates this replaced; `bench`, and four positions searched
 for 3 s with a 256 MiB hash:
 
@@ -112,7 +136,7 @@ for 3 s with a 256 MiB hash:
 |---|---|---|
 | deferred to the evaluation, no cache | -4.9% | -5.6% |
 | eager as before, with the cache (2^16 entries of 16 bytes) | +0.6% | -1.2% |
-| deferred to the evaluation, with that cache (EPYC 9R45) | +2.8% | -2.6% |
+| deferred to the evaluation, with that cache (a Zen 5 server CPU) | +2.8% | -2.6% |
 | eager on a cache miss, with that cache | +4.7% | +0.3% |
 | eager on a cache miss, 2^16 entries of 8 bytes | +5.1% | +1.7% |
 | eager on a cache miss, 2^17 entries of 8 bytes (what the engine does) | +5.3% | +1.1% |
@@ -127,10 +151,10 @@ changes (castling, en passant, promotion) is one pass per perspective where it u
 change; such moves are 0.7% of the frames.
 
 Tried and left out: prefetching the cache slot when the search prefetches the transposition-table
-entry, before the move is played (EPYC 9R45: `bench` +0.5%, the 3 s searches -0.3%, within the
-noise of that measurement), and 16-byte entries with the whole key (the fourth row of the table
-against the fifth: the smaller table stays in the caches better). The measurements were taken
-with 24 output bits and 40 hash bits in an entry.
+entry, before the move is played (a Zen 5 server CPU: `bench` +0.5%, the 3 s searches -0.3%,
+within the noise of that measurement), and 16-byte entries with the whole key (the fourth row of
+the table against the fifth: the smaller table stays in the caches better). The measurements were
+taken with 24 output bits and 40 hash bits in an entry.
 
 **Refresh loop.** The rebuild sums the removed rows with additions and subtracts that sum once,
 instead of subtracting row by row. With Zig 0.17.0 (LLVM 22) and an Apple CPU model, a loop of
@@ -140,7 +164,9 @@ combined with the wrong sign, so the row-by-row form gives wrong accumulators in
 compiled correctly. `zig build test -Doptimize=fast` covers it: the tests named "refresh" and
 "smp root" fail on an Apple CPU if the subtraction loop comes back, and the one named "random
 games" compares both accumulators with a scalar rebuild after every move of a few thousand random
-ones, castling, en passant, promotions and take-backs included.
+ones, castling, en passant, promotions and take-backs included. The one named "rebuild from the
+cache of an unrelated position" sets up positions whose kings stay on e1 and e8, so every rebuild
+starts from the cache entry of the position before it, with up to 30 rows to remove and to add.
 
 **Reinterpreting arrays.** Zig 0.17.0 defines `@bitCast` on the logical bits of a value. Between
 two vectors or two integers that is still a free reinterpretation, but a cast between an array
@@ -172,7 +198,22 @@ out = trunc((trunc(s / 255) + bias[b]) * 400 / (255 * 64))
 
 Total 25200704 bytes, no header. Invariant the loader checks: every output weight is in
 [-128, 127]. The SIMD path multiplies `activation * weight` in i16, and 255 * 127 is the largest
-product that fits.
+product that fits. It then multiplies by the activation again and adds neighbours into i32 with
+`pmaddwd` on x86 and `i32x4.dot_i16x8_s` on wasm simd128, the instruction of the multi-layer
+head's `pairs` L2, selected for both heads by `arch.pair_products_intrinsic`. Other targets and
+Debug builds compile the same sum from `@Vector` code.
+
+`s` is kept in an i32 and added with wrapping arithmetic. For a trained network it is far inside
+the i32, and a sum that fits is exact in whatever order the vector lanes are added. The weight
+range does not bound it for every file, though: when the positive weights of a bucket add up to
+more than 33025, activations of 255 on exactly those inputs take `s` past 2³¹, and likewise for
+the negative weights. The loader does not check that total, because the limit would sit too close
+to real networks, which never saturate all of those activations at once: the positive weights of
+a bucket add up to as much as 20366 in `nets/dianguang-1.nnue`. So the
+evaluation is total instead. `s` wraps, which gives a meaningless but defined number, the same on
+every target and in every build mode, and the last step is computed in i64, because
+`(trunc(s / 255) + bias) * 400` leaves an i32 long before `s` does. Whatever a file holds, the
+output is within ±207212.
 
 ## Multi-layer head
 
@@ -184,20 +225,20 @@ product that fits.
 | `FT_SHIFT` | 9 | pairwise product shift |
 | pairwise 1.0 | 255² / 2⁹ = 127.002 | integer value of a pairwise product of 1.0 |
 | `ACT_BITS` | 13 | fixed point of the L1 output and of every later activation: 8192 is 1.0 |
-| `L1_WEIGHT_SCALE` | 2²² / 255² = 64.5027 | an L1 weight is stored as `round(w * 64.5027 * 2^e)` |
+| `L1_WEIGHT_SCALE` | 2²² / 255² = 64.5029 | an L1 weight is stored as `round(w * 64.5029 * 2^e)` |
 | `e`, the L1 shift | 0..7, per network, in the header | extra fixed-point bits of the L1 weights, bias and sum |
 | `WEIGHT_BITS` | 10 | fixed point of L2 and L3 weights: 1024 is 1.0 |
 | `SUM_BITS` | 23 | fixed point of L2 and L3 biases and sums |
 | `SCALE` | 400 | centipawns per unit of output |
 
 `L1_WEIGHT_SCALE` is chosen so that, at `e = 0`, `stored weight * stored activation = w * a * 2¹³`
-exactly: `64.5027 * 127.002 = 8192`. The L1 sum is then a plain Q13 number.
+exactly: `64.5029 * 127.002 = 8192`. The L1 sum is then a plain Q13 number.
 
 **The L1 shift.** An i8 at scale 64.5 covers weights up to ±1.97, but the L1 weights of a trained
 net are much smaller: the first net trained on a GPU had a largest `|l1w|` of 0.2166, 14 of 127
 levels, and the rounding of those weights alone cost 23 cp on average against the trainer. So the
 scale is per network. The trainer saves with the largest `e` in 0..7 at which every stored L1
-weight still fits an i8 (`round(max|w| * 64.5027 * 2^e) <= 127`), which puts the largest weight at
+weight still fits an i8 (`round(max|w| * 64.5029 * 2^e) <= 127`), which puts the largest weight at
 64..127 levels; it stores `e` in the header and the L1 bias at the same scale. The L1 sum is then a
 Q(13 + e) number, and the engine rounds it back to Q13 with one shift on 16 values. Everything
 after that is the same for every network.
@@ -265,7 +306,7 @@ changes nothing in the sum, only its cost. The weights of one block are 64 adjac
 | 0 | header | bytes | 64 | below |
 | 64 | `l0w[feature][i]` | i16 | 12288 x 1024 | `round(w * 255)` |
 | 25165888 | `l0b[i]` | i16 | 1024 | `round(b * 255)` |
-| 25167936 | `l1w[bucket][block][j][k]`, input `4 * block + k` | i8 | 8 x 256 x 16 x 4 | `round(w * 64.5027 * 2^e)` |
+| 25167936 | `l1w[bucket][block][j][k]`, input `4 * block + k` | i8 | 8 x 256 x 16 x 4 | `round(w * 64.5029 * 2^e)` |
 | 25299008 | `l1b[bucket][j]` | i32 | 8 x 16 | `round(b * 2^(13 + e))`, Q(13 + e) |
 | 25299520 | `l2w[bucket][k][o]`, input `k`, output `o` | i32 | 8 x 32 x 32 | `round(w * 2¹⁰)` |
 | 25332288 | `l2b[bucket][o]` | i32 | 8 x 32 | `round(b * 2²³)` |
@@ -295,6 +336,9 @@ Header: the 8 bytes `AVALNNUE`, then fourteen u32:
 | L1 shift `e` | 0..7, chosen by the trainer for this network |
 | reserved | 0 |
 
+`HeaderField` in `src/engine/weights.zig` is this table: the engine writes and reads every field
+at the offset that follows from the order of its tags.
+
 Version 1 had no L1 shift (it was version 2 with `e = 0` and a reserved field in its place); no
 network of it was ever used.
 
@@ -315,7 +359,7 @@ enforces them by clipping, and bullet's quantiser fails the save rather than wra
 | Value | Stored range | Float range | Trainer |
 |---|---|---|---|
 | `e` | 0..7 | | largest value at which `l1w` fits an i8 |
-| `l1w` | any i8 | ±1.9689 / 2^e | AdamW clip ±126.9 / 64.5027 = ±1.9674, so `e = 0` always fits |
+| `l1w` | any i8 | ±1.9689 / 2^e | AdamW clip ±126.9 / 64.5029 = ±1.9674, so `e = 0` always fits |
 | `l2w`, `l3w` | ±2047 | ±1.999 | AdamW clip ±1.98 (stored ±2028) |
 | `l1b` | ±2³⁰ | ±2^(17 - e): ±131072 at `e = 0`, ±1024 at `e = 7` | AdamW default clip ±1.98 |
 | `l2b`, `l3b` | ±2³⁰ | ±128 | AdamW default clip ±1.98 |
@@ -333,13 +377,18 @@ Why no i32 sum can overflow:
 - Accumulators cannot overflow i16 for trained weights, as for the single-layer net; that is not
   checked on load.
 
+A unit test evaluates a head with every weight and bias at its limit on accumulators of all 255,
+for each combination of signs of the three layers. The eight cases form the largest sum of either
+sign in every layer; both paths must return the value the formula gives, and a Debug or safe build
+traps on an i32 overflow.
+
 ### Inference paths
 
-`head_multi.evaluate_scalar` is the formula above, one loop per stage. `evaluate_simd` is what the
-engine calls; it must return the same number for every input, and the tests compare the two on
-random weights and accumulators, stage by stage and end to end.
+`head_multi.evaluate_scalar` is the formula above, one loop per stage. `head_multi.evaluate` is what
+the engine calls, with vectors; it must return the same number for every input, and the tests
+compare the two on random weights and accumulators, stage by stage and end to end.
 
-`evaluate_simd` is three functions: `activate` (step 1), `l1_sums` (step 2 before the shift) and
+`evaluate` is three functions: `activate` (step 1), `l1_sums` (step 2 before the shift) and
 `finish` (the rest). Vectors are as wide as `std.simd.suggestVectorLength(u8)` says for the target:
 512 bits with AVX-512 unless the CPU model prefers 256 (`x86_64_v4` and Intel's server models do),
 256 with AVX2, 128 otherwise, and 128 on AArch64 also where SVE makes it suggest more: the AArch64
@@ -399,8 +448,8 @@ the result does not depend on the target:
   at the end. The indices of a round of blocks are read from the list with one load and taken
   apart with shifts: the loop is limited by loads (the index, the activations and the weights of
   every block), on the M4 and on Zen 4 alike. `pmaddubsw` + `pmaddwd` cannot saturate with
-  activations up to 127 (see "Integer formula") and feed a plain addition, so one sum is enough
-  there.
+  activations up to 127 (see "Integer formula") and feed a plain addition of one cycle, so one sum
+  is enough there, as it is on the `extadd` and portable paths.
 - **L1, `extadd`.** Wasm has no byte dot product, and neither has AArch64 before the dotprod
   extension (ARMv8.0: Cortex-A53, A57, A72, A73). A product of an activation and a weight fits an
   i16 (`127 * 128`), so it is an `i16x8.mul` of the sign-extended bytes (`smull`), and
@@ -427,7 +476,8 @@ the result does not depend on the target:
 `Avalanche nnue-speed` times the head on the accumulators of the 50 bench positions. Its first
 line is the whole evaluation, with the accumulators read from the second-level cache (50 positions
 of 4 KiB). The stage times that follow are taken four positions at a time, with the inputs in the
-first-level cache as they are in the search, so they add up to less than the first line.
+first-level cache as they are in the search, so they add up to less than the first line. The
+stages are timed in the order of the evaluation, each on what the one before it left behind.
 
 Apple M4, `--release=fast`, random networks from `nnue-random` with seed 1, best of five runs (all
 five within 6% of it). "Before" is the implementation this one replaced (commit 6137e9d). The search
@@ -440,7 +490,7 @@ after.
 | default (dense) | 233.5 of 256 | 410.6 ns | 238.4 ns | 1.19-1.20M -> 1.77-1.81M nps |
 | `full` (dense) | 233.5 of 256 | 413.6 ns | 237.2 ns | |
 
-AMD EPYC 9R14 (Zen 4; 512-bit `mulhrs` and `dpbusd`), trained nets, single thread: `nnue-speed`
+A Zen 4 server CPU (512-bit `mulhrs` and `dpbusd`), trained nets, single thread: `nnue-speed`
 226.5 -> 146.8 ns and `bench` 1.22M -> 1.53M nps (+26%) for the net trained with the sparsity
 penalty, 310.6 -> 171.5 ns and 1.10M -> 1.46M nps (+32%) for the one without; checksums and node
 counts unchanged. The single-layer net of that comparison ran at 1.79M nps.
@@ -460,9 +510,10 @@ dense network timed the way the first line is, before and after:
 - L2 and L3 are unchanged, 26 to 29 ns.
 
 A later change (the `pairs` L2 and the wasm paths) left the M4 where it was, since AArch64 keeps
-the `wide` L2: 150 ns per evaluation on the default net (84.6 of 256 blocks non-zero; pairwise
-33 ns, L1 63 ns of which the search 17 ns, L2 and L3 29 ns). It is for x86 and wasm. AMD EPYC 9R14
-(Zen 4), default net (Dianguang-3), three alternating runs, node counts and checksums equal:
+the `wide` L2: 150 ns per evaluation on Dianguang-3, the default net at the time (84.6 of 256
+blocks non-zero; pairwise 33 ns, L1 63 ns of which the search 17 ns, L2 and L3 29 ns). It is for
+x86 and wasm. A Zen 4 server CPU, the same net, three alternating runs, node counts and checksums
+equal:
 
 | Build | `nnue-speed` | L2 and L3 | `bench` |
 |---|---|---|---|
@@ -474,11 +525,11 @@ which the search 20 and 25 ns. Zen 4 runs a 512-bit operation as two of 256, whi
 pairwise step gains nothing from the wider vectors there. Wasm under Node 26 on the M4: `bench`
 1.00M -> 1.47M nps (+47%).
 
-Then the non-zero search with `vpcompressb` and the single load of a round's indices. EPYC 9R14,
-native: search 19.8 -> 7.0 ns, L1 68.6 -> 55.5 ns, `nnue-speed` 128.1 -> 116.9 ns, `bench`
-1.584M -> 1.634M nps (+3.2%, of which the indices +0.5%). The 256-bit AVX2 build has neither
-(no `vpcompressb`, one chain). Apple M4, from the indices alone: L1 63.2 -> 58.0 ns, `bench`
-2.193M -> 2.215M nps (+1.0%).
+Then the non-zero search with `vpcompressb` and the single load of a round's indices. A Zen 4
+server CPU, native: search 19.8 -> 7.0 ns, L1 68.6 -> 55.5 ns, `nnue-speed` 128.1 -> 116.9 ns,
+`bench` 1.584M -> 1.634M nps (+3.2%, of which the indices +0.5%). The 256-bit AVX2 build has
+neither (no `vpcompressb`, one chain). Apple M4, from the indices alone: L1 63.2 -> 58.0 ns,
+`bench` 2.193M -> 2.215M nps (+1.0%).
 
 Together with the accumulator changes ("Accumulator updates" above), from the commit that made
 Dianguang-3 the default net (3fa9ddf) to commit 19b56d7, same node counts. Each row is one
@@ -487,16 +538,16 @@ taken in other sessions and on other machines of the same model:
 
 | Machine, build | `nnue-speed` | `bench` |
 |---|---|---|
-| EPYC 9R14 (Zen 4), native, 512 bits | 144.3 -> 115.6 ns | 1.510M -> 1.627M nps (+7.8%) |
-| EPYC 9R14, `-Dcpu=haswell`, 256 bits | 166.4 -> 145.2 ns | 1.410M -> 1.525M nps (+8.2%) |
+| a Zen 4 server CPU, native, 512 bits | 144.3 -> 115.6 ns | 1.510M -> 1.627M nps (+7.8%) |
+| the same Zen 4 server CPU, `-Dcpu=haswell`, 256 bits | 166.4 -> 145.2 ns | 1.410M -> 1.525M nps (+8.2%) |
 | Apple M4 | 147 -> 145 ns | 2.121M -> 2.192M nps (+3.3%) |
 | wasm, Node 26 on the M4 | not measured | 1.00M -> 1.47M nps (+47%) |
 
-An EPYC 9R45 (Zen 5) runs the native build's `bench` at 2.38M nps.
+A Zen 5 server CPU runs the native build's `bench` at 2.38M nps.
 
 At that commit, by sampling the search thread, a `bench` run spends 20% of its time in
 accumulator updates, 5% in Finny rebuilds and 21% in the head on the M4; 20%, 6% and 18% on the
-EPYC 9R14.
+Zen 4 server CPU.
 
 What limits each part now:
 
@@ -525,7 +576,7 @@ the measurement that decided it:
 - **Prefetching the weight rows of an accumulator update.** At the start of the update, all rows:
   `bench` changed by -1.5% on the M4; the rows of a move are read sequentially already. When the
   move is picked, before its SEE test, the first 2, 8 or 32 lines of each row: by +0.4%, 0% and
-  -3.5% on an EPYC 9R45, and by -0.2% to -11% on the M4.
+  -3.5% on a Zen 5 server CPU, and by -0.2% to -11% on the M4.
 - **Reordering the feature-transformer outputs so that active ones share blocks.** It changes no
   evaluation: output `i` and its partner `i + 512` move together in the feature weights and
   biases, and the L1 inputs `i` (own) and `512 + i` (opponent) follow in every bucket. Measured
@@ -536,16 +587,16 @@ the measurement that decided it:
   above, 1 to 1.3% in nodes per second, for a second version of every network file. It belongs
   in the step that writes a network, not in the engine.
 - **A search step of 16 blocks** (one mask, two table lookups; one `vptestmd` with AVX-512, one
-  `bitmask` on wasm after narrowing). The search alone was 4 ns slower on an EPYC 9R14 at 256 and
-  at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing in the
-  whole L1 under wasm.
+  `bitmask` on wasm after narrowing). The search alone was 4 ns slower on a Zen 4 server CPU at
+  256 and at 512 bits (24.4 to 28.2 and 19.8 to 24.2 ns), the same on the M4, and changed nothing
+  in the whole L1 under wasm.
 
 - **A last L1 round without a branch.** The blocks left when fewer than a round of chains remain
-  were added with zeroed inputs instead of a branch per chain: +0.1% in `bench` on the EPYC 9R14
-  (range 0.0 to 0.2%, seven runs), nothing on the M4.
+  were added with zeroed inputs instead of a branch per chain: +0.1% in `bench` on the Zen 4
+  server CPU (range 0.0 to 0.2%, seven runs), nothing on the M4.
 
-- **Partial sums in the `pairs` L2**, four of them: 18.4 to 18.7 ns on the EPYC 9R14 at 512 bits
-  (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
+- **Partial sums in the `pairs` L2**, four of them: 18.4 to 18.7 ns on the Zen 4 server CPU at
+  512 bits (where LLVM merges `pmaddwd` and the addition into `vpdpwssd`), 19.4 to 19.8 at 256.
 - **16-bit L2 weights on AArch64** (`smlal`, half the weight loads): 28.3 ns against 29.2, and no
   more nodes per second. L2 there is limited by the multiplier, not by loads.
 
@@ -588,11 +639,11 @@ Tried and left out:
   the first-level cache a rebuild took 465 to 513 cycles (three runs) instead of 539 to 592, and
   `bench` retired 2.8 to 3.0% fewer instructions (113.4G to 110.1G for the same nodes; both builds
   are commit 870eeab with only this loop changed, so the absolute counts are not those of a build
-  with the evaluation cache and the other changes of pull requests #104 to #111). That did not
-  become time. Over eleven alternating pairs of `bench` the cycles, counted the same way,
-  were 0.7% higher by the fastest run of each binary (32.30G against 32.52G) and 1.9% higher by
-  the median (33.07G against 33.70G), with single pairs from 10% slower to 10% faster on a
-  machine that was busy throughout: no gain that the measurement can show, and more code. Passes
+  with the evaluation cache and the later changes). That did not become time. Over eleven
+  alternating pairs of `bench` the cycles, counted the same way, were 0.7% higher by the fastest
+  run of each binary (32.30G against 32.52G) and 1.9% higher by the median (33.07G against
+  33.70G), with single pairs from 10% slower to 10% faster on a machine that was busy
+  throughout: no gain that the measurement can show, and more code. Passes
   of up to 8 rows (81 loops; more than four rows of a kind occur in 15% of the rebuilds, more
   than eight in 1%) were 2.2% slower than the old loop by the fastest of four runs. With the rows
   in the first-level cache, passes of up to 2, 3, 6 or 8 rows took 519, 469, 469 and 461 cycles
@@ -602,10 +653,10 @@ Tried and left out:
 
 ### What has been executed
 
-The intrinsics are compiled only outside Debug (LLVM leaves them unresolved at ``-Doptimize=debug``). So a
-plain `zig build test` compares the scalar path with the *portable* paths only, and reports the test
-`multi head: the SIMD comparisons cover the intrinsic paths` as skipped. To test the paths a release
-binary runs:
+The intrinsics are compiled only outside Debug (LLVM leaves them unresolved at
+`-Doptimize=debug`). So a plain `zig build test` compares the scalar path with the *portable* paths
+only, and reports the test `multi head: the SIMD comparisons cover the intrinsic paths` as skipped.
+To test the paths a release binary runs:
 
 ```
 zig build test -Doptimize=safe -Dtest-filter="multi "
@@ -619,26 +670,27 @@ On Apple Silicon the x86 paths up to AVX2 run under Rosetta: add `-Dtarget=x86_6
 | Apple Silicon | `umull` | `sdot` | `wide` | yes, natively |
 | AArch64 without dotprod (`-Dcpu=generic`, `-Dcpu=apple_m4-dotprod`) | `umull` | `extadd` | `wide` | yes, natively |
 | AArch64 with SVE (`-Dcpu=neoverse_v1`) | `umull` | `sdot` | `wide` | in CI only, by the native build of the job `tiers` when its AArch64 runner has SVE: the same NEON code as on Apple Silicon. No development machine has SVE |
-| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on an EPYC 9R14 (Zen 4) |
-| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
-| x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on an EPYC 9R14 |
+| x86 AVX2 (`haswell`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, under Rosetta and on a Zen 4 server CPU |
+| x86 SSSE3 (`nehalem`) | `mulhrs`, 128 bits | `maddubs`, 128 bits | `pairs`, 128 bits | yes, under Rosetta and on a Zen 4 server CPU |
+| x86 SSE2 (`x86_64`) | `portable` | `portable` | `pairs`, 128 bits | yes, under Rosetta and on a Zen 4 server CPU |
 | Debug | `portable` | `portable` | `wide` | yes |
-| x86 AVX-512BW without VNNI (`-Dcpu=znver4-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | `pairs`, 512 bits | yes, on an EPYC 9R14 |
-| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | `pairs`, 512 bits | yes, natively on an EPYC 9R14 |
-| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`, `x86_64_v4`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | `pairs`, 256 bits | yes, on an EPYC 9R14 |
-| x86 at 256 bits with AVX-VNNI (`x86_64_v3+avxvnni`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | yes, on an EPYC 9R45 (Zen 5) |
+| x86 AVX-512BW without VNNI (`-Dcpu=znver4-avx512vnni`) | `mulhrs`, 512 bits | `maddubs`, 512 bits | `pairs`, 512 bits | yes, on a Zen 4 server CPU |
+| x86 AVX-512 VNNI (`znver4`, `znver5`) | `mulhrs`, 512 bits | `dpbusd`, 512 bits | `pairs`, 512 bits | yes, natively on a Zen 4 server CPU |
+| x86 at 256 bits with AVX-512BW and no VNNI (`x86_64_v4`) | `mulhrs`, 256 bits | `maddubs`, 256 bits | `pairs`, 256 bits | yes, on a Zen 5 server CPU (docs/BUILD.md, "Measurements") |
+| x86 at 256 bits with AVX-512 VNNI + VL (`icelake_server`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, EVEX | `pairs`, 256 bits | yes, on a Zen 4 server CPU |
+| x86 at 256 bits with AVX-VNNI (`x86_64_v3+avxvnni`) | `mulhrs`, 256 bits | `dpbusd`, 256 bits, VEX | `pairs`, 256 bits | yes, on a Zen 5 server CPU |
 | wasm simd128 | `mulhrs` | `extadd` | `pairs` | yes, by the `web/` tests (`bench` equal to native) |
 
-The EPYC 9R14 runs were repeated when the `pairs` L2 and when the `vpcompressb` search were added,
-with random weights and the default net embedded. The search with `vpcompressb` is what `znver4`
-and `znver4-avx512vnni` (512 bits) and `icelake_server` (256 bits) compile; `x86_64_v4` and the
-builds without AVX-512 compile the table.
+The Zen 4 runs were repeated when the `pairs` L2 and when the `vpcompressb` search were added,
+with random weights and with Dianguang-3, the default net then, embedded. The search with
+`vpcompressb` is what `znver4` and `znver4-avx512vnni` (512 bits) and `icelake_server` (256 bits)
+compile; `x86_64_v4` and the builds without AVX-512 compile the table.
 
 **The VEX-encoded `vpdpbusd` of AVX-VNNI** is what a 256-bit build without AVX-512 uses: Alder
 Lake and later Intel desktop CPUs with `-Dcpu=native`, and the `avxvnni` release binaries
 (`-Dcpu=x86_64_v3+avxvnni`, docs/BUILD.md). Zen 4 has no AVX-VNNI and Rosetta has none either;
-Zen 5 has it, and an EPYC 9R45 ran that build: `bench` and the `nnue-speed` checksum equal to
-every other path's. It differs from the EVEX path only in the encoding of that one instruction.
+Zen 5 has it, and a Zen 5 server CPU ran that build: `bench` and the `nnue-speed` checksum equal
+to every other path's. It differs from the EVEX path only in the encoding of that one instruction.
 The comparisons with the scalar path, on such a machine:
 
 ```
@@ -651,15 +703,87 @@ reliably have AVX-512, and OpenBench workers built with `-Dcpu=native` use the p
 
 ## Training
 
-`TRAIN_ARCH=single` (default) or `multi`; everything else in `scripts/train.sh` applies to both:
-the same loss, data loader, schedule and held-out validation. `multi` needs `TRAIN_INPUT=buckets16`.
+`scripts/train.sh [data_file ...]` builds the trainer (`training/`, a bullet program) whenever its
+sources are newer than the binary, and runs it from `training/`. The data is the `.viribin` files
+of `TRAIN_DATA_DIR`, or else the bulletformat files given as arguments (`data/training.bin` when
+there are none). Checkpoints go to `training/checkpoints/<TRAIN_NET_ID>-<superbatch>/`, and the
+`quantised.bin` of a checkpoint is the network file:
 
 ```
 TRAIN_ARCH=multi TRAIN_NET_ID=mynet TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
 zig build --release=fast -Dnet=training/checkpoints/mynet-40/quantised.bin
 ```
 
-Two things differ from the single-layer recipe:
+The trainer needs CUDA: bullet at the pinned revision has no CPU backend. `train.sh` takes the
+toolkit from `CUDA_PATH`, or from `/usr/local/cuda` when that directory exists, and stops before
+building when there is neither. The backend is the crate's `cuda` feature, which is on by default,
+so a plain `cargo build --release` gives the CUDA trainer. Without the feature bullet compiles
+against a mock device that cannot run a graph, and the binary says so and exits. That build is for
+the checks that need no device, which therefore run on any machine:
+
+```
+cd training
+cargo fmt --check
+cargo clippy --no-default-features --all-targets -- -D warnings
+cargo test --no-default-features
+```
+
+### Options
+
+A run is configured by environment variables, all optional. The defaults are a short single-layer
+run, not the recipe of the shipped network: that one is multi-layer (`TRAIN_ARCH=multi`) and was
+trained far longer (`TRAIN_SUPERBATCHES`; README.md gives the length of the shipped network's
+run). A net trained with the defaults is refused by `EvalFile` in a default build.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `TRAIN_NET_ID` | `net` | name of the run, the prefix of its checkpoints |
+| `TRAIN_INPUT` | `buckets16` | `buckets16`, the inputs of "Shared by both heads", or `chess768`, 768 inputs without king buckets (single-layer only) |
+| `TRAIN_ARCH` | `single` | the head, `single` or `multi`; `multi` needs `TRAIN_INPUT=buckets16`. The engine recognises the head of a saved file by its header |
+| `TRAIN_HIDDEN` | 1024 | accumulator width. The engine's is `HIDDEN_SIZE` in `src/engine/nnue/arch.zig`, fixed at build time, and must be the same; `multi` needs a multiple of 8 |
+| `TRAIN_FACTORISER` | on | `1`, `true`, `yes` or `on` trains a factoriser shared by the king buckets, which is added to the feature weights when a net is saved; anything else is off. `buckets16` only |
+| `TRAIN_L1_SPARSITY` | 0 (off) | `multi` only, see "Multi-layer runs" |
+| `TRAIN_SUPERBATCHES` | 40 | length of the run |
+| `TRAIN_BATCH_SIZE` | 16384 | positions per batch |
+| `TRAIN_BATCHES_PER_SB` | 12208 | batches per superbatch |
+| `TRAIN_WDL` | 0.25 | weight of the game result in the target; the rest is the search score |
+| `TRAIN_WDL_END` | `TRAIN_WDL` | when it differs, the weight moves linearly from `TRAIN_WDL` to this value over the run |
+| `TRAIN_LR_SCHEDULE` | `cosine` | `cosine`, `cosine-legacy` or `constant`, see below |
+| `TRAIN_LR_INITIAL` | 0.001 | learning rate at the start of the schedule, or throughout for `constant` |
+| `TRAIN_LR_FINAL` | 1e-7 | learning rate at the end of a cosine schedule |
+| `TRAIN_WARMUP_SB` | 0 (off) | superbatches of linear warm-up, see below; at most `TRAIN_SUPERBATCHES` |
+| `TRAIN_SAVE_RATE` | 10 | a checkpoint every this many superbatches |
+| `TRAIN_THREADS` | all cores | threads that prepare batches; the `.viribin` loader uses at most 16 of them |
+| `TRAIN_DATA_DIR` | unset | a directory whose `.viribin` files are the dataset, read with the games interleaved across files. Takes precedence over file arguments. An absolute path, because the trainer runs from `training/` |
+| `TRAIN_SHUFFLE_MB` | 128 | shuffle buffer of the `.viribin` loader, 16384 positions per MB; at least 1 |
+| `TRAIN_RESUME_FROM` | unset | a checkpoint directory: the run continues with its weights and optimiser state. A checkpoint of the other `TRAIN_ARCH` is refused, by the header of its `quantised.bin` |
+| `TRAIN_START_SB` | 1 | with `TRAIN_RESUME_FROM`, the superbatch to continue at; the schedules carry on from there |
+| `TRAIN_INIT_NET` | unset | a quantised single-layer net to start from, see "Fine-tuning from a shipped net" |
+| `TRAIN_VALIDATION_DIR` | unset (off) | a directory of held-out `.viribin` files, see "Held-out validation" |
+| `TRAIN_VALIDATION_BATCHES` | 64 | size of the validation set, in batches of `TRAIN_BATCH_SIZE`; at least 1 |
+| `TRAIN_PARITY_FENS` | unset | a file of FENs to evaluate instead of training, with the net of `TRAIN_RESUME_FROM` or `TRAIN_INIT_NET` (one of them is required), see "Parity" |
+| `TRAIN_PARITY_OUT` | `parity.txt` | where those evaluations are written |
+
+`TRAIN_ARCH`, `TRAIN_LR_SCHEDULE`, `TRAIN_WARMUP_SB`, `TRAIN_SHUFFLE_MB`, `TRAIN_L1_SPARSITY` and
+`TRAIN_VALIDATION_BATCHES` stop the run when their value is not valid. Any other number that does
+not parse is replaced by its default without a message.
+
+`TRAIN_INIT_NET`, `TRAIN_VALIDATION_DIR` and `TRAIN_PARITY_FENS` count as unset when they are
+empty, so a wrapper script can export them unconditionally.
+
+**Learning rate.** With `S = TRAIN_SUPERBATCHES`, `cosine` is bullet's cosine decay with progress
+`(sb - 1) / (S - 1)`, so superbatch 1 runs at `TRAIN_LR_INITIAL`. `cosine-legacy` has progress
+`sb / S`, so superbatch 1 is already below `TRAIN_LR_INITIAL`: it is the curve of earlier bullet
+revisions, kept to repeat the recipe of a net that was trained with it. `TRAIN_WARMUP_SB=n`
+multiplies the schedule by a factor that rises linearly, batch by batch, from one part in
+`n * TRAIN_BATCHES_PER_SB` to 1 over the first `n` superbatches. bullet's own `lr::Warmup` is not
+used for that: it acts only inside superbatch 1 and divides by the batches left, which is not a
+linear ramp.
+
+### Multi-layer runs
+
+`TRAIN_ARCH=multi` uses the same loss, data loader, schedule and held-out validation as the
+single-layer recipe. Two things differ:
 
 - **Initialisation.** The feature transformer is initialised as if it had 32 inputs
   (`init_with_effective_input_size(32)`, as in bullet's multi-layer example), because the default,
@@ -672,13 +796,55 @@ Two things differ from the single-layer recipe:
   comparable between runs with different coefficients, and with a coefficient above 0 it is no longer
   comparable with the training loss of the same run. The variable is an error with `TRAIN_ARCH=single`.
 
-`TRAIN_RESUME_FROM` with a checkpoint of the other architecture is refused, by the header of the
-checkpoint's `quantised.bin`.
-
 `quantised.bin` is the file above. bullet at the pinned revision expresses the whole network with
 its builder: sliced-affine pairwise, `concat`, `crelu`, the square as `x * x`, and
 `select(output_buckets)` for the three bucketed layers. The save format reorders `l1w` and `l2w`
 from bullet's column-major layout and scales `l1w` (`training/src/multilayer.rs`).
+
+### Held-out validation
+
+`TRAIN_VALIDATION_DIR` names a directory of held-out `.viribin` files, typically one per opening
+source, filtered like the training data; it must not be `TRAIN_DATA_DIR`. The trainer prints
+`validation superbatch <n> loss <value>` after every superbatch, and once before training starts,
+with `n = TRAIN_START_SB - 1`, so that a broken validation setup fails before any training time is
+spent. Only that first pass can stop the run: a later failure is printed as a warning, validation
+is switched off and training carries on.
+
+**The set** (`training/src/heldout.rs`) is `TRAIN_VALIDATION_BATCHES` batches of `TRAIN_BATCH_SIZE`
+positions, the same positions in the same order on every run and resume. Every file is read twice,
+one file at a time. The first pass counts the positions that pass the filter, which gives each
+file its quota: an equal share of the set, where a file that holds less than its share gives all
+it has and the others make up the difference equally. The files are served in ascending order of
+what they hold, each taking `ceil(still needed / files not yet served)`, so when the share does not
+divide evenly the files served first take one position more. The second pass takes the quota at an
+even stride over the file's filtered positions, the last position of each of `quota` equal
+strides, so the sample covers all of the file's games rather than the first ones. The samples are
+then interleaved round-robin across the files, so every batch mixes all sources. It is a startup
+error when the files hold fewer filtered positions than the set needs, or when a file's count
+differs between the two passes.
+
+The files are parsed by the trainer and not through bullet's `ViriBinpackLoader`, which shuffles
+with a time seed and loops over its files forever. This way the set depends only on the files, the
+filter and its size, and held-out files that are too small are an error instead of repeated
+positions.
+
+**The loss** (`training/src/validation.rs`) is the mean of `(sigmoid(output) - target)²` over the
+set, normalised like the training loss bullet prints. The targets use the WDL weight of the
+superbatch just finished, so the value is comparable with that superbatch's training loss. It is
+computed on the host from the model's output, not by the model's own loss node, which is why a
+term that a net adds to its training loss (`TRAIN_L1_SPARSITY`) never enters it.
+
+**Why the trainer has its own run loop.** bullet's `ValueTrainer::run` has neither a validation
+pass nor a hook at the end of a superbatch. A validated run therefore drives
+`bullet_trainer::run::train`, the layer that `ValueTrainer::run` wraps, and supplies again what
+`ValueTrainer` keeps private: the input mapper, the save format and the writing of checkpoints.
+`value_mapper` mirrors the mapper `ValueTrainer` builds for a net with a scalar output and neither
+datapoint weights nor a win-rate model, which is how each of the trainer's three builders
+(`run_chess768`, `run_buckets16`, `multilayer::run`) is set up. The loss evaluator follows bullet's
+`ModelEvaluator`, which is fixed to a batch size of 1. Compare `value_mapper` with bullet again
+whenever one of the builders gains a wdl-adjust, datapoint-weight, win-rate-model or wdl-output
+option, and whenever the bullet revision changes; the three lower-level bullet crates in
+`training/Cargo.toml` stay on the revision of `bullet` itself.
 
 ### Fine-tuning from a shipped net
 
@@ -686,8 +852,8 @@ from bullet's column-major layout and scales `l1w` (`training/src/multilayer.rs`
 instead of a random initialisation:
 
 ```
-TRAIN_INIT_NET="$PWD/nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_LR_INITIAL=0.0001 TRAIN_WARMUP_SB=1 \
-    TRAIN_NET_ID=nezha-ft TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
+TRAIN_INIT_NET="$PWD/nets/dianguang-1.nnue" TRAIN_FACTORISER=0 TRAIN_LR_INITIAL=0.0001 TRAIN_WARMUP_SB=1 \
+    TRAIN_NET_ID=dianguang-1-ft TRAIN_DATA_DIR=/data/viri ./scripts/train.sh
 ```
 
 **Why.** bullet's checkpoints hold float weights and the optimiser state, and `TRAIN_RESUME_FROM`
@@ -702,7 +868,7 @@ file's feature weights already contain the factoriser, so with `TRAIN_FACTORISER
 weights get the file's values and the factoriser starts at zero. The optimiser state is fresh.
 Saving without a training step writes the input file again, byte for byte: a float is
 `stored / scale` to within a relative 2^-24, and the save rounds `float * scale` back to `stored`.
-`cargo test` checks that on `nets/nezha.nnue`, with and without the factoriser.
+The trainer's tests check that on `nets/dianguang-1.nnue`, with and without the factoriser.
 
 **What it refuses**, each with a message naming the reason:
 
@@ -714,7 +880,7 @@ Saving without a training step writes the input file again, byte for byte: a flo
   given. The clip is ±1.98 for every weight, except ±0.99 for the feature weights when a factoriser
   is trained (so that bucketed weight plus factoriser stays within ±1.98). A net that was trained
   with a factoriser has merged feature weights up to ±1.98, so it needs `TRAIN_FACTORISER=0`:
-  `nets/nezha.nnue` has 16036 feature weights beyond ±0.99. Refusing is a choice, not a limit: such
+  `nets/dianguang-1.nnue` has 12682 feature weights beyond ±0.99. Refusing is a choice, not a limit: such
   weights can be split exactly into a non-zero factoriser plus a remainder within the clip whenever
   the buckets of one feature weight span at most 1.98, and that split is not implemented.
 
@@ -726,13 +892,15 @@ file, or any existing file as the argument).
 
 ```
 cd training
-TRAIN_INIT_NET="$PWD/../nets/nezha.nnue" TRAIN_FACTORISER=0 TRAIN_PARITY_FENS=fens.txt \
+TRAIN_INIT_NET="$PWD/../nets/dianguang-1.nnue" TRAIN_FACTORISER=0 TRAIN_PARITY_FENS=fens.txt \
     TRAIN_PARITY_OUT=parity.txt TRAIN_DATA_DIR=/path/to/viribin ./target/release/avalanche-trainer
 ```
 
-`parity.txt` holds `<fen> | <centipawns>` for the side to move. `Avalanche nnue-parity` reads only
+`parity.txt` holds `<fen> | <centipawns>` for the side to move. `TRAIN_PARITY_FENS` takes one FEN
+per line and ignores `#` lines and everything from a `|` on, so the trainer reads its own output
+and a parity file can be regenerated in place. `Avalanche nnue-parity` reads only
 multi-layer nets, so a single-layer net is compared through the engine built with it: the UCI
-`eval` command prints `NNUE evaluation <cp> (white side)` for the current position.
+`eval` command prints `info string NNUE evaluation <cp> cp (white side)` for the current position.
 
 **What stays the caller's job.** The learning rate is whatever the schedule says: the defaults,
 `TRAIN_LR_INITIAL=0.001` on a cosine to `TRAIN_LR_FINAL`, are for a net trained from scratch and
@@ -754,11 +922,14 @@ Avalanche nnue-random <out> [seed] [full] [sparse]
 Avalanche nnue-speed
 ```
 
+Any other name that starts with `nnue-` prints the usage and exits with status 1.
+
 `nnue-parity` reads a multi-layer file and, for each position (the bench positions by default),
 rebuilds both accumulators from the file and evaluates the head three ways:
 
 - **integer**: `head_multi.evaluate`, the engine's path;
-- **float**: the trainer's forward pass in f64 from the same quantised weights, no rounding anywhere;
+- **float**: the trainer's forward pass in f64 from the same quantised weights, no rounding anywhere
+  (`parity.evaluate_float`);
 - **float with quantised pairwise**: the same, but from the engine's 0..127 pairwise products.
 
 It prints the maximum and mean absolute difference in centipawns. In a multi-layer build it also
@@ -773,10 +944,14 @@ network (`|l1w| <= 0.19`, stored as up to 96 at `e = 3`; `|l2w|, |l3w| <= 400`),
 the whole valid range at `e = 0`. Both are dense: about nine L1 blocks in ten are non-zero on the
 bench positions, because the feature-transformer biases are drawn from 0..128. `sparse` draws them
 from -144..-16, which leaves about one block in four non-zero, as a network trained with
-`TRAIN_L1_SPARSITY` aims for; it combines with `full`.
+`TRAIN_L1_SPARSITY` aims for; it combines with `full`. The feature-transformer weights are drawn
+from -48..48, so no position can overflow an i16 accumulator: 32 pieces add at most 1536 to a
+bias.
+
 `nnue-speed` times the build's head on the bench positions; in a multi-layer build it also prints
 the SIMD paths, the mean number of non-zero L1 blocks and the time of each stage (see
-"Performance").
+"Performance"). Its checksum is the sum of every evaluation it timed, modulo 2⁶⁴ and printed
+unsigned, so it is a string of digits for every network.
 
 ### Tolerances
 
@@ -787,8 +962,9 @@ the SIMD paths, the mean number of non-zero L1 blocks and the time of each stage
 | integer vs float, full-range weights | none | max 143 cp, mean 18 cp, mean abs eval 1200 cp |
 
 - With the engine's own pairwise products, what is left is the final rounding to a whole
-  centipawn (at most 0.5 cp) and the two rounding shifts (each at most 2⁻¹⁴ per activation). A wrong
-  weight order, scale or shift anywhere after the pairwise step shows up here.
+  centipawn (at most 0.5 cp) and the rounding shifts of steps 2 to 4 (two when `e = 0`; each at
+  most 2⁻¹⁴ per activation). A wrong weight order, scale or shift anywhere after the pairwise step
+  shows up here.
 - Against exact pairwise products, each of up to 1024 inputs is off by at most half of 1/127, and
   L1 sums those errors weighted by `l1w`. The error grows with the size of the L1 weights, which
   is why it is only bounded for weights of trained magnitude. It is the price of u8 activations
@@ -796,13 +972,29 @@ the SIMD paths, the mean number of non-zero L1 blocks and the time of each stage
 - A layout or formula mismatch gives a difference of the order of the evaluations themselves,
   hundreds of centipawns.
 - A fourth tolerance, 16 cp max and 4 cp mean, is for the rounding of the L1 weights: float L1
-  weights up to 0.2166, stored at the shift the trainer would pick, against those floats on the
-  engine's pairwise products. Measured 8.1 cp max, 1.2 cp mean; without the shift, 81 and 17.
+  weights up to 0.2166, most of them far smaller as in a trained net, stored at the shift the
+  trainer would pick, against those floats on the engine's pairwise products. Measured 8.1 cp max,
+  1.2 cp mean; without the shift, 81 and 17. The test picks the shift by the trainer's rule, but
+  rounds an f64 product where the trainer (`l1_shift` in `training/src/multilayer.rs`) rounds an
+  f32 one, so the two can differ for a largest weight within f32 rounding of a boundary. The cases
+  the test asserts for its rule are those of the trainer's own test.
 
-The unit tests (`src/tests/nnue_multi.zig`) assert the first two rows on random accumulators, and
-the scalar-against-SIMD equality on both weight ranges at every L1 shift. Each SIMD stage also has
-its own comparison: the pairwise products for every pair of values around the clamp, the non-zero
-search and the L1 sums for every number of non-zero blocks from 0 to 256.
+The unit tests (`src/tests/nnue_heads.zig`) hold the tolerances. They assert the first two rows on
+random accumulators with values between the clamps: values drawn from all of i16, or only from 0
+and 255, give almost only pairwise products of 0 or 1, where the rounding leaves next to nothing
+to measure. The mean evaluation must be three times the tolerance, so that a wrong formula cannot
+pass because every evaluation was near zero.
+
+They assert the scalar-against-SIMD equality on both weight ranges at every L1 shift, and that
+those evaluations take more than a thousand distinct values: on a head that saturated to a few
+values the comparison would be empty. Each SIMD stage also has its own comparison:
+
+- the pairwise products for every pair of values around the clamp, where the rounding and the
+  saturation of each path differ, and at the extremes of an i16;
+- the non-zero search and the L1 sums for every number of non-zero blocks from 0 to 256, a random
+  subset each time, which covers every remainder of the vector width and of a round of chains. The
+  weights are random, then all -128 and all 127 under activations of 127, where a saturating
+  instruction is closest to its limit.
 
 ### Trainer against engine, on a GPU machine
 
@@ -831,8 +1023,8 @@ evaluates the unquantised weights, so that difference also contains the rounding
 themselves, the i8 L1 weights above all; the 16 cp tolerance above does not apply to it. A failure
 of the layout looks like the third row of the table: differences as large as the evaluations.
 
-First measurement, on commit d4d0dde (format version 1): a net trained for 3 superbatches of 200 batches on a tiny
-dataset, before the 32-input initialisation was added; the 50 bench positions, mean abs eval
+First measurement, with format version 1: a net trained for 3 superbatches of 200 batches on a
+tiny dataset, before the 32-input initialisation was added; the 50 bench positions, mean abs eval
 162 cp, max 773 cp. The trainer ran and saved a 25334400-byte file.
 
 | Comparison | Max | Mean |
@@ -844,8 +1036,8 @@ dataset, before the 32-input initialisation was added; the 50 bench positions, m
 So the layout and the formulas match the file bullet saves. The 9 cp mean of the last row is
 weight quantisation, mainly the i8 L1 weights at a resolution of 1/64.5.
 
-Second measurement, on commit 31b3a0d (still format version 1), with the 32-input initialisation
-and `TRAIN_L1_SPARSITY=0.005`; mean abs eval 196.7 cp. The trainer printed, at save: `l1w` max 0.2166,
+Second measurement, still with format version 1, with the 32-input initialisation and
+`TRAIN_L1_SPARSITY=0.005`; mean abs eval 196.7 cp. The trainer printed, at save: `l1w` max 0.2166,
 stored as 14 of 127; `l2w` 1068 of 2047; `l3w` 857 of 2047.
 
 | Comparison | Max | Mean |
@@ -893,9 +1085,16 @@ equal.
 
 ## Tests
 
-`zig build test` in the default build covers the multi-layer head. The multi-layer head's weights
-are passed explicitly, so its tests run in a build of either head; the single-layer head is only
-evaluated through the embedded network, so its tests need a single-layer build:
-`zig build test -Dnet=nets/dianguang-1.nnue`. `-Dtest-filter=<text>` runs the tests
-whose name contains the text. In Debug the intrinsics are not compiled, see "What has been executed";
-use `-Doptimize=safe` for those.
+`zig build test` in the default build covers the multi-layer head. Both heads take their weights
+explicitly, so the tests of their arithmetic run in a build of either head. They are in
+`src/tests/nnue_heads.zig`: those named "multi head" for the multi-layer head, and those named
+"single head" for the single-layer one (the formula on random weights, and weights at their
+extremes). The tests that evaluate positions use the embedded network, so they reach the
+single-layer head only in a single-layer build: `zig build test -Dnet=nets/dianguang-1.nnue`.
+`-Dtest-filter=<text>` runs the tests whose name contains the text. In Debug the intrinsics are
+not compiled, see "What has been executed"; use `-Doptimize=safe` for those.
+
+`cargo test --no-default-features` in `training/` covers the trainer's side of the file format
+without a device: the header bytes, the L1 and L2 layouts, the L1 shift (on the cases the engine's
+tests also assert), the learning-rate schedules, the validation sample and the `TRAIN_INIT_NET`
+round trip.

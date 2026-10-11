@@ -1,9 +1,40 @@
 import assert from "node:assert/strict";
 import { stat } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { createCapturingEngine, nativeBenchSignature, parseBenchNodes, wasmUrl } from "./fixtures.ts";
+import { Engine, EngineCrashError } from "../src/engine.ts";
+import {
+  compileEngineModule,
+  createCapturingEngine,
+  nativeBenchSignature,
+  parseBenchNodes,
+  wasmUrl,
+} from "./fixtures.ts";
 
 const KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
+const NODE_BUDGET = 5000;
+const LIMIT_POLL_INTERVAL_NODES = 1024;
+const SKILL_LEVEL = 1;
+const SKILL_DEPTH_LIMIT = SKILL_LEVEL + 1;
+const LARGEST_HASH_MB_BELOW_2_GIB = 2 * 1024 - 1;
+const HASH_OPTION = /^option name Hash type spin default \d+ min 1 max (?<max>\d+)$/;
+const NETWORK_ANNOUNCEMENT =
+  /^info string NNUE evaluation using (?<name>\S+) \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/;
+
+function reported(output: readonly string[], field: "nodes" | "depth"): number[] {
+  const pattern = new RegExp(` ${field} (\\d+) `);
+  return output.flatMap((line) => {
+    const value = pattern.exec(line)?.[1];
+    return value === undefined ? [] : [Number(value)];
+  });
+}
+
+async function announcedNetworkName(): Promise<string> {
+  const { run } = await createCapturingEngine();
+  run("position startpos");
+  const name = NETWORK_ANNOUNCEMENT.exec(run("go depth 1")[0] ?? "")?.groups?.["name"];
+  if (name === undefined) throw new Error("the engine did not announce its network");
+  return name;
+}
 
 describe("wasm engine", () => {
   it("completes the UCI handshake", async () => {
@@ -36,8 +67,11 @@ describe("wasm engine", () => {
   it("stops at the requested node budget", async () => {
     const { run } = await createCapturingEngine();
     run("position startpos");
-    const output = run("go nodes 5000");
+    const output = run(`go nodes ${String(NODE_BUDGET)}`);
     assert.match(output.at(-1) ?? "", /^bestmove /);
+    const nodes = reported(output, "nodes");
+    assert.ok(nodes.length > 0, "the search reported no node count");
+    assert.ok(Math.max(...nodes) <= NODE_BUDGET + LIMIT_POLL_INTERVAL_NODES, String(nodes));
   });
 
   it("reports distinct MultiPV lines", async () => {
@@ -62,19 +96,32 @@ describe("wasm engine", () => {
 
   it("limits strength by skill level", async () => {
     const { run } = await createCapturingEngine();
-    run("setoption name Skill Level value 1");
+    run(`setoption name Skill Level value ${String(SKILL_LEVEL)}`);
     run("position startpos");
-    const depths = run("go depth 12")
-      .map((line) => / depth (\d+) /.exec(line)?.[1])
-      .filter((depth) => depth !== undefined)
-      .map(Number);
-    assert.ok(Math.max(...depths) <= 2, String(depths));
+    const depths = reported(run("go depth 12"), "depth");
+    assert.ok(depths.length > 0, "the search reported no depth");
+    assert.ok(Math.max(...depths) <= SKILL_DEPTH_LIMIT, String(depths));
   });
 
   it("rejects commands that overflow the input buffer", async () => {
     const { engine } = await createCapturingEngine();
     assert.throws(() => engine.send("x".repeat(1 << 16)), RangeError);
-    assert.equal(engine.send("isready"), true);
+    assert.equal(engine.send("isready"), "running");
+  });
+
+  it("refuses every command after a call into the module was abandoned", async () => {
+    const abandonment = new Error("host callback failed");
+    const engine = await Engine.create(await compileEngineModule(), {
+      onLine: (line) => {
+        if (line.startsWith("info depth 2 ")) throw abandonment;
+      },
+    });
+    engine.send("position startpos");
+    assert.throws(
+      () => engine.send("go depth 4"),
+      (error) => error instanceof EngineCrashError && error.cause === abandonment,
+    );
+    assert.throws(() => engine.send("isready"), EngineCrashError);
   });
 
   it("advertises only the options wasm supports", async () => {
@@ -84,10 +131,16 @@ describe("wasm engine", () => {
     assert.ok(!options.some((line) => line.includes("Syzygy")));
   });
 
+  it("offers no hash table of 2 GiB or more, which a wasm32 module could not allocate", async () => {
+    const { run } = await createCapturingEngine();
+    const maxima = run("uci").flatMap((line) => HASH_OPTION.exec(line)?.groups?.["max"] ?? []);
+    assert.deepEqual(maxima, [String(LARGEST_HASH_MB_BELOW_2_GIB)]);
+  });
+
   it("embeds the network exactly once", async () => {
     const [module, network] = await Promise.all([
       stat(wasmUrl),
-      stat(new URL("../../nets/dianguang-5.nnue", import.meta.url)),
+      stat(new URL(`../../nets/${await announcedNetworkName()}.nnue`, import.meta.url)),
     ]);
     assert.ok(module.size > network.size, "network missing from the module");
     assert.ok(
@@ -99,27 +152,33 @@ describe("wasm engine", () => {
   it("names the network when a search starts", async () => {
     const { run } = await createCapturingEngine();
     run("position startpos");
-    const output = run("go depth 1");
-    assert.match(
-      output[0] ?? "",
-      /^info string NNUE evaluation using dianguang-5 \(768x\d+->\d+->pairwise->\d+x2->\d+->1x\d+, \d+ MiB\)$/,
-    );
+    assert.match(run("go depth 1")[0] ?? "", NETWORK_ANNOUNCEMENT);
   });
 
   it("reports quit to the host", async () => {
     const { engine } = await createCapturingEngine();
-    assert.equal(engine.send("isready"), true);
-    assert.equal(engine.send("quit"), false);
+    assert.equal(engine.send("isready"), "running");
+    assert.equal(engine.send("quit"), "quit");
   });
 
-  it("searches exactly the same tree as the native build", { timeout: 300_000 }, async (t) => {
-    const expected = nativeBenchSignature();
-    if (expected === null) {
-      t.skip("native binary not built (zig build --release=fast)");
-      return;
-    }
-    const { engine, lines } = await createCapturingEngine();
-    engine.bench();
-    assert.equal(parseBenchNodes(lines.join("\n")), expected);
-  });
+  for (const { session, commands } of [
+    { session: "a new engine", commands: [] },
+    {
+      session: "an engine that has resized its hash table and searched",
+      commands: ["setoption name Hash value 1", "position startpos", "go depth 14"],
+    },
+  ]) {
+    it(`benches exactly the tree of the native build on ${session}`, { timeout: 300_000 }, async (t) => {
+      const expected = nativeBenchSignature();
+      if (expected === null) {
+        t.skip("native binary not built (zig build --release=fast)");
+        return;
+      }
+      const { engine, lines } = await createCapturingEngine();
+      for (const command of commands) engine.send(command);
+      const start = lines.length;
+      engine.bench();
+      assert.equal(parseBenchNodes(lines.slice(start).join("\n")), expected);
+    });
+  }
 });

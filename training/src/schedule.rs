@@ -1,3 +1,5 @@
+//! See "Training" in docs/NNUE.md.
+
 use std::f32::consts::PI;
 
 use bullet::trainer::schedule::{
@@ -33,8 +35,6 @@ impl LrKind {
     }
 }
 
-/// bullet's cosine decay as it was before jw1912/bullet#553: progress is `superbatch / final_superbatch`
-/// rather than `(superbatch - 1) / (final_superbatch - 1)`, so superbatch 1 already sits below `initial_lr`.
 #[derive(Clone, Debug)]
 pub struct LegacyCosineDecayLR {
     pub initial_lr: f32,
@@ -106,9 +106,6 @@ impl LrScheduler for BaseLr {
     }
 }
 
-/// Scales `inner` by a factor rising linearly, batch by batch, from `1 / warmup batches` to 1 over the
-/// first `warmup_superbatches`. bullet's own `lr::Warmup` cannot be used: it only acts inside superbatch 1
-/// and divides by the batches left, which is not a linear ramp.
 #[derive(Clone, Debug)]
 pub struct LinearWarmup<LR> {
     pub inner: LR,

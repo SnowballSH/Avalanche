@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const utils = @import("../chess/utils.zig");
+const hce = @import("../engine/hce.zig");
 const search = @import("../engine/search.zig");
 const support = @import("support.zig");
 const expect = std.testing.expect;
@@ -44,8 +45,7 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
     var castles: usize = 0;
 
     for (WALK_FENS) |fen| {
-        var walk: usize = 0;
-        while (walk < WALKS_PER_FEN) : (walk += 1) {
+        for (0..WALKS_PER_FEN) |_| {
             pos.set_fen(fen);
             const root_pawn_hash = pos.pawn_hash;
             const root_nonpawn_hash = pos.nonpawn_hash;
@@ -75,9 +75,8 @@ test "pawn and non-pawn keys: incremental match recomputed over random move sequ
                 played[ply] = move;
                 try expect_keys_match(pos);
 
-                const board_fen = pos.basic_fen(std.testing.allocator);
-                defer std.testing.allocator.free(board_fen);
-                fresh.set_fen(board_fen);
+                var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
+                fresh.set_fen(pos.write_fen(&fen_buf));
                 try expectEqual(fresh.pawn_hash, pos.pawn_hash);
                 try expectEqual(fresh.nonpawn_hash, pos.nonpawn_hash);
             }
@@ -108,11 +107,11 @@ test "pawn key: ignores pieces other than pawns" {
     const start = pos.pawn_hash;
     try expect(start != 0);
 
-    const knight = types.Move.new_from_string(pos, "g1f3");
+    const knight = try support.parse_move(pos, "g1f3");
     pos.play_move(.White, knight);
     try expectEqual(start, pos.pawn_hash);
 
-    const pawn = types.Move.new_from_string(pos, "e7e5");
+    const pawn = try support.parse_move(pos, "e7e5");
     pos.play_move(.Black, pawn);
     try expect(start != pos.pawn_hash);
 }
@@ -127,12 +126,12 @@ test "non-pawn key: tracks only its own color's pieces" {
     const black = pos.nonpawn_hash[1];
     try expect(white != 0 and black != 0 and white != black);
 
-    const pawn = types.Move.new_from_string(pos, "e2e4");
+    const pawn = try support.parse_move(pos, "e2e4");
     pos.play_move(.White, pawn);
     try expectEqual(white, pos.nonpawn_hash[0]);
     try expectEqual(black, pos.nonpawn_hash[1]);
 
-    const knight = types.Move.new_from_string(pos, "g8f6");
+    const knight = try support.parse_move(pos, "g8f6");
     pos.play_move(.Black, knight);
     try expectEqual(white, pos.nonpawn_hash[0]);
     try expect(black != pos.nonpawn_hash[1]);
@@ -140,23 +139,20 @@ test "non-pawn key: tracks only its own color's pieces" {
 
 test "correction history: gravity keeps entries within the limit" {
     var entry: i16 = 0;
-    var i: usize = 0;
-    while (i < 1000) : (i += 1) {
-        search.update_correction(&entry, 888888, -888888, 255);
+    for (0..1000) |_| {
+        search.update_correction(&entry, hce.MateScore, -hce.MateScore, 255);
         try expect(entry <= search.CORRHIST_LIMIT);
     }
     try expectEqual(@as(i16, search.CORRHIST_LIMIT), entry);
 
-    i = 0;
-    while (i < 1000) : (i += 1) {
-        search.update_correction(&entry, -888888, 888888, 255);
+    for (0..1000) |_| {
+        search.update_correction(&entry, -hce.MateScore, hce.MateScore, 255);
         try expect(entry >= -search.CORRHIST_LIMIT);
     }
     try expectEqual(@as(i16, -search.CORRHIST_LIMIT), entry);
 
     var prng = utils.PRNG.new(0xC0_44_EC_71_0B);
-    i = 0;
-    while (i < 100000) : (i += 1) {
+    for (0..100000) |_| {
         const r = prng.rand64();
         const diff: i32 = @as(i32, @intCast(r % 4001)) - 2000;
         const depth: usize = @intCast((r >> 32) % 64 + 1);
@@ -171,8 +167,7 @@ test "correction history: a consistent error converges instead of saturating" {
     var nonpawn_black: i16 = 0;
     const raw_eval: i32 = 40;
     const true_value: i32 = 50;
-    var i: usize = 0;
-    while (i < 1000) : (i += 1) {
+    for (0..1000) |_| {
         const corrected = raw_eval + search.weighted_correction(pawn, nonpawn_white, nonpawn_black);
         search.update_correction(&pawn, true_value, corrected, 8);
         search.update_correction(&nonpawn_white, true_value, corrected, 8);

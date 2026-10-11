@@ -1,9 +1,5 @@
-# CI for Avalanche.
-
 name: CI
 
-# Tests run on master, on pull requests into it, and weekly. Feature branches
-# are tested through their pull request instead of on every push.
 on:
   push:
     branches: [master]
@@ -12,9 +8,8 @@ on:
     branches: [master]
   workflow_dispatch:
   schedule:
-    - cron: "0 0 * * 1" # weekly regression guard against master (Monday)
+    - cron: "0 0 * * 1"
 
-# Cancel superseded runs on the same branch (e.g. rapid PR pushes).
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
@@ -24,6 +19,8 @@ permissions:
 
 env:
   ZIG_VERSION: "0.17.0"
+  RUFF_VERSION: "0.17.0"
+  RUST_VERSION: "1.99.0"
 
 jobs:
   build:
@@ -39,11 +36,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup Zig ${{ env.ZIG_VERSION }}
-        # mlugg/setup-zig@v2 is the maintained successor to goto-bus-stop/setup-zig:
-        # it knows the current release channel and ziglang.org download
-        # layout, verifies the release minisign signature, and caches the global
-        # zig cache (~/.cache/zig), which holds the maker executable, across runs.
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -52,7 +45,10 @@ jobs:
           zig version
           zig env
 
-      # Unit tests do not compile the UCI frontend; one Debug build covers it.
+      - name: Format
+        if: runner.os == 'Linux'
+        run: zig fmt --check src build.zig build.zig.zon
+
       - name: Debug build
         if: runner.os == 'Linux'
         run: zig build
@@ -70,49 +66,19 @@ jobs:
       - name: Unit tests (fast)
         run: zig build test -Doptimize=fast
 
-      # The default network is multi-layer; this covers the single-layer head.
+      - name: Unit tests (safe)
+        if: runner.os != 'Windows'
+        run: zig build test -Doptimize=safe
+
       - name: Unit tests (single-layer head)
         if: runner.os == 'Linux'
         run: zig build test -Dnet=nets/dianguang-1.nnue
 
-      # The release build above leaves the binary at zig-out/bin/Avalanche[.exe].
-      # The expected node count and checksum are NOT hardcoded here -- they are
-      # read from the committed `bench.nodes` and `nnue-speed.checksum` files.
-      # Whenever a change legitimately alters either, run
-      # `scripts/update_bench.sh` and commit the updated files.
       - name: Bench node count and nnue-speed checksum
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
           bash scripts/verify_binary.sh "$BIN"
-
-      - name: UCI frontend smoke test
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
-          # Mock a user driving the UCI frontend, then quit. The engine spawns the
-          # search on a detached thread, so "bestmove" prints asynchronously after
-          # "go"; pad with a sleep before "quit" so it can flush before stdin closes.
-          OUT="$(
-            {
-              printf 'uci\n'
-              printf 'isready\n'
-              printf 'position startpos moves e2e4 e7e5\n'
-              printf 'go depth 8\n'
-              sleep 3
-              printf 'quit\n'
-            } | "$BIN"
-          )"
-          echo "----- engine output -----"
-          echo "$OUT"
-          echo "-------------------------"
-          fail=0
-          echo "$OUT" | grep -q "uciok"     || { echo "FAIL: missing 'uciok'";    fail=1; }
-          echo "$OUT" | grep -q "readyok"   || { echo "FAIL: missing 'readyok'";  fail=1; }
-          echo "$OUT" | grep -q "^bestmove" || { echo "FAIL: missing 'bestmove' line"; fail=1; }
-          [ "$fail" -eq 0 ] || exit 1
-          echo "OK: UCI smoke test passed (uciok / readyok / bestmove)"
 
       - name: UCI protocol tests
         shell: bash
@@ -120,10 +86,6 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then BIN="./zig-out/bin/Avalanche.exe"; else BIN="./zig-out/bin/Avalanche"; fi
           python3 scripts/uci_protocol_test.py "$BIN"
 
-  # Release binaries for CPU levels other than the runner's own (docs/BUILD.md, "Release matrix"):
-  # each is built, checked for the SIMD paths and instructions of its level and, where the
-  # runner's CPU has them, run. A pull request builds four of them and one native binary; the
-  # whole matrix is built by the `artifacts` job for tags.
   tiers:
     name: tiers / ${{ matrix.arch }}
     strategy:
@@ -141,14 +103,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     env:
-      # A fixed version keeps build_options, and with it the compilation cache, the same between runs.
       VERSION: ci
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
       - name: Setup Zig ${{ env.ZIG_VERSION }}
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -159,13 +120,12 @@ jobs:
         run: grep -m1 -E '^(flags|Features)' /proc/cpuinfo
 
       - name: Binaries every runner of this architecture can run
-        run: REQUIRE_RUN=1 bash build_all_v3.sh ${{ matrix.must_run }}
+        run: REQUIRE_RUN=1 scripts/build_release.sh ${{ matrix.must_run }}
 
       - name: Binaries that run where the CPU allows
         if: matrix.may_run != ''
-        run: bash build_all_v3.sh ${{ matrix.may_run }}
+        run: scripts/build_release.sh ${{ matrix.may_run }}
 
-      # No development machine has SVE, so an SVE-enabled build is executed here or nowhere.
       - name: Native build on an SVE CPU
         if: matrix.arch == 'aarch64'
         run: |
@@ -187,15 +147,66 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
         with:
+          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt, clippy
       - name: Format
         run: cargo fmt --check
       - name: Lint
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --locked --all-targets -- -D warnings
       - name: Test
-        run: cargo test
+        run: cargo test --locked
+
+  trainer:
+    name: trainer
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: training
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # v1
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --locked --no-default-features --all-targets -- -D warnings
+      - name: Lint with the CUDA backend
+        run: CUDA_PATH="$RUNNER_TEMP" cargo clippy --locked --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --no-default-features
+
+  scripts:
+    name: scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Shell lint
+        run: git ls-files -z '*.sh' | xargs -0 shellcheck -x
+
+      - name: Install ruff ${{ env.RUFF_VERSION }} and numpy
+        run: |
+          python3 -m venv "$RUNNER_TEMP/python"
+          "$RUNNER_TEMP/python/bin/pip" install "ruff==$RUFF_VERSION" numpy
+          echo "$RUNNER_TEMP/python/bin" >> "$GITHUB_PATH"
+
+      - name: Python lint
+        run: ruff check scripts
+
+      - name: Python format
+        run: ruff format --check scripts
+
+      - name: Python tests
+        run: python3 -m unittest discover -s scripts
 
   wasm:
     name: wasm / node
@@ -206,14 +217,14 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Setup Zig ${{ env.ZIG_VERSION }}
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
       - name: Setup Node
         uses: actions/setup-node@v7
         with:
-          node-version: 24
+          node-version: 26
 
       - name: Install web dependencies
         working-directory: web
@@ -281,12 +292,9 @@ jobs:
           source "$GITHUB_WORKSPACE/tcec/update.sh"
           printf 'uci\nquit\n' | "$EXE" | grep -E -x "id name Avalanche [0-9]+\.[0-9]+\.[0-9]+(-dev-[0-9a-f]{8})?"
 
-  # Cross-compile release binaries (native + wasm) and upload them. This is the
-  # slowest job, so it runs only for version tags (v*) and manual dispatch, never
-  # per commit or on pull requests (so forks cannot trigger artifact builds).
   artifacts:
     name: release artifacts
-    needs: [build, tiers, wasm]
+    needs: [build, tiers, wasm, scripts]
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -294,8 +302,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: The tag is the version of both manifests
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag=${GITHUB_REF_NAME#v}
+          zon=$(sed -n 's/^ *\.version = "\(.*\)",$/\1/p' build.zig.zon)
+          web=$(jq -r .version web/package.json)
+          if [ "$tag" != "$zon" ] || [ "$tag" != "$web" ]; then
+            echo "::error::tag $tag, build.zig.zon $zon and web/package.json $web must be one version"
+            exit 1
+          fi
+
       - name: Setup Zig ${{ env.ZIG_VERSION }}
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -304,15 +323,13 @@ jobs:
 
       - name: Cross-compile release binaries
         env:
-          # Tag builds report the tag's version (v4.1.0 -> 4.1.0); manual runs are dev builds.
           VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
-        run: bash build_all_v3.sh
+        run: scripts/build_release.sh
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: Avalanche-${{ github.sha }}
-          # Ship the runnable binaries only; drop the Windows .pdb debug symbols.
           path: |
             artifacts/bin/*
             !artifacts/bin/*.pdb

@@ -1,12 +1,9 @@
 const std = @import("std");
-const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const position = @import("../chess/position.zig");
 const castling = @import("../chess/castling.zig");
 const frc = @import("../chess/frc.zig");
 const perft = @import("../chess/perft.zig");
-const search = @import("../engine/search.zig");
-const tt = @import("../engine/tt.zig");
 const support = @import("support.zig");
 const expect = std.testing.expect;
 const expectEqual = std.testing.expectEqual;
@@ -14,10 +11,9 @@ const expectEqualStrings = std.testing.expectEqualStrings;
 
 const PerftCase = struct {
     fen: []const u8,
-    nodes: []const usize,
+    nodes: []const u64,
 };
 
-// Reference counts produced independently with python-chess (chess960=True).
 const PERFT_SUITE = [_]PerftCase{
     .{ .fen = "bqnb1rkr/pp3ppp/3ppn2/2p5/5P2/P2P4/NPP1P1PP/BQ1BNRKR w HFhf - 2 9", .nodes = &.{ 21, 528, 12189, 326672 } },
     .{ .fen = "2nnrbkr/p1qppppp/8/1ppb4/6PP/3PP3/PPP2P2/BQNNRBKR w HEhe - 1 9", .nodes = &.{ 21, 807, 18002, 667366 } },
@@ -33,7 +29,6 @@ const PERFT_SUITE = [_]PerftCase{
     .{ .fen = "rkrnnqbb/pppppppp/8/8/8/8/PPPPPPPP/BBQNNRKR w HFca - 0 1", .nodes = &.{ 20, 400, 9014, 202136 } },
 };
 
-// Positions isolating Chess960 castling corner cases.
 const CASTLING_EDGE_SUITE = [_]PerftCase{
     // King already on its destination file; rook on the adjacent file.
     .{ .fen = "1k6/8/8/8/8/8/8/RK5R w A - 0 1", .nodes = &.{ 24, 70, 1872, 9476 } },
@@ -54,7 +49,7 @@ const init_tables = support.init_tables;
 const new_position = support.new_position;
 const destroy_position = support.destroy_position;
 
-fn perft_from(pos: *position.Position, depth: u32) usize {
+fn perft_from(pos: *position.Position, depth: u32) u64 {
     return switch (pos.turn) {
         .White => perft.perft(.White, pos, depth),
         .Black => perft.perft(.Black, pos, depth),
@@ -160,7 +155,7 @@ test "frc: double fischer random starts match reference perft" {
     const pos = try new_position();
     defer destroy_position(pos);
 
-    const cases = [_]struct { white: u16, black: u16, nodes: [4]usize }{
+    const cases = [_]struct { white: u16, black: u16, nodes: [4]u64 }{
         .{ .white = 123, .black = 876, .nodes = .{ 20, 400, 8930, 196471 } },
         .{ .white = 0, .black = 959, .nodes = .{ 20, 400, 9014, 202136 } },
         .{ .white = 518, .black = 0, .nodes = .{ 20, 400, 8902, 199818 } },
@@ -191,11 +186,10 @@ test "frc: incremental hash, fen and nnue agree with a fresh position after ever
 
         const root_hash = pos.hash;
         const root_board = pos.mailbox;
+        var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
         for (moves.items()) |move| {
             play(pos, move);
-            const fen = pos.basic_fen(std.testing.allocator);
-            defer std.testing.allocator.free(fen);
-            fresh.set_fen(fen);
+            fresh.set_fen(pos.write_fen(&fen_buf));
             try expectEqual(fresh.hash, pos.hash);
             try expectEqual(fresh.castling_rights(), pos.castling_rights());
             try support.expect_nnue_matches_fresh(pos);
@@ -219,11 +213,10 @@ test "frc: fen castling field accepts Shredder and X-FEN and writes X-FEN" {
         .{ "rr2k2r/8/8/8/8/8/8/R2K3R w KQb - 0 1", "rr2k2r/8/8/8/8/8/8/R2K3R w KQb - 0 1" },
         .{ "4k3/8/8/8/8/8/8/R3K2R w XYZ - 0 1", "4k3/8/8/8/8/8/8/R3K2R w - - 0 1" },
     };
+    var fen_buf: [position.FEN_CAPACITY]u8 = undefined;
     for (cases) |case| {
         pos.set_fen(case[0]);
-        const fen = pos.basic_fen(std.testing.allocator);
-        defer std.testing.allocator.free(fen);
-        try expectEqualStrings(case[1], fen);
+        try expectEqualStrings(case[1], pos.write_fen(&fen_buf));
     }
 }
 
@@ -236,50 +229,35 @@ test "frc: castling notation follows UCI_Chess960 and parses both forms" {
     var buf: [8]u8 = undefined;
 
     pos.uci_chess960 = false;
-    const standard = types.Move.new_from_string(pos, "e1g1");
+    const standard = try support.parse_move(pos, "e1g1");
     try expect(standard.is_castle());
     try expectEqualStrings("e1g1", format_move(standard, pos.chess960_notation(), &buf));
-    try expectEqual(standard.to_u16(), types.Move.new_from_string(pos, "e1h1").to_u16());
+    try expectEqual(standard.to_u16(), (try support.parse_move(pos, "e1h1")).to_u16());
 
     pos.uci_chess960 = true;
-    const king_takes_rook = types.Move.new_from_string(pos, "e1a1");
+    const king_takes_rook = try support.parse_move(pos, "e1a1");
     try expect(king_takes_rook.is_castle());
     try expectEqualStrings("e1a1", format_move(king_takes_rook, pos.chess960_notation(), &buf));
-    try expectEqual(@as(u16, 0), types.Move.new_from_string(pos, "e1c1").to_u16());
+    try expect(types.Move.parse(pos, "e1c1") == null);
 
     pos.uci_chess960 = false;
     pos.set_fen("4k3/8/8/8/8/8/8/1R3K2 w B - 0 1");
     try expect(pos.chess960_notation());
-    const b_file_castle = types.Move.new_from_string(pos, "f1b1");
+    const b_file_castle = try support.parse_move(pos, "f1b1");
     try expect(b_file_castle.is_castle());
     try expectEqualStrings("f1b1", format_move(b_file_castle, pos.chess960_notation(), &buf));
-    try expect(!types.Move.new_from_string(pos, "f1c1").is_castle());
+    try expect(types.Move.parse(pos, "f1c1") == null);
 }
 
 test "frc: search returns a legal move from a double fischer random position" {
-    var io_threaded: std.Io.Threaded = .init(std.heap.page_allocator, .{});
-    defer io_threaded.deinit();
-    platform.io = io_threaded.io();
-
-    init_tables();
-    search.init_lmr();
-    tt.GlobalTT.reset(16);
-    search.NUM_THREADS = 0;
-
-    const pos = try new_position();
-    defer destroy_position(pos);
     var buf: [frc.FEN_CAPACITY]u8 = undefined;
-    pos.set_fen(frc.dfrc_fen(123, 876, &buf));
+    var f = try support.SearchFixture.init(frc.dfrc_fen(123, 876, &buf));
+    defer f.deinit();
+    _ = f.run(6);
 
-    var searcher = search.Searcher.new();
-    defer searcher.deinit();
-    searcher.force_thinking = true;
-    searcher.silent_output = true;
-    _ = searcher.iterative_deepening(pos, .White, 6);
-
-    const moves = pos.legal_moves();
+    const moves = f.pos.legal_moves();
     for (moves.items()) |move| {
-        if (move.to_u16() == searcher.best_move.to_u16()) return;
+        if (move.to_u16() == f.searcher.best_move.to_u16()) return;
     }
     return error.TestUnexpectedResult;
 }

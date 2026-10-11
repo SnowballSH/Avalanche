@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# Regenerates the datatool test fixtures from fixed seeds.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 FIX="$ROOT/tools/datatool/tests/fixtures"

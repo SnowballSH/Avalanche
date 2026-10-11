@@ -271,6 +271,17 @@ stop_children() {
     exit 130
 }
 
+wait_for_workers() {
+    local status=0
+    local pid
+
+    for pid in "${pids[@]}"; do
+        wait "$pid" || status=1
+    done
+
+    return "$status"
+}
+
 trap stop_children INT TERM
 
 while (( $# > 0 )); do
@@ -395,11 +406,4 @@ if (( dry_run == 1 )); then
     exit 0
 fi
 
-status=0
-for pid in "${pids[@]}"; do
-    if ! wait "$pid"; then
-        status=1
-    fi
-done
-
-exit "$status"
+wait_for_workers

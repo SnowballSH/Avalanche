@@ -32,7 +32,11 @@ This project isn't possible without the help of the Zig community, since this is
 
 ## License
 
-GPL-3.0. See [`LICENSE`](LICENSE).
+Copyright (C) 2022-2026 Yinuo Huang (SnowballSH).
+
+Avalanche is free software under the GNU General Public License, version 3 only (GPL-3.0-only). See
+[`LICENSE`](LICENSE). The Syzygy probing code in `src/pyrrhic` is under the MIT licence of its authors
+([`src/pyrrhic/LICENSE`](src/pyrrhic/LICENSE), `LICENSE-pyrrhic` in a release package).
 
 ## Compile
 
@@ -46,8 +50,12 @@ code, is vendored under `deps/`, so a build never downloads anything.
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
 zig build                     # debug build
 zig build test                # unit tests
+zig fmt --check src build.zig build.zig.zon  # formatting
 python3 scripts/uci_protocol_test.py  # end-to-end UCI checks (needs the release build)
 python3 scripts/uci_protocol_test.py node web/src/node/cli.ts zig-out/web/avalanche.wasm  # same checks on wasm
+ruff check scripts && ruff format --check scripts  # lint and format check of the Python scripts
+python3 -m unittest discover -s scripts  # tests of scripts/fit_wdl.py (needs numpy)
+git ls-files -z '*.sh' | xargs -0 shellcheck -x  # lint of the shell scripts
 ./zig-out/bin/Avalanche bench # fixed-position benchmark
 zig build wasm --release=fast # WebAssembly build -> zig-out/web/avalanche.wasm (see docs/WASM.md)
 ```
@@ -58,8 +66,8 @@ a binary was compiled with. [docs/BUILD.md](docs/BUILD.md) has the build options
 with, and the measurements behind both.
 
 Development builds report their build time as the version (`Avalanche Compiled at ...`). Release binaries are built
-with `VERSION=4.1.0 bash build_all_v3.sh` (one binary per supported CPU level plus the wasm module, in `artifacts/`),
-which passes `-Dversion`; CI does the same for pushed `v*` tags.
+with `VERSION=<x.y.z> scripts/build_release.sh` (one binary per supported CPU level plus the wasm module, in
+`artifacts/`), which passes `-Dversion`; CI does the same for pushed `v*` tags.
 
 Pick the last binary in this list whose CPU features your CPU has. A binary for features the CPU lacks stops with an
 illegal instruction. On Linux, `/proc/cpuinfo` lists them under `flags` (x86) or `Features` (ARM), with the names
@@ -76,8 +84,6 @@ given here.
 | `aarch64-*-dotprod` | `asimddp`, `atomics` | Cortex-A76 and later (Raspberry Pi 5), Neoverse N1 and later, Snapdragon 855 / 8cx and later, Apple Silicon under Linux |
 | `aarch64-macos` | nothing | every Apple Silicon Mac |
 
-Older Zig 0.10.x is no longer required.
-
 Avalanche also has a lichess account (though not often played): https://lichess.org/@/IceBurnEngine
 
 ## Usage
@@ -87,6 +93,9 @@ Avalanche follows the UCI protocol and is not a full chess application. You shou
 Supported features include Chess960 and Double Fischer Random Chess, pondering, MultiPV, `searchmoves`, `go mate`, Syzygy tablebases, `EvalFile`, a persistent NUMA-aware thread pool, live `currmove`/bound reporting, and strength limiting via `Skill Level` or `UCI_LimitStrength`/`UCI_Elo`. See [docs/UCI.md](docs/UCI.md), [docs/CHESS960.md](docs/CHESS960.md), [docs/THREADS.md](docs/THREADS.md) and [docs/STRENGTH.md](docs/STRENGTH.md). Training-data generation is described in [docs/DATAGEN.md](docs/DATAGEN.md), the network architectures and file formats in [docs/NNUE.md](docs/NNUE.md), the board code in [docs/BOARD.md](docs/BOARD.md), the search in [docs/SEARCH.md](docs/SEARCH.md), and where the engine's large data lives in [docs/MEMORY.md](docs/MEMORY.md). The scripts TCEC builds the engine with are described in [docs/TCEC.md](docs/TCEC.md).
 
 ## Past Versions
+
+What changed in each version is in [docs/CHANGELOG.md](docs/CHANGELOG.md). The released versions are at
+https://github.com/SnowballSH/Avalanche/releases.
 
 <img src="https://docs.google.com/spreadsheets/d/e/2PACX-1vSeuY7fgGH72R5n7v8dtT5XoKxMMgnLkT3ew9pk8Mn8BYKp8A9wPpZ4f9EPmmVs-x0_uFiZn0_nmcm6/pubchart?oid=1884376007&format=image" width=719/>
 
@@ -101,16 +110,18 @@ Supported features include Chess960 and Double Fischer Random Chess, pondering, 
 - Maksim Korzh, https://www.youtube.com/channel/UCB9-prLkPwgvlKKqDgXhsMQ for getting me started on chess programming.
 - https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton (1.5.0 and older)
 - https://github.com/Disservin/Smallbrain and https://github.com/cosmobobak/viridithas for search ideas
+- [Pyrrhic](https://github.com/AndyGrant/Pyrrhic) by Andrew Grant, derived from Fathom by basil and Jon Dart and from
+  the Syzygy tablebase code of Ronald de Man, for the tablebase probing code in `src/pyrrhic`
 - https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status
 
 - General
-  - This is the first released chess engine written in the **Zig Programming Language**. Although there are Zig libraries for chess, Avalanche is completely stand-alone and does not use any external libraries.
+  - This is the first released chess engine written in the **Zig Programming Language**. Although there are Zig libraries for chess, Avalanche uses none of them. The only third-party code in the engine is the Syzygy tablebase probing library Pyrrhic, vendored in `src/pyrrhic` (see Credits).
 - Move Generator
   - Algorithm is inspired by Surge, but code is 100% hand-written in Zig.
 - Search
-  - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. Some ideas are borrowed from other chess engines as in comments. However many ideas and parameters are tuned manually and automatically using my own scripts.
+  - Avalanche has a simple Search written 100% by myself, but is probably a subset of many other engines. Some ideas are borrowed from other chess engines, as listed under "Sources" in [docs/SEARCH.md](docs/SEARCH.md). However many ideas and parameters are tuned manually and automatically using my own scripts.
 - Evaluation
   - The Hand-Crafted Evaluation is based on https://www.chessprogramming.org/PeSTO%27s_Evaluation_Function with adaptation to endgames. The HCE is only activated at late endgames when finding checkmate against a lone king is needed.
   - NNUE since 2.0.0 is trained with https://github.com/jw1912/bullet

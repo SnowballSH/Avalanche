@@ -1,53 +1,50 @@
-// Offline Syzygy tablebase filter for self-play training data.
-//
-// Reads a bulletformat `.bin` file (fixed 32-byte `ChessBoard` records, as
-// emitted by `datagen format=bullet`) and writes a new `.bin` that drops every
-// position whose self-play WDL result contradicts the Syzygy tablebase.
+//! See "Tablebase cleaning" in docs/DATAGEN.md.
 
 const std = @import("std");
 const platform = @import("../platform.zig");
 const types = @import("../chess/types.zig");
 const syzygy = @import("syzygy.zig");
+const arguments = @import("datagen/arguments.zig");
+const SideResult = @import("datagen/adjudicator.zig").SideResult;
 const viri = @import("tbfilter/viri.zig");
 
 const RECORD_SIZE: usize = 32;
+const MIN_MEN: u32 = 2;
 const MAX_MEN: u32 = 7;
+const DEFAULT_MAX_MEN: u32 = 5;
+const MAX_THREADS: usize = 256;
+const MAX_AUTOMATIC_THREADS: usize = 32;
+const WORKER_STACK_SIZE: usize = 8 * 1024 * 1024;
 const BLOCK_RECS: usize = 1 << 17;
 const BLOCK_BYTES: usize = BLOCK_RECS * RECORD_SIZE;
+const SIDE_RESULTS = std.enums.values(SideResult).len;
 
-/// How to treat a tablebase cursed-win / blessed-loss
-pub const Rule50Mode = enum {
-    keep, // never drop on cursed/blessed (default)
-    on, // 50-move-rule aware: both count as a draw
-    off, // ignore the 50-move rule: cursed win = win, blessed loss = loss
-};
+pub const Rule50Mode = enum { keep, on, off };
 
-pub const Format = enum { bullet, viri };
+pub const Format = @import("datagen/format.zig").Format;
 
 pub const Config = struct {
-    format: Format = .bullet,
-    input: []const u8 = "",
-    output: []const u8 = "",
-    tb_path: []const u8 = "",
-    threads: usize = 0, // 0 => auto-detect
-    max_men: u32 = 5,
-    max_positions: u64 = 0, // 0 => whole file
+    format: Format,
+    input: []const u8,
+    output: []const u8,
+    tb_path: []const u8,
+    threads: ?usize = null,
+    max_men: u32 = DEFAULT_MAX_MEN,
+    max_positions: ?u64 = null,
     rule50: Rule50Mode = .keep,
 };
 
 const Stats = struct {
-    read: u64 = 0, // records examined
-    over_men: u64 = 0, // men > max_men, copied through unprobed
-    probed: u64 = 0, // men <= max_men (sum of the categories below)
-    agree: u64 = 0, // tablebase matches recorded result -> kept
-    disagree: u64 = 0, // tablebase contradicts recorded result -> dropped
-    ambiguous: u64 = 0, // cursed/blessed under `keep` -> kept
-    ep_skipped: u64 = 0, // en passant could matter -> kept
-    failed: u64 = 0, // probe failed / table missing -> kept
-    anomalies: u64 = 0, // corrupt / undecodable record -> kept
-    // Confusion matrix over decisively-probed positions:
-    // matrix[recorded_result][tablebase_result], indices 0=loss,1=draw,2=win.
-    matrix: [3][3]u64 = .{ .{ 0, 0, 0 }, .{ 0, 0, 0 }, .{ 0, 0, 0 } },
+    read: u64 = 0,
+    over_men: u64 = 0,
+    probed: u64 = 0,
+    agree: u64 = 0,
+    disagree: u64 = 0,
+    ambiguous: u64 = 0,
+    ep_skipped: u64 = 0,
+    failed: u64 = 0,
+    anomalies: u64 = 0,
+    recorded_by_tablebase: [SIDE_RESULTS][SIDE_RESULTS]u64 = @splat(@splat(0)),
     probed_by_men: [MAX_MEN + 1]u64 = @splat(0),
     dropped_by_men: [MAX_MEN + 1]u64 = @splat(0),
 
@@ -65,9 +62,9 @@ const Stats = struct {
         self.ep_skipped += o.ep_skipped;
         self.failed += o.failed;
         self.anomalies += o.anomalies;
-        for (0..3) |i| for (0..3) |j| {
-            self.matrix[i][j] += o.matrix[i][j];
-        };
+        for (&self.recorded_by_tablebase, o.recorded_by_tablebase) |*row, other_row| {
+            for (row, other_row) |*cell, other_cell| cell.* += other_cell;
+        }
         for (0..MAX_MEN + 1) |i| {
             self.probed_by_men[i] += o.probed_by_men[i];
             self.dropped_by_men[i] += o.dropped_by_men[i];
@@ -77,7 +74,7 @@ const Stats = struct {
 
 const Worker = struct {
     input: []const u8,
-    out_path: []const u8, // this worker's part file (or the final output when single-threaded)
+    part_path: []const u8,
     start_rec: u64,
     end_rec: u64,
     id: usize,
@@ -90,37 +87,27 @@ const Worker = struct {
     err: []const u8 = "",
 };
 
-/// Map a raw tablebase WDL to the recorded-result encoding (0=loss,1=draw,
-/// 2=win). Returns null when the outcome is ambiguous and should be kept.
-pub fn expectedResult(w: syzygy.WdlResult, mode: Rule50Mode) ?u8 {
+pub fn expected_result(w: syzygy.WdlResult, mode: Rule50Mode) ?SideResult {
     switch (w) {
-        .win => return 2,
-        .loss => return 0,
-        .draw => return 1,
+        .win => return .win,
+        .loss => return .loss,
+        .draw => return .draw,
         .cursed_win => switch (mode) {
             .keep => return null,
-            .on => return 1,
-            .off => return 2,
+            .on => return .draw,
+            .off => return .win,
         },
         .blessed_loss => switch (mode) {
             .keep => return null,
-            .on => return 1,
-            .off => return 0,
+            .on => return .draw,
+            .off => return .loss,
         },
     }
 }
 
-/// True if an en-passant capture could be legal for the side to move, i.e. a
-/// friendly pawn on the 5th rank is horizontally adjacent to an enemy pawn on
-/// the 5th rank. The record stores no en-passant square, so such positions are
-/// kept rather than risk a wrong drop.
-///
-/// Both e.p. pawns always sit on the same rank (the double-push landing rank),
-/// which is rank 5 in the side-to-move-normalized frame: for a white-to-move
-/// record they are on rank 5 directly; for a black-to-move record the encoder's
-/// vertical flip maps black's 4th rank (where they sit) to rank 5 here. So a
-/// single RANK5 check covers both, and the vertical flip preserves files.
-fn enPassantPossible(white: u64, black: u64, pawns: u64) bool {
+/// A record is stored from the side to move's point of view (`white` here), flipped vertically when that side is
+/// Black, so the pawns of a possible en-passant capture stand side by side on rank 5 whichever colour is to move.
+fn en_passant_possible(white: u64, black: u64, pawns: u64) bool {
     const RANK5: u64 = 0x0000_00FF_0000_0000;
     const FILE_A: u64 = 0x0101_0101_0101_0101;
     const FILE_H: u64 = 0x8080_8080_8080_8080;
@@ -130,8 +117,6 @@ fn enPassantPossible(white: u64, black: u64, pawns: u64) bool {
     return (wp5 & adjacent) != 0;
 }
 
-/// Classify one 32-byte record at `buf[base..]`. Updates `st` and returns true
-/// if the record should be kept (copied to the output).
 fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *Stats) bool {
     st.read += 1;
 
@@ -156,7 +141,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
 
     var occ_it = occ;
     var idx: usize = 0;
-    var bad = false;
+    var unknown_piece = false;
     while (occ_it != 0) {
         const sq: u6 = @intCast(@ctz(occ_it));
         const bit = @as(u64, 1) << sq;
@@ -178,16 +163,16 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
             3 => rooks |= bit,
             4 => queens |= bit,
             5 => kings |= bit,
-            else => bad = true, // invalid piece type for bulletformat
+            else => unknown_piece = true,
         }
     }
 
-    if (bad or @popCount(kings) != 2 or @popCount(kings & white) != 1 or @popCount(kings & black) != 1 or white == 0 or black == 0) {
+    if (unknown_piece or @popCount(kings) != 2 or @popCount(kings & white) != 1 or @popCount(kings & black) != 1 or white == 0 or black == 0) {
         st.anomalies += 1;
         return true;
     }
 
-    if (enPassantPossible(white, black, pawns)) {
+    if (en_passant_possible(white, black, pawns)) {
         st.ep_skipped += 1;
         return true;
     }
@@ -197,18 +182,17 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
         return true;
     };
 
-    const recorded = buf[base + 26];
-    if (recorded > 2) {
+    const recorded = std.enums.fromInt(SideResult, buf[base + 26]) orelse {
         st.anomalies += 1;
         return true;
-    }
+    };
 
-    const expected = expectedResult(wdl, mode) orelse {
+    const expected = expected_result(wdl, mode) orelse {
         st.ambiguous += 1;
         return true;
     };
 
-    st.matrix[recorded][expected] += 1;
+    st.recorded_by_tablebase[@backingInt(recorded)][@backingInt(expected)] += 1;
     if (expected == recorded) {
         st.agree += 1;
         return true;
@@ -218,7 +202,7 @@ fn classify(buf: []const u8, base: usize, max_men: u32, mode: Rule50Mode, st: *S
     return false;
 }
 
-fn workerRun(w: *Worker) void {
+fn run_worker(w: *Worker) void {
     const io = platform.io;
 
     const in_file = std.Io.Dir.cwd().openFile(io, w.input, .{}) catch {
@@ -228,7 +212,7 @@ fn workerRun(w: *Worker) void {
     };
     defer in_file.close(io);
 
-    const out_file = std.Io.Dir.cwd().createFile(io, w.out_path, .{ .read = true }) catch {
+    const out_file = std.Io.Dir.cwd().createFile(io, w.part_path, .{ .read = true }) catch {
         w.ok = false;
         w.err = "could not create output/part file";
         return;
@@ -262,8 +246,7 @@ fn workerRun(w: *Worker) void {
         const got: usize = n / RECORD_SIZE;
 
         var out_len: usize = 0;
-        var i: usize = 0;
-        while (i < got) : (i += 1) {
+        for (0..got) |i| {
             const base = i * RECORD_SIZE;
             if (classify(read_buf, base, w.max_men, w.rule50, &w.stats)) {
                 @memcpy(out_buf[out_len .. out_len + RECORD_SIZE], read_buf[base .. base + RECORD_SIZE]);
@@ -288,11 +271,9 @@ fn workerRun(w: *Worker) void {
             std.debug.print("  ... {} positions processed\n", .{w.progress.load(.monotonic)});
         }
 
-        if (got < this_recs) break; // short block -> stop and let the caller detect it
+        if (got < this_recs) break;
     }
 
-    // The read count was derived from the file length up front; reading fewer
-    // records than assigned means the file changed underneath us.
     if (rec < w.end_rec) {
         w.ok = false;
         w.err = "short read (input truncated?)";
@@ -302,10 +283,7 @@ fn workerRun(w: *Worker) void {
     w.bytes_written = woff;
 }
 
-/// Copy one part file fully into `out_file` starting at byte offset `woff`,
-/// returning the number of bytes copied. Errors (incl. a short read) leave the
-/// part on disk for inspection; the handle is always closed.
-fn copyPart(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 {
+fn copy_part(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 {
     const io = platform.io;
     const pf = try std.Io.Dir.cwd().openFile(io, part, .{});
     defer pf.close(io);
@@ -322,9 +300,7 @@ fn copyPart(out_file: std.Io.File, part: []const u8, buf: []u8, woff: u64) !u64 
     return off;
 }
 
-/// Concatenate `parts` in order into a freshly created `output`, deleting each
-/// part once fully copied. Returns total bytes written.
-fn concatParts(output: []const u8, parts: []const []const u8) !u64 {
+fn concat_parts(output: []const u8, parts: []const []const u8) !u64 {
     const io = platform.io;
     const out_file = try std.Io.Dir.cwd().createFile(io, output, .{ .read = true });
     defer out_file.close(io);
@@ -334,43 +310,41 @@ fn concatParts(output: []const u8, parts: []const []const u8) !u64 {
 
     var woff: u64 = 0;
     for (parts) |part| {
-        woff += try copyPart(out_file, part, buf, woff);
+        woff += try copy_part(out_file, part, buf, woff);
         std.Io.Dir.cwd().deleteFile(io, part) catch {};
     }
     return woff;
 }
 
-fn parseUsize(s: []const u8, default: usize) usize {
-    return std.fmt.parseInt(usize, s, 10) catch default;
-}
+const USAGE = std.fmt.comptimePrint(
+    \\Usage: Avalanche tbfilter <input> <output> tb=<path> [options]
+    \\
+    \\The input's extension names its format ({s} bulletformat, {s} viriformat)
+    \\unless format= does. The output is written in the same format, and its
+    \\extension must not name the other one.
+    \\bulletformat: drops every <=N-man position whose recorded WDL contradicts
+    \\the Syzygy tablebase.
+    \\viriformat: replays each game and masks such positions with an out-of-range
+    \\eval that training filters drop; prints JSON stats.
+    \\
+    \\Required:
+    \\  tb=<path>           Syzygy tablebase directory
+    \\
+    \\Options:
+    \\  in=<path> out=<path>
+    \\                      <input> and <output> by name, for a path with '=' in it
+    \\  format=bullet|viri  Input format (default: by the input's extension)
+    \\  threads=<n>         Worker threads, 1-{d}, bulletformat only
+    \\                      (default: CPU count, at most {d})
+    \\  men=<n>             Max men to probe, {d}-{d} (default {d})
+    \\  max=<n>             Position limit, bulletformat only (default: whole file)
+    \\  rule50=keep|on|off  Cursed-win / blessed-loss handling (default keep):
+    \\                        keep = never drop on these (ambiguous)
+    \\                        on   = treat both as a draw (50-move-rule aware)
+    \\                        off  = cursed win=win, blessed loss=loss
+    \\
+, .{ Format.bullet.extension(), Format.viri.extension(), MAX_THREADS, MAX_AUTOMATIC_THREADS, MIN_MEN, MAX_MEN, DEFAULT_MAX_MEN });
 
-fn printUsage() void {
-    std.debug.print(
-        \\Usage: Avalanche tbfilter <input> <output> tb=<path> [options]
-        \\
-        \\bulletformat (default): drops every <=N-man position whose recorded WDL
-        \\contradicts the Syzygy tablebase.
-        \\viriformat (format=viri): replays each game and masks such positions
-        \\with an out-of-range eval that training filters drop; prints JSON stats.
-        \\
-        \\Required:
-        \\  tb=<path>        Syzygy tablebase directory
-        \\
-        \\Options:
-        \\  format=bullet|viri Input format                (default bullet)
-        \\  threads=<n>      Worker threads (bullet only) (default: CPU count)
-        \\  men=<n>          Max men to probe             (default 5)
-        \\  max=<n>          Position limit (bullet only) (default: whole file)
-        \\  rule50=keep|on|off
-        \\                   Cursed-win / blessed-loss handling (default keep):
-        \\                     keep = never drop on these (ambiguous)
-        \\                     on   = treat both as a draw (50-move-rule aware)
-        \\                     off  = cursed win=win, blessed loss=loss
-        \\
-    , .{});
-}
-
-/// Loads the Syzygy tables at `tb_path` and returns the largest piece count they cover, or null after reporting why.
 pub fn load_tablebases(tb_path: []const u8) ?u32 {
     const path_z = std.heap.page_allocator.dupeSentinel(u8, tb_path, 0) catch {
         std.debug.print("tbfilter: out of memory\n", .{});
@@ -384,72 +358,106 @@ pub fn load_tablebases(tb_path: []const u8) ?u32 {
     return @intCast(@max(@as(i32, 0), syzygy.max_pieces()));
 }
 
-pub const ParseError = error{ UnknownFormat, MissingArgument, BulletOnlyOption };
+pub const ParseError = arguments.KeyError || arguments.ValueError ||
+    error{ MissingArgument, UnexpectedArgument, UndecidedFormat, OutputExtensionOfOtherFormat, BulletOnlyOption };
 
-/// Parses the `tbfilter` arguments. On error, `offending` holds the text at fault, if any.
-pub fn parse_config(args: []const []const u8, offending: *[]const u8) ParseError!Config {
-    var cfg = Config{};
-    var bullet_only_arg: ?[]const u8 = null;
-    var input: ?[]const u8 = null;
-    var output: ?[]const u8 = null;
+const Key = enum { in, out, tb, format, threads, men, max, rule50 };
+const PATH_KEYS = [_]Key{ .in, .out };
+const BULLET_ONLY_KEYS = [_]Key{ .threads, .max };
 
-    for (args) |arg| {
-        if (std.mem.startsWith(u8, arg, "tb=")) {
-            cfg.tb_path = arg[3..];
-        } else if (std.mem.startsWith(u8, arg, "format=")) {
-            cfg.format = std.meta.stringToEnum(Format, arg[7..]) orelse {
-                offending.* = arg[7..];
-                return error.UnknownFormat;
-            };
-        } else if (std.mem.startsWith(u8, arg, "threads=")) {
-            cfg.threads = parseUsize(arg[8..], 0);
-            bullet_only_arg = arg;
-        } else if (std.mem.startsWith(u8, arg, "men=")) {
-            cfg.max_men = std.fmt.parseInt(u32, arg[4..], 10) catch 5;
-        } else if (std.mem.startsWith(u8, arg, "max=")) {
-            cfg.max_positions = std.fmt.parseInt(u64, arg[4..], 10) catch 0;
-            bullet_only_arg = arg;
-        } else if (std.mem.startsWith(u8, arg, "rule50=")) {
-            const v = arg[7..];
-            if (std.mem.eql(u8, v, "on")) {
-                cfg.rule50 = .on;
-            } else if (std.mem.eql(u8, v, "off")) {
-                cfg.rule50 = .off;
-            } else {
-                cfg.rule50 = .keep;
-            }
-        } else if (input == null) {
-            input = arg;
-        } else if (output == null) {
-            output = arg;
-        } else {
-            std.debug.print("tbfilter: unexpected argument '{s}'\n", .{arg});
-        }
+fn first_path_not_given(options: arguments.KeyValues(Key)) ?Key {
+    for (PATH_KEYS) |key| {
+        if (!options.given(key)) return key;
     }
-
-    if (input == null or output == null or cfg.tb_path.len == 0) return error.MissingArgument;
-    if (cfg.format == .viri) {
-        if (bullet_only_arg) |arg| {
-            offending.* = arg;
-            return error.BulletOnlyOption;
-        }
-    }
-    cfg.input = input.?;
-    cfg.output = output.?;
-    return cfg;
+    return null;
 }
 
-/// Entry point for the `tbfilter` subcommand. Returns a process exit code
-/// (0 = success, non-zero = failure) so callers and scripts can detect errors.
+pub fn parse_config(args: []const []const u8, diag: *arguments.Diagnostic) ParseError!Config {
+    var options: arguments.KeyValues(Key) = .{};
+    var input_path: ?[]const u8 = null;
+    var output_path: ?[]const u8 = null;
+    var tablebase_path: ?[]const u8 = null;
+    var named_format: ?Format = null;
+    var threads: ?usize = null;
+    var max_men: u32 = DEFAULT_MAX_MEN;
+    var max_positions: ?u64 = null;
+    var rule50: Rule50Mode = .keep;
+
+    for (args) |arg| {
+        const key_of_bare_argument: ?Key = if (arguments.is_key_value(arg)) null else first_path_not_given(options) orelse {
+            diag.* = .{ .value = arg };
+            return error.UnexpectedArgument;
+        };
+        const option = try options.next(arg, key_of_bare_argument, diag);
+        switch (option.key) {
+            .in => input_path = try arguments.non_empty(option.value),
+            .out => output_path = try arguments.non_empty(option.value),
+            .tb => tablebase_path = try arguments.non_empty(option.value),
+            .format => named_format = try arguments.choice(Format, option.value),
+            .threads => threads = try arguments.integer(usize, option.value, 1, MAX_THREADS),
+            .men => max_men = try arguments.integer(u32, option.value, MIN_MEN, MAX_MEN),
+            .max => max_positions = try arguments.integer(u64, option.value, 1, std.math.maxInt(u64)),
+            .rule50 => rule50 = try arguments.choice(Rule50Mode, option.value),
+        }
+    }
+
+    const input = input_path orelse return error.MissingArgument;
+    const output = output_path orelse return error.MissingArgument;
+    const tb_path = tablebase_path orelse return error.MissingArgument;
+    const format = named_format orelse Format.of_path(input) orelse {
+        diag.* = .{ .value = input };
+        return error.UndecidedFormat;
+    };
+    if (Format.of_path(output)) |named_by_output| {
+        if (named_by_output != format) {
+            diag.* = .{ .value = output };
+            return error.OutputExtensionOfOtherFormat;
+        }
+    }
+    if (format == .viri) {
+        for (BULLET_ONLY_KEYS) |key| {
+            if (options.given(key)) {
+                diag.* = .{ .key = @tagName(key) };
+                return error.BulletOnlyOption;
+            }
+        }
+    }
+    return .{
+        .format = format,
+        .input = input,
+        .output = output,
+        .tb_path = tb_path,
+        .threads = threads,
+        .max_men = max_men,
+        .max_positions = max_positions,
+        .rule50 = rule50,
+    };
+}
+
+fn report_parse_error(failure: ParseError, diag: arguments.Diagnostic) void {
+    switch (failure) {
+        error.MissingArgument => {},
+        error.UnexpectedArgument => std.debug.print("tbfilter: unexpected argument '{s}'\n", .{diag.value}),
+        error.UnknownKey => std.debug.print("tbfilter: unknown option '{s}'\n", .{diag.key}),
+        error.DuplicateKey => std.debug.print("tbfilter: option {s} is given more than once\n", .{diag.key}),
+        error.InvalidValue => std.debug.print("tbfilter: invalid value '{s}' for option {s}\n", .{ diag.value, diag.key }),
+        error.UndecidedFormat => std.debug.print("tbfilter: the extension of '{s}' names no format; give format=bullet or format=viri\n", .{diag.value}),
+        error.OutputExtensionOfOtherFormat => std.debug.print("tbfilter: the extension of output '{s}' names the other format; the output is written in the format of the input\n", .{diag.value}),
+        error.BulletOnlyOption => std.debug.print("tbfilter: option {s} is not supported for viriformat\n", .{diag.key}),
+    }
+    std.debug.print("{s}", .{USAGE});
+}
+
+pub fn whole_records(input_bytes: u64) error{PartialRecord}!u64 {
+    if (input_bytes % RECORD_SIZE != 0) return error.PartialRecord;
+    return input_bytes / RECORD_SIZE;
+}
+
 pub fn run(args: []const []const u8) u8 {
     const io = platform.io;
-    var offending: []const u8 = "";
-    const cfg = parse_config(args, &offending) catch |err| {
-        switch (err) {
-            error.UnknownFormat => std.debug.print("tbfilter: unknown format '{s}' (bullet or viri)\n", .{offending}),
-            error.MissingArgument => printUsage(),
-            error.BulletOnlyOption => std.debug.print("tbfilter: '{s}' is not supported with format=viri\n", .{offending}),
-        }
+    var diag: arguments.Diagnostic = .{};
+    const cfg = parse_config(args, &diag) catch |failure| {
+        report_parse_error(failure, diag);
         return 1;
     };
 
@@ -461,7 +469,7 @@ pub fn run(args: []const []const u8) u8 {
         const in_base = std.fs.path.basename(cfg.input);
         const out_base = std.fs.path.basename(cfg.output);
         if (std.mem.eql(u8, in_base, out_base) and (std.mem.eql(u8, cfg.input, out_base) or std.mem.eql(u8, cfg.output, in_base) or std.mem.endsWith(u8, cfg.input, cfg.output) or std.mem.endsWith(u8, cfg.output, cfg.input))) {
-            if (std.mem.indexOfScalar(u8, cfg.input, '/') == null or std.mem.indexOfScalar(u8, cfg.output, '/') == null) {
+            if (std.mem.findScalar(u8, cfg.input, '/') == null or std.mem.findScalar(u8, cfg.output, '/') == null) {
                 std.debug.print("tbfilter: refusing potentially aliased input/output paths\n", .{});
                 return 1;
             }
@@ -470,7 +478,6 @@ pub fn run(args: []const []const u8) u8 {
 
     if (cfg.format == .viri) return viri.run_file(cfg);
 
-    // Discover the input size / record count.
     const in_file = std.Io.Dir.cwd().openFile(io, cfg.input, .{}) catch {
         std.debug.print("tbfilter: cannot open input '{s}'\n", .{cfg.input});
         return 1;
@@ -482,16 +489,16 @@ pub fn run(args: []const []const u8) u8 {
     };
     in_file.close(io);
 
-    if (in_len % RECORD_SIZE != 0) {
+    const file_records = whole_records(in_len) catch {
         std.debug.print(
-            "tbfilter: WARNING input size {} is not a multiple of {} bytes; {} trailing bytes ignored\n",
-            .{ in_len, RECORD_SIZE, in_len % RECORD_SIZE },
+            "tbfilter: '{s}' is not bulletformat: its size {} is not a multiple of {} bytes (a viriformat file needs format=viri)\n",
+            .{ cfg.input, in_len, RECORD_SIZE },
         );
-    }
-    const file_records = in_len / RECORD_SIZE;
-    const num_records = if (cfg.max_positions > 0) @min(file_records, cfg.max_positions) else file_records;
+        return 1;
+    };
+    const num_records = if (cfg.max_positions) |limit| @min(file_records, limit) else file_records;
     if (num_records == 0) {
-        std.debug.print("tbfilter: no complete records in input\n", .{});
+        std.debug.print("tbfilter: no records in input\n", .{});
         return 1;
     }
 
@@ -499,14 +506,8 @@ pub fn run(args: []const []const u8) u8 {
     defer syzygy.deinit();
     const eff_max_men = @min(@min(cfg.max_men, tb_max), MAX_MEN);
 
-    // Auto-detect defaults to a modest cap: the job is largely I/O-bound, so a
-    // few dozen concurrent streams saturate the disk without thrashing. An
-    // explicit threads= overrides this (up to 256).
-    const auto_threads = @min(std.Thread.getCpuCount() catch 4, 32);
-    var threads = if (cfg.threads > 0) cfg.threads else auto_threads;
-    if (threads < 1) threads = 1;
-    if (threads > 256) threads = 256;
-    if (threads > num_records) threads = @intCast(num_records);
+    const automatic_threads = @min(std.Thread.getCpuCount() catch 4, MAX_AUTOMATIC_THREADS);
+    const threads: usize = @intCast(@min(cfg.threads orelse automatic_threads, num_records));
 
     std.debug.print("=== Avalanche Syzygy Filter ===\n", .{});
     std.debug.print("Input:   {s} ({} positions", .{ cfg.input, file_records });
@@ -529,12 +530,12 @@ pub fn run(args: []const []const u8) u8 {
     };
     defer std.heap.page_allocator.free(workers);
 
-    var part_paths = std.array_list.Managed([]const u8).init(std.heap.page_allocator);
+    var part_paths: std.ArrayList([]const u8) = .empty;
     defer {
         for (part_paths.items) |p| std.heap.page_allocator.free(p);
-        part_paths.deinit();
+        part_paths.deinit(std.heap.page_allocator);
     }
-    part_paths.ensureTotalCapacity(threads) catch {
+    part_paths.ensureTotalCapacity(std.heap.page_allocator, threads) catch {
         std.debug.print("tbfilter: out of memory (part paths)\n", .{});
         return 1;
     };
@@ -552,7 +553,7 @@ pub fn run(args: []const []const u8) u8 {
         part_paths.appendAssumeCapacity(path);
         workers[t] = Worker{
             .input = cfg.input,
-            .out_path = path,
+            .part_path = path,
             .start_rec = start,
             .end_rec = start + count,
             .id = t,
@@ -565,21 +566,21 @@ pub fn run(args: []const []const u8) u8 {
 
     const timer = types.Timer.start();
 
-    var handles = std.array_list.Managed(std.Thread).init(std.heap.page_allocator);
-    defer handles.deinit();
-    handles.ensureTotalCapacity(threads) catch {
+    var handles: std.ArrayList(std.Thread) = .empty;
+    defer handles.deinit(std.heap.page_allocator);
+    handles.ensureTotalCapacity(std.heap.page_allocator, threads) catch {
         std.debug.print("tbfilter: out of memory (thread handles)\n", .{});
         return 1;
     };
     for (1..threads) |t| {
-        const h = std.Thread.spawn(.{ .stack_size = 8 * 1024 * 1024 }, workerRun, .{&workers[t]}) catch {
+        const h = std.Thread.spawn(.{ .stack_size = WORKER_STACK_SIZE }, run_worker, .{&workers[t]}) catch {
             std.debug.print("tbfilter: could not spawn worker {}; running it inline\n", .{t});
-            workerRun(&workers[t]);
+            run_worker(&workers[t]);
             continue;
         };
         handles.appendAssumeCapacity(h);
     }
-    workerRun(&workers[0]);
+    run_worker(&workers[0]);
     for (handles.items) |h| h.join();
 
     const elapsed_ns = timer.read();
@@ -594,7 +595,6 @@ pub fn run(args: []const []const u8) u8 {
         }
     }
 
-    // Abort without producing a partial output if anything went wrong.
     if (any_fail or total.read != num_records) {
         if (total.read != num_records) {
             std.debug.print(
@@ -607,7 +607,7 @@ pub fn run(args: []const []const u8) u8 {
     }
 
     var out_bytes: u64 = 0;
-    out_bytes = concatParts(cfg.output, part_paths.items) catch |e| {
+    out_bytes = concat_parts(cfg.output, part_paths.items) catch |e| {
         std.debug.print("tbfilter: concatenation failed: {} -- output deleted\n", .{e});
         std.Io.Dir.cwd().deleteFile(io, cfg.output) catch {};
         for (part_paths.items) |p| std.Io.Dir.cwd().deleteFile(io, p) catch {};
@@ -615,7 +615,6 @@ pub fn run(args: []const []const u8) u8 {
     };
     for (part_paths.items) |p| std.Io.Dir.cwd().deleteFile(io, p) catch {};
 
-    // Final integrity gate: the output must hold exactly the kept records.
     if (out_bytes / RECORD_SIZE != total.kept()) {
         std.debug.print(
             "tbfilter: output has {} records, expected {} kept -- output deleted\n",
@@ -657,7 +656,7 @@ fn report(s: Stats, out_bytes: u64, elapsed_ns: u64, max_men: u32) void {
     std.debug.print("Output records:       {}\n", .{out_records});
 
     std.debug.print("\nProbed by man count (probed / dropped):\n", .{});
-    var m: usize = 2;
+    var m: usize = MIN_MEN;
     while (m <= max_men) : (m += 1) {
         if (s.probed_by_men[m] > 0) {
             std.debug.print("  {}-man: {} / {}\n", .{ m, s.probed_by_men[m], s.dropped_by_men[m] });
@@ -667,8 +666,8 @@ fn report(s: Stats, out_bytes: u64, elapsed_ns: u64, max_men: u32) void {
     std.debug.print("\nConfusion matrix (rows = recorded WDL, cols = tablebase WDL):\n", .{});
     std.debug.print("             tb loss    tb draw     tb win\n", .{});
     const labels = [_][]const u8{ "rec loss", "rec draw", "rec win " };
-    for (0..3) |i| {
-        std.debug.print("  {s}  {d:>10} {d:>10} {d:>10}\n", .{ labels[i], s.matrix[i][0], s.matrix[i][1], s.matrix[i][2] });
+    for (labels, s.recorded_by_tablebase) |label, row| {
+        std.debug.print("  {s}  {d:>10} {d:>10} {d:>10}\n", .{ label, row[0], row[1], row[2] });
     }
 
     std.debug.print("\nTime: {d:.2}s  ({d:.0} pos/s, {d:.1} MB/s)\n", .{ secs, rate, mbps });

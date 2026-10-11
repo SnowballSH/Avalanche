@@ -2,9 +2,16 @@
 name = "avalanche-trainer"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.88"
+license = "GPL-3.0-only"
+publish = false
+
+[features]
+default = ["cuda"]
+cuda = ["bullet/cuda"]
 
 [dependencies]
-bullet = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5", package = "bullet_lib", features = ["cuda"] }
+bullet = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5", package = "bullet_lib" }
 # bullet's lower layers, driven directly by validation.rs; keep them on the same rev as bullet.
 bullet-compiler = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5" }
 bullet-gpu = { git = "https://github.com/jw1912/bullet", rev = "c004ebf04025edf91c6ccac47e72d561062a46b5" }

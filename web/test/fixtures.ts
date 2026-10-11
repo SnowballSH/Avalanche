@@ -9,6 +9,11 @@ const nativeBinary = fileURLToPath(new URL("../../zig-out/bin/Avalanche", import
 
 let compiled: Promise<WebAssembly.Module> | undefined;
 
+export function compileEngineModule(): Promise<WebAssembly.Module> {
+  compiled ??= readFile(wasmUrl).then((bytes) => WebAssembly.compile(bytes));
+  return compiled;
+}
+
 export interface CapturingEngine {
   readonly engine: Engine;
   readonly lines: string[];
@@ -16,9 +21,8 @@ export interface CapturingEngine {
 }
 
 export async function createCapturingEngine(): Promise<CapturingEngine> {
-  compiled ??= readFile(wasmUrl).then((bytes) => WebAssembly.compile(bytes));
   const lines: string[] = [];
-  const engine = await Engine.create(await compiled, { onLine: (line) => lines.push(line) });
+  const engine = await Engine.create(await compileEngineModule(), { onLine: (line) => lines.push(line) });
   return {
     engine,
     lines,
@@ -30,10 +34,15 @@ export async function createCapturingEngine(): Promise<CapturingEngine> {
   };
 }
 
+let nativeSignature: string | null | undefined;
+
 export function nativeBenchSignature(): string | null {
-  if (!existsSync(nativeBinary)) return null;
-  const output = execFileSync(nativeBinary, ["bench"], { encoding: "utf8" });
-  return parseBenchNodes(output);
+  if (nativeSignature === undefined) {
+    nativeSignature = existsSync(nativeBinary)
+      ? parseBenchNodes(execFileSync(nativeBinary, ["bench"], { encoding: "utf8" }))
+      : null;
+  }
+  return nativeSignature;
 }
 
 export function parseBenchNodes(output: string): string | null {

@@ -1,9 +1,4 @@
-//! The multi-layer head, `TRAIN_ARCH=multi`:
-//! `(768x16hm -> H)x2 -> pairwise CReLU -> L1(H -> 16) -> [CReLU, CReLU^2] -> L2(32 -> 32) CReLU -> L3(32 -> 1)`,
-//! with L1, L2 and L3 bucketed by material.
-//!
-//! docs/NNUE.md specifies the network and the file. The engine side is src/engine/nnue/head_multi.zig
-//! and the header is `MULTI_HEADER` in src/engine/weights.zig; every constant here has a twin there.
+//! See "Multi-layer head" in docs/NNUE.md.
 
 use bullet::{
     game::{inputs::ChessBucketsMirrored, outputs::MaterialCount},
@@ -22,16 +17,11 @@ use crate::{
 
 const L1_SIZE: usize = 16;
 const L2_SIZE: usize = 32;
-/// Inputs of L2: the CReLU of each L1 output, then the square of each.
 const L2_INPUTS: usize = 2 * L1_SIZE;
 
-/// The engine stores a pairwise product as `(a * b + 256) >> FT_SHIFT`, 0..=127.
 const FT_SHIFT: u32 = 9;
-/// Fixed-point position of the L1 output and of every later activation.
 const ACT_BITS: u32 = 13;
-/// Fixed-point position of the L2 and L3 weights.
 const WEIGHT_BITS: u32 = 10;
-/// Fixed-point position of the L2 and L3 biases.
 const SUM_BITS: u32 = ACT_BITS + WEIGHT_BITS;
 
 const FORMAT_VERSION: u32 = 2;
@@ -39,24 +29,15 @@ const HEAD_MULTI: u32 = 1;
 const MAGIC: &[u8; 8] = b"AVALNNUE";
 const HEADER_SIZE: usize = 64;
 
-/// Whether a saved quantised network is a multi-layer one: only those start with the magic.
 pub fn is_multilayer_file(first_bytes: &[u8]) -> bool {
     first_bytes.starts_with(MAGIC)
 }
 
-/// Kaiming initialisation of the feature transformer as if it had this many inputs, about the number
-/// of pieces on a board, as bullet's examples/progression/4_multi_layer.rs does. The default, for all
-/// 12288 inputs, starts the pairwise products near zero.
 const FT_EFFECTIVE_INPUTS: usize = 32;
 
-/// An L1 weight is stored as `round(w * L1_WEIGHT_SCALE * 2^shift)`: a pairwise product of 1.0 is the
-/// integer `255 * 255 / 2^FT_SHIFT`, and at shift 0 the L1 sum lands on `2^ACT_BITS`.
 const L1_WEIGHT_SCALE: f64 = (1u64 << (ACT_BITS + FT_SHIFT)) as f64 / (QA as f64 * QA as f64);
-/// The largest L1 shift the engine accepts (`head_multi.L1_SHIFT_MAX`).
 const L1_SHIFT_MAX: u32 = 7;
-/// Keeps `round(w * L1_WEIGHT_SCALE)` inside an i8, so that shift 0 always works.
 const L1_WEIGHT_CLIP: f32 = (126.9 / L1_WEIGHT_SCALE) as f32;
-/// The engine accepts L2 and L3 weights up to 2047 / 2^WEIGHT_BITS; this is bullet's default clip.
 const WEIGHT_CLIP: f32 = 1.98;
 
 const _: () = assert!(
@@ -64,15 +45,12 @@ const _: () = assert!(
     "L2 and L3 weights must fit the engine's range"
 );
 
-/// An L1 weight as the file stores it at `shift`, before rounding. `l1_shift` and the layout both go
-/// through this, so the shift is chosen on exactly the numbers that get rounded.
+/// `l1_shift` and the layout both go through this, so the shift is chosen on exactly the numbers that
+/// get rounded.
 fn l1_stored(weight: f32, shift: u32) -> f32 {
     (f64::from(weight) * L1_WEIGHT_SCALE * f64::from(1u32 << shift)) as f32
 }
 
-/// The L1 shift of a net: the largest one, up to `L1_SHIFT_MAX`, at which every stored L1 weight still
-/// fits an i8. A net with small L1 weights then uses the whole i8 range instead of a few levels of it.
-/// The engine removes the extra bits after the L1 sum.
 fn l1_shift(l1_weights: &[f32]) -> u32 {
     let max = l1_weights
         .iter()
@@ -84,8 +62,6 @@ fn l1_shift(l1_weights: &[f32]) -> u32 {
     shift
 }
 
-/// The 64-byte header: the magic, then little-endian u32 fields. The engine compares all of it but
-/// the L1 shift with its own.
 fn header(input_buckets: usize, hidden_size: usize, l1_shift: u32) -> Vec<u8> {
     let fields = [
         FORMAT_VERSION,
@@ -110,11 +86,8 @@ fn header(input_buckets: usize, hidden_size: usize, l1_shift: u32) -> Vec<u8> {
     bytes
 }
 
-/// bullet keeps the weights of an affine layer column-major: `values[input * rows + row]`, and a
+/// bullet keeps the weights of an affine layer column-major, `values[input * rows + row]`, and a
 /// bucketed layer's row is `bucket * outputs + output`.
-///
-/// L1 goes to `[bucket][input / 4][output][input % 4]`, scaled: the four weights that one output has
-/// for one block of four inputs are adjacent, which is what the engine's sparse dot product reads.
 fn l1_weights_layout(values: &[f32], inputs: usize, shift: u32) -> Vec<f32> {
     let rows = NUM_OUTPUT_BUCKETS * L1_SIZE;
     assert_eq!(values.len(), rows * inputs);
@@ -134,7 +107,6 @@ fn l1_weights_layout(values: &[f32], inputs: usize, shift: u32) -> Vec<f32> {
     layout
 }
 
-/// L2 goes to `[bucket][input][output]`: one column per input, as the engine multiplies it.
 fn l2_weights_layout(values: &[f32]) -> Vec<f32> {
     let rows = NUM_OUTPUT_BUCKETS * L2_SIZE;
     assert_eq!(values.len(), rows * L2_INPUTS);
@@ -151,8 +123,6 @@ fn l2_weights_layout(values: &[f32]) -> Vec<f32> {
     layout
 }
 
-/// Prints the largest magnitude of a section at every save: how much of the stored range a trained net
-/// uses decides whether the fixed-point positions above can be made finer (docs/NNUE.md).
 fn report_max(name: &'static str, stored_scale: f64, stored_limit: f64) -> impl Fn(&[f32]) {
     move |values| {
         let max = values
@@ -165,7 +135,6 @@ fn report_max(name: &'static str, stored_scale: f64, stored_limit: f64) -> impl 
     }
 }
 
-/// The file, in order: header, feature transformer, L1, L2, L3. bullet pads it to a multiple of 64 bytes.
 fn save_format(input_buckets: usize, hidden_size: usize, use_factoriser: bool) -> Vec<SavedFormat> {
     let weight_one = f64::from(1u32 << WEIGHT_BITS);
     let bias_limit = f64::from(1u32 << 30);
@@ -202,7 +171,6 @@ fn save_format(input_buckets: usize, hidden_size: usize, use_factoriser: bool) -
             })
             .round()
             .quantise::<i8>(1),
-        // The bias joins the L1 sum, so it carries the same extra bits as the weights.
         SavedFormat::id("l1b")
             .transform(move |store, values| {
                 let scale = f64::from(1u32 << (ACT_BITS + l1_shift(store.get("l1w").values.f32())));
@@ -265,8 +233,6 @@ pub fn run(cfg: TrainConfig) {
 
     let save_format = save_format(NUM_INPUT_BUCKETS, hidden_size, use_factoriser);
     let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
-    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
-    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)
@@ -303,12 +269,8 @@ pub fn run(cfg: TrainConfig) {
                 let l2_out = l2.forward(dual).select(output_buckets).crelu();
                 let output = l3.forward(l2_out).select(output_buckets);
 
-                // The same loss as the single-layer net. validation.rs recomputes exactly this from the
-                // output, so the penalty below never reaches the validation loss.
                 let mut loss = output.sigmoid().squared_error(target);
                 if l1_sparsity > 0.0 {
-                    // As bullet's examples/advanced/main.rs: fewer non-zero pairwise activations are
-                    // fewer blocks for the engine's sparse L1.
                     let mean_activation = pairwise.reduce_sum_rows() / (hidden_size as f32);
                     loss = loss + l1_sparsity * mean_activation;
                 }
@@ -352,8 +314,10 @@ mod tests {
         assert_eq!(bytes.len(), 64);
         assert_eq!(&bytes[..8], b"AVALNNUE");
         let fields: Vec<u32> = bytes[8..]
-            .chunks_exact(4)
-            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_le_bytes(*chunk))
             .collect();
         assert_eq!(
             fields,
@@ -365,15 +329,15 @@ mod tests {
     fn l1_layout_groups_blocks_of_four_inputs() {
         let inputs = 8;
         let rows = NUM_OUTPUT_BUCKETS * L1_SIZE;
-        // Each weight encodes where it came from.
-        let code = |bucket: usize, input: usize, output: usize| {
+        let source_tag = |bucket: usize, input: usize, output: usize| {
             ((bucket * 100 + input) * 100 + output) as f32 / 1_000_000.0
         };
         let mut values = vec![0.0; rows * inputs];
         for bucket in 0..NUM_OUTPUT_BUCKETS {
             for input in 0..inputs {
                 for output in 0..L1_SIZE {
-                    values[input * rows + bucket * L1_SIZE + output] = code(bucket, input, output);
+                    values[input * rows + bucket * L1_SIZE + output] =
+                        source_tag(bucket, input, output);
                 }
             }
         }
@@ -384,23 +348,28 @@ mod tests {
             layout[((bucket * 2 + block) * L1_SIZE + output) * 4 + k]
         };
         for (bucket, block, output, k) in [(0, 0, 0, 0), (3, 1, 7, 2), (7, 1, 15, 3)] {
-            let expected = f64::from(code(bucket, block * 4 + k, output)) * L1_WEIGHT_SCALE * 4.0;
+            let expected =
+                f64::from(source_tag(bucket, block * 4 + k, output)) * L1_WEIGHT_SCALE * 4.0;
             assert!((f64::from(at(bucket, block, output, k)) - expected).abs() < 1e-4);
         }
     }
 
-    /// The same cases as `head_multi.l1_shift_for` in the engine's tests.
+    const SHIFTS_THE_ENGINE_TESTS_ALSO_ASSERT: [(&[f32], u32); 6] = [
+        (&[0.5, -1.9689], 0),
+        (&[1.0], 0),
+        (&[-0.98, 0.1], 1),
+        (&[0.2166, -0.01], 3),
+        (&[0.001], L1_SHIFT_MAX),
+        (&[0.0], L1_SHIFT_MAX),
+    ];
+
     #[test]
     fn l1_shift_fills_the_i8_range() {
-        assert_eq!(l1_shift(&[0.5, -1.9689]), 0);
-        assert_eq!(l1_shift(&[1.0]), 0);
-        assert_eq!(l1_shift(&[-0.98, 0.1]), 1);
-        assert_eq!(l1_shift(&[0.2166, -0.01]), 3);
-        assert_eq!(l1_shift(&[0.001]), L1_SHIFT_MAX);
-        assert_eq!(l1_shift(&[0.0]), L1_SHIFT_MAX);
+        for (l1_weights, shift) in SHIFTS_THE_ENGINE_TESTS_ALSO_ASSERT {
+            assert_eq!(l1_shift(l1_weights), shift, "{l1_weights:?}");
+        }
         assert_eq!(l1_shift(&[L1_WEIGHT_CLIP, -L1_WEIGHT_CLIP]), 0);
 
-        // Whatever the largest weight, it is stored in 64..=127 unless the shift is at its cap.
         for step in 1..2000 {
             let max = step as f32 * 0.001;
             if max > L1_WEIGHT_CLIP {
@@ -422,10 +391,11 @@ mod tests {
     #[test]
     fn l2_layout_is_one_column_per_input() {
         let rows = NUM_OUTPUT_BUCKETS * L2_SIZE;
+        let (input, bucket, output) = (5, 3, 9);
         let mut values = vec![0.0; rows * L2_INPUTS];
-        values[5 * rows + 3 * L2_SIZE + 9] = 1.0; // input 5, bucket 3, output 9
+        values[input * rows + bucket * L2_SIZE + output] = 1.0;
         let layout = l2_weights_layout(&values);
-        assert_eq!(layout[(3 * L2_INPUTS + 5) * L2_SIZE + 9], 1.0);
+        assert_eq!(layout[(bucket * L2_INPUTS + input) * L2_SIZE + output], 1.0);
         assert_eq!(layout.iter().filter(|&&weight| weight != 0.0).count(), 1);
     }
 

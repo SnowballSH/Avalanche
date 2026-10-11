@@ -1,3 +1,5 @@
+//! See docs/NNUE.md.
+
 mod heldout;
 mod init_net;
 mod multilayer;
@@ -40,14 +42,11 @@ use viriformat::{
     dataformat::{Filter, WDL},
 };
 
-// Architecture constants — must match engine's weights.zig
 const NUM_OUTPUT_BUCKETS: usize = 8;
 const QA: i16 = 255;
 const QB: i16 = 64;
 const EVAL_SCALE: f32 = 400.0;
 
-// Pawnocchio / Alexandria-style 16-bucket half-board layout (files a–d).
-// ChessBucketsMirrored expands this to 64 squares via file mirroring.
 #[rustfmt::skip]
 const BUCKET_LAYOUT_16: [usize; 32] = [
     0,  1,  2,  3,
@@ -60,7 +59,6 @@ const BUCKET_LAYOUT_16: [usize; 32] = [
     14, 14, 15, 15,
 ];
 
-// --- env-var helpers (lets us launch many experiments without recompiling) ---
 fn env_usize(key: &str, default: usize) -> usize {
     std::env::var(key)
         .ok()
@@ -82,13 +80,15 @@ fn env_bool(key: &str, default: bool) -> bool {
         Err(_) => default,
     }
 }
+fn env_non_empty(key: &str) -> Option<String> {
+    std::env::var(key).ok().filter(|value| !value.is_empty())
+}
 
 fn fail(message: &str) -> ! {
     eprintln!("Error: {message}");
     std::process::exit(1);
 }
 
-/// Unlike the lenient helpers above, a value that is set but does not parse is an error.
 fn env_strict<T>(key: &str, default: T) -> Result<T, String>
 where
     T: FromStr<Err: std::fmt::Display>,
@@ -101,7 +101,6 @@ where
     }
 }
 
-/// Stored by `Avalanche tbfilter format=viri` for positions whose label contradicts the Syzygy tables.
 const TABLEBASE_MASKED_EVAL: i16 = i16::MAX;
 
 const VIRI_FILTER: Filter = Filter {
@@ -128,7 +127,6 @@ const _: () = assert!(
     "the filter must drop tablebase-masked positions"
 );
 
-// Initially taken from https://github.com/JonathanHallstrom/bullet/blob/bb5a2725b7beb2178aa59fa38f163aeb31bac7fc/examples/advanced.rs
 fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
     let wdl = match wdl_float {
         x if x >= 0.9 => WDL::Win,
@@ -140,12 +138,9 @@ fn viri_filter(board: &Board, mv: Move, eval: i16, wdl_float: f32) -> bool {
     !VIRI_FILTER.should_filter(mv, eval as i32, board, wdl, &mut rng)
 }
 
-/// The layers after the feature transformer; docs/NNUE.md specifies both.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Arch {
-    /// `(inputs -> H)x2 -> SCReLU -> 1x8`.
     Single,
-    /// `(inputs -> H)x2 -> pairwise CReLU -> 16 -> dual activation -> 32 -> 1`, bucketed; see multilayer.rs.
     Multi,
 }
 
@@ -185,18 +180,14 @@ struct TrainConfig {
     save_rate: usize,
     threads: usize,
     use_factoriser: bool,
-    /// `TRAIN_L1_SPARSITY`; 0 is off. Only the multi-layer net has the pairwise activations it penalises.
     l1_sparsity: f32,
     dataset_paths: Vec<String>,
     shuffle_mb: usize,
     start_superbatch: usize,
     validation: Option<ValidationConfig>,
-    /// `TRAIN_INIT_NET`: a quantised single-layer net to start from instead of a random initialisation.
     init_net: Option<String>,
 }
 
-/// Every `*.viribin` file in the directory named by the env variable `key`, sorted, so a directory of
-/// cleaned chunks is one dataset.
 fn viribin_files(key: &str, dir: &str) -> Result<Vec<String>, String> {
     let entries =
         std::fs::read_dir(dir).map_err(|err| format!("cannot read {key} {dir}: {err}"))?;
@@ -255,12 +246,8 @@ fn l1_sparsity_from_env(arch: Arch) -> Result<f32, String> {
     Ok(coefficient)
 }
 
-/// Empty is unset, as for a variable a wrapper script exports unconditionally.
 fn init_net_from_env(arch: Arch, start_superbatch: usize) -> Result<Option<String>, String> {
-    let Some(path) = std::env::var("TRAIN_INIT_NET")
-        .ok()
-        .filter(|path| !path.is_empty())
-    else {
+    let Some(path) = env_non_empty("TRAIN_INIT_NET") else {
         return Ok(None);
     };
     if arch != Arch::Single {
@@ -289,10 +276,9 @@ fn canonical_dir(key: &str, dir: &str) -> Result<std::path::PathBuf, String> {
 }
 
 fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
-    let dir = std::env::var("TRAIN_VALIDATION_DIR").unwrap_or_default();
-    if dir.is_empty() {
+    let Some(dir) = env_non_empty("TRAIN_VALIDATION_DIR") else {
         return Ok(None);
-    }
+    };
     let batches = env_strict("TRAIN_VALIDATION_BATCHES", 64)?;
     if batches == 0 {
         return Err(String::from("TRAIN_VALIDATION_BATCHES must be at least 1"));
@@ -313,7 +299,16 @@ fn validation_from_env() -> Result<Option<ValidationConfig>, String> {
     }))
 }
 
+const HAS_GPU_BACKEND: bool = cfg!(feature = "cuda");
+
 fn main() {
+    if !HAS_GPU_BACKEND {
+        fail(
+            "this binary was built without the `cuda` feature, which leaves bullet's mock device: \
+             enough to lint and test the trainer, not to train. Build with the default features.",
+        );
+    }
+
     let args: Vec<String> = std::env::args().skip(1).collect();
     let dataset_paths = match std::env::var("TRAIN_DATA_DIR") {
         Ok(dir) => viribin_files("TRAIN_DATA_DIR", &dir).unwrap_or_else(|err| fail(&err)),
@@ -335,8 +330,9 @@ fn main() {
     let hidden_size = env_usize("TRAIN_HIDDEN", 1024);
     if matches!(input_mode.as_str(), "buckets16" | "buckets") && hidden_size != 1024 {
         eprintln!(
-            "WARNING: TRAIN_HIDDEN={hidden_size} but engine weights.zig uses HIDDEN_SIZE=1024; \
-             buckets nets will not load unless the engine is rebuilt with a matching hidden size."
+            "WARNING: TRAIN_HIDDEN={hidden_size} but the engine's HIDDEN_SIZE in \
+             src/engine/nnue/arch.zig is 1024; buckets nets will not load unless the engine is \
+             rebuilt with a matching hidden size."
         );
     }
     let superbatches = env_usize("TRAIN_SUPERBATCHES", 40);
@@ -399,7 +395,6 @@ fn main() {
     }
 }
 
-/// The head of `Arch::Single`, as `print_banner` shows it.
 const SINGLE_HEAD: &str = "1x8";
 const _: () = assert!(NUM_OUTPUT_BUCKETS == 8);
 
@@ -446,7 +441,6 @@ fn print_banner(cfg: &TrainConfig, input: &str, head: &str) {
 
 type OutputBuckets = MaterialCount<NUM_OUTPUT_BUCKETS>;
 
-/// A built trainer plus what `ValueTrainer` keeps private but a validated run has to supply again.
 struct Session<'a, Opt: OptimiserState<ExecutionContext>, I: SparseInputType> {
     trainer: &'a mut ValueTrainer<Opt, I, OutputBuckets>,
     inputs: I,
@@ -460,11 +454,7 @@ where
     I: SparseInputType<RequiredDataType = ChessBoard>,
 {
     let cfg = session.cfg;
-    // Empty is unset, as for a variable a wrapper script exports unconditionally.
-    let parity_fens = std::env::var("TRAIN_PARITY_FENS")
-        .ok()
-        .filter(|fens| !fens.is_empty());
-    if let Some(fens) = parity_fens {
+    if let Some(fens) = env_non_empty("TRAIN_PARITY_FENS") {
         if std::env::var("TRAIN_RESUME_FROM").is_err() && cfg.init_net.is_none() {
             fail(
                 "TRAIN_PARITY_FENS needs the net to evaluate, TRAIN_RESUME_FROM=<checkpoint> or \
@@ -485,9 +475,6 @@ where
     println!("Training complete. net_id={}", cfg.net_id);
 }
 
-/// Instead of training: the unquantised net's evaluation of every FEN of `fens_path`, in centipawns for
-/// the side to move, written to `out_path` as `<fen> | <centipawns>`. `Avalanche nnue-parity` compares
-/// the engine against that file; docs/NNUE.md has the commands.
 fn write_parity<Opt, I>(
     trainer: &mut ValueTrainer<Opt, I, OutputBuckets>,
     fens_path: &str,
@@ -504,7 +491,6 @@ where
 
     let mut count = 0;
     for line in fens.lines() {
-        // Accepts its own output, so a parity file can be regenerated in place.
         let fen = line.split('|').next().unwrap_or_default().trim();
         if fen.is_empty() || fen.starts_with('#') {
             continue;
@@ -599,7 +585,6 @@ fn run_with_reader<Opt, I>(
     .unwrap_or_else(|err| fail(&err));
 }
 
-/// The file's first two sections, `l0w` then `l0b`, with the factoriser folded into the weights.
 fn feature_transformer_format(use_factoriser: bool, input_buckets: usize) -> [SavedFormat; 2] {
     let weights = if use_factoriser {
         SavedFormat::id("l0w").transform(move |store, weights| {
@@ -619,11 +604,8 @@ fn feature_transformer_format(use_factoriser: bool, input_buckets: usize) -> [Sa
     ]
 }
 
-/// Clip of `l0w` and of `l0f` when a factoriser is trained, so that their sum stays in bullet's default
-/// range.
 const FACTORISED_CLIP: f32 = 0.99;
 
-/// Match bullet examples/progression/3_input_buckets.rs: the saved weight is `l0w + l0f`.
 fn clip_factorised_feature_transformer<Opt>(optimiser: &mut Optimiser<ExecutionContext, Opt>)
 where
     Opt: OptimiserState<ExecutionContext, Params = AdamWParams>,
@@ -637,8 +619,6 @@ where
     optimiser.set_params_for_weight("l0f", stricter_clipping);
 }
 
-/// The architecture of the checkpoint at `path`, read off the `quantised.bin` bullet saves next to
-/// the weights; `None` when that file is missing or unreadable.
 fn checkpoint_arch(path: &str) -> Option<Arch> {
     let mut first_bytes = [0; 8];
     let mut file = std::fs::File::open(format!("{path}/quantised.bin")).ok()?;
@@ -672,7 +652,6 @@ where
     }
 }
 
-/// `feature_weight_clip` is the clip the optimiser applies to `l0w`.
 fn init_from_net<Opt>(
     optimiser: &mut Optimiser<ExecutionContext, Opt>,
     cfg: &TrainConfig,
@@ -701,8 +680,6 @@ fn run_chess768(cfg: TrainConfig) {
         SavedFormat::id("l1b").round().quantise::<i16>(QA * QB),
     ];
 
-    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
-    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)
@@ -749,7 +726,6 @@ fn buckets16_save_format(use_factoriser: bool) -> Vec<SavedFormat> {
     save_format
 }
 
-/// `(768x16hm -> hidden_size)x2 -> SCReLU -> 1x8`, the graph of `Arch::Single` on bucketed inputs.
 fn bucketed_single_head<'a>(
     builder: &'a ModelBuilder,
     stm_inputs: ModelNode<'a>,
@@ -789,8 +765,6 @@ fn run_buckets16(cfg: TrainConfig) {
     let save_format = buckets16_save_format(use_factoriser);
 
     let inputs = ChessBucketsMirrored::new(BUCKET_LAYOUT_16);
-    // validation.rs keeps its own copy of bullet's input mapper for this builder setup. Re-check it when
-    // this gains wdl-adjust, datapoint-weight, win-rate-model or wdl-output options, or bullet is bumped.
     let mut trainer = ValueTrainerBuilder::default()
         .dual_perspective()
         .optimiser(AdamW)

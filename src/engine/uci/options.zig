@@ -1,3 +1,5 @@
+//! See docs/UCI.md.
+
 const std = @import("std");
 const platform = @import("../../platform.zig");
 const search = @import("../search.zig");
@@ -11,10 +13,8 @@ const hce = @import("../hce.zig");
 const position = @import("../../chess/position.zig");
 const numa = @import("../numa.zig");
 
-/// Option values that shape each `go` rather than engine-global state.
 pub const Settings = struct {
     multi_pv: usize = 1,
-    ponder: bool = false,
     limit_strength: bool = false,
     elo: u32 = strength.DEFAULT_ELO,
     skill_level: u8 = strength.MAX_LEVEL,
@@ -26,6 +26,8 @@ pub const Settings = struct {
             strength.Strength.from_skill_level(self.skill_level);
     }
 };
+
+const DEFAULT_SETTINGS: Settings = .{};
 
 const Spin = struct { default: i64, min: i64, max: i64 };
 
@@ -47,11 +49,9 @@ pub const Context = struct {
 
 const Option = struct {
     name: []const u8,
-    // Former or common alternative names still accepted by setoption.
     aliases: []const []const u8 = &.{},
     kind: Kind,
     apply: *const fn (ctx: Context, value: Value) anyerror!void,
-    // Options the current build target cannot honour are neither advertised nor accepted.
     available: bool = true,
 
     fn matches(self: *const Option, name: []const u8) bool {
@@ -71,21 +71,21 @@ const Value = union(enum) {
 };
 
 const OPTIONS = [_]Option{
-    .{ .name = "Hash", .kind = .{ .spin = .{ .default = 16, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
+    .{ .name = "Hash", .kind = .{ .spin = .{ .default = tt.DEFAULT_HASH_MB, .min = 1, .max = tt.MAX_HASH_MB } }, .apply = set_hash },
     .{ .name = "Threads", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_SEARCH_THREADS } }, .apply = set_threads },
     .{ .name = "Move Overhead", .aliases = &.{"MoveOverhead"}, .kind = .{ .spin = .{ .default = search.DEFAULT_MOVE_OVERHEAD, .min = 0, .max = search.MAX_MOVE_OVERHEAD } }, .apply = set_move_overhead },
     .{ .name = "NumaPolicy", .kind = .{ .combo = .{ .default = @tagName(numa.Policy.auto), .values = @typeInfo(numa.Policy).@"enum".field_names } }, .apply = set_numa_policy, .available = platform.has_threads },
-    .{ .name = "MultiPV", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = search.MAX_MULTI_PV } }, .apply = set_multi_pv },
-    .{ .name = "Ponder", .kind = .{ .check = false }, .apply = set_ponder },
+    .{ .name = "MultiPV", .kind = .{ .spin = .{ .default = DEFAULT_SETTINGS.multi_pv, .min = 1, .max = search.MAX_MULTI_PV } }, .apply = set_multi_pv },
+    .{ .name = "Ponder", .kind = .{ .check = false }, .apply = accept_without_effect },
     .{ .name = "Clear Hash", .kind = .button, .apply = clear_hash },
     .{ .name = "UCI_Chess960", .kind = .{ .check = false }, .apply = set_chess960 },
-    .{ .name = "UCI_LimitStrength", .kind = .{ .check = false }, .apply = set_limit_strength },
-    .{ .name = "UCI_Elo", .kind = .{ .spin = .{ .default = strength.DEFAULT_ELO, .min = strength.MIN_ELO, .max = strength.MAX_ELO } }, .apply = set_elo },
-    .{ .name = "Skill Level", .kind = .{ .spin = .{ .default = strength.MAX_LEVEL, .min = 0, .max = strength.MAX_LEVEL } }, .apply = set_skill_level },
+    .{ .name = "UCI_LimitStrength", .kind = .{ .check = DEFAULT_SETTINGS.limit_strength }, .apply = set_limit_strength },
+    .{ .name = "UCI_Elo", .kind = .{ .spin = .{ .default = DEFAULT_SETTINGS.elo, .min = strength.MIN_ELO, .max = strength.MAX_ELO } }, .apply = set_elo },
+    .{ .name = "Skill Level", .kind = .{ .spin = .{ .default = DEFAULT_SETTINGS.skill_level, .min = 0, .max = strength.MAX_LEVEL } }, .apply = set_skill_level },
     .{ .name = "SyzygyPath", .kind = .{ .string = "<empty>" }, .apply = set_syzygy_path, .available = syzygy.supported },
-    .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = 1, .min = 1, .max = 100 } }, .apply = set_syzygy_probe_depth, .available = syzygy.supported },
-    .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = 7, .min = 1, .max = 7 } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
-    .{ .name = "Syzygy50MoveRule", .kind = .{ .check = true }, .apply = set_syzygy_rule50, .available = syzygy.supported },
+    .{ .name = "SyzygyProbeDepth", .kind = .{ .spin = .{ .default = syzygy.DEFAULT_PROBE_DEPTH, .min = 1, .max = syzygy.MAX_PROBE_DEPTH } }, .apply = set_syzygy_probe_depth, .available = syzygy.supported },
+    .{ .name = "SyzygyProbeLimit", .kind = .{ .spin = .{ .default = syzygy.DEFAULT_PROBE_LIMIT, .min = 1, .max = syzygy.MAX_PROBE_LIMIT } }, .apply = set_syzygy_probe_limit, .available = syzygy.supported },
+    .{ .name = "Syzygy50MoveRule", .kind = .{ .check = syzygy.DEFAULT_USE_RULE50 }, .apply = set_syzygy_rule50, .available = syzygy.supported },
     .{ .name = "EvalFile", .kind = .{ .string = weights.EMBEDDED_NAME }, .apply = set_eval_file, .available = weights.supports_eval_file },
     .{ .name = "EvalScale", .kind = .{ .spin = .{ .default = hce.DEFAULT_EVAL_SCALE, .min = hce.MIN_EVAL_SCALE, .max = hce.MAX_EVAL_SCALE } }, .apply = set_eval_scale },
     .{ .name = "UCI_ShowWDL", .kind = .{ .check = false }, .apply = set_show_wdl },
@@ -106,16 +106,15 @@ pub fn print_all(out: *std.Io.Writer) !void {
             .string => |default| try out.print("string default {s}", .{default}),
             .button => try out.writeAll("button"),
         }
-        try out.writeAll(search.line_ending);
+        try out.writeAll(search.LINE_ENDING);
     }
     for (parameters.TunableParams) |tunable| {
-        try out.print("option name {s} type spin default {d} min {d} max {d}" ++ search.line_ending, .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
+        try out.print("option name {s} type spin default {d} min {d} max {d}" ++ search.LINE_ENDING, .{ tunable.name, tunable.value, tunable.min_value, tunable.max_value });
     }
 }
 
 pub const SetOptionError = error{ UnknownOption, InvalidValue };
 
-/// Handles the text after `setoption `: `name <name...> [value <value...>]`.
 pub fn set_option(args: []const u8, ctx: Context) !void {
     const request = parse_request(args) orelse return SetOptionError.UnknownOption;
 
@@ -137,24 +136,35 @@ pub fn set_option(args: []const u8, ctx: Context) !void {
         return option.apply(ctx, value);
     }
 
-    const raw = std.fmt.parseInt(i64, request.value, 10) catch return SetOptionError.UnknownOption;
-    const tunable = parameters.set(request.name, raw) orelse return SetOptionError.UnknownOption;
+    const tunable = find_tunable(request.name) orelse return SetOptionError.UnknownOption;
+    const raw = std.fmt.parseInt(i64, request.value, 10) catch return SetOptionError.InvalidValue;
+    _ = parameters.set(tunable.name, raw);
     if (tunable.reinit_lmr) search.init_lmr();
+}
+
+fn find_tunable(name: []const u8) ?parameters.Tunable {
+    for (parameters.TunableParams) |tunable| {
+        if (std.ascii.eqlIgnoreCase(tunable.name, name)) return tunable;
+    }
+    return null;
 }
 
 const Request = struct { name: []const u8, value: []const u8 };
 
+const WHITESPACE = " \t";
+
 fn parse_request(args: []const u8) ?Request {
-    const trimmed = std.mem.trim(u8, args, " \t");
-    if (!std.mem.startsWith(u8, trimmed, "name ")) return null;
-    const rest = trimmed["name ".len..];
-    if (std.mem.indexOf(u8, rest, " value ")) |split| {
+    var tokens = std.mem.tokenizeAny(u8, args, WHITESPACE);
+    if (!std.mem.eql(u8, tokens.next() orelse return null, "name")) return null;
+    const name_start = tokens.index;
+    while (tokens.next()) |token| {
+        if (!std.mem.eql(u8, token, "value")) continue;
         return .{
-            .name = std.mem.trim(u8, rest[0..split], " \t"),
-            .value = std.mem.trim(u8, rest[split + " value ".len ..], " \t"),
+            .name = std.mem.trim(u8, args[name_start .. tokens.index - token.len], WHITESPACE),
+            .value = std.mem.trim(u8, tokens.rest(), WHITESPACE),
         };
     }
-    return .{ .name = std.mem.trim(u8, rest, " \t"), .value = "" };
+    return .{ .name = std.mem.trim(u8, args[name_start..], WHITESPACE), .value = "" };
 }
 
 fn parse_bool(value: []const u8) ?bool {
@@ -168,43 +178,34 @@ fn set_hash(ctx: Context, value: Value) !void {
     tt.GlobalTT.reset(requested);
     const installed_mb = tt.GlobalTT.size * @sizeOf(tt.Item) / tt.MB;
     if (installed_mb < requested) {
-        try ctx.out.print("info string Hash: failed to allocate {} MB, still using {} MB" ++ search.line_ending, .{ requested, installed_mb });
+        try ctx.out.print("info string Hash: failed to allocate {} MB, still using {} MB" ++ search.LINE_ENDING, .{ requested, installed_mb });
     }
-    try ctx.out.print("info string Hash: {} MB, {} MB on huge pages" ++ search.line_ending, .{ installed_mb, tt.GlobalTT.huge_page_bytes() / tt.MB });
+    try ctx.out.print("info string Hash: {} MB, {} MB on huge pages" ++ search.LINE_ENDING, .{ installed_mb, tt.GlobalTT.huge_page_bytes() / tt.MB });
 }
 
 fn set_threads(ctx: Context, value: Value) !void {
     const total: usize = @intCast(value.spin);
-    search.THREADS_CONFIGURED = true;
+    search.threads_configured = true;
     search.set_helper_count(total - 1);
     if (search.helper_count() < total - 1) {
-        try ctx.out.print("info string Threads: failed to allocate {} helpers, using {}" ++ search.line_ending, .{ total - 1, search.helper_count() + 1 });
+        try ctx.out.print("info string Threads: failed to allocate {} helpers, using {}" ++ search.LINE_ENDING, .{ total - 1, search.helper_count() + 1 });
     }
 }
 
 fn set_numa_policy(_: Context, value: Value) !void {
-    const chosen = std.meta.stringToEnum(numa.Policy, value.string).?;
-    if (chosen == numa.policy) return;
-    numa.policy = chosen;
-    numa.init();
-    if (!numa.topology().is_numa()) return;
-    // Helpers are placed when they start, so restart them under the new policy.
-    const helpers = search.helper_count();
-    search.set_helper_count(0);
-    search.set_helper_count(helpers);
+    numa.policy = std.meta.stringToEnum(numa.Policy, value.string).?;
+    search.set_helper_count(search.helper_count());
 }
 
 fn set_move_overhead(_: Context, value: Value) !void {
-    search.MOVE_OVERHEAD = @intCast(value.spin);
+    search.move_overhead = @intCast(value.spin);
 }
 
 fn set_multi_pv(ctx: Context, value: Value) !void {
     ctx.settings.multi_pv = @intCast(value.spin);
 }
 
-fn set_ponder(ctx: Context, value: Value) !void {
-    ctx.settings.ponder = value.check;
-}
+fn accept_without_effect(_: Context, _: Value) !void {}
 
 fn clear_hash(_: Context, _: Value) !void {
     tt.GlobalTT.clear();
@@ -235,9 +236,9 @@ fn set_syzygy_path(ctx: Context, value: Value) !void {
     const cpath = try platform.allocator.dupeSentinel(u8, path, 0);
     defer platform.allocator.free(cpath);
     if (syzygy.init(cpath.ptr)) {
-        try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.line_ending, .{ syzygy.max_pieces(), path });
+        try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.LINE_ENDING, .{ syzygy.max_pieces(), path });
     } else {
-        try ctx.out.print("info string Syzygy: failed to load tablebases from '{s}'" ++ search.line_ending, .{path});
+        try ctx.out.print("info string Syzygy: failed to load tablebases from '{s}'" ++ search.LINE_ENDING, .{path});
     }
 }
 
@@ -256,20 +257,18 @@ fn set_syzygy_rule50(_: Context, value: Value) !void {
 fn set_eval_file(ctx: Context, value: Value) !void {
     const path = if (value.string.len == 0) weights.EMBEDDED_NAME else value.string;
     weights.load(path) catch |err| {
-        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}: {s}), keeping the current network" ++ search.line_ending, .{ path, @errorName(err), weights.explain(err) });
+        try ctx.out.print("info string EvalFile: failed to load '{s}' ({s}: {s}), keeping the current network" ++ search.LINE_ENDING, .{ path, @errorName(err), weights.explain(err) });
         return;
     };
     ctx.position.refresh_evaluation();
-    // Stored static evals were computed by the previous network.
     tt.GlobalTT.clear();
-    try ctx.out.print("info string EvalFile: using {s}" ++ search.line_ending, .{weights.active_network()});
+    try ctx.out.print("info string EvalFile: using {s}" ++ search.LINE_ENDING, .{weights.active_network()});
 }
 
 fn set_eval_scale(_: Context, value: Value) !void {
     const scale: i32 = @intCast(value.spin);
     if (scale != hce.eval_scale) {
         hce.eval_scale = scale;
-        // Stored static evals were computed with the previous scale.
         tt.GlobalTT.clear();
     }
 }
@@ -280,8 +279,8 @@ fn set_show_wdl(_: Context, value: Value) !void {
 
 fn set_contempt(_: Context, value: Value) !void {
     const contempt: i32 = @intCast(value.spin);
-    if (contempt != search.CONTEMPT) {
-        search.CONTEMPT = contempt;
+    if (contempt != search.contempt) {
+        search.contempt = contempt;
         tt.GlobalTT.clear();
     }
 }
