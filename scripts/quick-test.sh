@@ -43,7 +43,9 @@ build_ref() {
     fi
 
     local wt="$CACHE/wt-$sha"
-    [ -d "$wt" ] && git -C "$REPO" worktree remove --force "$wt" 2>/dev/null || true
+    if [ -d "$wt" ]; then
+        git -C "$REPO" worktree remove --force "$wt" 2>/dev/null || true
+    fi
     info "Building ref $(bold "$ref") ($sha) in a temporary worktree" >&2
     git -C "$REPO" worktree add --detach --force "$wt" "$sha" >&2 2>&1
 

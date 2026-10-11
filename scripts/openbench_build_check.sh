@@ -32,7 +32,7 @@ for name in Avalanche bin/Avalanche Avalanche-0a1b2c3d; do
 done
 
 DEFAULT_NET="$(sed -n 's/^const default_net = "\(.*\)";$/\1/p' "$ROOT/build.zig")"
-[ -n "$DEFAULT_NET" ] && [ -f "$ROOT/$DEFAULT_NET" ] || fail "build.zig does not name the default network"
+[[ -n "$DEFAULT_NET" && -f "$ROOT/$DEFAULT_NET" ]] || fail "build.zig does not name the default network"
 cp "$ROOT/$DEFAULT_NET" "$WORK/candidate.nnue"
 (cd "$ROOT" && make -j EXE="$WORK/Avalanche-ob" CC=zig EVALFILE="$WORK/candidate.nnue")
 test -x "$WORK/Avalanche-ob"

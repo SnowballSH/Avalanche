@@ -78,6 +78,6 @@ if [ "$BULLET_BYTES" != "0" ]; then
     echo "Bullet positions: $(( BULLET_BYTES / 32 ))"
 fi
 echo "Files:"
-ls -lh data_*.bin data_*.viribin 2>/dev/null | tail -5 || true
+find . -maxdepth 1 \( -name "data_*.bin" -o -name "data_*.viribin" \) -exec ls -lh {} + | tail -5 || true
 
 exit "$ENGINE_STATUS"
