@@ -69,7 +69,7 @@ skipped. Every test ends by stopping the search and restoring the options it
 changed; an engine that exits fails that test, and the next one starts a new
 process.
 
-### Checks of a built engine
+### Checks of a build, and their reference data
 
 | Script | Purpose |
 |--------|---------|
