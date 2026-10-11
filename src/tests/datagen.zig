@@ -121,7 +121,8 @@ test "datagen: never overwrites an existing output file" {
 
     var gen = datagen.Datagen.new(quick_config(10), 1);
     defer gen.deinit();
-    try testing.expectError(error.PathAlreadyExists, gen.start(1, run.path));
+    try testing.expectError(error.OutputNotCreated, gen.generate(1, run.path));
+    try testing.expectEqual(@as(?anyerror, error.PathAlreadyExists), gen.output_failure);
     const bytes = try run.read();
     defer testing.allocator.free(bytes);
     try testing.expectEqualStrings("keep", bytes);
@@ -273,7 +274,6 @@ test "datagen: a missing book is an error, not a panic" {
     platform.io = std.testing.io;
     var diag: book.Diagnostic = .{};
     try testing.expectError(error.FileNotFound, book.Book.load(testing.allocator, "/nonexistent/book.epd", &diag));
-    try testing.expectError(error.FileNotFound, datagen.loadEpdFile("/nonexistent/book.epd", &diag));
 }
 
 test "datagen: a malformed book line is rejected with its line number and reason" {

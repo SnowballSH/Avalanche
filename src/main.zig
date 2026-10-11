@@ -11,6 +11,7 @@ const nnue_parity = @import("engine/nnue/parity.zig");
 const bench = @import("engine/bench.zig");
 const datagen = @import("engine/datagen.zig");
 const datagen_options = @import("engine/datagen/options.zig");
+const book = @import("engine/datagen/book.zig");
 const tbfilter = @import("engine/tbfilter.zig");
 const netscale = @import("engine/netscale.zig");
 
@@ -32,10 +33,24 @@ const DATAGEN_USAGE =
     \\  positions=N   stop after at least N positions, at a game boundary (default: unbounded)
     \\  seed=N        deterministic seed (default: random)
     \\  raweval=BOOL  true labels with the unscaled network output (default false)
-    \\  out=PATH      output file, must not exist (default data_<seed>.viribin)
+    \\  out=PATH      output file, must not exist (default data_<seed>.viribin, data_<seed>.bin with format=bullet)
     \\  format=viri|bullet (default viri)
     \\
 ;
+
+fn load_book(path: []const u8) book.Book {
+    var diag: book.Diagnostic = .{};
+    const loaded = book.Book.load(platform.allocator, path, &diag) catch |err| {
+        if (err == error.InvalidBookLine) {
+            std.debug.print("datagen: book '{s}' line {}: {s}\n", .{ path, diag.line, diag.reason });
+        } else {
+            std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
+        }
+        std.process.exit(2);
+    };
+    std.debug.print("Loaded {} openings from {s}\n", .{ loaded.lines.len, path });
+    return loaded;
+}
 
 fn run_datagen(args: []const []const u8) !void {
     var diag: datagen_options.Diagnostic = .{};
@@ -51,27 +66,14 @@ fn run_datagen(args: []const []const u8) !void {
     };
     var gen = datagen.Datagen.new(datagen.DatagenConfig.from_options(opts), seed);
     defer gen.deinit();
-    if (opts.book) |path| {
-        var book_diag: datagen.BookDiagnostic = .{};
-        gen.openings = datagen.loadEpdFile(path, &book_diag) catch |err| {
-            if (err == error.InvalidBookLine) {
-                std.debug.print("datagen: book '{s}' line {}: {s}\n", .{ path, book_diag.line, book_diag.reason });
-            } else {
-                std.debug.print("datagen: cannot load book '{s}': {s}\n", .{ path, @errorName(err) });
-            }
-            std.process.exit(2);
-        };
-        std.debug.print("Loaded {} openings from {s}\n", .{ gen.openings.?.len, path });
-    }
+    var openings: ?book.Book = if (opts.book) |path| load_book(path) else null;
+    defer if (openings) |*loaded| loaded.deinit();
+    if (openings) |loaded| gen.openings = loaded.lines;
 
-    var path_buf: [64]u8 = undefined;
+    var path_buf: [datagen.DEFAULT_OUTPUT_PATH_CAPACITY]u8 = undefined;
     const out = opts.out orelse datagen.default_output_path(&path_buf, seed, opts.format);
     gen.print_banner(opts.threads, out);
-    gen.start(opts.threads, out) catch |err| {
-        if (err == error.WorkerFailed) std.process.exit(1);
-        std.debug.print("datagen: cannot write '{s}': {s}\n", .{ out, @errorName(err) });
-        std.process.exit(2);
-    };
+    gen.start(opts.threads, out) catch |err| std.process.exit(if (err == error.WorkerFailed) 1 else 2);
 
     var buffer: [512]u8 = undefined;
     var stdout = platform.Stdout.init(&buffer);

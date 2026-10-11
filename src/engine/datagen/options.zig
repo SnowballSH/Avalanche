@@ -7,7 +7,7 @@ const tt = @import("../tt.zig");
 pub const Format = @import("format.zig").Format;
 
 const MAX_THREADS: usize = 4096;
-const MAX_RANDOM_PLIES: u64 = 500;
+pub const MAX_RANDOM_PLIES: u64 = 500;
 const RANDOM_SEE_LIMIT: i32 = 10_000;
 const MAX_TT_MB: u64 = tt.MAX_HASH_MB;
 

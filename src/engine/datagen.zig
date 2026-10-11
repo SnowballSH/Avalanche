@@ -10,10 +10,18 @@ const see = @import("see.zig");
 const tt = @import("tt.zig");
 const options = @import("datagen/options.zig");
 const adjudicator = @import("datagen/adjudicator.zig");
-const book = @import("datagen/book.zig");
 const viriformat = @import("datagen/viriformat.zig");
 
 pub const Format = options.Format;
+
+const DRAWN_AFTER_PLY: usize = 500;
+const LONGEST_GAME_PLIES = @max(options.MAX_RANDOM_PLIES, DRAWN_AFTER_PLY + 1) + 1;
+
+comptime {
+    if (LONGEST_GAME_PLIES > position.MAX_HISTORY_PLY) {
+        @compileError("a datagen game must fit position.MAX_HISTORY_PLY: a position and a searcher's key history hold that many game plies before a search");
+    }
+}
 
 pub const Summary = struct {
     positions: u64 = 0,
@@ -303,7 +311,7 @@ pub const Worker = struct {
 
     fn note_game_position(self: *Worker, pos: *position.Position) void {
         for (&self.searchers) |*s| {
-            s.hash_history.append(pos.hash) catch {};
+            s.hash_history.append(pos.hash) catch unreachable;
         }
     }
 
@@ -452,7 +460,7 @@ pub const Worker = struct {
                 break;
             }
 
-            if (ply > 500) {
+            if (ply > DRAWN_AFTER_PLY) {
                 outcome = .draw;
                 break;
             }
@@ -546,7 +554,7 @@ pub const Worker = struct {
                 break;
             }
 
-            if (ply > 500) {
+            if (ply > DRAWN_AFTER_PLY) {
                 outcome = .draw;
                 break;
             }
@@ -614,13 +622,6 @@ pub fn explain(failure: anyerror) []const u8 {
     };
 }
 
-pub const BookDiagnostic = book.Diagnostic;
-
-pub fn loadEpdFile(path: []const u8, diag: *BookDiagnostic) ![]const []const u8 {
-    const loaded = try book.Book.load(platform.allocator, path, diag);
-    return loaded.lines;
-}
-
 pub fn thread_seed(run_seed: u64, thread: usize) u128 {
     var state = run_seed ^ (@as(u64, thread) *% 0x9E3779B97F4A7C15);
     const low = splitmix64(&state);
@@ -656,6 +657,7 @@ pub const Datagen = struct {
     openings: ?[]const []const u8 = null,
     config: DatagenConfig,
     timer: types.Timer = undefined,
+    output_failure: ?anyerror = null,
 
     pub fn new(config: DatagenConfig, seed: u64) Datagen {
         return .{ .seed = seed, .config = config };
@@ -676,7 +678,11 @@ pub const Datagen = struct {
 
     pub fn start(self: *Datagen, num_threads: usize, out_path: []const u8) !void {
         self.generate(num_threads, out_path) catch |failure| {
-            if (failure == error.WorkerFailed) self.print_worker_failures();
+            switch (failure) {
+                error.WorkerFailed => self.print_worker_failures(),
+                error.OutputNotCreated => std.debug.print("datagen: cannot write '{s}': {s}\n", .{ out_path, @errorName(self.output_failure.?) }),
+                else => std.debug.print("datagen: cannot start workers: {s}\n", .{@errorName(failure)}),
+            }
             return failure;
         };
     }
@@ -690,7 +696,10 @@ pub const Datagen = struct {
     }
 
     pub fn generate(self: *Datagen, num_threads: usize, out_path: []const u8) !void {
-        const file = try std.Io.Dir.cwd().createFile(platform.io, out_path, .{ .read = true, .exclusive = true });
+        const file = std.Io.Dir.cwd().createFile(platform.io, out_path, .{ .read = true, .exclusive = true }) catch |failure| {
+            self.output_failure = failure;
+            return error.OutputNotCreated;
+        };
         defer file.close(platform.io);
         self.output = .{ .file = file, .positions_target = self.config.positions_target };
         self.timer = types.Timer.start();
