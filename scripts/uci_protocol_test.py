@@ -10,7 +10,8 @@ Usage: python3 scripts/uci_protocol_test.py [engine command...]
 The engine command defaults to the native release build. To test the wasm
 build, pass e.g. `node web/src/node/cli.ts zig-out/web/avalanche.wasm`.
 Tests for options the engine does not advertise (Threads > 1, EvalFile on
-wasm) are skipped.
+wasm) are skipped, and so are the tests of the engine's own command line when
+the engine command has more than one word.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ BESTMOVE = re.compile(r"bestmove (?P<move>\S+)(?: ponder (?P<ponder>\S+))?")
 NNUE_EVALUATION = re.compile(r"info string NNUE evaluation -?\d+ cp \(white side\)")
 FINAL_EVALUATION = re.compile(r"info string Final evaluation (-?\d+) cp \(white side\)")
 NETWORK_ANNOUNCEMENT = re.compile(r"using \S+ \(768x\d+->\d+->(\d+|pairwise->\d+x2->\d+->1x\d+), \d+ MiB\)$")
+SCORE_WITH_WDL = re.compile(r" score \S+ -?\d+ wdl (\d+) (\d+) (\d+)(?: (?:lower|upper)bound)? nodes ")
 
 HANDSHAKE_TIMEOUT = 30.0
 READY_TIMEOUT = 10.0
@@ -47,19 +49,28 @@ STOP_TIMEOUT = 10.0
 QUIT_TIMEOUT = 10.0
 SEARCH_TIMEOUT = 60.0
 EVALUATION_TIMEOUT = 5.0
+COMMAND_LINE_TIMEOUT = 60.0
 SETOPTION_FAILURE_WINDOW = 0.3
 BESTMOVE_HELD_BACK_FOR = 1.5
 
 LIVE_INFO_DELAY_SECONDS = 3.0
 LIVE_INFO_TIMEOUT = 120.0
 NULL_MOVE = "0000"
-INFO_FIELDS: tuple[str, ...] = ("depth", "multipv", "cp", "mate")
+INFO_FIELDS: tuple[str, ...] = ("depth", "multipv", "cp", "mate", "nodes")
 THREADS_UNDER_TEST = 4
 MULTIPV_UNDER_TEST = 3
 MULTIPV_DEPTH = 8
 WEAK_SKILL_LEVEL = 2
 WEAK_ELO = 1400
 WEAK_SEARCH_MAX_DEPTH = 1 + WEAK_SKILL_LEVEL
+NEW_GAME_DEPTH = 12
+WDL_DEPTH = 6
+PERMILLE = 1000
+TUNABLE = "LMRWeight"
+LARGEST_CLOCK = 2**63 - 1
+LARGEST_INCREMENT = 2**64 - 1
+GENFENS_COUNT = 3
+USAGE_ERROR = 2
 
 THREE_QUEENS_UP_WHITE = "4k3/8/8/8/8/8/8/QQQ1K3 w - - 0 1"
 THREE_QUEENS_UP_BLACK = "qqq1k3/8/8/8/8/8/8/4K3 b - - 0 1"
@@ -235,12 +246,23 @@ def info_fields(line: str) -> dict[str, str]:
     return fields
 
 
+def iterations(result: SearchResult) -> list[dict[str, str]]:
+    return [info_fields(line) for line in result.output if line.startswith("info depth")]
+
+
 def searched_depths(result: SearchResult) -> set[int]:
-    return {int(info_fields(line)["depth"]) for line in result.output if line.startswith("info depth")}
+    return {int(iteration["depth"]) for iteration in iterations(result)}
 
 
-class UciProtocolTest(unittest.TestCase):
+def final_nodes(result: SearchResult) -> int:
+    return int(iterations(result)[-1]["nodes"])
+
+
+class EngineCommandTest(unittest.TestCase):
     command: ClassVar[Sequence[str]] = (str(DEFAULT_ENGINE),)
+
+
+class UciProtocolTest(EngineCommandTest):
     engine: ClassVar[Engine]
 
     @classmethod
@@ -277,6 +299,10 @@ class UciProtocolTest(unittest.TestCase):
             self.fail(output[-1])
         return int(final[1])
 
+    def setoption_failure(self, arguments: str) -> str:
+        self.engine.send(f"setoption {arguments}")
+        return self.engine.read_until("info string setoption failed", READY_TIMEOUT)[-1]
+
     def test_uci_advertises_options(self) -> None:
         for required in (
             "MultiPV",
@@ -296,6 +322,31 @@ class UciProtocolTest(unittest.TestCase):
         self.engine.expect_silence("info string setoption failed", SETOPTION_FAILURE_WINDOW)
         self.engine.send("setoption name MoveOverhead value 40")
         self.engine.expect_silence("info string setoption failed", SETOPTION_FAILURE_WINDOW)
+
+    def test_syzygy_path_with_nothing_after_value_is_accepted(self) -> None:
+        self.require_option("SyzygyPath")
+        self.engine.send("setoption name SyzygyPath value")
+        self.engine.expect_silence("info string setoption failed", SETOPTION_FAILURE_WINDOW)
+
+    def test_eval_file_with_nothing_after_value_restores_the_embedded_network(self) -> None:
+        self.require_option("EvalFile")
+        self.engine.send("setoption name EvalFile value")
+        answer = self.engine.read_until("info string ", EVALUATION_TIMEOUT)[-1]
+        self.assertTrue(answer.startswith("info string EvalFile: using "), answer)
+
+    def test_tunable_names_ignore_case(self) -> None:
+        default = self.engine.options[TUNABLE].default
+        self.engine.send(f"setoption name {TUNABLE.swapcase()} value {default}")
+        self.engine.expect_silence("info string setoption failed", SETOPTION_FAILURE_WINDOW)
+
+    def test_failed_setoption_names_the_reason(self) -> None:
+        for arguments, reason in (
+            ("name NoSuchOption value 1", "UnknownOption"),
+            (f"name {TUNABLE} value x", "InvalidValue"),
+        ):
+            self.assertEqual(
+                self.setoption_failure(arguments), f"info string setoption failed ({reason}): {arguments}"
+            )
 
     def test_eval_command_reports_evaluations_from_whites_side(self) -> None:
         start = self.evaluation("startpos")
@@ -317,6 +368,30 @@ class UciProtocolTest(unittest.TestCase):
         announcements = [line for line in output if line.startswith("info string NNUE evaluation using ")]
         self.assertEqual(len(announcements), 1, output)
         self.assertRegex(announcements[0], NETWORK_ANNOUNCEMENT)
+
+    def test_go_after_ucinewgame_searches_the_start_position(self) -> None:
+        self.engine.search("startpos moves e2e4 e7e5", f"depth {NEW_GAME_DEPTH}")
+        self.engine.send("ucinewgame")
+        self.engine.go(f"depth {NEW_GAME_DEPTH}")
+        without_position = self.engine.bestmove(SEARCH_TIMEOUT)
+        self.engine.send("ucinewgame")
+        with_position = self.engine.search("startpos", f"depth {NEW_GAME_DEPTH}")
+        self.assertEqual(final_nodes(without_position), final_nodes(with_position))
+
+    def test_clock_and_increment_at_the_integer_limits_are_searched(self) -> None:
+        result = self.engine.search("startpos", f"wtime {LARGEST_CLOCK} winc {LARGEST_INCREMENT} depth 4")
+        self.assertNotEqual(result.move, NULL_MOVE)
+
+    def test_show_wdl_reports_permille_between_score_and_nodes(self) -> None:
+        self.engine.set_option("UCI_ShowWDL", "true")
+        result = self.engine.search("startpos", f"depth {WDL_DEPTH}")
+        lines = [line for line in result.output if line.startswith("info depth")]
+        self.assertTrue(lines, result.output)
+        for line in lines:
+            permille = SCORE_WITH_WDL.search(line)
+            if permille is None:
+                self.fail(line)
+            self.assertEqual(sum(map(int, permille.groups())), PERMILLE, line)
 
     def test_live_currmove_after_delay(self) -> None:
         self.engine.send("position startpos moves e2e4 c7c5")
@@ -360,8 +435,7 @@ class UciProtocolTest(unittest.TestCase):
 
     def test_bestmove_carries_ponder_move(self) -> None:
         result = self.engine.search("startpos moves e2e4", "depth 10")
-        last_pv = [info_fields(line)["pv"] for line in result.output if line.startswith("info depth")][-1]
-        self.assertEqual(last_pv.split()[:2], [result.move, result.ponder])
+        self.assertEqual(iterations(result)[-1]["pv"].split()[:2], [result.move, result.ponder])
 
     def test_ponderhit_releases_bestmove(self) -> None:
         self.engine.send("position startpos moves e2e4 e7e5")
@@ -410,6 +484,11 @@ class UciProtocolTest(unittest.TestCase):
         self.assertLessEqual(max(searched_depths(result)), WEAK_SEARCH_MAX_DEPTH)
         self.assertNotEqual(result.move, NULL_MOVE)
 
+    def test_limited_strength_reports_only_the_lines_multipv_asks_for(self) -> None:
+        self.engine.set_option("Skill Level", str(WEAK_SKILL_LEVEL))
+        result = self.engine.search("startpos", "depth 20")
+        self.assertEqual({iteration["multipv"] for iteration in iterations(result)}, {"1"})
+
     def test_limit_strength_by_elo(self) -> None:
         self.engine.set_option("UCI_LimitStrength", "true")
         self.engine.set_option("UCI_Elo", str(WEAK_ELO))
@@ -421,7 +500,40 @@ class UciProtocolTest(unittest.TestCase):
         self.engine.expect_silence("info string setoption failed", SETOPTION_FAILURE_WINDOW)
 
 
+class CommandLineTest(EngineCommandTest):
+    def setUp(self) -> None:
+        if len(self.command) > 1:
+            self.skipTest("the engine command is a launcher that takes the arguments itself")
+
+    def run_engine(self, *arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [*self.command, *arguments],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=COMMAND_LINE_TIMEOUT,
+            check=False,
+        )
+
+    def test_arguments_run_as_uci_commands_before_standard_input(self) -> None:
+        run = self.run_engine("isready", "quit")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("readyok", run.stdout.splitlines())
+
+    def test_genfens_argument_prints_the_requested_positions_and_exits(self) -> None:
+        run = self.run_engine(f"genfens {GENFENS_COUNT} seed 1 book None", "quit")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        positions = [line for line in run.stdout.splitlines() if line.startswith("info string genfens ")]
+        self.assertEqual(len(positions), GENFENS_COUNT, run.stdout)
+
+    def test_argument_that_is_not_a_command_is_a_usage_error(self) -> None:
+        run = self.run_engine("--version")
+        self.assertEqual(run.returncode, USAGE_ERROR)
+        self.assertEqual(run.stdout, "")
+        self.assertIn("Usage: ", run.stderr)
+
+
 if __name__ == "__main__":
     if sys.argv[1:]:
-        UciProtocolTest.command = sys.argv[1:]
+        EngineCommandTest.command = sys.argv[1:]
     unittest.main(argv=sys.argv[:1], verbosity=2)
