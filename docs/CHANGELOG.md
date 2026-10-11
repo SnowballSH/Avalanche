@@ -1,3 +1,444 @@
+# v5.0.0
+
+- Match Results
+
+STC vs Avalanche 4.0.0:
+```
+Elo   | 100.18 +- 3.87 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 10000 W: 4048 L: 1242 D: 4710
+Penta | [13, 355, 1794, 2489, 349]
+```
+
+LTC vs Avalanche 4.0.0:
+```
+Elo   | 102.22 +- 8.18 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 2000 W: 789 L: 217 D: 994
+Penta | [2, 65, 338, 549, 46]
+```
+
+VLTC vs Avalanche 4.0.0:
+```
+Elo   | 92.46 +- 31.19 (95%)
+Conf  | 120.0+1.00s Threads=1 Hash=64MB
+Games | N: 100 W: 36 L: 10 D: 54
+Penta | [0, 2, 20, 28, 0]
+```
+
+SMP vs Avalanche 4.0.0 (4 Threads):
+```
+Elo   | 111.37 +- 14.47 (95%)
+Conf  | 40.0+0.40s Threads=4 Hash=64MB
+Games | N: 500 W: 193 L: 38 D: 269
+Penta | [0, 8, 86, 149, 7]
+```
+
+STC Double Fischer Random vs the first build with `UCI_Chess960` (b6ac754):
+```
+Elo   | 257.94 +- 14.20 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 2006 W: 1346 L: 81 D: 579
+Penta | [2, 17, 141, 400, 443]
+```
+
+LTC vs Stockfish 13:
+```
+Elo   | -38.02 +- 11.60 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 204 L: 313 D: 483
+Penta | [12, 170, 234, 83, 1]
+```
+
+LTC vs Stockfish 12:
+```
+Elo   | 15.99 +- 11.35 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 258 L: 212 D: 530
+Penta | [6, 98, 241, 154, 1]
+```
+
+LTC vs Igel 3.7.0:
+```
+Elo   | -76.61 +- 11.26 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 147 L: 364 D: 489
+Penta | [14, 236, 203, 47, 0]
+```
+
+LTC vs RubiChess 20240817:
+```
+Elo   | -71.52 +- 11.37 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 154 L: 357 D: 489
+Penta | [7, 246, 192, 53, 2]
+```
+
+LTC vs Seer 2.8.0:
+```
+Elo   | 11.12 +- 11.54 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 256 L: 224 D: 520
+Penta | [7, 102, 248, 138, 5]
+```
+
+LTC vs Arasan 26.0:
+```
+Elo   | 48.61 +- 10.95 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 327 L: 188 D: 485
+Penta | [1, 67, 227, 202, 3]
+```
+
+LTC vs Koivisto 9.0:
+```
+Elo   | 46.84 +- 11.32 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 300 L: 166 D: 534
+Penta | [4, 69, 218, 207, 2]
+```
+
+LTC Chess960 vs Igel 3.7.0:
+```
+Elo   | -28.55 +- 10.30 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 78 L: 160 D: 762
+Penta | [16, 111, 313, 59, 1]
+```
+
+LTC Chess960 vs Halogen 16:
+```
+Elo   | -19.13 +- 13.71 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 157 L: 212 D: 631
+Penta | [24, 136, 234, 83, 23]
+```
+
+LTC Chess960 vs Stockfish 13:
+```
+Elo   | 46.13 +- 13.86 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 1000 W: 255 L: 123 D: 622
+Penta | [7, 86, 217, 148, 42]
+```
+
+The matches against other engines are between AVX2 builds: each opponent from its release source, Avalanche from the release candidate, which has the search of this release. The clock is scaled to the machine and a game is resigned only when both engines agree.
+
+- Pre-release review: fixes and cleanup that leave the search unchanged
+
+STC (8+0.08):
+```
+Elo   | 0.35 +- 5.56 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 4010 W: 936 L: 932 D: 2142
+Penta | [13, 477, 1026, 471, 18]
+```
+
+STC SMP (8+0.08, 8 Threads):
+```
+Elo   | 4.52 +- 10.64 (95%)
+Conf  | 8.0+0.08s Threads=8 Hash=64MB
+Games | N: 1000 W: 215 L: 202 D: 583
+Penta | [1, 112, 260, 127, 0]
+```
+
+- LTC SPSA tune of the 29 search parameters that depend on the evaluation
+
+LTC (40+0.40):
+```
+Elo   | 4.19 +- 2.58 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 17070 W: 3808 L: 3602 D: 9660
+Penta | [13, 1934, 4442, 2126, 20]
+```
+
+- New net: Dianguang-5
+
+STC (8+0.08) vs Dianguang-4:
+```
+Elo   | 3.28 +- 2.26 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 25082 W: 5892 L: 5655 D: 13535
+Penta | [113, 2892, 6308, 3101, 127]
+```
+
+LTC (40+0.40) vs Dianguang-4:
+```
+Elo   | 2.53 +- 1.86 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 32978 W: 7235 L: 6995 D: 18748
+Penta | [36, 3761, 8673, 3965, 54]
+```
+
+- New net: Dianguang-4
+
+STC (8+0.08) vs Dianguang-3:
+```
+Elo   | 8.79 +- 4.13 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.98 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 8422 W: 2168 L: 1955 D: 4299
+Penta | [70, 920, 2016, 1137, 68]
+```
+
+LTC (40+0.40) vs Dianguang-3:
+```
+Elo   | 17.28 +- 5.70 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 3702 W: 949 L: 765 D: 1988
+Penta | [9, 356, 938, 538, 10]
+```
+
+- Speed: an evaluation cache, accumulators computed only when a position needs them, a move picker that evaluates exchanges on demand, king attackers and occupancy kept up to date, huge pages for the continuation history and the evaluator storage, per-searcher node counts
+
+STC (8+0.08):
+```
+Elo   | 25.17 +- 6.99 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.98 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 2558 W: 682 L: 497 D: 1379
+Penta | [1, 241, 625, 396, 16]
+```
+
+LTC (40+0.40):
+```
+Elo   | 17.56 +- 5.66 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 3506 W: 848 L: 671 D: 1987
+Penta | [4, 324, 921, 499, 5]
+```
+
+- Zig 0.17.0
+
+STC (8+0.08), the same search built with Zig 0.16.0:
+```
+Elo   | 3.73 +- 5.44 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 4008 W: 912 L: 869 D: 2227
+Penta | [11, 443, 1057, 478, 15]
+```
+
+STC SMP (8+0.08, 8 Threads):
+```
+Elo   | 6.25 +- 10.79 (95%)
+Conf  | 8.0+0.08s Threads=8 Hash=64MB
+Games | N: 1000 W: 220 L: 202 D: 578
+Penta | [2, 107, 265, 123, 3]
+```
+
+- New net: Dianguang-3
+
+STC (8+0.08) vs Dianguang-2:
+```
+Elo   | 4.65 +- 3.69 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 10006 W: 2467 L: 2333 D: 5206
+Penta | [67, 1133, 2473, 1259, 71]
+```
+
+LTC (40+0.40) vs Dianguang-2:
+```
+Elo   | 9.86 +- 4.26 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.96 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 6730 W: 1605 L: 1414 D: 3711
+Penta | [12, 733, 1698, 896, 26]
+```
+
+- LMR-reduced depth in the quiet futility and SEE pruning margins
+
+STC (8+0.08):
+```
+Elo   | 2.73 +- 2.00 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.97 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 32712 W: 7568 L: 7311 D: 17833
+Penta | [147, 3848, 8146, 4031, 184]
+```
+
+LTC (40+0.40), stopped undecided:
+```
+Elo   | 0.83 +- 2.54 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 0.08 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 17502 W: 3768 L: 3726 D: 10008
+Penta | [29, 1998, 4650, 2050, 24]
+```
+
+- New net: Dianguang-2 (multi-layer head)
+
+STC (8+0.08) vs Dianguang-1:
+```
+Elo   | 10.14 +- 3.85 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 10006 W: 2572 L: 2280 D: 5154
+Penta | [85, 1115, 2314, 1401, 88]
+```
+
+LTC (40+0.40) vs Dianguang-1:
+```
+Elo   | 16.11 +- 5.49 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.97 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 4014 W: 1027 L: 841 D: 2146
+Penta | [11, 389, 1023, 571, 13]
+```
+
+- New net: Dianguang-1
+
+STC (8+0.08) vs Nezha:
+```
+Elo   | 16.02 +- 3.81 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 10006 W: 2687 L: 2226 D: 5093
+Penta | [54, 1073, 2351, 1408, 117]
+```
+
+LTC (40+0.40) vs Nezha:
+```
+Elo   | 16.33 +- 4.91 (95%)
+Conf  | 40.0+0.40s Threads=1 Hash=64MB
+Games | N: 5002 W: 1264 L: 1029 D: 2709
+Penta | [9, 483, 1302, 678, 29]
+```
+
+STC Double Fischer Random vs Nezha:
+```
+Elo   | 162.65 +- 11.67 (95%)
+Conf  | 8.0+0.08s Threads=1 Hash=16MB
+Games | N: 2006 W: 1044 L: 168 D: 794
+Penta | [7, 50, 254, 444, 248]
+```
+
+- Capture history for capture ordering
+
+STC (8+0.08):
+```
+Elo   | 2.81 +- 2.03 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.97 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 31324 W: 7163 L: 6910 D: 17251
+Penta | [132, 3668, 7863, 3813, 186]
+```
+
+LTC (40+0.40), stopped undecided:
+```
+Elo   | 2.62 +- 4.00 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 0.68 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 7282 W: 1590 L: 1535 D: 4157
+Penta | [15, 829, 1895, 890, 12]
+```
+
+- Transposition table score as the pruning evaluation when its bound allows
+
+STC (8+0.08):
+```
+Elo   | 2.87 +- 2.06 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 3.01 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 30946 W: 7131 L: 6875 D: 16940
+Penta | [152, 3604, 7735, 3800, 182]
+```
+
+LTC (40+0.40), stopped undecided:
+```
+Elo   | 0.33 +- 3.90 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | -0.15 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 7290 W: 1578 L: 1571 D: 4141
+Penta | [8, 837, 1948, 844, 8]
+```
+
+- Continuation history in the late-move reduction adjustment
+
+STC (8+0.08):
+```
+Elo   | 2.11 +- 1.65 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 48228 W: 11083 L: 10790 D: 26355
+Penta | [261, 5651, 11987, 5964, 251]
+```
+
+LTC (40+0.40):
+```
+Elo   | 10.53 +- 4.36 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 6038 W: 1365 L: 1182 D: 3491
+Penta | [3, 636, 1569, 797, 14]
+```
+
+- Non-pawn correction history
+
+STC (8+0.08):
+```
+Elo   | 12.85 +- 5.00 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 5220 W: 1274 L: 1081 D: 2865
+Penta | [17, 550, 1308, 693, 42]
+```
+
+LTC (40+0.40):
+```
+Elo   | 23.91 +- 6.66 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 2576 W: 642 L: 465 D: 1469
+Penta | [1, 228, 658, 395, 6]
+```
+
+- Pawn correction history
+
+STC (8+0.08):
+```
+Elo   | 15.37 +- 5.45 (95%)
+SPRT  | 8.0+0.08s Threads=1 Hash=16MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 4252 W: 1027 L: 839 D: 2386
+Penta | [12, 425, 1080, 581, 28]
+```
+
+LTC (40+0.40):
+```
+Elo   | 23.43 +- 6.57 (95%)
+SPRT  | 40.0+0.40s Threads=1 Hash=64MB
+LLR   | 2.95 (-2.94, 2.94) [0.00, 3.00]
+Games | N: 2614 W: 657 L: 481 D: 1476
+Penta | [1, 230, 673, 398, 5]
+```
+
+- Chess960 and Double Fischer Random Chess: `UCI_Chess960`, X-FEN and Shredder-FEN, king-takes-rook notation
+- MultiPV, pondering, `searchmoves` and `go mate`; `currmove` and bound lines while searching
+- Strength limiting with `Skill Level` or `UCI_LimitStrength` and `UCI_Elo`
+- Persistent thread pool; helpers take over the root once per search
+- `NumaPolicy`: on a multi-node Linux machine search threads are bound to NUMA nodes once there are too many of them for one node, and spread over the nodes in proportion to their CPU counts
+- `score cp` is normalized so that 100 is a 50% win chance at move 32, with the win-rate model fitted on the engine's own games at 40+0.4
+- Tablebase scores are reported in a fixed band below the mate scores
+- `EvalFile` loads a network at run time, `EvalScale` rescales its output, `Clear Hash` empties the hash table; `MoveOverhead` is now `Move Overhead` and the old name is still accepted
+- Command-line arguments are run as UCI commands before standard input is read
+- `eval` prints the static evaluation of the current position, and every `go` names the network in an `info string`
+- Multi-layer network head (`768x16 -> 1024 -> pairwise -> 16x2 -> 32 -> 1x8`), network file format v2, and faster inference of it on AVX-512, AVX2, NEON and wasm
+- WebAssembly build and a TypeScript package around it
+- Builds with Zig 0.17.0 and downloads nothing: the `translate-c` and `aro` packages are vendored
+- A release binary per CPU level, each checked for the instruction set of its level and, where the build machine can run it, against the bench node count and the NNUE checksum. The files are named `v1`, `v2`, `v3`, `avxvnni` and `avx512` on x86-64 (`v3` only on macOS) and plain or `dotprod` on AArch64; the `v4`, `general`, per-chip macOS and x86-64 macOS `v1` and `v2` files of 4.0.0 are gone (README, "Compile")
+- Datagen: batch mode, strict opening book validation, `raweval`, the `datatool` validator and a tablebase filter for viriformat data
+- Trainer: dataset directories, resumable runs, held-out validation, learning rate warmup and a selectable multi-layer head
+- A fixed TCEC update script that follows `master` (docs/TCEC.md)
+- Relicensed from MIT to GPL-3.0-only
+- Fixes an issue where some GUIs did not record the PV: the `info` fields are in Stockfish's order and output lines end with CRLF on Windows
+- Fixes an issue where `go` without a preceding `position` searched with an empty repetition history
+- Fixes an issue where an en passant square was accepted from a FEN without a pawn that could be captured
+- Fixes an issue where a FEN's fullmove number could overflow the ply counter
+- Fixes an issue where datagen ran forever on a book with no usable opening, or recorded a mate score when its node budget could not finish depth 1
+
 # v4.0.0
 
 - Match Results
