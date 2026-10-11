@@ -314,8 +314,10 @@ mod tests {
         assert_eq!(bytes.len(), 64);
         assert_eq!(&bytes[..8], b"AVALNNUE");
         let fields: Vec<u32> = bytes[8..]
-            .chunks_exact(4)
-            .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| u32::from_le_bytes(*chunk))
             .collect();
         assert_eq!(
             fields,

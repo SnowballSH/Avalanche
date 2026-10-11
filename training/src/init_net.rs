@@ -60,8 +60,10 @@ fn column_major(row_major: &[f32], shape: Shape) -> Vec<f32> {
 
 fn section_values(section: &Section, stored: &[u8], shape: Shape) -> Vec<f32> {
     let file_order: Vec<f32> = stored
-        .chunks_exact(STORED_BYTES)
-        .map(|bytes| dequantise(i16::from_le_bytes([bytes[0], bytes[1]]), section.quantum))
+        .as_chunks::<STORED_BYTES>()
+        .0
+        .iter()
+        .map(|bytes| dequantise(i16::from_le_bytes(*bytes), section.quantum))
         .collect();
     if section.transposed {
         column_major(&file_order, shape)
