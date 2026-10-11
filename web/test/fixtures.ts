@@ -34,10 +34,15 @@ export async function createCapturingEngine(): Promise<CapturingEngine> {
   };
 }
 
+let nativeSignature: string | null | undefined;
+
 export function nativeBenchSignature(): string | null {
-  if (!existsSync(nativeBinary)) return null;
-  const output = execFileSync(nativeBinary, ["bench"], { encoding: "utf8" });
-  return parseBenchNodes(output);
+  if (nativeSignature === undefined) {
+    nativeSignature = existsSync(nativeBinary)
+      ? parseBenchNodes(execFileSync(nativeBinary, ["bench"], { encoding: "utf8" }))
+      : null;
+  }
+  return nativeSignature;
 }
 
 export function parseBenchNodes(output: string): string | null {

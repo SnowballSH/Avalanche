@@ -153,14 +153,24 @@ describe("wasm engine", () => {
     assert.equal(engine.send("quit"), "quit");
   });
 
-  it("searches exactly the same tree as the native build", { timeout: 300_000 }, async (t) => {
-    const expected = nativeBenchSignature();
-    if (expected === null) {
-      t.skip("native binary not built (zig build --release=fast)");
-      return;
-    }
-    const { engine, lines } = await createCapturingEngine();
-    engine.bench();
-    assert.equal(parseBenchNodes(lines.join("\n")), expected);
-  });
+  for (const { session, commands } of [
+    { session: "a new engine", commands: [] },
+    {
+      session: "an engine that has resized its hash table and searched",
+      commands: ["setoption name Hash value 1", "position startpos", "go depth 14"],
+    },
+  ]) {
+    it(`benches exactly the tree of the native build on ${session}`, { timeout: 300_000 }, async (t) => {
+      const expected = nativeBenchSignature();
+      if (expected === null) {
+        t.skip("native binary not built (zig build --release=fast)");
+        return;
+      }
+      const { engine, lines } = await createCapturingEngine();
+      for (const command of commands) engine.send(command);
+      const start = lines.length;
+      engine.bench();
+      assert.equal(parseBenchNodes(lines.slice(start).join("\n")), expected);
+    });
+  }
 });
