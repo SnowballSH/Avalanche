@@ -233,9 +233,7 @@ fn set_syzygy_path(ctx: Context, value: Value) !void {
         syzygy.deinit();
         return;
     }
-    const cpath = try platform.allocator.dupeSentinel(u8, path, 0);
-    defer platform.allocator.free(cpath);
-    if (syzygy.init(cpath.ptr)) {
+    if (syzygy.init(path)) {
         try ctx.out.print("info string Syzygy: loaded tablebases up to {}-men from '{s}'" ++ search.LINE_ENDING, .{ syzygy.max_pieces(), path });
     } else {
         try ctx.out.print("info string Syzygy: failed to load tablebases from '{s}'" ++ search.LINE_ENDING, .{path});

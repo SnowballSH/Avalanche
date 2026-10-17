@@ -35,16 +35,15 @@ This project isn't possible without the help of the Zig community, since this is
 Copyright (C) 2022-2026 Yinuo Huang (SnowballSH).
 
 Avalanche is free software under the GNU General Public License, version 3 only (GPL-3.0-only). See
-[`LICENSE`](LICENSE). The Syzygy probing code in `src/pyrrhic` is under the MIT licence of its authors
-([`src/pyrrhic/LICENSE`](src/pyrrhic/LICENSE), `LICENSE-pyrrhic` in a release package).
+[`LICENSE`](LICENSE). The Syzygy probing code in `src/syzygy`, a port of Pyrrhic, is under the MIT licence of
+Pyrrhic's authors ([`src/syzygy/LICENSE`](src/syzygy/LICENSE), `LICENSE-pyrrhic` in a release package).
 
 ## Compile
 
 `zig build --release=fast`
 
-Avalanche builds with **Zig 0.17.0** and nothing else: the official
-[translate-c](https://codeberg.org/ziglang/translate-c) package, which generates the bindings for the Syzygy probing
-code, is vendored under `deps/`, so a build never downloads anything.
+Avalanche builds with **Zig 0.17.0** and nothing else: it is all Zig, with no dependencies, so a build never
+downloads anything.
 
 ```sh
 zig build --release=fast      # optimized build -> zig-out/bin/Avalanche
@@ -111,13 +110,13 @@ https://github.com/SnowballSH/Avalanche/releases.
 - https://github.com/dsekercioglu/blackmarlin for NNUE structure and trainer skeleton (1.5.0 and older)
 - https://github.com/Disservin/Smallbrain and https://github.com/cosmobobak/viridithas for search ideas
 - [Pyrrhic](https://github.com/AndyGrant/Pyrrhic) by Andrew Grant, derived from Fathom by basil and Jon Dart and from
-  the Syzygy tablebase code of Ronald de Man, for the tablebase probing code in `src/pyrrhic`
+  the Syzygy tablebase code of Ronald de Man: the tablebase probing code in `src/syzygy` is a Zig port of it
 - https://openai.com/dall-e-2/ for generating the beautiful logo image
 
 ## Originality Status
 
 - General
-  - This is the first released chess engine written in the **Zig Programming Language**. Although there are Zig libraries for chess, Avalanche uses none of them. The only third-party code in the engine is the Syzygy tablebase probing library Pyrrhic, vendored in `src/pyrrhic` (see Credits).
+  - This is the first released chess engine written in the **Zig Programming Language**. Although there are Zig libraries for chess, Avalanche uses none of them. The only code in the engine derived from another project's is the Syzygy tablebase probing in `src/syzygy`, a Zig port of Pyrrhic (see Credits and [docs/SYZYGY.md](docs/SYZYGY.md)).
 - Move Generator
   - Algorithm is inspired by Surge, but code is 100% hand-written in Zig.
 - Search

@@ -1,15 +1,12 @@
 .{
     .name = .avalanche,
     .version = "5.0.0",
-    .dependencies = .{
-        .translate_c = .{ .path = "deps/translate-c" },
-    },
+    .dependencies = .{},
     .minimum_zig_version = "0.17.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
-        "deps",
         "nets",
         "LICENSE",
         "README.md",

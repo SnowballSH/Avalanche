@@ -38,11 +38,8 @@
 
 ## Tablebases
 
-- Syzygy probing goes through the vendored Pyrrhic library (`src/pyrrhic`, docs/BUILD.md). The
-  bit and attack primitives Pyrrhic asks its host for are callbacks exported from
-  `src/engine/syzygy.zig` and served by the engine's own attack tables, so no move generation
-  is duplicated. `src/pyrrhic/tbconfig.h` declares them; it inverts the color of the pawn
-  attacks, because Pyrrhic numbers White 1 and the engine 0.
+- Syzygy probing is `src/syzygy`, a Zig port of Pyrrhic (docs/SYZYGY.md). Its move generation
+  takes its attacks from the engine's own tables in `src/chess/tables.zig`.
 - Nothing probes until `SyzygyPath` has loaded tables: `syzygy.init` has to succeed, and every
   probe in the search tests `syzygy.active()` before anything else. `bench` loads none, so
   its node count is that of a search without tablebases.
@@ -54,7 +51,7 @@
   result that decides the node is stored in the transposition table and returned; otherwise
   it narrows the window. With `Syzygy50MoveRule` (the default) a cursed win and a blessed
   loss are draws, without it the win and the loss they are.
-- The root probes the DTZ tables, or the WDL tables when Pyrrhic has no DTZ result, under the
+- The root probes the DTZ tables, or the WDL tables when the DTZ probe fails, under the
   same conditions on castling rights and piece count, and keeps the root moves that share
   the best rank ("Search integration" in docs/UCI.md, under "Root candidates").
 

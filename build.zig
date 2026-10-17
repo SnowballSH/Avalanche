@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const Translator = @import("translate_c").Translator;
-
 const DEFAULT_NET = "nets/dianguang-5.nnue";
 
 fn build_timestamp(b: *std.Build) []const u8 {
@@ -18,31 +16,6 @@ fn build_timestamp(b: *std.Build) []const u8 {
     });
 }
 
-const Pyrrhic = struct {
-    bindings: *std.Build.Module,
-    include_path: std.Build.LazyPath,
-    source: std.Build.LazyPath,
-
-    fn init(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.lang.Optimize) Pyrrhic {
-        const translator: Translator = .init(b.dependency("translate_c", .{ .optimize = std.lang.Optimize.debug }), .{
-            .c_source_file = b.path("src/pyrrhic/tbprobe.h"),
-            .target = target,
-            .optimize = optimize,
-        });
-        return .{
-            .bindings = translator.mod,
-            .include_path = b.path("src/pyrrhic"),
-            .source = b.path("src/pyrrhic/tbprobe.c"),
-        };
-    }
-
-    fn add_to(pyrrhic: Pyrrhic, module: *std.Build.Module) void {
-        module.addImport("pyrrhic", pyrrhic.bindings);
-        module.addIncludePath(pyrrhic.include_path);
-        module.addCSourceFile(.{ .file = pyrrhic.source, .flags = &.{ "-O3", "-std=gnu11" } });
-    }
-};
-
 const Configuration = struct {
     options: *std.Build.Step.Options,
     net: std.Build.LazyPath,
@@ -58,7 +31,6 @@ const Native = struct {
     optimize: std.lang.Optimize,
     strip: ?bool,
     configuration: Configuration,
-    pyrrhic: Pyrrhic,
 
     fn create_module(native: Native, b: *std.Build, root_source_file: []const u8) *std.Build.Module {
         const module = b.createModule(.{
@@ -69,7 +41,6 @@ const Native = struct {
             .strip = native.strip,
         });
         native.configuration.add_to(module);
-        native.pyrrhic.add_to(module);
         return module;
     }
 };
@@ -108,7 +79,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
         .strip = b.option(bool, "strip", "Omit debug information (release binaries; default: the compiler's choice)"),
         .configuration = configuration,
-        .pyrrhic = .init(b, target, optimize),
     };
 
     const exe = b.addExecutable(.{

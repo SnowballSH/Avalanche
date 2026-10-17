@@ -204,7 +204,7 @@ zig build wasm --release=fast --prefix "$OUT" ${VERSION_FLAG[@]+"${VERSION_FLAG[
 cp "$OUT/web/avalanche.wasm" "$OUT/bin/Avalanche-${VERSION}-wasm.wasm"
 
 cp README.md LICENSE "$OUT/bin/"
-cp src/pyrrhic/LICENSE "$OUT/bin/LICENSE-pyrrhic"
+cp src/syzygy/LICENSE "$OUT/bin/LICENSE-pyrrhic"
 cd "$OUT/bin"
 zip -9 -r build.zip ./*
 mv build.zip ../

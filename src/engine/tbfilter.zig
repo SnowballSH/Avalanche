@@ -346,12 +346,7 @@ const USAGE = std.fmt.comptimePrint(
 , .{ Format.bullet.extension(), Format.viri.extension(), MAX_THREADS, MAX_AUTOMATIC_THREADS, MIN_MEN, MAX_MEN, DEFAULT_MAX_MEN });
 
 pub fn load_tablebases(tb_path: []const u8) ?u32 {
-    const path_z = std.heap.page_allocator.dupeSentinel(u8, tb_path, 0) catch {
-        std.debug.print("tbfilter: out of memory\n", .{});
-        return null;
-    };
-    defer std.heap.page_allocator.free(path_z);
-    if (!syzygy.init(path_z.ptr)) {
+    if (!syzygy.init(tb_path)) {
         std.debug.print("tbfilter: failed to load Syzygy tablebases from '{s}' -- aborting\n", .{tb_path});
         return null;
     }

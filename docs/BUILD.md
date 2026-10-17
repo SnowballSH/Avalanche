@@ -1,18 +1,7 @@
 # Build
 
-Avalanche builds with Zig 0.17.0 and nothing else: `build.zig` compiles the engine, the Syzygy
-probing code in `src/pyrrhic` (C, through the bundled Clang) and its bindings (the `translate_c`
-package and its C front end `aro`, vendored under `deps/` and named by path in `build.zig.zon`).
-
-The two packages are the official Zig Software Foundation ones at translate-c 875969d and aro
-d0c8c4d. They are vendored rather than fetched
-because their host, Codeberg, rate-limits and sometimes refuses the fetch from build machines and
-cloud workers, and a fetch that returns the wrong content fails the build with a hash mismatch.
-`deps/translate-c/build.zig.zon` is the upstream file with its `aro` dependency pointed at
-`../aro`; nothing else in `deps/` is modified. To upgrade, `zig fetch` the new commits of
-`git+https://codeberg.org/ziglang/translate-c` and `git+https://codeberg.org/ziglang/arocc`, extract
-the resulting `~/.cache/zig/p/<name>-<hash>.tar.gz` files over the two directories (translate-c's
-archive nests its tree one directory deeper) and re-apply that one edit.
+Avalanche builds with Zig 0.17.0 and nothing else: the engine, its Syzygy probing code
+(`src/syzygy`, docs/SYZYGY.md) included, is Zig, and `build.zig.zon` has no dependencies.
 
 ```sh
 zig build --release=fast      # zig-out/bin/Avalanche, for the CPU of this machine
@@ -57,9 +46,9 @@ What the compiler resolves, read off the binaries, and what changing it does:
 | Stack protector, stack probes, error return traces, C undefined-behaviour checks, Valgrind requests | all off | each set off explicitly | the identical binary: these are the defaults |
 | Debug information | kept. ELF: 8.2 MB of DWARF in a 35.0 MB file. Mach-O: the symbol table, 0.26 MB. Windows: a separate `.pdb` | `-Dstrip=true` | 26.8 MB on Linux. The code that would read the debug information for a crash report goes too (134 KB of text on macOS), nothing the search runs: instructions within the spread. The release script strips; a development build keeps its symbols for profilers |
 | Position-independent executable | macOS: always. Linux, static: no. Windows: relocatable (ASLR) | `pie = true` on Linux | static-pie, 28 KB larger. Not timed (the Linux machine at hand is a virtual machine without cycle counters) |
-| Link-time optimisation | none; it needs LLD, so it does not exist for Mach-O | `lto = .full` on Linux | 322 KB smaller: unused parts of libc and compiler-rt go. Not timed, for the same reason; the Zig code is one module already, and the C code is not on the search's path |
+| Link-time optimisation | none; it needs LLD, so it does not exist for Mach-O | `lto = .full` on Linux | 322 KB smaller: unused parts of libc and compiler-rt go. Not timed, for the same reason; the Zig code is one module already, and the C code that build had (Pyrrhic, since ported to Zig) was not on the search's path |
 | Function and data sections, section garbage collection | the linker's default | all three on | 32 KB smaller on Linux, same size on macOS; instructions within the spread (-0.5% to +0.3%) |
-| libc | linked: the allocator and Pyrrhic's file I/O use it. Dynamic on macOS, static musl in the Linux release binaries | | |
+| libc | linked: the allocator uses it. Dynamic on macOS, static musl in the Linux release binaries | | |
 | Code model, red zone | target defaults (small model; red zone where the ABI has one) | not tried | nothing in a 1 MB text segment needs another model |
 
 Instruction counts are from `/usr/bin/time -l` on an Apple M4 that was running other work, where
@@ -70,14 +59,6 @@ table are not those of a build that also has the later changes.
 Nothing here is a measured gain in time, so `build.zig` sets none of it. Frame pointers are the one
 worth timing on a quiet x86-64 machine: there the prologue is three instructions and `rbp` becomes
 a general register, and a profiler that walks frames is the price.
-
-One thing the build does choose: the `translate_c` tool is always compiled in Debug mode
-(`.optimize` in its `b.dependency` call). It runs once, on one header.
-Compiled in the mode of the engine, it would cost a `--release=fast` build 3.2 times the CPU of
-the Debug tool (89.8 s against 27.7 s of user time on the loaded machine, from an empty cache)
-before the engine's own compilation starts, and release builds and test builds would each
-compile a tool of their own. The engine binary is the same either way, instruction for
-instruction.
 
 ## CPU baselines
 
@@ -124,8 +105,8 @@ scripts/build_release.sh x86_64-linux-v2  # only the binaries named, no wasm mod
 | `REQUIRE_RUN=1` | A binary that this machine cannot execute is a failure |
 
 A full run adds `README.md`, `LICENSE` and `LICENSE-pyrrhic` to `artifacts/bin` and zips the
-directory. `LICENSE-pyrrhic` is `src/pyrrhic/LICENSE`: every native binary contains the Syzygy
-probing code, whose licence asks for its text in every copy.
+directory. `LICENSE-pyrrhic` is `src/syzygy/LICENSE`: every native binary contains the Syzygy
+probing code, a port of Pyrrhic, whose licence asks for its text in every copy.
 
 | Binary | `-Dcpu` | NNUE paths | For |
 |---|---|---|---|
@@ -284,10 +265,9 @@ kinds that are lower case because of how they read: a flag that selects code at 
 like an enum tag wherever the type is known (`.stale` for `FrameState.stale`), and
 `platform.allocator`, which is passed around as the allocators of the standard library are.
 
-Two groups are named by something outside the engine. The search parameters of
+One group is named by something outside the engine. The search parameters of
 `src/engine/parameters.zig` are spelled as their UCI options (`LMRWeight`), because
-`parameters.set` finds an option's variable by the option's name, and the callbacks of
-`src/engine/syzygy.zig` have the names Pyrrhic calls them by (`pawnAttacks`). Any other name that
+`parameters.set` finds an option's variable by the option's name. Any other name that
 differs, such as the PascalCase lookup tables of `src/chess/tables.zig`, is not a second
 convention, and new code does not follow it.
 
@@ -370,8 +350,8 @@ network as `EVALFILE`, checks that the copy is the network embedded, and parses 
 output with OpenBench's regular expressions: the count must be the one in `bench.nodes`.
 
 A worker therefore runs the paths of its own CPU. The build must not depend on anything a worker
-lacks: no option of `build.zig` is required, and nothing is downloaded, since the `translate_c`
-package and its dependency `aro` are vendored.
+lacks: no option of `build.zig` is required, and nothing is downloaded, since the build has no
+dependencies.
 
 ## Tried and left out
 
