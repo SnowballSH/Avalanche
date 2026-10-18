@@ -13,12 +13,6 @@ const interface = @import("engine/interface.zig");
 const support = @import("tests/support.zig");
 const expect = std.testing.expect;
 
-// The C tablebase code links against callbacks syzygy.zig exports. Reference
-// it here so that they exist whichever tests -Dtest-filter keeps.
-comptime {
-    _ = @import("engine/syzygy.zig");
-}
-
 test {
     _ = @import("platform.zig");
     _ = @import("platform/affinity.zig");
@@ -47,6 +41,9 @@ test {
     _ = @import("chess/fen.zig");
     _ = @import("tests/viriformat.zig");
     _ = @import("tests/tbfilter_viri.zig");
+    _ = @import("tests/syzygy.zig");
+    _ = @import("syzygy/encoding.zig");
+    _ = @import("syzygy/tablebases.zig");
     _ = @import("engine/netscale.zig");
     _ = @import("tests/netscale.zig");
     _ = @import("tests/nnue_heads.zig");

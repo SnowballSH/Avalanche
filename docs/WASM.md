@@ -191,7 +191,7 @@ earlier; even setting the current size again grows it once. Set `Hash` once.
 
 ## Not supported on wasm
 
-- **Syzygy tablebases.** Pyrrhic needs libc file I/O, so `syzygy.supported` is false, all probe paths are compiled
+- **Syzygy tablebases.** The tables are files that the probing code memory-maps, so `syzygy.supported` is false, all probe paths are compiled
   out, and the Syzygy options are not advertised.
 - **Threads > 1.** Lazy SMP would need shared memory, a `wasi-threads`-style spawn import backed by Web
   Workers, and 64-bit atomics for the TT. Zig rejects 64-bit atomics on wasm32, so the TT lock words
